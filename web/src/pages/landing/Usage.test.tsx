@@ -32,8 +32,24 @@ describe("compact shared allowance arc", () => {
   it("does not invent a percentage or progressbar for an unlimited allowance", () => {
     render(<StatRows total={{ label: "全站今日已用", used: 123, cap: 0 }} v5={v5} />, host);
     expect(host.querySelector(".stat--v45[role=progressbar]")).toBeNull();
-    expect(host.querySelector(".stat--v45.lp-meter")?.textContent).toContain("V4.5123张已出 · 不限量");
+    expect(host.querySelector(".stat--v45.lp-meter")?.textContent).toContain("V4.5123张");
+    expect(host.querySelector(".stat--v45.lp-meter")?.textContent).not.toContain("不限量");
     expect(host.querySelector(".lp-site-gauge__fill")).toBeNull();
+  });
+
+  it("shows only the image count for an unlimited V5 total", () => {
+    render(
+      <StatRows
+        total={{ label: "全站今日已用", used: 123, cap: 500 }}
+        v5={{ label: "V5 已用", used: 106, cap: 0 }}
+      />,
+      host,
+    );
+    const v5Row = host.querySelector(".stat--v5.lp-meter");
+    expect(v5Row?.textContent).toContain("V5106张");
+    expect(v5Row?.textContent).not.toContain("已出");
+    expect(v5Row?.textContent).not.toContain("不限量");
+    expect(v5Row?.getAttribute("title")).toBe("V5 106 张");
   });
 
   it("signals a low remaining allowance in text as well as color", () => {

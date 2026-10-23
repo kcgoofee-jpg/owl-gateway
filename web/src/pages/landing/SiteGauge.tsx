@@ -51,7 +51,7 @@ export function SiteGauge({ rows, generated }: { rows: Row[]; generated: { total
             : future
               ? (r.m.label.match(/（(.+)）/)?.[1] ?? r.name)
               : !r.capped
-                ? "已出 · 不限量"
+                ? ""
                 : r.pct <= 10
                   ? `仅剩 ${Math.round(r.pct)}%`
                   : "";
@@ -59,7 +59,7 @@ export function SiteGauge({ rows, generated }: { rows: Row[]; generated: { total
             ? (r.m.hint ?? "V5 暂时用完")
             : r.capped
               ? `${r.name} ${fmt(r.value)} 张，每日 ${fmt(r.m.cap)} 张${caption ? `；${caption}` : ""}`
-              : `今天已出 ${fmt(r.value)} 张，不限量`;
+              : `${r.name} ${fmt(r.value)} 张`;
           const content = (
             <>
               <span class="lp-meter__name">

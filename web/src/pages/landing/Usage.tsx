@@ -31,12 +31,21 @@ export function StatRows(props: {
     // dailyMeters 在用满后换成第二天的额度：名称缩成四个字，完整说法放在悬停提示里
     const special = !paused && !label.includes("已用");
     const value = capped ? Math.max(0, cap - used) : used;
+    const name = paused
+      ? "V5 剩余"
+      : special
+        ? nextName(x.kind, label)
+        : capped
+          ? x.left
+          : x.kind === "v5"
+            ? "V5"
+            : "V4.5";
     return {
       ...x,
       capped,
       paused,
       value: paused ? 0 : value,
-      name: paused ? "V5 剩余" : special ? nextName(x.kind, label) : capped ? x.left : x.made,
+      name,
       tone: paused ? ("danger" as Tone) : toneFor(used, cap),
       pct: capped && !paused ? Math.max(0, Math.min(100, (value / cap) * 100)) : 0,
     };
