@@ -1,4 +1,4 @@
-//! 后台「运营 / 监控」接口（旧版 `app/admin.py` 的中间一大段）：
+//! 后台「运营 / 监控」接口：
 //!
 //! - [`monitor`]：状态码分布、总览、运行状态、上游表现、V5 额度；
 //! - [`upstream`]：上游 Token 增删改、Anlas 核对；
@@ -34,7 +34,7 @@ pub fn router() -> Router<AppState> {
         .merge(system::router())
 }
 
-/// 旧版 `st.upstream_health()`：最近 10 分钟上游调用成败 + 全站图片冷却剩余秒数。
+/// 上游健康：最近 10 分钟上游调用成败 + 全站图片冷却剩余秒数。
 fn upstream_health(state: &AppState) -> Value {
     let now = state.now();
     let (status, recent, failed) = state.health.status(now);

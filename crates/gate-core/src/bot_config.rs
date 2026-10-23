@@ -1,8 +1,7 @@
 //! Discord 机器人（奶妹）的运行状态（心跳）的纯逻辑部分。
 //!
-//! 旧版（`app/bot_config.py`）还有后台可改的「跑图分享设置」（新帖自动点赞、AI 看图评论、频道名、每日条数、模型）
-//! 和机器人上报的「最近动作」记录；3.0 机器人从未实现这些功能，已整体删除。
-//! 站点设置里残留的 `bot_gallery_*` / `bot_events` 行不再读写（只增不减，留在库里无害）。
+//! 机器人只管成员命令；跑图分享、最近动作之类的扩展功能不存在，站点设置里残留的
+//! `bot_gallery_*` / `bot_events` 行不再读写（只增不减，留在库里无害）。
 //!
 //! 不在这里的（服务层负责，都是 `site_settings` 表的键值读写）：
 //! - 机器人每分钟上报一次心跳：服务层把 `status` 交给 [`status_to_store`]，结果写进 `bot_status`；
@@ -16,16 +15,16 @@ pub const STATUS_KEY: &str = "bot_status";
 /// 心跳每分钟一次，3 分钟没收到算离线
 pub const ONLINE_WINDOW: f64 = 180.0;
 
-/// 库里的状态坏了：旧版没有捕获，后台接口回 500。
+/// 库里的状态坏了：后台接口回 500。
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
 pub enum BotConfigError {
-    /// 库里的 JSON 坏了：旧版 `json.loads` 的 ValueError 没被捕获 → 500
+    /// 库里的 JSON 坏了（不是合法 JSON）→ 500
     #[error("ValueError: {0}")]
     BadJson(String),
-    /// 库里的 JSON 类型不对（要对象）：旧版会 AttributeError
+    /// 库里的 JSON 类型不对（要对象）
     #[error("AttributeError: {0}")]
     WrongType(String),
-    /// 状态里的字段类型不对：旧版 TypeError
+    /// 状态里的字段类型不对
     #[error("TypeError: {0}")]
     Type(String),
 }
@@ -46,7 +45,7 @@ pub fn status_to_store(status: &Map<String, Value>, now: f64) -> String {
 }
 
 /// 在线判断：`bool(seen and now - seen < 180)`。`seen` 是状态里的 `seen_at`（没有 = None）。
-/// 为真但不是数字时旧版 `now - seen` 抛 TypeError。
+/// 为真但不是数字时报错（`Err`）。
 pub fn online(seen_at: Option<&Value>, now: f64) -> Result<bool, BotConfigError> {
     let Some(seen) = seen_at else {
         return Ok(false);

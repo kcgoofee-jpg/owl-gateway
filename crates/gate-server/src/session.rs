@@ -1,4 +1,4 @@
-//! 后台与成员网页的会话 Cookie（与旧版逐字节兼容：切换前后谁都不用重新登录）。
+//! 后台与成员网页的会话 Cookie（格式自 2.x 延续至今，成员与站长的登录一直有效）。
 //!
 //! - 后台 `nai_gate_admin`：`<到期秒>.<HMAC-SHA256 hex>`，密钥 = `secret + ":" + sha256(密码哈希或 ADMIN_PASSWORD)`，
 //!   改密码即令所有旧会话失效；有效期 7 天；SameSite=Strict。

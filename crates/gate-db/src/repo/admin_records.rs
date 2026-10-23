@@ -1,11 +1,11 @@
-//! 后台「日志与记录」接口用到的裸 SQL（旧版 `app/admin.py` / `feedback.py` 里直接用 `db._db` 写的那些）：
+//! 后台「日志与记录」接口用到的查询：
 //! 操作日志筛选、Bug 页的 Key 名、成员反馈，以及按「文本形式的 Key 编号」查生成记录。
 
 use super::{SqlValue, marks};
 use crate::{Db, Result, value};
 use serde_json::Value;
 
-/// 操作日志筛选（旧版 `/admin/api/actions` 的 actor / action 参数，已规整）。
+/// 操作日志筛选（`/admin/api/actions` 的 actor / action 参数，已规整）。
 #[derive(Debug, Clone, Default)]
 pub struct ActionFilter {
     /// "manual"（站长 + Claude）/ "auto"（算法与定时任务）/ "member"，以及旧的 "admin" / "system"；其它值不筛。

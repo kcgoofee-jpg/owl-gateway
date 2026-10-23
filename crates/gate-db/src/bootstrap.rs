@@ -1,8 +1,7 @@
-//! 启动时的建表与轻量迁移：逐条复刻旧版 `Database.connect()`（app/database.py）与
-//! `status_page.ensure_schema()`，保证三件事：
-//! 1. 全新库建出来的 `sqlite_master` 与 Python 建的逐字一致（tests/schema_parity.rs 对拍）；
-//! 2. 对 Python 已经迁移过的线上库是空操作（只有幂等的 UPDATE / 重建触发器）；
-//! 3. Rust 写过的库，Python 再启动也能照常打开——切回旧版不需要任何手工处理。
+//! 启动时的建表与轻量迁移。表结构从 2.x 延续而来（线上库就是它建的），保证三件事：
+//! 1. 全新库建出来的 `sqlite_master` 与 2.x 建库脚本的产物逐字一致（tests/schema_parity.rs 对拍）；
+//! 2. 对线上库是空操作（只有幂等的 UPDATE / 重建触发器）；
+//! 3. 重复执行不出错（同一份脚本管全新库和线上库）。
 //!
 //! 表结构只增不减：已删除功能的死列 / 死表在 3.0 上线稳定后再单独迁移删除。
 
@@ -11,7 +10,7 @@ use rusqlite::{Connection, ErrorCode};
 const SCHEMA: &str = include_str!("sql/schema.sql");
 const STATUS_SCHEMA: &str = include_str!("sql/status_schema.sql");
 
-/// 老库补列（新库建表已含这些列，执行会报 duplicate column，忽略即可）。顺序与旧版一致。
+/// 老库补列（新库建表已含这些列，执行会报 duplicate column，忽略即可）。顺序决定列序，不要打乱。
 const ADD_COLUMNS: &[&str] = &[
     "ALTER TABLE api_keys ADD COLUMN daily_anlas REAL NOT NULL DEFAULT 0",
     "ALTER TABLE api_keys ADD COLUMN daily_v5 INTEGER NOT NULL DEFAULT 0",
@@ -55,9 +54,9 @@ const ADD_COLUMNS: &[&str] = &[
     "ALTER TABLE api_keys ADD COLUMN last_image_at REAL",
 ];
 
-/// 3.0 新增的列（旧版 Python 不知道它们；表结构只增不减，nullable，回滚到 2.x 不受影响）。
-/// 只放在这里、不写进 `schema.sql`：全新库与线上库走同一条路（建出旧版的表再补列），
-/// `tests/schema_parity.rs` 的「Python 建的表」一侧也是按这份清单补出来的。
+/// 3.0 新增的列（nullable，表结构只增不减）。
+/// 只放在这里、不写进 `schema.sql`：全新库与线上库走同一条路（建出 2.x 的表再补列），
+/// `tests/schema_parity.rs` 的「基线表」一侧也是按这份清单补出来的。
 pub const RUST_ADDED_COLUMNS: &[&str] = &[
     // 成员进服时间（Discord 返回的 joined_at，Unix 秒；没取到为 NULL）和成员标记位（1 = 退群后又重新加入）：
     // 防小号（「刚进服就领 Key」「退了又进」）和新号额度爬坡用。
@@ -88,7 +87,7 @@ pub const RUST_ADDED_COLUMNS: &[&str] = &[
     "ALTER TABLE usage_log ADD COLUMN origin TEXT",
 ];
 
-/// 3.0 新增的表（旧版 Python 不认识；只增不减，回滚到 2.x 不受影响）。同 `RUST_ADDED_COLUMNS`：
+/// 3.0 新增的表（只增不减）。同 `RUST_ADDED_COLUMNS`：
 /// 不写进 `schema.sql`，`tests/schema_parity.rs` 的「Python 建的表」一侧也按这份清单补出来。
 pub const RUST_ADDED_TABLES: &[&str] = &[
     // 成员用 Discord OAuth 授权后核验到的身份组（领 Key 的门槛只认这张表，不再用机器人 Token 查）。
@@ -215,7 +214,7 @@ const INDEXES: &[&str] = &[
 /// 本版本写入 `PRAGMA user_version` 的值。Python 版从不读它，所以写它不影响回滚。
 pub const SCHEMA_VERSION: i64 = 1;
 
-/// 连接级设置：与旧版一致（WAL + synchronous=NORMAL + 锁等待 15 秒）。
+/// 连接级设置：WAL + synchronous=NORMAL + 锁等待 15 秒。
 pub fn configure(conn: &Connection) -> rusqlite::Result<()> {
     conn.busy_timeout(std::time::Duration::from_secs(15))?;
     conn.pragma_update(None, "journal_mode", "WAL")?;
@@ -255,8 +254,8 @@ pub fn run(conn: &mut Connection) -> rusqlite::Result<()> {
     if !has_column(conn, "api_keys", "discord_id")? {
         conn.execute("ALTER TABLE api_keys ADD COLUMN discord_id TEXT", [])?;
     }
-    // 3.0 的列放在旧版所有列（含上面的 discord_id）之后：全新库和线上库的列顺序一致，
-    // 旧版整行插入（`INSERT ... VALUES(...)` 不带列名）的位置也不受影响。
+    // 3.0 的列放在 2.x 的所有列（含上面的 discord_id）之后：全新库和线上库的列顺序一致，
+    // 不带列名的整行 `INSERT ... VALUES(...)` 也不受影响。
     for ddl in RUST_ADDED_COLUMNS {
         match conn.execute(ddl, []) {
             Ok(_) => {}

@@ -1,4 +1,4 @@
-//! Discord 自助领 Key（旧版 `app/registration.py` + `app/ops.py` 里与领 Key 相关的部分）。
+//! Discord 自助领 Key。
 //!
 //! 发 Key 只有一条路径：机器人 /register → `POST /self-register/issue` → [`RegistrationService::issue_direct`]
 //! → [`RegistrationService::provision`]。
@@ -35,8 +35,8 @@ const INVITE_RECHECK_SECS: f64 = 30.0 * 86400.0;
 
 // ------------------------------------------------------------------ 错误
 
-/// 领 Key 流程里的失败。`Denied` = 旧版 `RegistrationError`（中文原因，直接给成员看）；
-/// `Internal` = 旧版未捕获的异常（数据库 / 响应解析），路由层按 500 处理。
+/// 领 Key 流程里的失败。`Denied` = 业务拒绝（中文原因，直接给成员看）；
+/// `Internal` = 数据库 / 响应解析之类的内部错误，路由层按 500 处理。
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum RegErr {
     Denied(String),
@@ -305,7 +305,7 @@ pub enum RoleCheck {
     Unavailable,
 }
 
-/// Discord REST 调用失败的种类（对应旧版 `_discord` 抛的 RegistrationError / httpx.HTTPError / ValueError）。
+/// Discord REST 调用失败的种类。
 #[derive(Debug)]
 enum DiscordErr {
     Rejected,
@@ -1228,7 +1228,6 @@ impl RegistrationService {
 // ------------------------------------------------------------------ 后台任务（由任务调度方安排）
 
 /// 每 5 分钟的维护：同步身份组、补全资料、退群回收。每一步单独记错，不互相影响
-/// （旧版 `background_tasks.registrar_jobs`）。
 pub async fn registrar_jobs(state: &AppState) {
     let Some(svc) = state.registration.as_ref() else {
         return;

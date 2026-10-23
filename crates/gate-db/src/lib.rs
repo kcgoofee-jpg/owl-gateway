@@ -2,15 +2,15 @@
 //!
 //! 并发模型：
 //! - **一个写线程**独占写连接，所有写操作排队执行，每个任务是一个 `BEGIN IMMEDIATE` 事务；
-//!   遇到 `SQLITE_BUSY`（备份脚本、旧版 Python 同时开着库等）按旧版的节奏重试 4 次。
+//!   遇到 `SQLITE_BUSY`（备份脚本同时开着库等）重试 4 次。
 //! - **只读连接池**（默认 2 个）：WAL 下读不阻塞写，查询放在 `spawn_blocking` 里跑。
 //!   等连接的读请求在异步信号量上排队，不占阻塞线程（同一时刻最多「池子大小」个读线程）。
 //!
-//! `repo` 模块是旧版 `class Database`（app/database.py）的逐方法移植，`tests/repo_snapshot.rs` 对每个方法的
-//! 返回值、有变化的表和原图目录做快照（输入取自旧 Python 生成的夹具，脚本见标签 py-final）。
+//! `repo` 里每个方法都有快照：`tests/repo_snapshot.rs` 对返回值、有变化的表和原图目录做快照
+//! （夹具取自 2.x 时代的真实数据，脚本见标签 py-final）。
 //!
-//! 旧版的问题（共享主连接上一条语句失败后事务不结束 → 之后所有写都 locked，见 database.py
-//! `_rollback_on_error`）在这里不存在：事务由 `rusqlite::Transaction` 的 Drop 自动回滚。
+//! 事务失败即整体回滚：由 `rusqlite::Transaction` 的 Drop 自动完成，不会出现「一条语句失败后
+//! 事务挂着、之后所有写都 locked」。
 
 pub mod bootstrap;
 pub mod repo;
@@ -31,7 +31,7 @@ pub enum DbError {
     WriterGone,
     #[error("读任务异常退出")]
     ReaderPanicked,
-    /// 调用参数不合法（对应旧版里抛 ValueError / KeyError / 绑定参数失败的场景）。
+    /// 调用参数不合法。
     #[error("参数错误：{0}")]
     Invalid(String),
     #[error("文件操作失败：{0}")]
@@ -50,7 +50,7 @@ pub struct Db {
 
 struct Inner {
     path: PathBuf,
-    /// 审计原图目录：`<库所在目录>/audit_images`（旧版 `Database.image_dir`）。
+    /// 审计原图目录：`<库所在目录>/audit_images`。
     image_dir: PathBuf,
     writer: std::sync::mpsc::SyncSender<Job>,
     readers: Mutex<Vec<Connection>>,
@@ -76,7 +76,7 @@ impl Unhealthy {
     }
 }
 
-/// 写事务里遇到锁冲突时的重试次数（与旧版 `record` 的 4 次一致）。
+/// 写事务里遇到锁冲突时的重试次数。
 const WRITE_ATTEMPTS: u32 = 4;
 
 impl Db {
@@ -127,7 +127,7 @@ impl Db {
             })
             .expect("能创建写线程");
 
-        // 旧版：Path(path).resolve().parent / "audit_images"
+        // 与库同目录的 audit_images/
         let abs = std::fs::canonicalize(&path).unwrap_or_else(|_| path.clone());
         let image_dir = abs
             .parent()

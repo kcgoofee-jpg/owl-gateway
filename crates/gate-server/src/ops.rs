@@ -1,9 +1,9 @@
-//! 站长可在运行中调整的开关（旧版 `app/ops.py`）：自助领 Key（注册）、全局功能、生成记录。
+//! 站长可在运行中调整的开关：自助领 Key（注册）、全局功能、生成记录。
 //!
 //! 所有值保存在 `site_settings`，没设过时用 [`crate::defaults`] 里的常量（没有环境变量）；机器人每次命令都实时读取，所以改了立刻生效。
-//! 校验失败的文案、存进库里的字符串（整数不带小数点、开关 "1" / "0"）都与旧版逐字一致——旧 Python 还能读这些行。
+//! 校验失败的文案、存进库里的字符串（整数不带小数点、开关 "1" / "0"）都是固定格式：库里的行要长期可读，客户端和后台依赖这些文案。
 //!
-//! 另外放几个后台接口共用的「按数据库区分的单例」（旧版是模块级全局变量）：
+//! 另外放几个后台接口共用的单例：
 //! 测试告警的 10 秒节流、运行期限制的写锁、Anlas 核对的互斥锁。
 
 use crate::audit::{audit_flags, audit_image_cap_mb, audit_image_keep_hours};
@@ -20,12 +20,12 @@ use std::sync::Mutex;
 /// 后台这几个接口里的错误：参数不合法回 422，在别处管的设置回 400，库里的数据坏了回 500。
 #[derive(Debug)]
 pub enum OpsError {
-    /// 旧版 `ValueError` / `TypeError`：路由层回 422，原文作为 `detail`。
+    /// 设置值不合法：路由层回 422，原文作为 `detail`。
     Invalid(String),
     /// 想在这里改别处管的设置：400。
     Managed(String),
     Db(DbError),
-    /// 库里的存档坏了（旧版会抛未捕获的异常 → 500）。
+    /// 库里的存档坏了（会让读到它的接口 500）。
     Corrupt(String),
 }
 
@@ -48,14 +48,14 @@ impl From<OpsError> for ApiError {
 
 // ------------------------------------------------------------------ 进程内共享状态
 
-/// 旧版的模块级全局变量，挂在 `AppState::ops` 上。
+/// 后台接口共用的单例，挂在 `AppState::ops` 上。
 #[derive(Default)]
 pub struct Shared {
-    /// 上一次发测试告警的时间（旧版 `_last_alert_test_time`）。
+    /// 上一次发测试告警的时间。
     pub alert_test_at: Mutex<f64>,
-    /// 旧版 `_runtime_limits_lock`：写库 + 生效必须连在一起。
+    /// 运行期限制的写锁：写库 + 生效必须连在一起。
     pub runtime_limits: tokio::sync::Mutex<()>,
-    /// 旧版 `ManualReconciliation.lock`：同一时刻只允许一次 Anlas 核对。
+    /// Anlas 核对的互斥锁：同一时刻只允许一次。
     pub reconcile: tokio::sync::Mutex<()>,
 }
 
@@ -73,7 +73,7 @@ pub async fn global_daily_v5(db: &Db) -> Result<i64, DbError> {
 
 // ------------------------------------------------------------------ 注册设置
 
-/// 生效的注册设置：数据库里保存的优先，其次是 [`crate::defaults`] 里的常量（旧版 `registration_settings`）。
+/// 生效的注册设置：数据库里保存的优先，其次是 [`crate::defaults`] 里的常量。
 #[derive(Debug, Clone, PartialEq)]
 pub struct Registration {
     pub configured: bool,
@@ -156,7 +156,7 @@ impl Registration {
         }
     }
 
-    /// 键顺序与旧版 dict 一致。
+    /// 键顺序固定，后台和机器人按它读。
     pub fn to_map(&self) -> Map<String, Value> {
         let features = match &self.features {
             Some(list) => json!(list),
@@ -433,7 +433,7 @@ pub async fn set_registration(state: &AppState, body: &Map<String, Value>) -> Re
 
 // ------------------------------------------------------------------ 全局功能开关
 
-/// 全局开关：功能名 → 是否开启，按 `FEATURES` 的顺序（旧版 `global_flags`）。缺省全部开启。
+/// 全局开关：功能名 → 是否开启，按 `FEATURES` 的顺序。缺省全部开启。
 pub async fn global_flags(state: &AppState) -> Result<Map<String, Value>, OpsError> {
     let raw = state.db.get_setting(GLOBAL_KEY).await?;
     let flags = features::parse_global_flags(raw.as_deref())

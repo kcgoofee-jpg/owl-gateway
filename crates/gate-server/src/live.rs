@@ -1,14 +1,13 @@
-//! 首页实时图（旧版 `app/live.py`）、`/public/live` 的 meta（`public_routes._live_meta`）、
-//! `/public/status`（`_public_status_body`）和公开页面用的进程内状态。
+//! 首页实时图（`/public/live` 的数据与 meta）、`/public/status` 和公开页面用的进程内状态。
 //!
-//! 3.0 的变化：旧版每个请求自己算、结果缓存 1 秒；现在算出来的快照放进一个 `tokio::sync::watch` 通道，
+//! 算出来的快照放进一个 `tokio::sync::watch` 通道，
 //! JSON 接口与 SSE 共用同一份——
-//! - HTTP 取数（[`Hub::current`]）：快照不到 1 秒新就直接用，否则单飞重算（与旧版 1 秒缓存同一语义，没人访问就不算）；
+//! - HTTP 取数（[`Hub::current`]）：快照不到 1 秒新就直接用，否则单飞重算（没人访问就不算）；
 //! - SSE 订阅（[`Hub::subscribe`]）：第一次订阅时起一个后台任务，每秒在有订阅者时重算一次；任务挂在 `state.tasks` 上，
 //!   `state.shutdown` 取消时退出。
 //!
 //! 快照里没有任何人的 Key、提示词、IP 或 Discord ID；「我的排队」（`me`）按连接单独拼，不进共享快照
-//! （旧版 test_review_regressions 的红线：共享缓存对象绝不能被某个请求的 `me` 污染）。
+//! 红线：共享缓存对象绝不能被某个请求的 `me` 污染。
 
 use crate::auth::site_flag;
 use crate::error::InternalError;
@@ -28,7 +27,7 @@ use tokio::time::{Duration, Instant};
 
 /// 「近 1 分钟」请求窗口（秒）。
 pub const WINDOW: f64 = 60.0;
-/// 快照新鲜度：与旧版 `live.build` 的 1 秒缓存一致。
+/// 快照新鲜度：1 秒。
 const SNAPSHOT_TTL: Duration = Duration::from_secs(1);
 /// meta（站点地址、注册开关……）变化很慢：30 秒子缓存。
 const META_TTL: Duration = Duration::from_secs(30);
@@ -49,7 +48,7 @@ pub fn recent(state: &AppState, now: f64) -> (i64, i64) {
     (e.len() as i64, rejected as i64)
 }
 
-/// 旧版 `_wait_minutes`：理由里「约 N 分钟」的 N；没有就当无穷大（取最短等待时排在最后）。
+/// 从拒绝理由里取「约 N 分钟」的 N；没有就当无穷大（取最短等待时排在最后）。
 fn wait_minutes(text: &str) -> i64 {
     let mut rest = text;
     while let Some(i) = rest.find("约 ") {
@@ -64,7 +63,7 @@ fn wait_minutes(text: &str) -> i64 {
 
 // ------------------------------------------------------------------ 注册设置（只读部分）
 
-/// 旧版 `ops.registration_settings` 里首页用得到的三项。没配注册服务时没有这个东西（None）。
+/// 注册设置里首页用得到的三项。没配注册服务时没有这个东西（None）。
 pub struct RegSettings {
     pub open: bool,
     pub max_users: i64,
@@ -105,7 +104,7 @@ async fn slots_left(state: &AppState, cfg: &RegSettings) -> Result<Option<i64>, 
 /// 还没有出图耗时样本时，一个账号平均多久开始一张（秒）：实测出图约 7.6 秒 + 出完后平均歇 2 秒，取整 10。
 pub const DEFAULT_CYCLE: f64 = 10.0;
 
-/// 旧版 `live.build`：汇总数字（请求数、额度、排队数、账号保护、名额），不含 meta 与 me。键顺序照抄旧版。
+/// 汇总数字（请求数、额度、排队数、账号保护、名额），不含 meta 与 me。键顺序固定，前端按它读。
 pub async fn build(state: &AppState, now: f64) -> Result<Map<String, Value>, InternalError> {
     struct Acct {
         usable: bool,
@@ -320,7 +319,7 @@ pub async fn upstream_v5_free(state: &AppState) -> bool {
     state.nai.v5_free_open().await.unwrap_or(true)
 }
 
-/// 旧版 `live.mine`：这把 Key 的图现在排第几 / 是否在生成。
+/// 这把 Key 的图现在排第几 / 是否在生成。
 /// `eta`：已经排到账号上的用上游客户端的估计（`start_at`，按那个账号前面排了几张和它现在的间隔算）；
 /// 还没排到的按 位次 × 全站每张的放行间隔（[`Snapshot::site_interval`]：单账号周期 ÷ 可用账号数）。
 pub fn mine(state: &AppState, key_id: i64, snap: &Snapshot) -> Value {
@@ -346,7 +345,7 @@ pub fn mine(state: &AppState, key_id: i64, snap: &Snapshot) -> Value {
     json!({"mine": items, "waiting": view["waiting"], "running": view["running"]})
 }
 
-/// 旧版 `_live_meta`：变化很慢的站点信息。
+/// 变化很慢的站点信息（meta）。
 async fn build_meta(state: &AppState) -> Result<Map<String, Value>, InternalError> {
     let env = &state.env;
     let mut reg = json!({"configured": false, "open": false}); // 没配注册服务 = 关闭（fail-closed）
@@ -384,7 +383,7 @@ fn public_limits(state: &AppState) -> Value {
     json!({"key_image_queue": get("queue_per_member")})
 }
 
-/// 旧版 `_public_status_body`：不含任何密钥、成员信息或计数细节。
+/// 状态页的公开响应：不含任何密钥、成员信息或计数细节。
 pub async fn build_status(state: &AppState) -> Result<Value, InternalError> {
     let flags =
         features::parse_global_flags(state.db.get_setting(features::GLOBAL_KEY).await?.as_deref())?;
@@ -757,7 +756,7 @@ impl Hub {
             .store(d.as_millis().max(1) as u64, Ordering::Relaxed);
     }
 
-    /// 前端脚本报错上报的限流：每 IP 每 10 分钟 10 条，全站每 10 分钟 100 条（旧版 `_CLIENT_ERR`）。
+    /// 前端脚本报错上报的限流：每 IP 每 10 分钟 10 条，全站每 10 分钟 100 条。
     /// 计数发生在解析请求体之前：乱发的请求也占名额。
     pub fn client_error_slot(&self, ip: &str, now: f64) -> bool {
         let mut c = self.client_err.lock().expect("client_err");

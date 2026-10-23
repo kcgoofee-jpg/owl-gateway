@@ -15,8 +15,8 @@ fn legacy() -> String {
     "legacy".into()
 }
 
-/// `create_key(fields: dict)` 的入参。缺省值与旧版 `fields.get(k, default)` 一致；
-/// 必填项（name / token / daily_images / monthly_anlas / daily_text_tokens / rpm）旧版缺了抛 KeyError。
+/// `create_key` 的入参。缺省值见各字段；
+/// 必填项（name / token / daily_images / monthly_anlas / daily_text_tokens / rpm）缺了返回 Err。
 #[derive(Debug, Clone, Deserialize)]
 pub struct NewKey {
     pub name: String,
@@ -137,7 +137,7 @@ impl Db {
         .await
     }
 
-    /// 换 token 但保留 id（在途请求、用量和限速仍归属于它）。token 撞了 UNIQUE 约束时返回 Err（旧版抛 IntegrityError）。
+    /// 换 token 但保留 id（在途请求、用量和限速仍归属于它）。token 撞了 UNIQUE 约束时返回 Err。
     pub async fn rotate_key_token(&self, key_id: i64, token: &str) -> Result<bool> {
         let token = token.to_string();
         self.write(move |tx| {
@@ -151,7 +151,7 @@ impl Db {
     }
 
     /// 按白名单改列。`fields` 保持调用方的键顺序；开关类的列用 Python 真值判断（`1 if v else 0`），
-    /// 其余原样绑定（bool 当整数；list / dict 旧版绑定时抛错，这里返回 Err）。没有可改的列时什么都不做。
+    /// 其余原样绑定（bool 当整数；list / dict 无法绑定，返回 Err）。没有可改的列时什么都不做。
     pub async fn update_key(
         &self,
         key_id: i64,
@@ -234,7 +234,7 @@ impl Db {
                 .optional()?
                 .flatten();
             let grace = match raw {
-                None => 0.0, // 旧版默认值 0
+                None => 0.0, // 缺省 0
                 Some(s) => match pyc::parse_float(&s) {
                     Some(g) => g,
                     None => return Ok(Vec::new()),

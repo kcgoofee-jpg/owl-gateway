@@ -1,4 +1,4 @@
-//! `/status.json` 的内容与状态页用到的小工具：与旧版逐字节一致。
+//! `/status.json` 的内容与状态页用到的小工具。
 
 use super::snapshot::{Snapshot, impact_rank};
 use gate_core::pyval::float;
@@ -38,7 +38,7 @@ pub fn standard_body(status: &str) -> Option<&'static str> {
         .map(|(_, b)| *b)
 }
 
-/// `Incident` → 旧版的事件字典（键顺序：id、title、impact、components、started_at、resolved_at、updates）。
+/// `Incident` → 事件 JSON（键顺序固定：id、title、impact、components、started_at、resolved_at、updates）。
 pub fn incident_json(inc: &Incident) -> Value {
     json!({
         "id": inc.id,

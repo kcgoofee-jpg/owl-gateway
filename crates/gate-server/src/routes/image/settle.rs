@@ -18,7 +18,7 @@ use gate_upstream::client::{Callbacks, RequestOpts, UpstreamError};
 use serde_json::{Map, Value, json};
 use std::sync::{Arc, Mutex};
 
-/// V5 额度确认回调用到的可变状态（旧版 `nonlocal est, detail`）。
+/// V5 额度确认回调用到的可变状态。
 pub(super) struct Billing {
     pub(super) est: Est,
     pub(super) detail: String,

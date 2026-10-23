@@ -2,7 +2,7 @@
 //!
 //! 不私信、不群发：成员自己发起，回执只有本人可见（680009 申诉期规则）。
 //!
-//! 旧版是 5 道必填单选题；选择题归「问卷」，3.0 起 `/反馈` 只收文字。
+//! 2.x 的 `/反馈` 是 5 道必填单选题；选择题归「问卷」，3.0 起 `/反馈` 只收文字。
 //! 库里已有的旧记录（`answers` 是 score / pain / wish / client / freq 的选择）照常显示成一行摘要。
 
 use gate_core::pyc::{strip, take_chars};
@@ -19,7 +19,7 @@ pub const RECEIPT: &str = "收到啦，谢谢你的反馈～奶妹会转给站�
 pub const TOO_SHORT: &str = "写点什么再提交吧～";
 pub const TOO_FREQUENT: &str = "刚刚已经收到你的反馈啦，过 10 分钟再提交新的吧。";
 
-/// 提交失败：旧版抛 `ValueError`（中文原因，机器人原样转述给成员）。
+/// 提交失败：2.x 会以 `ValueError` 上抛（中文原因，机器人原样转述给成员），这里保持同样的转述方式。
 #[derive(Debug)]
 pub enum SubmitError {
     Rejected(String),
@@ -64,7 +64,7 @@ pub async fn submit(
     Ok(RECEIPT.into())
 }
 
-/// 旧版选择题的题目 id → 摘要里的简称（顺序即旧版题目顺序）。
+/// 2.x 问卷选择题的题目 id → 摘要里的简称（顺序即当年问卷的题目顺序）。
 const LEGACY_FIELDS: [(&str, &str); 5] = [
     ("score", "整体"),
     ("pain", "困扰"),
@@ -73,8 +73,8 @@ const LEGACY_FIELDS: [(&str, &str); 5] = [
     ("freq", "频率"),
 ];
 
-/// 一份反馈给后台看的文字，以及是不是旧版选择题的记录。
-/// 新记录就是成员写的话；旧记录拼成一行「（旧版选择题）整体：满意；困扰：…；希望：…」；什么都没有就是空串。
+/// 一份反馈给后台看的文字，以及是不是 2.x 问卷的旧记录。
+/// 新记录就是成员写的话；2.x 问卷的旧记录拼成一行「（旧版选择题）整体：满意；困扰：…；希望：…」（库里有 8 条，照常显示）；什么都没有就是空串。
 pub fn display_text(answers: &Value) -> (String, bool) {
     if let Some(text) = answers.get("text").and_then(Value::as_str) {
         return (strip(text).to_string(), false);
@@ -106,7 +106,7 @@ pub fn member_label(item: &Value) -> String {
         .to_string()
 }
 
-/// 后台查看用（旧版 `listing`）：新 → 旧。每条带 `text`（显示用的文字）和 `legacy`（是不是旧版选择题）。
+/// 后台查看用：新 → 旧。每条带 `text`（显示用的文字）和 `legacy`（是不是 2.x 问卷的旧记录）。
 pub async fn listing(db: &Db, limit: i64) -> Result<Vec<Value>, DbError> {
     let rows = db.list_feedback(limit).await?;
     Ok(rows

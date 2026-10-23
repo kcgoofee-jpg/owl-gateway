@@ -1,11 +1,11 @@
-//! Bug 追踪（`error_events`）与成员接口状态码分布（`status_hourly`）。旧版 `app/errors.py` / `app/status_stats.py`
+//! Bug 追踪（`error_events`）与成员接口状态码分布（`status_hourly`）。
 //! 直接在共享连接上写 SQL，这里收口成方法。
 
 use crate::{Db, Result, value};
 use rusqlite::OptionalExtension;
 use serde_json::Value;
 
-/// 一条要入库的错误事件（字段同旧版 dict）。
+/// 一条要入库的错误事件。
 #[derive(Debug, Clone)]
 pub struct ErrorRow {
     pub sig: String,

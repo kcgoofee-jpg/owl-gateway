@@ -3,7 +3,7 @@
 use crate::{Db, Result, value};
 
 impl Db {
-    /// `seed_hour`：最近 3 小时成功出图的 (token_id, ts, images)，按时间排序（旧版 guard.seed_hour，
+    /// 最近 3 小时成功出图的 (token_id, ts, images)，按时间排序（
     /// 3.0 起多取 token_id 以便按账号补回；老行 / 没记账号的为 None）。
     pub async fn recent_image_stamps(&self, since: f64) -> Result<Vec<(Option<String>, f64, i64)>> {
         self.read(move |c| {

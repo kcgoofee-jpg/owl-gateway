@@ -5,7 +5,7 @@ use gate_core::pyc;
 use rusqlite::params;
 use serde_json::Value;
 
-/// 封禁时附带的资料（缺省值与旧版一致：banned_by = "系统"，其余空串）。
+/// 封禁时附带的资料（缺省值：banned_by = "系统"，其余空串）。
 #[derive(Debug, Clone)]
 pub struct BanInfo {
     pub reason: String,
@@ -85,7 +85,7 @@ impl Db {
     }
 
     /// 黑名单列表（新→旧）；`q` 非空时按 discord_id / username / display_name / reason 模糊匹配
-    /// （LIKE 通配符不转义，与旧版一致）。
+    /// （LIKE 通配符不转义）。
     pub async fn list_bans(&self, q: &str) -> Result<Vec<Value>> {
         let q = pyc::strip(q).to_string();
         self.read(move |c| {

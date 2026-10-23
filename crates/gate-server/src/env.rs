@@ -5,7 +5,7 @@
 //! 没有后台入口、只是代码常量的几个数（排队超时、登录限流……）在下面的 `pub const` 里，
 //! [`EnvConfig`] 里对应的字段只是方便测试和 `cargo xtask dev` 覆盖，生产不读环境变量。
 //!
-//! 解析规则逐个复刻旧版（app/config.py、registration.py、ops.py、status_page.py 里散落的 `os.getenv`）：
+//! 解析规则：
 //! - 布尔：`1/true/yes/on/y`（不区分大小写、去空白）为真，其余为假；未设置用默认值；
 //!   例外 `ADMIN_COOKIE_SECURE`：只有 `0/false/no/off` 为假（默认安全）。
 //! - 整数：空串或解析失败都用默认值（`int(os.environ.get(name, "").strip() or default)`）。
@@ -84,7 +84,7 @@ impl Reader<'_> {
     }
 }
 
-/// 自助领取 Key（Discord 机器人桥接）的配置；任一必填项缺失则为 None（旧版 `configured_service`）。
+/// 自助领取 Key（Discord 机器人桥接）的配置；任一必填项缺失则为 None。
 /// 领 Key 的名额、有效期、功能、身份组限定都是数据库设置（见 `ops::registration_settings`），不在这里。
 #[derive(Debug, Clone)]
 pub struct RegistrationEnv {

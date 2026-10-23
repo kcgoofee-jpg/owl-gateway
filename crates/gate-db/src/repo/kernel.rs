@@ -1,10 +1,10 @@
 //! 定时任务（额度同步 / 自动驾驶 / 上游快照 / 维护循环 / 闲置回收）要用的查询与写入。
 //!
-//! 旧版散在 `quota_algo.py` / `autopilot.py` / `modules.py` / `background_tasks.py` /
-//! `state.py` 里的 `db._db.execute*`，这里按「同一个任务读到的一批数据」收成一个方法一次读完。
-//! SQL 文本与旧版逐字相同（包括没有 `ORDER BY` 的地方：行顺序由 SQLite 决定，两边引擎一致）。
+//! 定时任务（额度同步 / 上游快照 / 维护循环 / 闲置回收）要用的查询与写入，
+//! 按「同一个任务读到的一批数据」收成一个方法一次读完。
 //!
-//! 评估周期内额度 / 处罚结果不许变：这里**不做任何「顺手优化」**，怪癖照抄。
+//! SQL 文本固定（包括没有 `ORDER BY` 的地方：行顺序由 SQLite 决定），快照测试按它对拍；
+//! 这里**不做任何「顺手优化」**。
 
 use crate::{Db, Result, value};
 use gate_core::autopilot::BreakerRows;
@@ -135,7 +135,7 @@ impl Db {
     /// 参与单 Key 限流判断的成员 Key（id, name）。
     pub async fn autopilot_keys(&self) -> Result<Vec<(i64, String)>> {
         self.read(|c| {
-            // 旧版没有 ORDER BY；全表扫描就是 rowid 顺序，这里写明，免得换了查询计划后顺序漂移
+            // 没写 ORDER BY：全表扫描就是 rowid 顺序，这里写明，免得换了查询计划后顺序漂移
             let mut stmt =
                 c.prepare("SELECT id, name FROM api_keys WHERE enabled=1 ORDER BY id")?;
             stmt.query_map([], |r| {

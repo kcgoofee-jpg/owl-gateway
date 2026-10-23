@@ -1,4 +1,4 @@
-//! 虚拟 Key 行。数据库读出来是一个 JSON 对象（列名 → 值，与旧版 aiosqlite.Row 的访问方式一致）；
+//! 虚拟 Key 行。数据库读出来是一个 JSON 对象（列名 → 值）；
 //! 这里给常用字段一组带 Python 语义的访问器（`bool(row[x])`、缺列当假 / 0）。
 
 use gate_core::pyval;
@@ -12,7 +12,7 @@ impl Key {
         self.0.get(name).unwrap_or(&Value::Null)
     }
 
-    /// `bool(row[name])`；缺列为假（旧版 `_flag`）。
+    /// `bool(row[name])`；缺列为假。
     pub fn flag(&self, name: &str) -> bool {
         pyval::truthy(self.get(name))
     }

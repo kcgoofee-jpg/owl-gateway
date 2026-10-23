@@ -1,7 +1,7 @@
-//! 公开状态页（旧版 `app/status_page.py`）：`GET|HEAD /status`（HTML）、`GET /status.json`、
+//! 公开状态页：`GET|HEAD /status`（HTML）、`GET /status.json`、
 //! 事件没有后台接口，直接写库（`incidents` / `incident_updates` 表）。
 //!
-//! - JSON 和旧版逐字节一致；HTML 的版式 / 文案照旧，安全头与样式加载方式见 [`page`]。
+//! - JSON 字段与取值是固定契约（第三方可能存档 `/status.json`）；HTML 的安全头与样式加载方式见 [`page`]。
 //! - 公开页不登录就能访问：60 秒内复用同一份快照，避免被反复刷新时每次都扫 90 天日志（缓存挂在路由上，
 //!   不是全局变量；`app()` 只组装一次路由，所以线上缓存是共享的）。
 //! - 样式与主题切换脚本编进二进制，由 `/_owl/status-page.{css,js}` 提供（地址带内容哈希，长期缓存）：
@@ -91,7 +91,7 @@ pub fn router() -> Router<AppState> {
         .layer(Extension(Arc::new(Shared::new())))
 }
 
-/// 从库里读出数据并组装快照（旧版 `snapshot(db, now)`）。
+/// 从库里读出数据并组装快照。
 async fn load(st: &AppState, now: f64) -> Result<Snapshot, gate_db::DbError> {
     use snapshot::*;
     let clock = &st.clock;
@@ -115,7 +115,7 @@ async fn load(st: &AppState, now: f64) -> Result<Snapshot, gate_db::DbError> {
     ))
 }
 
-/// 带显式 Content-Length 的响应：HEAD 请求（axum 会去掉正文）也能拿到与 GET 相同的长度，与旧版一致。
+/// 带显式 Content-Length 的响应：HEAD 请求（axum 会去掉正文）也能拿到与 GET 相同的长度。
 fn respond(
     content_type: &'static str,
     body: Vec<u8>,
@@ -210,7 +210,7 @@ async fn js(Extension(sh): Extension<Arc<Shared>>, RawQuery(q): RawQuery) -> Res
     asset("text/javascript; charset=utf-8", JS, &sh.js_v, q)
 }
 
-/// 官方状态接口的返回 → 存进设置的那份摘要（旧版 `fetch_official` 的字段与顺序）。
+/// 官方状态接口的返回 → 存进设置的那份摘要（字段与顺序固定，快照测试按它比较）。
 /// 形状不对（缺 `result` / `status_overall`）返回 None，调用方保留上次的结果。
 pub fn official_value(resp: &Value, fetched_at: f64) -> Option<Value> {
     let d = resp.get("result")?;

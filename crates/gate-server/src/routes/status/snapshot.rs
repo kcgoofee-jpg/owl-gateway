@@ -1,7 +1,7 @@
-//! 状态快照（旧版 `status_page.snapshot`）：每个组件 90 天的色条、可用率、当前状态，以及事件列表。
+//! 状态快照：每个组件 90 天的色条、可用率、当前状态，以及事件列表。
 //!
-//! 「天」按网关的时区（常量 Asia/Shanghai，见 `gate_core::clock::TZ`）划分，与旧版 `datetime.fromtimestamp` 的本地时间一致。
-//! 数值运算的顺序照抄旧版（浮点结果要逐位相同，`/status.json` 里的 `uptime` 会原样输出）。
+//! 「天」按网关的时区（常量 Asia/Shanghai，见 `gate_core::clock::TZ`）划分。
+//! 浮点运算的顺序固定：`/status.json` 里的 `uptime` 原样输出，快照测试按逐位比较。
 
 use gate_core::clock::Clock;
 use gate_db::repo::status_page::{Incident, UpstreamRecent};
@@ -103,7 +103,7 @@ pub fn level_of(ratio: f64) -> usize {
 
 /// 「现在」（最近一小时）上游的失败占比，决定当前状态。
 ///
-/// 旧版：不到 10 次请求不下结论，否则 `失败 / 总数`。3.0 追加（站长批准）：
+/// 不到 10 次请求不下结论，否则 `失败 / 总数`。追加条件（站长批准）：
 /// 失败至少 3 次且来自至少 2 把不同的 Key 才算——一个成员自己的畸形请求（被 NovelAI 返回 500）
 /// 不该让全站的上游显示「性能下降」。每天的色条（[`level_of`] 按日占比）不受影响。
 pub fn recent_ratio(r: UpstreamRecent) -> f64 {
@@ -195,7 +195,7 @@ pub fn upstream_days(clock: &Clock, buckets: &[(i64, i64, i64)]) -> HashMap<Stri
         .collect()
 }
 
-/// 旧版 `snapshot` 的主体（纯函数，数据已读好）。
+/// 快照的主体（纯函数，数据已读好）。
 pub fn build(clock: &Clock, now: f64, inputs: Inputs) -> Snapshot {
     let today = local_date(clock, now);
     let first = days_before(today, DAYS - 1);
@@ -350,7 +350,7 @@ mod tests {
                 bad_keys,
             })
         };
-        // 不到 10 次不下结论（与旧版一致）
+        // 不到 10 次不下结论
         assert_eq!(r(9, 9, 5), 0.0);
         // 同一把 Key 反复失败：不算
         assert_eq!(r(105, 5, 1), 0.0);

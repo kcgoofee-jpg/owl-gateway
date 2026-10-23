@@ -1,4 +1,4 @@
-//! 把成员的原图打包成 ZIP（旧版 `app/exporter.py`）。只有后台「导出该成员全部」用；
+//! 把成员的原图打包成 ZIP。只有后台「导出该成员全部」用；
 //! 成员自助导出（含 EPUB 电子书）已在 3.0 删除（站长决定不再提供）。
 //!
 //! 行是 `db.audit_images_for_key` 的结果。可能较大较慢，调用方放到阻塞线程里跑。
@@ -12,7 +12,7 @@ use std::io::{Cursor, Write};
 use zip::CompressionMethod;
 use zip::write::SimpleFileOptions;
 
-/// 原图扩展名（其余类型落 `.png`，与旧版 `_EXT.get(type, "png")` 一致）。
+/// 原图扩展名（其余类型落 `.png`）。
 fn ext_of(image_type: &str) -> &'static str {
     match image_type {
         "image/jpeg" => "jpg",

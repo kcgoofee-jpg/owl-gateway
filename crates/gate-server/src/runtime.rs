@@ -1,15 +1,13 @@
-//! 运行期共享状态（旧版 `state.py` 的 GateState 里与请求相关的部分）：
-//! - 一个通用滑动窗口 [`SlidingWindow`]，取代旧版 5 份几乎相同的实现（RPM / 无效 Key / 后台登录 / 前端报错）；
+//! 运行期共享状态：
+//! - 一个通用滑动窗口 [`SlidingWindow`]（RPM / 无效 Key / 后台登录 / 前端报错共用）；
 //! - 防爆破（IPv6 聚合到 /64）；
 //! - 全站图片冷却（上游 429 后）；
 //! - Key 暂停闸门（自动驾驶限流等）。
 //!
 //! 时间：墙钟用 `crate::time::now()`，间隔类用 tokio 单调时钟（测试可暂停）。
 //!
-//! 每把 Key 的限速只剩两层：出图排队（同时生成 1 张，每人最多排 `queue_per_member` 张，见 `admission::image_admission`）和
-//! 每分钟次数（RPM）。2.x 的「每把 Key 两张图至少隔 15 秒」（`KEY_IMAGE_MIN_INTERVAL`）与出图请求的
-//! 「同一把 Key 同时在途 ≤ 4」已删除（与排队重复；后者原先只剩文本路由在用，文本接口删除后
-//! 整层删掉）。
+//! 每把 Key 的限速只有这两层：出图排队（同时生成 1 张，每人最多排 `queue_per_member` 张，见 `admission::image_admission`）
+//! 和每分钟次数（RPM）。
 
 use std::collections::{HashMap, VecDeque};
 use std::hash::Hash;
@@ -20,7 +18,7 @@ use tokio::time::{Duration, Instant};
 /// 滑动窗口计数器。
 pub struct SlidingWindow<K: Eq + Hash + Clone> {
     inner: Mutex<HashMap<K, VecDeque<f64>>>,
-    /// 键太多时顺手清理（旧版：RPM 1024、登录 / 防爆破 2048）。
+    /// 键太多时顺手清理的上限（RPM 1024、登录 / 防爆破 2048）。
     gc_over: usize,
 }
 
@@ -33,7 +31,7 @@ impl<K: Eq + Hash + Clone> SlidingWindow<K> {
     }
 
     /// 先查后记（RPM、后台登录）：窗口内已有 `limit` 次则拒绝且不记；否则记一次放行。
-    /// 过期判定与旧版一致：`now - t > window` 才算出窗。
+    /// 过期判定：`now - t > window` 才算出窗（边界上的那一秒不算过期）。
     pub fn check_then_push(&self, key: &K, limit: usize, window: f64, now: f64) -> bool {
         let mut map = self.inner.lock().expect("window");
         let win = map.entry(key.clone()).or_default();
@@ -179,7 +177,7 @@ impl ImageCooldown {
     }
 }
 
-/// Key 暂停闸门（旧版 ShareGuard 只剩的部分）。
+/// Key 暂停闸门。
 #[derive(Default)]
 pub struct KeyPauses {
     inner: Mutex<HashMap<i64, (f64, String)>>,
@@ -220,7 +218,7 @@ impl KeyPauses {
 /// 同一把 Key 两次标签补全至少间隔 2 秒（补全很轻，旧查询会被新查询取代）。
 pub const TAG_MIN_INTERVAL: f64 = 2.0;
 
-/// 标签补全排队（旧版 `wait_for_tag_request` / `finish_tag_request`）。
+/// 标签补全排队。
 /// 客户端每输入一个字就查一次补全，只有最新那次有意义：新查询到来时，同一把 Key 还在排队的旧查询作废。
 #[derive(Default)]
 pub struct TagQueue {
@@ -252,8 +250,7 @@ pub enum TagAdmit {
 
 impl TagQueue {
     /// `global_concurrency` 传 [`TAG_CONCURRENCY`]。被取消（超时 / 断开）时排队计数照样归还。
-    /// 同一把 Key 两次补全至少隔 [`TAG_MIN_INTERVAL`] 秒（旧版取它与每 Key 出图间隔的较小者；
-    /// 每 Key 出图间隔已删除）。
+    /// 同一把 Key 两次补全至少隔 [`TAG_MIN_INTERVAL`] 秒。
     pub async fn wait(&self, key_id: i64, global_concurrency: i64) -> TagAdmit {
         struct Waiting<'a>(&'a TagQueue, i64);
         impl Drop for Waiting<'_> {
@@ -372,7 +369,7 @@ mod tests {
         assert!(w.check_then_push(&1, 2, 60.0, 0.0));
         assert!(w.check_then_push(&1, 2, 60.0, 1.0));
         assert!(!w.check_then_push(&1, 2, 60.0, 2.0));
-        // 恰好 60 秒不出窗（旧版用 > 判定）
+        // 恰好 60 秒不出窗（边界用 > 判定）
         assert!(!w.check_then_push(&1, 2, 60.0, 60.0));
         assert!(w.check_then_push(&1, 2, 60.0, 60.5));
     }

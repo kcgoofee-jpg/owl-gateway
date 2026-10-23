@@ -1,4 +1,4 @@
-//! 后台登录、退出、改密码、会话检查（旧版 admin.py 的 auth 部分）。
+//! 后台登录、退出、改密码、会话检查。
 
 use super::BODY_LIMIT;
 use crate::body::read_json_body;

@@ -1,4 +1,4 @@
-//! 全局中间件（顺序与旧版一致，外 → 内）：
+//! 全局中间件（外 → 内）：
 //! 1. `/v1/ai/*`、`/v1/user/*` 去掉多余的 `/v1`（成员常把 OpenAI 的 Base URL 填进 NovelAI 客户端）——必须在路由之前；
 //! 2. 请求上下文：生成请求编号、写 `X-Request-Id`、计时、客户端名；
 //! 3. 成员接口状态码计数（没发响应就断开记 499）；
@@ -139,8 +139,7 @@ pub async fn admin_no_store(req: Request, next: Next) -> Response {
     resp
 }
 
-/// 跨域（旧版 Starlette `CORSMiddleware(allow_origins=CORS_ORIGINS, allow_methods=["*"], allow_headers=["*"],
-/// allow_credentials=False)`，默认 `CORS_ORIGINS=*`）。浏览器里的网页客户端直连网关要靠它。
+/// 跨域（允许任意来源 `CORS_ORIGINS=*`、任意方法与头，不带凭据）。浏览器里的网页客户端直连网关要靠它。
 /// 预检请求原样回显请求的头：通配符 `*` 不包括 `Authorization`（Fetch 规范），而成员接口要带 Key。
 pub fn cors(origins: &[String]) -> Option<tower_http::cors::CorsLayer> {
     use axum::http::Method;

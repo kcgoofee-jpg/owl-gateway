@@ -5,7 +5,7 @@ use gate_core::pyc;
 use rusqlite::params;
 use serde_json::Value;
 
-/// `save_survey` 的各项回答（保存时按旧版的长度截断）。
+/// `save_survey` 的各项回答（保存时按约定长度截断）。
 #[derive(Debug, Clone, Default)]
 pub struct Survey {
     pub client: String,

@@ -1,4 +1,4 @@
-//! 生图参数：校验与整理、免费档钳制、费用预估（旧版 `_generate_image` 里到 `quota_image_check` 为止的部分）。
+//! 生图参数：校验与整理、免费档钳制、费用预估。
 
 use super::size_text;
 use crate::accounting::Entry;
@@ -30,7 +30,7 @@ pub(super) struct Prepared {
     pub(super) detail: String,
 }
 
-/// 参数校验与整理（旧版 `_generate_image` 里到 `quota_image_check` 为止的部分）。
+/// 参数校验与整理（发往上游前的最后一道额度检查也在这里）。
 pub(super) async fn prepare(
     state: &AppState,
     ctx: &ReqCtx,
@@ -229,7 +229,7 @@ pub(super) async fn prepare(
     }
     // 入口预检对所有请求都做（含 V5）：用快照、算上别的请求已拿到的预留，额度不够就立即 403，
     // 不让成员先排队 / 先在按时段放行里等位，轮到了才被拒（10-21：同 Key 第二张 V5 排了 47 秒才拿到 402）。
-    // 旧版只对非 V5 请求做，是给已删除的「V5 续杯」留的口子。
+    // 以前只对非 V5 请求做（给已删除的「V5 续杯」留的口子），现在 V5 也一视同仁。
     let snapshot = state.budget.lock().await.clone();
     admission::quota_image_check(state, &snapshot, &key, &est, legacy_free_images, None).await?;
     let cost: Vec<String> = [

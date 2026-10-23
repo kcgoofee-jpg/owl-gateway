@@ -1,4 +1,4 @@
-//! Bug 追踪：把所有「不该发生」的错误按特征归并记下来（旧版 `app/errors.py` 的 Tracker）。
+//! Bug 追踪：把所有「不该发生」的错误按特征归并记下来。
 //!
 //! 来源：接口未捕获的错误（500）、上游 5xx、后台任务失败、记账写入失败、成员在图片返回前断开、网页脚本报错。
 //! 同一个 bug 只占一行（count 累加），每次都写一行日志；不私信站长（后台「Bug 追踪」能看）。不记录 Key、提示词或 IP。
@@ -20,7 +20,7 @@ pub struct Bugs {
     db: Db,
     printed: Mutex<HashMap<String, f64>>,
     recent: Mutex<Vec<gate_core::errors::ErrorEvent>>,
-    /// 同一个特征码的读-改-写串行（旧版用一把全局锁）。
+    /// 同一个特征码的读-改-写串行。
     store_lock: Arc<tokio::sync::Mutex<()>>,
     tasks: tokio_util::task::TaskTracker,
     /// 还没写进库的记录数（入库是后台任务；`idle()` 等它归零）。
@@ -29,7 +29,7 @@ pub struct Bugs {
     triage_at: Mutex<f64>,
 }
 
-/// 一次记录的参数（旧版 capture 的关键字参数）。
+/// 一次记录的参数。
 #[derive(Default, Clone)]
 pub struct Report<'a> {
     pub source: &'a str,

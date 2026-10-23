@@ -1,8 +1,8 @@
-//! 机器人桥接 `/self-register/*`（旧版 `app/registration_routes.py` 的上半部分）。
+//! 机器人桥接 `/self-register/*`。
 //!
 //! 鉴权：`Authorization: Bearer <REGISTRATION_BRIDGE_SECRET>`；成员网页接口见 `member.rs`。
 //! 错误一律是 `{"detail": ...}`；请求体的校验错误沿用 FastAPI（pydantic v2）的 422 形状。
-//! 次序与旧版一致：先校验请求体（422），再鉴权（503 / 401），再校验服务器（403）。
+//! 检查次序固定：先校验请求体（422），再鉴权（503 / 401），再校验服务器（403）。
 //! 机器人只有成员命令（/register /resetkey /反馈；/quota、/help 10-23 删除）；管理员命令 `ops` / `slots` / `revoke` 已删除（管理都在网页后台）。
 
 use crate::action_log::log_action;
@@ -33,7 +33,7 @@ pub fn router() -> Router<AppState> {
         .route("/self-register/bot/report", post(bot_report))
 }
 
-/// 桥接 / 成员页接口的请求体上限（旧版没有上限；正常请求都在几百字节）。
+/// 桥接 / 成员页接口的请求体上限（正常请求都在几百字节）。
 pub(super) const BODY_LIMIT: usize = 1024 * 1024;
 
 // ------------------------------------------------------------------ 请求体校验（FastAPI / pydantic v2 的 422 形状）
@@ -169,7 +169,7 @@ fn authorize<'a>(
     let given = header_str(&parts.headers, "authorization");
     let want = format!("Bearer {}", svc.bridge_secret());
     if !ct_eq(given.as_bytes(), want.as_bytes()) {
-        // 猜桥接密钥也计入无效请求限流（拿不到对端地址时不记，同旧版 `request.client` 为空）
+        // 猜桥接密钥也计入无效请求限流（拿不到对端地址时不记）
         if record_failure && parts.extensions.get::<ConnectInfo<SocketAddr>>().is_some() {
             let ip = client_ip(parts, &state.env.forwarded_allow_ips);
             crate::auth::record_auth_failure(state, &ip, state.now());

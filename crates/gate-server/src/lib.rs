@@ -57,7 +57,7 @@ pub fn app(
         .layer(from_fn_with_state(state, accounting::error_ledger))
         .layer(from_fn_with_state(stats, middleware::status_stats))
         .layer(from_fn(middleware::request_context));
-    // 最外层（与旧版 add_middleware 的顺序一致）：浏览器里的网页客户端直连网关要靠它
+    // 最外层：浏览器里的网页客户端直连网关要靠它
     if let Some(cors) = cors {
         router = router.layer(cors);
     }

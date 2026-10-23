@@ -1,4 +1,4 @@
-//! 请求体读取（旧版 `app/body.py` 的 `read_json_body` 与 `app/image_payload.py` 的入口）。
+//! 请求体读取。
 //! 先按 Content-Length / 实际字节数限长，再严格解析 JSON（拒绝 NaN / Infinity、嵌套超过 32 层）。
 
 use crate::error::{GateError, HttpError};
@@ -12,7 +12,7 @@ pub type JsonObject = Map<String, Value>;
 
 fn parse(raw: &[u8]) -> Result<JsonObject, HttpError> {
     match parse_json_body(raw) {
-        // 超出 i64 的整数 / 孤立代理 / 溢出的浮点：旧版会在转发上游时才失败（多半 500），这里直接按非法 JSON 拒绝
+        // 超出 i64 的整数 / 孤立代理 / 溢出的浮点：直接按非法 JSON 拒绝，不等到转发上游才失败
         Ok((_, lossy)) if lossy.any() => Err(HttpError::new(400, BodyJsonError::Invalid.message())),
         Ok((m, _)) => Ok(m),
         Err(e) => Err(HttpError::new(400, e.message())),

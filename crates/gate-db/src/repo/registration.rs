@@ -1,7 +1,7 @@
 //! Discord 领取记录（`discord_registrations`）、待摘身份组（`pending_role_removals`）与成员反馈（`feedback`）。
 //!
-//! 旧版 `registration.py` / `feedback.py` 里的裸 SQL 收口到这里。旧版「几条语句 + 一次 commit」= 这里一个事务；
-//! 中间夹着 Discord 请求的地方，旧版本来就是分几次提交（不能在持有未提交写事务时等网络），这里也分成几个方法。
+//! 领取记录 / 问卷的查询与写入。「几条语句 + 一次 commit」= 这里一个事务；
+//! 中间夹着 Discord 请求的地方分成几个方法（不能在持有未提交写事务时等网络）。
 
 use super::INVITE_TAG;
 use crate::{Db, Result, value};
@@ -94,7 +94,7 @@ impl Db {
     pub async fn revoke_registration(&self, discord_id: &str, now: f64) -> Result<Option<i64>> {
         match self.registration_key_id(discord_id).await? {
             Some(key_id) => {
-                // 旧版 delete_key 之后还会再按 discord_id 删一次领取记录；key_id 是唯一键，
+                // delete_key 之后还会再按 discord_id 删一次领取记录；key_id 是唯一键，
                 // delete_key 已经按 key_id 删过了，那一步是空操作，不重复。
                 self.delete_key(key_id, now).await?;
                 Ok(Some(key_id))

@@ -1,4 +1,4 @@
-//! 公开状态页（旧版 `app/status_page.py`）用到的表：`incidents` / `incident_updates`（事件）、
+//! 公开状态页用到的表：`incidents` / `incident_updates`（事件）、
 //! `status_hourly`（出图接口每小时各状态码次数）、`usage_log`（上游真实失败率）。
 //!
 //! 建表在 [`crate::bootstrap`]（`status_schema.sql`）。这里只放查询 / 写入；快照、可用率条、页面都在 gate-server。
@@ -39,7 +39,7 @@ pub struct UpstreamRecent {
     pub bad_keys: i64,
 }
 
-/// 上游失败的判定，与旧版 `_upstream_days` / `_upstream_last_hour` 一致。
+/// 上游失败的判定（状态页「上游」组件的口径）。
 const BAD: &str = "up_status >= 500 OR up_status IN (429, 403)";
 
 /// 按天聚合时的分桶宽度（秒）。SQLite 的 `'localtime'` 依赖进程时区，而网关的时区是代码常量（`gate_core::clock::TZ`）；
@@ -127,7 +127,7 @@ impl Db {
     }
 
     /// `add_update`：追加一条更新，并按状态改写 `resolved_at`（resolved → `at`；其它 → NULL，即重新打开）。
-    /// 事件不存在时什么都不写，返回 `false`（旧版会写一条挂不到任何事件的孤儿更新）。
+    /// 事件不存在时什么都不写，返回 `false`（不写挂不到任何事件的孤儿更新）。
     pub async fn add_incident_update(
         &self,
         incident_id: i64,
@@ -215,7 +215,7 @@ impl Db {
 }
 
 /// `json.loads(components or "[]")`。库里的值都是我们自己写的 JSON 数组；
-/// 万一被手工改坏，旧版会让整个状态页 500，这里按「没有组件」处理。
+/// 万一被手工改坏，按「没有组件」处理，不让整个状态页 500。
 fn parse_components(raw: Option<&str>) -> Value {
     let raw = raw.filter(|s| !s.is_empty()).unwrap_or("[]");
     serde_json::from_str(raw).unwrap_or_else(|_| Value::Array(Vec::new()))

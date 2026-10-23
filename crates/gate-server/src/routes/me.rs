@@ -1,4 +1,4 @@
-//! `GET /v1/me`：这把 Key 自己的额度、功能开关和闲置回收设置（旧版 `app/routers/text_routes.py` 里的 `/v1/me`）。
+//! `GET /v1/me`：这把 Key 自己的额度、功能开关和闲置回收设置。
 //!
 //! 2026-10-15 文本生成 / 语音 / OpenAI 兼容聊天整套接口删除（线上几乎没人用），这个文件原先叫
 //! `text.rs`，只留下了 `/v1/me`（线上冒烟 `nai-ops smoke` 和用 Key 自查额度的脚本在用）。
@@ -23,7 +23,7 @@ pub fn router() -> Router<AppState> {
 async fn feature_view(state: &AppState, key: &Key) -> Result<Vec<Value>, ApiError> {
     let mut view = Vec::new();
     for (name, label) in FEATURES {
-        // require_feature 只在被拒时返回 Gate 错误（对应旧版 `check(...) is not None`）
+        // require_feature 只在被拒时返回 Gate 错误
         let on = match require_feature(state, key, name).await {
             Ok(()) => true,
             Err(ApiError::Gate(_)) => false,

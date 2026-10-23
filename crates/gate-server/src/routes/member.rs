@@ -289,7 +289,7 @@ async fn logout() -> Response {
 // ------------------------------------------------------------------ 个人状态 / 重置券
 
 /// 登录后的个人状态：不用粘贴 Key 就能看额度、排队、到期；并提供自己的 Key 供一键复制。
-/// 内容由首页首屏用的同一份 [`super::public::me_payload`] 生成（旧版 `public_me`），不另写一份。
+/// 内容由首页首屏用的同一份 [`super::public::me_payload`] 生成，不另写一份。
 async fn public_me(State(state): State<AppState>, headers: HeaderMap) -> ApiResult {
     let Some((discord_id, key)) = member_state(&state, &headers).await? else {
         return Ok(no_store(ok_json(&json!({"logged_in": false}))));

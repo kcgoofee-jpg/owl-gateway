@@ -1,4 +1,4 @@
-//! 后台「成员」接口用到的裸 SQL（旧版 `app/admin.py` 里直接用 `db._db` 写的那些）：
+//! 后台「成员」接口用到的查询：
 //! 邀请 Key、标签、手动绑定 Discord、成员页聚合、全站重置。
 //!
 //! 已删除功能（`anlas_auto` 自动分配、`v5_pinned`）的列仍留在表里，这里一律不读不写。
@@ -23,7 +23,7 @@ const REG_COLS: &str = "key_id, discord_id, username, display_name, avatar, crea
 fn reg_row(r: &rusqlite::Row<'_>) -> rusqlite::Result<RegistrationRow> {
     Ok(RegistrationRow {
         key_id: value::i64_or(r, 0, 0)?,
-        // 旧版 `str(row[1])`
+        // 字符串化（数字 id 也按字符串比较）
         discord_id: value::text_or(r, 1, "None")?,
         username: value::text_opt(r, 2)?,
         display_name: value::text_opt(r, 3)?,

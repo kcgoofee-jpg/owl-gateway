@@ -1,5 +1,4 @@
-//! 成员接口的鉴权与准入前检查（旧版 `main.authenticate` / `require_feature` / `check_rpm` /
-//! `check_image_cooldown`；`limit_inflight` 随文本接口删除）。
+//! 成员接口的鉴权与准入前检查（鉴权 / 功能开关 / 每分钟次数 / 出图冷却）。
 
 use crate::error::{ApiError, GateError, InternalError};
 use crate::key::Key;
@@ -59,7 +58,7 @@ fn trusted(host: &str, list: &[String]) -> bool {
     })
 }
 
-/// 成员的 IP（旧版 `request.client.host`，经 uvicorn ProxyHeadersMiddleware 处理）：
+/// 成员的 IP（反代场景按信任列表解析 X-Forwarded-For）：
 /// 直连对端受信任时取 X-Forwarded-For 从右往左第一个不受信任的地址；全部受信任取最左边那个。
 pub fn client_ip(parts: &Parts, trusted_list: &[String]) -> String {
     let peer = parts
@@ -315,7 +314,7 @@ pub async fn site_flag(state: &AppState, spec: &Spec) -> Result<Value, gate_db::
     crate::audit::site_value(&state.db, spec).await
 }
 
-/// 数值型站点设置（旧版直接拿来和数字比较）。
+/// 数值型站点设置。
 pub async fn site_flag_f64(state: &AppState, spec: &Spec) -> Result<f64, gate_db::DbError> {
     crate::audit::site_f64(&state.db, spec).await
 }

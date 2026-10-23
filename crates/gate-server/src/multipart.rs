@@ -8,7 +8,7 @@
 //! - [`read_bounded_body`]：先看 `Content-Length` 再边读边数，超限 413；
 //! - [`parse_image_multipart`]：已读好的 multipart 体 → 展开后的 JSON 对象。
 //!
-//! 报错文案与状态码逐条对齐旧版。解析层（旧版是 Starlette + python-multipart）的取舍：
+//! 报错文案与状态码是客户端依赖的固定契约，不要随手改。解析层的取舍：
 //! - multipart 的切分用 `multer`；`Content-Type` / `Content-Disposition` 的参数解析是
 //!   `python_multipart.parse_options_header` 的逐行移植（大小写、引号转义、`name*=` 被忽略、`filename=` 即算文件），
 //!   不用 multer 自带的（它对这些的取舍不同）；
@@ -18,13 +18,12 @@
 //! - `Content-Type` 主类型不是（小写的）`multipart/form-data` 时，Starlette 把表单当空的，
 //!   所以得到 400「缺少 request JSON 字段」。
 //!
-//! 已知与旧版不同的地方（都只出现在手工构造的畸形体里，正常客户端不会碰到）：
-//! - 带 `charset=` 的 `Content-Type`：只认 UTF-8 别名，其他字符集一律按 latin-1 解码（旧版会用对应编码）；
-//! - 体在最后一个 part 中途被截断 / 缺结尾边界：旧版静默丢掉没结束的 part，这里是 400「格式无效」；
+//! 已知的行为边界（都只出现在手工构造的畸形体里，正常客户端不会碰到）：
+//! - 带 `charset=` 的 `Content-Type`：只认 UTF-8 别名，其他字符集一律按 latin-1 解码；
+//! - 体在最后一个 part 中途被截断 / 缺结尾边界：400「格式无效」，不静默丢 part；
 //! - 边界后面的传输层空白、边界行里的前导杂字节、数据里出现 `\r\n--边界` 加其他字符：
-//!   python-multipart 与 multer 的取舍不同。首个边界之前的杂字节与其后的空白按旧版处理（见 `start_check`），
-//!   其余交给 multer；
-//! - 单 part 的头数量按 multer 去重后的头计数（旧版按行计），头大小按 `Name: value` 估算（旧版精确计入空白）；
+//!   首个边界之前的杂字节与其后的空白按宽松方式处理（见 `start_check`），其余交给 multer；
+//! - 单 part 的头数量按 multer 去重后的头计数，头大小按 `Name: value` 估算；
 //! - JSON 里无法无损装进 `serde_json::Value` 的数字 / 孤立代理按「不是合法 JSON」拒绝（见 `gate_core::json_body::Lossy`）。
 
 use std::collections::{HashMap, HashSet};
@@ -102,7 +101,7 @@ pub async fn read_bounded_body(
     let mut buf = BytesMut::new();
     while let Some(chunk) = stream.next().await {
         let chunk = chunk.map_err(|_| bad_request(MSG_INTERRUPTED))?;
-        // 读流失败几乎都是连接中断（旧版只把 ClientDisconnect 映射成 400）。请求体是手动 into_data_stream 读的，
+        // 读流失败几乎都是连接中断，一律 400。请求体是手动 into_data_stream 读的，
         // 没有 RequestBodyLimit 一类的外层包装，所以没有长度超限的 413 分支；以后加了这类层，要在这里补回来。
         if buf.len() + chunk.len() > limit {
             return Err(HttpError::new(413, MSG_TOO_LARGE));
@@ -303,7 +302,7 @@ enum Charset {
     Latin1,
 }
 
-/// 解析失败（对应旧版 `Request.form()` 抛出的任何异常）。
+/// 解析失败（本层任何一步的失败都归到这里）。
 type FormResult<T> = Result<T, ()>;
 
 fn parse_form(content_type: &[u8], body: Bytes) -> FormResult<Vec<Item>> {
@@ -332,7 +331,7 @@ async fn collect_items(boundary: String, body: Bytes, charset: Charset) -> FormR
     let (mut files, mut fields) = (0usize, 0usize);
     let mut items = Vec::new();
     while let Some(mut field) = multipart.next_field().await.map_err(|_| ())? {
-        // 旧版按行计「名字 + 冒号 + 冒号后的空格 + 值」；这里按常见写法 `Name: value` 估算
+        // 头大小按常见写法 `Name: value` 估算
         let oversized = |(name, value): (&axum::http::HeaderName, &axum::http::HeaderValue)| {
             name.as_str().len() + 2 + value.len() > MAX_PART_HEADER_BYTES
         };
@@ -397,7 +396,7 @@ fn poll_ready<F: Future>(future: F) -> Option<F::Output> {
 }
 
 enum Start {
-    /// 体里一个 part 都没有（旧版不报错，得到空表单）
+    /// 体里一个 part 都没有
     Empty,
     /// 开头不合法
     Bad,
@@ -436,7 +435,7 @@ fn start_check(body: &[u8], boundary: &[u8]) -> Start {
     }
 }
 
-/// `codecs.lookup(charset).name`：只区分 UTF-8 别名；未知字符集在旧版里就是 latin-1。
+/// 字符集参数：只区分 UTF-8 别名；未知字符集按 latin-1 解码。
 fn charset_of(param: Option<&[u8]>) -> Charset {
     let Some(raw) = param else {
         return Charset::Utf8;

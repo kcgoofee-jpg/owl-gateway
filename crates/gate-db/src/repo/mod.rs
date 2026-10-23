@@ -1,17 +1,12 @@
-//! 旧版 `app/database.py` 里 `class Database` 的逐方法移植。
+//! 数据库访问层。
 //!
 //! 约定：
-//! - 方法名、参数顺序、SQL 语义与旧版一致；旧版里的 `time.time()` 一律改成调用方传入的 `now: f64`，
-//!   按日 / 按月的计算用 [`gate_core::clock::Clock`]。
-//! - 旧版一个方法里「多条语句 + 一次 commit」= 这里一个 `db.write` 闭包 = 一个事务；
-//!   只读方法走只读连接池。`record_success` 的重试循环、`_record_lock` 在单写线程下不改变可见结果，不移植。
+//! - 时间一律由调用方传入 `now: f64`，SQL 里不取当前时间；按日 / 按月的计算用 [`gate_core::clock::Clock`]。
+//! - 一个方法里的多条语句放进同一个 `db.write` 闭包 = 一个事务；只读方法走只读连接池。
 //! - 返回「原样的行」（`SELECT *` 之类）用 `serde_json::Value`（[`crate::value::row_json`]，保持列顺序与
-//!   INTEGER / REAL 区分，序列化出来与旧版 `dict(row)` 一致）；旧代码自己拼的 dict 用同名字段的结构体。
-//! - 旧版返回 `dict[int, ...]` / `dict[str, ...]` 的，这里返回 `Vec<(K, V)>`，顺序就是旧版 dict 的插入顺序。
+//!   INTEGER / REAL 区分，键名 = 列名）；调用方自己拼的映射用同名字段的结构体。
+//! - 需要「映射」语义的查询返回 `Vec<(K, V)>`，保持插入顺序。
 //!
-//! 旧版没有放进 `class Database` 的表（error_events / status_hourly / feedback / discord_registrations /
-//! pending_role_removals / upstream_snapshots / key_tags 的读写）是各业务模块直接用 `db._db` 写的 SQL，
-//! 不在本次移植范围内。
 
 pub mod abuse;
 pub mod account_stats;
@@ -45,7 +40,7 @@ pub const INVITE_TAG: &str = "邀请";
 
 pub const ROLE_INVITE: &str = "invite";
 pub const ROLE_REGULAR: &str = "regular";
-/// 身份组 → 中文标签（顺序与旧版 `ROLE_LABELS` 一致）。
+/// 身份组 → 中文标签。
 pub const ROLE_LABELS: [(&str, &str); 2] = [(ROLE_INVITE, "邀请"), (ROLE_REGULAR, "普通")];
 
 /// 原图在 BLOB（老记录）或文件里。
@@ -64,7 +59,7 @@ pub(crate) const INSERT_LOG: &str = "INSERT INTO usage_log (ts, key_id, key_name
 images, anlas, tokens, detail, unconfirmed_anlas, wait_ms, dur_ms, up_status, rid, reason, token_id, client, src, \
 xrw, lang, chua, hfp, bid, origin) \
 VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)";
-/// 计数器累加（旧版 `_UPSERT_COUNTERS`，列顺序：key_id, day, images, anlas, text_tokens, requests, v5, legacy_free_images）。
+/// 计数器累加（列顺序：key_id, day, images, anlas, text_tokens, requests, v5, legacy_free_images）。
 pub(crate) const UPSERT_COUNTERS: &str = "INSERT INTO counters \
 (key_id, day, images, anlas, text_tokens, requests, v5, legacy_free_images) \
 VALUES (?,?,?,?,?,?,?,?) \
@@ -76,10 +71,10 @@ requests = requests + excluded.requests, \
 v5 = v5 + excluded.v5, \
 legacy_free_images = legacy_free_images + excluded.legacy_free_images";
 
-/// 旧版返回 `dict[K, V]` 的方法：保持 dict 的插入顺序。
+/// 保持插入顺序的键值列表。
 pub type PyMap<K, V> = Vec<(K, V)>;
 
-/// `?,?,?` 占位符串（旧版 `",".join("?" * n)`）。
+/// `?,?,?` 占位符串。
 pub(crate) fn marks(n: usize) -> String {
     vec!["?"; n].join(",")
 }

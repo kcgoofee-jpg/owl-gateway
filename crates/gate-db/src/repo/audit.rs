@@ -64,7 +64,7 @@ type RawAuditRow = (
     Option<String>,
 );
 
-/// 原图文件扩展名（旧版 `_EXT`，其余类型落 `.bin`）。
+/// 原图文件扩展名（其余类型落 `.bin`）。
 fn image_ext(image_type: &str) -> &'static str {
     match image_type {
         "image/png" => "png",
@@ -141,7 +141,7 @@ fn unlink_images(dir: &Path, rels: &[String]) {
     }
 }
 
-/// 新生成一个 uuid4 风格的 32 位十六进制串（旧版 `uuid4().hex`）。
+/// 新生成一个 uuid4 风格的 32 位十六进制串。
 fn uuid_hex() -> String {
     let mut n: u128 = rand::random();
     n = (n & !(0xf_u128 << 76)) | (4_u128 << 76); // version 4
@@ -149,7 +149,7 @@ fn uuid_hex() -> String {
     format!("{n:032x}")
 }
 
-/// 阻塞的文件任务放到 blocking 线程池（旧版 `asyncio.to_thread`）。
+/// 阻塞的文件任务放到 blocking 线程池。
 async fn blocking<T: Send + 'static>(f: impl FnOnce() -> T + Send + 'static) -> Result<T> {
     tokio::task::spawn_blocking(f)
         .await
@@ -417,7 +417,7 @@ impl Db {
         self.with_image(raw).await
     }
 
-    /// 旧版 `_with_image`：把 BLOB / 文件里的原图字节取出来，文件丢了的跳过。
+    /// 把 BLOB / 文件里的原图字节取出来，文件丢了的跳过。
     async fn with_image(&self, rows: Vec<RawAuditRow>) -> Result<Vec<AuditImage>> {
         let dir = self.image_dir().to_path_buf();
         blocking(move || {
@@ -512,7 +512,7 @@ impl Db {
 
     /// 把满足 where 的记录的原图清掉：BLOB 置空、文件删除。返回清掉的条数。
     /// 先选出要清的记录，再只按这些 id 清（中间插进来的新记录不会被清了库、漏删文件）；
-    /// 每 50 条一个事务，让别的请求能插进来（旧版 10-11 事故：一次改几 GB 把唯一连接占住十几分钟）。
+    /// 每 50 条一个事务，让别的请求能插进来（一次改几 GB 会把写连接占住十几分钟，别的写全堵死）。
     async fn drop_images(&self, where_: &'static str, arg: SqlValue) -> Result<i64> {
         let rows: Vec<(i64, Option<String>)> = {
             let arg = arg.clone();

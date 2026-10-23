@@ -125,7 +125,7 @@ pub struct Entry {
 #[derive(Debug, Clone, PartialEq)]
 pub struct Saved {
     pub updates: Vec<(String, i64)>,
-    /// `set_settings_bulk` 要写的键值；`updates` 为空时旧版不写库
+    /// `set_settings_bulk` 要写的键值；`updates` 为空时不写库
     pub writes: Vec<(String, String)>,
 }
 
@@ -164,7 +164,7 @@ pub fn parse_token_daily_caps(raw: Option<&str>) -> BTreeMap<String, (i64, f64)>
 }
 
 impl GuardCore {
-    /// `Guard(db, tz, reset_hour)`（旧版默认 `reset_hour=0`；线上用 [`crate::clock::TZ`] / [`crate::clock::DAY_RESET_HOUR`]）。
+    /// 线上用 [`crate::clock::TZ`] / [`crate::clock::DAY_RESET_HOUR`]；测试可传别的时区与重置点。
     pub fn new(tz: &str, reset_hour: i64) -> Self {
         let reset_hour = reset_hour.clamp(0, 23);
         Self {
@@ -214,7 +214,7 @@ impl GuardCore {
 
     /// `load()` 的解析：`stored` 是库里 `guard_*` 键的原文（没有的键 = 没存，保持现值）。
     /// 每个字段 `max(low, min(high, int(float(raw))))`；读不懂（ValueError / TypeError）回到字段默认值；
-    /// `inf` 在旧版是 OverflowError 且没被捕获——这里同样返回 `Err`，前面已处理的字段保持已更新（与旧版一致）。
+    /// `inf` 同样返回 `Err`，前面已处理的字段保持已更新。
     pub fn load_settings(&mut self, stored: &BTreeMap<String, String>) -> Result<(), PyErr> {
         for f in FIELDS {
             let Some(raw) = stored.get(&setting_key(f.name)) else {
@@ -288,7 +288,7 @@ impl GuardCore {
     }
 
     /// `save(body)` 整体：校验 + 改内存，并给出要写库的键值。
-    /// 想保持旧版「先写库后改内存」的顺序时，改用 `validate_save` + 写库 + `apply_updates`。
+    /// 想「先写库后改内存」时，改用 `validate_save` + 写库 + `apply_updates`。
     pub fn save(&mut self, body: &Map<String, Value>) -> Result<Saved, PyErr> {
         let updates = Self::validate_save(body)?;
         let writes = updates
@@ -434,7 +434,7 @@ impl GuardCore {
     }
 
     /// 轮到这把 Key 的这一张了吗：它是这把 Key 还在的条目里最早登记的（前面那张已出完或被取消）。
-    /// 每把 Key 同时只生成 1 张，排在后面的那张等它——取代旧版每把 Key 一个的信号量。
+    /// 每把 Key 同时只生成 1 张，排在后面的那张等它。
     pub fn key_turn(&self, key_id: i64, entry_id: i64) -> bool {
         !self
             .entries

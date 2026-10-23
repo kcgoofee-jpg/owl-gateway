@@ -1,4 +1,4 @@
-//! 公开页面、实时看板、状态与客户端兼容视图（旧版 `app/routers/public_routes.py` + `app/live.py` 的路由部分）。
+//! 公开页面、实时看板、状态与客户端兼容视图。
 //!
 //! - `POST /member/survey`：成员问卷；
 //! - `/public/live`（JSON）、`/public/live/stream`（SSE，3.0 新增）、`/public/status`、`/queue-status`；
@@ -77,7 +77,7 @@ fn no_content() -> Response {
     StatusCode::NO_CONTENT.into_response()
 }
 
-/// 请求体的前 `n` 个字节（旧版 `(await request.body())[:4096]`；多余的不读）。
+/// 请求体的前 `n` 个字节（多余的不读）。
 async fn head_bytes(body: Body, n: usize) -> Vec<u8> {
     let mut stream = body.into_data_stream();
     let mut buf: Vec<u8> = Vec::new();
@@ -132,7 +132,7 @@ fn text_of(d: &serde_json::Map<String, Value>, name: &str) -> String {
 // ------------------------------------------------------------------ 成员问卷
 
 /// 问卷身份：先认成员的 Discord 会话（3.0 只留 Discord 登录），没有会话再认 `Authorization: Bearer <Key>`。
-/// 都是 passive：不算活跃、不进防分享统计。失败的格式是 `{"detail": ...}`（旧版 `HTTPException(exc.status, exc.message)`）。
+/// 都是 passive：不算活跃、不进防分享统计。失败的格式是 `{"detail": ...}`。
 async fn survey_key(state: &AppState, parts: &axum::http::request::Parts) -> Result<Key, ApiError> {
     if let Some((_, Some(key))) = session::member_state(state, &parts.headers).await? {
         ctx_of(parts).set_key(key.id(), key.name());
@@ -416,7 +416,7 @@ fn injected_script_error(msg: &str, stack: &str, host: &str) -> bool {
     if frames.is_empty() {
         return false;
     }
-    // 旧版是 /static/；3.0 的前端文件在 /_owl/
+    // 前端文件在 /_owl/（/static/ 也会一起查，老链接不 404）
     let ours: Vec<&str> = [
         "/static/",
         "/_owl/",
@@ -596,7 +596,7 @@ fn canonical_parts(data: &serde_json::Map<String, Value>) -> Option<(String, Str
 /// 首页 / 后台网页的脚本报错上报（只收本站页面的错误；每 IP 每 10 分钟 10 条，全站每 10 分钟 100 条）。
 ///
 /// 3.0 起另外丢弃两类：浏览器网络失败（断网 / 请求被取消，不是我们的缺陷），
-/// 以及出错脚本不在 `/_owl/` 下的 `Uncaught …`（旧版缓存页、浏览器插件）。
+/// 以及出错脚本不在 `/_owl/` 下的 `Uncaught …`（多半是浏览器插件）。
 async fn client_error(State(state): State<AppState>, req: Request) -> Response {
     let (parts, body) = req.into_parts();
     let h = &parts.headers;
@@ -741,7 +741,7 @@ async fn user_information(State(state): State<AppState>, req: Request) -> ApiRes
 
 /// 后台 SSE 的最短推送间隔与保底心跳。页面把任何一条消息都当作「该刷新了」（admin/Admin.tsx 的 `onmessage = bump`），
 /// 所以：真有变化才推（且至少隔 2 秒，免得队列忙时每秒刷新所有分区）；没变化也每 15 秒推一条，
-/// 等价于旧版没有 SSE 时的 15 秒定时刷新（日志 / Bug / 成员列表这些不在快照里的数据靠它更新）。
+/// 相当于一条 15 秒的心跳（日志 / Bug / 成员列表这些不在快照里的数据靠它更新）。
 const ADMIN_MIN_GAP: Duration = Duration::from_secs(2);
 const ADMIN_HEARTBEAT: Duration = Duration::from_secs(15);
 const BADGE_TTL: Duration = Duration::from_secs(5);
@@ -832,7 +832,7 @@ async fn admin_events(State(state): State<AppState>, _s: AdminSession, req: Requ
 
 // ------------------------------------------------------------------ 首页首屏数据
 
-/// 登录成员的个人状态（`/public/me` 的内容，旧版 `registration_routes.public_me`）。
+/// 登录成员的个人状态（`/public/me` 的内容）。
 pub(super) async fn me_payload(
     state: &AppState,
     discord_id: &str,

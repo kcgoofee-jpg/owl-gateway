@@ -1,31 +1,30 @@
-//! 生成记录：提示词与原图（旧版 `app/audit.py`）。均可单独关闭，自动过期。
+//! 生成记录：提示词与原图。均可单独关闭，自动过期。
 //! 画廊小图从原图现场缩小，不另存缩略图。
 //!
 //! 本模块只放「记什么 / 怎么记」：
-//! - [`capture_prompts`] / [`prompt_texts`]：从请求体取提示词与生成参数，逐字节复刻旧版（含旧版抛的异常）；
+//! - [`capture_prompts`] / [`prompt_texts`]：从请求体取提示词与生成参数，字段类型不对时报 `Err`；
 //! - [`full_image`] / [`make_thumbnail`]：从上游返回的 zip（或裸图片）里取第一张图；
 //! - `audit_*` 设置读取：记录开关 / 保留时长。
 //!
 //! 调用点（出图成功后的后台任务、后台画廊接口）不在这里。
 //!
-//! 与旧版一致的怪癖（都是故意的，见快照 `tests/snapshots/audit/`）：
-//! - 请求体里字段类型不对时，旧版直接对它 `.get(...)` / 迭代，抛 `AttributeError` / `TypeError`，
-//!   调用方（`audit_generation`）把整条记录丢掉并记一条 bug。所以 [`capture_prompts`] 返回 `PyResult`，
-//!   调用方要照样处理 `Err`（丢掉这次记录、记 bug），不能当成「没有提示词」；
+//! 刻意保留的怪癖（都有快照 `tests/snapshots/audit/` 冻结现状，改动要显式更新快照）：
+//! - 请求体里字段类型不对时按失败处理：[`capture_prompts`] 返回 `PyResult`，
+//!   调用方（`audit_generation`）要处理 `Err`——丢掉整条记录并记一条 bug，不能当成「没有提示词」；
 //! - [`full_image`] 不校验内容：任何不超过 15 MiB 的字节串都原样存下，类型串靠魔数猜，猜不出就当 PNG；
-//! - 缩略图要真的解码：像素超过 2500 万（Pillow 的 `MAX_IMAGE_PIXELS`）、损坏、截断都返回 `None`；
+//! - 缩略图要真的解码：像素超过 2500 万、损坏、截断都返回 `None`；
 //! - zip 里取「后缀是 .png / .jpg / .jpeg / .webp（不分大小写）的第一个条目」，不看目录层级；
-//!   同名条目以最后一个为准（Python `getinfo` 的行为）；
+//!   同名条目以最后一个为准；
 //! - `audit_flags` 里存着的天数解析不出有限数（空串 / `nan` / `inf` / `1e999` / 乱码）时回到 7 天，不是环境默认值；
-//!   旧版遇到 `inf` 会抛没人捕获的 `OverflowError`，这里不再复刻（会让公开接口 500）。
+
 //!
-//! 与旧版的差异（图片编解码换成 `image` crate；快照见 tests/audit_snapshot.rs）：
-//! - 字节不逐位相同：缩放核、JPEG 量化 / 子采样 / 霍夫曼优化与 Pillow 不同；尺寸、收不收、类型串一致；
-//! - 只认 PNG / JPEG / WebP：Pillow 还会打开 GIF / BMP / TIFF 等，上游不会返回这些；
-//! - zip 只支持 stored / deflate：旧版 `zipfile` 还能读 bzip2 / lzma，上游不会这样压；
-//! - 截掉了 PNG 尾部（IEND 与最后一个 IDAT 的校验）但像素数据完整的图，Pillow 照样打开，这里拒绝；
-//! - 16 位灰度 PNG 的颜色：Pillow 把大于 255 的值截成 255，这里取高 8 位（尺寸、收不收一致）；
-//! - 动画图（APNG / 动画 WebP）取第一帧，与 Pillow 一致；
+//! 图片编解码边界（`image` crate；快照见 tests/audit_snapshot.rs）：
+//! - 编码字节不承诺逐位稳定：缩放核、JPEG 量化 / 子采样 / 霍夫曼优化随 `image` crate 的实现走；尺寸、收不收、类型串稳定；
+//! - 只认 PNG / JPEG / WebP（上游只会返回这几种）；
+//! - zip 只支持 stored / deflate（上游只这样压）；
+//! - 截掉了 PNG 尾部（IEND 与最后一个 IDAT 的校验）但像素数据完整的图，这里拒绝；
+//! - 16 位灰度 PNG 的颜色取高 8 位；
+//! - 动画图（APNG / 动画 WebP）取第一帧；
 //! - `repr` 里的未分配码点（`str(非字符串提示词)` 时才会走到）见 `gate_core::pyext::repr_str` 的说明。
 
 use gate_core::pyext::{PyErr, PyResult, py_str, type_name};
@@ -44,7 +43,7 @@ pub const THUMB_QUALITY: u8 = 82;
 pub const MAX_IMAGE_BYTES: usize = 15 * 1024 * 1024;
 
 /// Pillow 的 `Image.MAX_IMAGE_PIXELS`：超过即报错（默认只是警告），防止解压炸弹。
-/// 旧版同时把 `DecompressionBombWarning` 升级成错误，所以「超过 1 倍」就已经拒绝。
+/// 「超过 1 倍」就直接拒绝（防解压炸弹，宁严勿宽）。
 pub const MAX_IMAGE_PIXELS: u64 = 25_000_000;
 /// 缩略图只肯读声明大小不超过 40 MiB 的 zip 条目。
 const MAX_THUMB_ZIP_ENTRY: u64 = 40 * 1024 * 1024;
@@ -65,7 +64,7 @@ const PARAM_KEYS: [&str; 22] = [
     "ucPreset",
     "qualityToggle",
     "n_samples",
-    // 以下影响复现（Variety+、旧版采样行为、角色坐标开关）
+    // 以下影响复现（Variety+、采样行为、角色坐标开关）
     "skip_cfg_above_sigma",
     "uncond_scale",
     "legacy",
@@ -131,7 +130,7 @@ pub fn prompt_texts(body: &Value) -> PyResult<(String, String)> {
     ))
 }
 
-/// 从 `v4_prompt` / `v4_negative_prompt` 里取 base_caption 和各角色 caption（去掉空的）；旧版 `_captions`。
+/// 从 `v4_prompt` / `v4_negative_prompt` 里取 base_caption 和各角色 caption（去掉空的）。
 pub fn captions(node: Option<&Value>) -> PyResult<(String, Vec<String>)> {
     let cap = match node {
         Some(Value::Object(m)) => m.get("caption").filter(|c| pyval::truthy(c)),
@@ -195,7 +194,7 @@ fn char_centers(node: Option<&Value>) -> Vec<Value> {
 /// extra 里是「正面 / 负面」之外的东西——角色提示词（多人图）和生成参数（种子 / 采样器 / 步数 / CFG / 尺寸…），
 /// 否则光存正负面会漏掉多角色场景和复现所需的参数。没有任何这类内容时 extra 是空串。
 ///
-/// `Err` 对应旧版抛出的 `AttributeError` / `TypeError`（请求体字段类型不对）：调用方要丢掉整条记录。
+/// `Err` 表示请求体字段类型不对（看不出来就没法记）：调用方要丢掉整条记录。
 pub fn capture_prompts(body: &Value) -> PyResult<(String, String, String)> {
     let (mut positive, mut negative) = prompt_texts(body)?;
     let params = params_of(body)?;
@@ -274,7 +273,7 @@ fn first_zip_image(payload: &[u8], max_declared: u64) -> Option<Vec<u8>> {
     let mut entry = archive.by_index(index).ok()?;
     let mut data = Vec::with_capacity(usize::try_from(declared).unwrap_or(0).min(MAX_IMAGE_BYTES));
     // 多读 1 字节：读到条目真正结束（返回 0）zip 才会核对 CRC。声明大小说谎（压缩炸弹 / 截断）时长度对不上，
-    // 旧版 `ZipFile.read` 会因 CRC 不符抛 BadZipFile，同样当作失败
+    // CRC 不符同样当作失败
     (&mut entry)
         .take(declared + 1)
         .read_to_end(&mut data)
@@ -286,7 +285,7 @@ fn first_zip_image(payload: &[u8], max_declared: u64) -> Option<Vec<u8>> {
 }
 
 /// 缩略图尺寸：长边缩到 [`THUMB_SIDE`]、保持比例、不放大。返回 `None` 表示不用缩（两边都没超过上限）。
-/// （旧版 Pillow `Image.thumbnail` 的 floor / ceil 取舍至多差 1 像素，缩略图现场生成、不落库，不再复刻。）
+/// 现场生成、不落库，舍入方向以本函数为准。
 fn thumbnail_size(width: u32, height: u32) -> Option<(u32, u32)> {
     if width <= THUMB_SIDE && height <= THUMB_SIDE {
         return None;
@@ -306,7 +305,7 @@ fn thumbnail_size(width: u32, height: u32) -> Option<(u32, u32)> {
 /// JPEG 是否完整：第一个 SOS 之后还能找到 EOI（`FF D9`；熵编码数据里的 `FF` 一定被填充成 `FF 00`，不会冒出 `FF D9`）。
 ///
 /// image crate 用的 zune-jpeg 对截断的文件很宽容（缺的部分补灰，照样返回一张图），
-/// Pillow 则报 "image file is truncated"：旧版缩略图因此是 `None`，这里补上这道判断。
+/// 截断的文件在这里显式判掉：缩略图返回 `None` 而不是补灰的图。
 fn jpeg_is_complete(data: &[u8]) -> bool {
     let mut i = 2; // 跳过 SOI
     while i + 4 <= data.len() {
@@ -380,7 +379,7 @@ pub fn make_thumbnail(payload: &[u8]) -> Option<Vec<u8>> {
 
 /// 取上游返回的第一张图的原始字节（不缩放、不重压），超过大小上限则不存。返回 `(字节, content_type)`。
 ///
-/// 不检查内容是不是图片（旧版如此）：类型串按魔数猜，猜不出就是 `image/png`；失败时是 `(None, "")`。
+/// 不检查内容是不是图片：类型串按魔数猜，猜不出就是 `image/png`；失败时是 `(None, "")`。
 pub fn full_image(payload: &[u8]) -> (Option<Vec<u8>>, String) {
     let data: Cow<[u8]> = if payload.starts_with(b"PK") {
         match first_zip_image(payload, MAX_IMAGE_BYTES as u64) {
@@ -424,7 +423,7 @@ pub(crate) async fn site_int(db: &Db, spec: &site_flags::Spec) -> Result<i64, Db
     Ok(int_of(&site_value(db, spec).await?))
 }
 
-/// 数值型设置（旧版直接拿来和数字比较）；读不懂为 0。
+/// 数值型设置；读不懂为 0。
 pub(crate) async fn site_f64(db: &Db, spec: &site_flags::Spec) -> Result<f64, DbError> {
     Ok(pyval::number_like(&site_value(db, spec).await?).unwrap_or(0.0))
 }
@@ -449,7 +448,7 @@ pub async fn audit_image_cap_mb(db: &Db) -> Result<i64, DbError> {
     site_int(db, &site_flags::IMAGE_CAP_MB).await
 }
 
-/// 旧版 `truth()`：`str(value).strip().lower() in ("1", "true", "yes", "on")`。
+/// 布尔设置的取值：`str(value).strip().lower() in ("1", "true", "yes", "on")`。
 fn truth(raw: &str) -> bool {
     matches!(
         raw.trim().to_lowercase().as_str(),
@@ -540,7 +539,7 @@ mod tests {
             capture_prompts(&json!({"input": "x"})).unwrap(),
             ("x".into(), String::new(), String::new())
         );
-        // 字段类型不对：旧版抛异常，整条记录被丢
+        // 字段类型不对：`Err`，整条记录被丢
         let err = capture_prompts(&json!({"parameters": {"v4_prompt": {"caption": "oops"}}}))
             .unwrap_err();
         assert_eq!(err.type_name(), "AttributeError");

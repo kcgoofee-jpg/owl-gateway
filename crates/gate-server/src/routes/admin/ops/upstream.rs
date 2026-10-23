@@ -18,7 +18,7 @@ use gate_core::{pyc, pyext, pyval};
 use gate_upstream::{headers::token_id, token_store};
 use serde_json::{Map, Value, json};
 
-/// 旧版 `_token_payload` 的请求体上限：一个 Token 绰绰有余。
+/// 上游 Token 请求体的上限：一个 Token 绰绰有余。
 const TOKEN_BODY_LIMIT: usize = 4096;
 const NOT_FOUND: &str = "上游 Token 不存在";
 
@@ -45,7 +45,7 @@ pub(super) fn router() -> Router<AppState> {
 
 // ------------------------------------------------------------------ 令牌池状态
 
-/// 令牌池的当前状态（旧版 `nai.status()`）：Token 打码，另附当天用量。
+/// 令牌池的当前状态：Token 打码，另附当天用量。
 pub(super) async fn pool_status(state: &AppState) -> Result<Vec<Value>, ApiError> {
     let now = state.now();
     let mut out = Vec::new();
@@ -273,7 +273,7 @@ async fn set_enabled(
 
 // ------------------------------------------------------------------ Anlas 核对
 
-/// 会话绑定的 CSRF 令牌：用管理员会话密钥对「reconciliation:<会话 Cookie>」做 HMAC（旧版 `_reconciliation_csrf`）。
+/// 会话绑定的 CSRF 令牌：用管理员会话密钥对「reconciliation:<会话 Cookie>」做 HMAC。
 /// 密钥与后台会话相同（`session::admin_key_from`），
 /// 所以改密码 / 换会话都会让旧令牌失效。
 fn csrf_for(secret_key: &str, password_material: &str, session_cookie: &str) -> String {

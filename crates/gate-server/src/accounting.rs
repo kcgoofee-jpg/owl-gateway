@@ -1,9 +1,8 @@
-//! 记账（旧版 `main.record` / `settle_record` / `bug`）与成员接口的错误收尾（旧版两个异常处理器里
-//! 「记一条拒绝 / 记 Bug」的部分）。
+//! 记账与成员接口的错误收尾。
 //!
 //! - `record`：写用量日志；成功请求同时计入每日配额。写库在后台任务里做（关停时等它们写完）。
 //! - `settle_record`：成功出图的那一笔必须在额度预留 / 并发槽释放之前落库。后台任务不随调用方取消，
-//!   所以「等它写完」本身就是旧版 `asyncio.shield` 的语义。
+//!   所以「等它写完」是天经地义的语义，记账路径可以放心 `.await`。
 
 use crate::bugs::Report;
 use crate::error::{GateErrorInfo, InternalErrorInfo};
@@ -16,7 +15,10 @@ use axum::response::Response;
 use gate_db::repo::audit::NewAudit;
 use gate_db::repo::usage::{NewLog, Success};
 
-/// 一条用量记录（旧版 `record()` 的关键字参数）。
+/// 一条用量记录。
+///
+/// `legacy_free_images` 的 legacy 指 NovelAI 的「V4.5 及更早模型」（与 V5 相对，不是遗留代码）：
+/// 记的是这类模型当天出了几张，和每日 V4.5 额度对应。
 #[derive(Debug, Clone, Default)]
 pub struct Entry {
     pub kind: String,
@@ -57,7 +59,7 @@ impl Entry {
     }
 }
 
-/// 路径 → 用量日志里的 kind（旧版 `_PATH_KIND`，按顺序子串匹配）。
+/// 路径 → 用量日志里的 kind（按顺序子串匹配）。
 const PATH_KIND: [(&str, &str); 6] = [
     ("generate-image-stream", "image_stream"),
     ("suggest-tags", "tags"),
@@ -286,7 +288,7 @@ pub async fn error_ledger(State(state): State<AppState>, req: Request, next: Nex
 }
 
 impl AppState {
-    /// 生成记录（旧版 `main.audit_generation`）：按后台开关记录提示词和原图（缩略图编码较慢，放后台任务；任何失败都不得影响生图结果）。
+    /// 生成记录：按后台开关记录提示词和原图（缩略图编码较慢，放后台任务；任何失败都不得影响生图结果）。
     #[allow(clippy::too_many_arguments)]
     pub async fn audit_generation(
         &self,

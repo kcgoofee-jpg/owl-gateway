@@ -1,11 +1,11 @@
-//! 定时任务（旧版 `app/background_tasks.py` + 内核模块的周期部分）与启动 / 关停序列。
+//! 定时任务与启动 / 关停序列。
 //!
 //! 每件事一个循环，全部挂在 `state.tasks` 上，启动后立即跑第一轮，睡觉时听 `state.shutdown`：
 //!
 //! | 任务 | 周期 | 做什么 |
 //! |---|---|---|
 //! | `quota` 动态额度 | 10 分钟 ±20% | `quota::decide`：服务日第一次跑时复盘昨天、定当天的 V5 方案，之后每轮把额度下发给算法管理的 Key |
-//! | `upstream_snapshot` 上游 V5 快照 | 10 分钟 ±20%，满 1 小时才记 | 主动读一次订阅，写 `upstream_snapshots`（安静时段测速用） |
+//! | `upstream_snapshot` 上游 V5 快照 | 10 分钟 ±20%，满 1 小时才记 | 主动读一次订阅，写 `upstream_snapshots`（后台「额度记录」页估算 V5 实测恢复速度用） |
 //! | `breaker` 全站熔断 | 10 分钟 ±20% | 15 分钟内上游失败 ≥ 5 次、≥ 30%、来自 ≥ 2 把 Key → 停 5 分钟 |
 //! | `key_guard` 单 Key 限流 | 10 分钟 ±20% | 1 小时被拒 ≥ 120 次 → 暂停这把 Key 1 小时 |
 //! | `maintenance` 维护 | 5 分钟 ±20% | 状态码统计落库 / 设置了保留期的记录才清（线上全部永久保留）/ 自动关闭不用处理的 Bug（最多 10 分钟一次）/ 注册服务的三个同步（`registration::registrar_jobs`）/ 磁盘自检 / 官方状态 |
@@ -109,7 +109,7 @@ pub async fn shutdown(state: &AppState) {
     }
 }
 
-/// 把内存里累计的状态码分布写进 `status_hourly`；写失败放回去下次再写（旧版 `status_stats.flush`）。
+/// 把内存里累计的状态码分布写进 `status_hourly`；写失败放回去下次再写。
 pub async fn flush_status_stats(state: &AppState) -> Result<(), gate_db::DbError> {
     let items = state.status_stats.drain();
     if items.is_empty() {

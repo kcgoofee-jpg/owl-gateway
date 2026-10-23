@@ -141,8 +141,7 @@ async fn put_settings(State(state): State<AppState>, _s: AdminSession, req: Requ
 
 // ------------------------------------------------------------------ 排队与冷却
 
-/// 当前生效的两个运行期限制（取整，与旧版 `int(getattr(settings, name))` 一致；
-/// 每 Key 出图间隔、账号出图间隔已删除，见 [`RUNTIME_LIMIT_BOUNDS`]）。
+/// 当前生效的运行期限制（取整；每 Key 出图间隔、账号出图间隔已删除，见 [`RUNTIME_LIMIT_BOUNDS`]）。
 fn runtime_limits_snapshot(state: &AppState) -> Value {
     let l = state.limits();
     json!({
@@ -182,7 +181,7 @@ async fn put_runtime_limits(
             }
         }
     }
-    // 写库 + 生效必须连在一起（旧版 `_runtime_limits_lock`）
+    // 写库 + 生效必须连在一起（`ops.runtime_limits` 锁）
     let shared = &state.ops;
     let _lock = shared.runtime_limits.lock().await;
     let writes: Vec<(String, String)> = values
@@ -248,7 +247,7 @@ async fn guard_put(State(state): State<AppState>, _s: AdminSession, req: Request
     let body = read_json_body(&parts.headers, body, BODY_LIMIT).await?;
     match state.guard.save(&body).await {
         Ok(_) => {}
-        // 旧版：ValueError → 422 原文；其余（库写失败 / OverflowError）是 500
+        // 值不合法 → 422 原文；其余（库写失败等）是 500
         Err(GuardIoError::Guard(PyErr::Value(msg))) => {
             return Err(HttpError::new(422, msg).into());
         }

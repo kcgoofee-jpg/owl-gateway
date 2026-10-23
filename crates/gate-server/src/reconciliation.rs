@@ -1,4 +1,4 @@
-//! Anlas 手动核对（旧版 `app/reconciliation.py`）：查询官方余额，与本站记账对比。
+//! Anlas 手动核对：查询官方余额，与本站记账对比。
 //!
 //! 核对时要拿到「没有进行中的出图、新出图也不能开始」的一刻：先等 `state.budget` 里没有额度预留，
 //! 持着预算锁（挡住新的准入）去读官方余额，读完再放。每次核对（含失败）都先写 60 秒冷却，
@@ -16,9 +16,9 @@ use std::time::Duration;
 use tokio::time::Instant;
 
 pub const COOLDOWN_SETTING: &str = "anlas_reconciliation_retry_at";
-/// 等进行中的图片任务结算的最长时间（旧版 `wait_timeout`）。
+/// 等进行中的图片任务结算的最长时间。
 const WAIT_TIMEOUT: Duration = Duration::from_secs(30);
-/// 查询全部账号的总时限（旧版 `query_timeout`）。
+/// 查询全部账号的总时限。
 const QUERY_TIMEOUT: Duration = Duration::from_secs(30);
 /// 单个账号的查询时限。
 const ACCOUNT_TIMEOUT: Duration = Duration::from_secs(8);
@@ -27,7 +27,7 @@ const MAX_BODY: usize = 65536;
 /// 页面上保留的历史条数。
 const HISTORY: i64 = 20;
 
-/// 旧版 `ReconciliationError`：`status` 是回给后台的 HTTP 状态码，`retry_after > 0` 时带 `Retry-After` 头。
+/// 核对失败：`status` 是回给后台的 HTTP 状态码，`retry_after > 0` 时带 `Retry-After` 头。
 #[derive(Debug, Clone)]
 pub struct ReconError {
     pub message: String,
@@ -116,7 +116,7 @@ fn value_eq(a: Option<&Value>, b: Option<&Value>) -> bool {
     }
 }
 
-/// 两次快照的对比（旧版 `comparison`）。`previous` 是库里存的上一条；旧快照缺字段时按旧版的 `KeyError` 报错。
+/// 两次快照的对比。`previous` 是库里存的上一条；旧快照缺字段时按「存档损坏」报错。
 pub fn comparison(previous: Option<&Value>, current: &Value) -> Result<Value, String> {
     let Some(previous) = previous else {
         return Ok(json!({"reason": "first"}));
@@ -287,7 +287,7 @@ pub async fn run(state: &AppState) -> Result<Value, RunError> {
     run_with(state, WAIT_TIMEOUT).await
 }
 
-/// 同 [`run`]，等图片任务结算的最长时间可调（测试用，旧版是类属性 `wait_timeout`）。
+/// 同 [`run`]，等图片任务结算的最长时间可调（测试用）。
 pub async fn run_with(state: &AppState, wait_timeout: Duration) -> Result<Value, RunError> {
     {
         let shared = &state.ops;

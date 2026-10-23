@@ -43,7 +43,7 @@ fn normalize_wire_format(raw: Option<&Value>) -> Result<WireFormat, GateError> {
     }
 }
 
-/// 推流的一端（旧版 `ImageStreamResponse`）：响应头要等上游接受之后才发；之前出错就回一个普通 JSON 错误。
+/// 推流的一端：响应头要等上游接受之后才发；之前出错就回一个普通 JSON 错误。
 struct StreamSink {
     head: Option<tokio::sync::oneshot::Sender<Head>>,
     tx: tokio::sync::mpsc::Sender<Bytes>,
@@ -172,7 +172,7 @@ fn tokio_stream_from(
     futures::stream::poll_fn(move |cx| rx.poll_recv(cx))
 }
 
-/// 旧版 `run_stream`：排队阶段可取消；上游阶段在真正派发之前也可取消。
+/// 流式出图的主流程：排队阶段可取消；上游阶段在真正派发之前也可取消。
 async fn run_stream(
     state: AppState,
     ctx: ReqCtx,
@@ -437,7 +437,7 @@ async fn perform_stream(
         }
     };
 
-    // 收尾记账（旧版 finally）
+    // 收尾记账（无论成败都走到）
     let completed = tracker.completed_images() as i64;
     let est = billing.lock().expect("billing").est;
     let detail = billing.lock().expect("billing").detail.clone();

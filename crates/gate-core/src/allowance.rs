@@ -1,6 +1,6 @@
 //! V5 订阅额度缓存的纯逻辑部分（对应 `app/allowance.py` 的 `AllowanceCache`）。
 //!
-//! 旧版一次 `resolve` 里夹着 HTTP、数据库和时钟；这里把它拆成「服务层做 IO、这里做判定」的几步：
+//! 判定逻辑拆成「服务层做 IO、这里做判定」的几步：
 //!
 //! 1. 服务层持有每个 token 的锁，取单调时钟 `now_mono`，读阈值（见下），调 [`AllowanceCore::check_cache`]：
 //!    `Unavailable` → 抛 [`UNAVAILABLE_MSG`]；`Cached` → 返回 `false`（不是耗尽）；`Fetch` → 去请求上游；
@@ -9,17 +9,17 @@
 //! 3. 调 [`AllowanceCore::finish_resolve`]（传请求结束后的墙钟 / 单调时钟）：返回 [`Resolved`]
 //!    （`Err(Unavailable)` 或 `Ok(是否耗尽)` 加上要做的副作用）；
 //! 4. 服务层按 [`Resolved::note_period`] 调 [`AllowanceCore::note_period`] 并把返回的文本写回库，
-//!    [`Resolved::low`] 为真（额度偏低）时写一行日志（旧版是 `on_low` 回调，发告警）。
+//!    [`Resolved::low`] 为真（额度偏低）时写一行日志。
 //!
 //! 不在这里的 IO（服务层负责）：
 //! - `read_alert_threshold(db)`：`db.get_setting("v5_alert_threshold", 20)`，取到的值交给 [`normalize_alert_threshold`]；
 //! - `_note_period` 的读写：第一次用时 `db.get_setting("v5_period_samples", "{}")` 交给 [`AllowanceCore::load_periods`]，
-//!   之后每次 `db.set_setting("v5_period_samples", <note_period 返回的文本>)`，写失败只忽略（旧版 `except Exception: pass`）；
-//! - HTTP 请求与响应体读取本身；`asyncio.Lock` 按 token 串行；`log.warning`。
+//!   之后每次 `db.set_setting("v5_period_samples", <note_period 返回的文本>)`，写失败只忽略；
+//! - HTTP 请求与响应体读取本身；按 token 串行的锁；日志。
 //!
 //! 已知边界（只在库里数据被手改坏、或上游返回非 UTF-8 JSON 时才碰到）：
-//! - `v5_period_samples` 不是 `{token: [[ts, 秒], ...]}` 的形状时，不合法的部分当作没有（旧版会 TypeError / AttributeError）；
-//! - 订阅响应只按 UTF-8 解析（Python `json.loads(bytes)` 还会自动识别 UTF-16 / UTF-32）。
+//! - `v5_period_samples` 不是 `{token: [[ts, 秒], ...]}` 的形状时，不合法的部分当作没有；
+//! - 订阅响应只按 UTF-8 解析；
 
 use crate::pyc;
 use serde_json::{Map, Value};
@@ -40,7 +40,7 @@ pub const MAX_BODY: usize = 65536;
 
 /// `read_alert_threshold` 的判定：库里是 TEXT，`"20"` 这样的 1～3 位 ASCII 数字串转成整数；
 /// 取值必须是 1～100 的整数（bool 不算），否则回到默认值 20。
-/// 没有这一行时旧版拿到的就是默认值（整数 20），传 `Value::Null` 也得到 20。
+/// 没有这一行时用的就是默认值（整数 20），传 `Value::Null` 也得到 20。
 pub fn normalize_alert_threshold(value: &Value) -> i64 {
     let v = match value {
         Value::String(s)
@@ -60,7 +60,7 @@ pub fn normalize_alert_threshold(value: &Value) -> i64 {
     }
 }
 
-/// 缓存里一个上游账号的最近一次读数（对应旧版 `_rows[token_id]` 这个 dict；缺失的键 = `None` / 0）。
+/// 缓存里一个上游账号的最近一次读数（没读过的账号 = `None` / 0）。
 #[derive(Debug, Clone, Default, PartialEq)]
 pub struct Row {
     pub percent: Option<i64>,
@@ -77,14 +77,14 @@ pub struct Row {
     pub anlas: Option<i64>,
 }
 
-/// 每个账号最近 48 小时的「再恢复 1% 还要多少秒」读数，保持账号的插入顺序（回写库时与旧版同序）。
+/// 每个账号最近 48 小时的「再恢复 1% 还要多少秒」读数，保持账号的插入顺序（回写库时同序）。
 #[derive(Debug, Clone, Default, PartialEq)]
 pub struct Periods {
     pub tokens: Vec<(String, Vec<(i64, i64)>)>,
 }
 
 impl Periods {
-    /// `json.loads(raw or "{}")`；读不懂就是空（旧版 `except (TypeError, ValueError): {}`）。
+    /// 解析 `v5_period_samples`；读不懂就是空。
     pub fn parse(raw: Option<&str>) -> Self {
         let text = match raw {
             Some(s) if !s.is_empty() => s,
@@ -164,7 +164,7 @@ pub struct Subscription {
 }
 
 /// 订阅响应校验：必须是对象、`active` 为 true、`tier` 为整数 3、`usage.percent` 为非负整数、
-/// `usage.isNegative` 为布尔值，否则当作失败（旧版各处 `raise ValueError`）。
+/// `usage.isNegative` 为布尔值，否则当作失败。
 pub fn parse_subscription(body: &[u8]) -> Option<Subscription> {
     let body = body.strip_prefix(&[0xef, 0xbb, 0xbf]).unwrap_or(body);
     let data: Value = serde_json::from_slice(body).ok()?;
@@ -323,7 +323,7 @@ impl AllowanceCore {
     }
 
     /// `resolve` 的开头：退避期检查 + 缓存命中判定。`now_mono` 是 `time.monotonic()`，`threshold` 是
-    /// [`normalize_alert_threshold`] 的结果（旧版在退避期检查之后才读，多读一次设置没有可观察的差别）。
+    /// [`normalize_alert_threshold`] 的结果。
     pub fn check_cache(&self, token_id: &str, now_mono: f64, threshold: i64) -> Begin {
         let default = Row::default();
         let row = self.rows.get(token_id).unwrap_or(&default);

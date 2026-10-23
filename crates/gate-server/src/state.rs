@@ -1,5 +1,5 @@
 //! 应用状态：启动时构造一次，`Arc` 共享给所有请求与后台任务（没有全局变量）。
-//! 启动顺序复刻旧版 `main.lifespan`：建表迁移 → 运行期限制 → 上游 Token 标识迁移 → Token 设置 →
+//! 启动顺序：建表迁移 → 运行期限制 → 上游 Token 标识迁移 → Token 设置 →
 //! 账号保护 → 回填最近 3 小时出图 → Key 暂停 → 全站冷却 → 停机检测 → 后台密码。
 
 use crate::alerts::Alerter;
@@ -25,7 +25,7 @@ use tokio_util::task::TaskTracker;
 
 pub const VERSION: &str = env!("CARGO_PKG_VERSION");
 
-/// 运行期可在后台调的两个限制（旧版 RUNTIME_LIMIT_BOUNDS）。每 Key 出图间隔 `key_image_min_interval`、
+/// 运行期可在后台调的限制。每 Key 出图间隔 `key_image_min_interval`、
 /// 账号出图间隔 `image_min_interval`（10-23，出图节奏只剩账号保护的「每张出完后歇 N～M 秒」）已删除，
 /// 库里残留的 `runtime_*` 行不再读。
 pub const RUNTIME_LIMIT_BOUNDS: [(&str, i64, i64); 2] = [

@@ -5,7 +5,7 @@
 //! - 原地修改入参的函数（`normalize_image_request` / `fix_name_digit_weights` / `sanitize_and_translate_prompts`）
 //!   取 `&mut Value`；Python 里「浅拷贝后改副本」的函数（`clamp_*` / `fill_v4_prompt` / `medium_normalize` /
 //!   `guard_image_action`）取 `&Value` 返回新值，入参保持不变；
-//! - Python 会抛异常的地方返回 [`PyResult`]，异常类型与消息同旧版（`ValueError` 的中文消息会回给成员）；
+//! - 校验失败返回 [`PyResult`]，`Err` 的中文消息可能原样回给成员；
 //! - 随机源（`secrets` / `random`）由调用方注入。
 
 use crate::pyext::{
@@ -549,7 +549,7 @@ pub fn validate_image_references(payload: &Value) -> Option<String> {
             return Some("Vibe 参考图数据无法读取，未扣费。请重新添加参考图。给客户端作者：须为有效 base64，V3 要传原图而不是 V4 编码".into());
         }
     }
-    // `cached_vibes + precise`：前半是 Vibe 缓存，后半是精确参考（旧版用 `is` 判断，JSON 解析出的对象互不相同，等价于看下标）
+    // `cached_vibes + precise`：前半是 Vibe 缓存，后半是精确参考（按下标区分）
     for (idx, item) in cached_vibes.iter().chain(precise.iter()).enumerate() {
         let is_precise = idx >= cached_vibes.len();
         let obj = item.as_object();
@@ -595,7 +595,7 @@ pub fn reference_surcharge(payload: &Value) -> PyResult<i64> {
 /// 路由入口统一规范化：模型名小写去空格并回写；尺寸 / 步数 / 张数必须是整数。
 ///
 /// 计价按 `int()` 截断而上游原样接收：放过 28.99 步或 1.99 张会让「免费」估价与实际扣费不一致。
-/// 出错时入参可能已被部分改写（与旧版一致：先写回 model、再逐项转换浮点整数）。
+/// 出错时入参可能已被部分改写（先写回 model、再逐项转换浮点整数）。
 /// `randint` 是 `random.randint(0, 4294967295)` 的注入源（seed 超出 uint32 时重抽）。
 pub fn normalize_image_request(body: &mut Value, randint: &mut dyn FnMut() -> u32) -> PyResult<()> {
     let body_type = pyext::type_name(body);
@@ -699,7 +699,7 @@ fn f_to_i128(f: f64) -> Option<i128> {
 
 // ----------------------------------------------------------------------------- 提示词
 
-/// 按旧版 `_prompt_texts` 的顺序列出所有提示词位置：`(路径, 值)`，值可能不是字符串（由调用方判断）。
+/// 按固定顺序列出所有提示词位置：`(路径, 值)`，值可能不是字符串（由调用方判断）。
 pub fn prompt_texts(body: &Value) -> Vec<(String, Option<&Value>)> {
     let mut out: Vec<(String, Option<&Value>)> =
         vec![("input".to_string(), pyval::get(body, "input"))];
@@ -740,7 +740,7 @@ pub fn prompt_texts(body: &Value) -> Vec<(String, Option<&Value>)> {
     out
 }
 
-/// 对请求里每个字符串形态的提示词字段原地改写（顺序与旧版 `fix_name_digit_weights` / `sanitize_and_translate_prompts` 相同）。
+/// 对请求里每个字符串形态的提示词字段原地改写（顺序固定，快照测试按它对拍）。
 fn rewrite_prompt_strings(body: &mut Value, f: &mut dyn FnMut(&str) -> String) {
     fn fix(slot: Option<&mut Value>, f: &mut dyn FnMut(&str) -> String) {
         if let Some(Value::String(s)) = slot {
@@ -797,15 +797,14 @@ struct Regexes {
 }
 
 fn fancy(pattern: &str) -> FancyRegex {
-    // 回溯上限关掉：旧版 `re` 没有上限，对拍时不能因为上限报错；这些模式在输入长度上是线性的
+    // 回溯上限关掉：这些模式在输入长度上是线性的，关掉上限避免长输入误报错
     fancy_regex::RegexBuilder::new(pattern)
         .backtrack_limit(usize::MAX)
         .build()
         .expect("内置正则必须合法")
 }
 
-/// 旧版用 Python `re` 的 `\d` / `\s`（Unicode 15.0）；这里把它们展开成同一集合的字符类，
-/// 避免 regex 自带 Unicode 表版本更新带来的差异。
+/// `\d` / `\s` 展开成固定的字符类，避免 regex 自带 Unicode 表版本更新带来的差异。
 fn regexes() -> &'static Regexes {
     static R: OnceLock<Regexes> = OnceLock::new();
     R.get_or_init(|| {
@@ -1291,7 +1290,7 @@ pub fn clamp_image_params(
     let mut notes: Vec<String> = Vec::new();
     let mut out = dict_copy(payload)?;
     let mut p = params_copy(&out);
-    // `out["parameters"] = p`：先占位，保证键位置与旧版一致
+    // `out["parameters"] = p`：先占位，保证 JSON 键位置稳定
     out.insert("parameters".into(), Value::Null);
 
     macro_rules! finish {

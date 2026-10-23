@@ -1,4 +1,4 @@
-//! V5 官方免费额度缓存的 IO 层（旧版 `app/allowance.py` 的 `AllowanceCache`）。判定逻辑在
+//! V5 官方免费额度缓存的 IO 层。判定逻辑在
 //! `gate_core::allowance::AllowanceCore`（纯逻辑）；这里负责按账号串行、读阈值、请求订阅接口、
 //! 回写恢复周期读数；额度偏低时写一行日志（后台「上游」页另有「低」标记）。
 //!
@@ -16,7 +16,7 @@ pub struct ServerAllowance {
     db: Db,
     core: Mutex<AllowanceCore>,
     locks: Mutex<HashMap<String, Arc<tokio::sync::Mutex<()>>>>,
-    /// 单调时钟起点：缓存新鲜度按单调时钟算（旧版 `time.monotonic()`）。
+    /// 单调时钟起点：缓存新鲜度按单调时钟算。
     epoch: std::time::Instant,
 }
 
@@ -37,7 +37,7 @@ impl ServerAllowance {
     }
 
     fn mono(&self) -> f64 {
-        // 加一个大偏移：旧版 `row.get("at", -1e9)` 依赖单调时钟远大于 0
+        // 加一个大偏移：缺省值 -1e9 依赖单调时钟远大于 0，保证没读过时排最后
         self.epoch.elapsed().as_secs_f64() + 1e6
     }
 
@@ -108,7 +108,7 @@ impl ServerAllowance {
             Begin::Cached => return Ok(false),
             Begin::Fetch => {}
         }
-        // 与这把 Token 生图时同一个浏览器指纹（旧版固定用第 0 套）
+        // 与这把 Token 生图时同一个浏览器指纹
         let url = format!(
             "{}/user/subscription",
             nai.image_host().trim_end_matches('/')
@@ -162,7 +162,7 @@ impl ServerAllowance {
         resolved.result.map_err(|()| unavailable())
     }
 
-    /// `_note_period`：第一次用时从库里读样本，写失败只忽略（旧版 `except Exception: pass`）。
+    /// `_note_period`：第一次用时从库里读样本，写失败只忽略。
     async fn note_period(&self, token_id: &str, seconds: i64) {
         let loaded = self.core.lock().expect("allowance").periods_loaded();
         if !loaded {

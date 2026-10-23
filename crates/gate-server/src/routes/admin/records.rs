@@ -1,5 +1,5 @@
-//! 后台「日志与记录」接口（旧版 `app/admin.py` 的用量日志 / 操作日志 / Bug / 生成记录 / 反馈 / 问卷 / 全站重置部分）。
-//! 导出（zip / CSV）的格式沿用旧版 `exporter.py` / `feedback.py`。
+//! 后台「日志与记录」接口（用量日志 / 操作日志 / Bug / 生成记录 / 反馈 / 问卷 / 全站重置）。
+//! 导出（zip / CSV）的格式固定，导出的文件有人存档，别随手改列名与列序。
 
 use super::req::{AdminPath, AdminQuery, R, bytes_response, http, internal, json_of, py_quote};
 use super::{actor, mark_logged};
@@ -242,7 +242,7 @@ async fn errors_list(State(state): State<AppState>, _s: AdminSession, q: AdminQu
             .and_then(Value::as_i64)
             .filter(|k| *k != 0)
         {
-            // 旧版 `names.get(key_id) or f"Key #{key_id} (已删除)"`：名字是空串也当已删除
+            // 名字查不到（或空串）就显示「Key #N (已删除)」
             Some(k) => names
                 .get(&k)
                 .filter(|n| !n.is_empty())
@@ -336,7 +336,7 @@ async fn audit_list(State(state): State<AppState>, _s: AdminSession, q: AdminQue
 }
 
 /// 现场缩图约 70ms/张，翻页回来不再重算；约 400×55KB ≈ 22MB。
-/// 旧版是模块级全局缓存，所以这里同样是进程级——按数据库路径区分实例（同进程里并存多个网关时互不串图）。
+/// 进程级缓存——按数据库路径区分实例（同进程里并存多个网关时互不串图）。
 struct ThumbCache {
     map: HashMap<(PathBuf, i64), Vec<u8>>,
     order: VecDeque<(PathBuf, i64)>,
@@ -430,7 +430,7 @@ async fn audit_image(
     Ok(bytes_response(data, &ctype, &jpeg_cache_headers()))
 }
 
-/// 旧版 `_safe_filename`：只留字母数字 `_.-`，其余字符换成 `_`，去掉两头的 `_.`，最长 40 个字符，空了叫 member。
+/// 导出文件名的净化：只留字母数字 `_.-`，其余字符换成 `_`，去掉两头的 `_.`，最长 40 个字符，空了叫 member。
 fn safe_filename(name: &str) -> String {
     let cleaned: String = name
         .chars()
@@ -648,13 +648,13 @@ fn csv_bytes(header: &[&str], rows: &[Vec<String>]) -> Vec<u8> {
     s.into_bytes()
 }
 
-/// 成员 /反馈 写的话，最新在前。每条的 `text` 是显示用的文字（旧版选择题的记录是一行摘要，`legacy` 为真）。
+/// 成员 /反馈 写的话，最新在前。每条的 `text` 是显示用的文字（2.x 问卷的旧记录是一行摘要，`legacy` 为真）。
 async fn feedback_list(State(state): State<AppState>, _s: AdminSession) -> R {
     let items = listing(&state.db, 500).await?;
     Ok(ok_json(&json!({"items": items})))
 }
 
-/// CSV 三列：time、member（Key 名 / 用户名 / Discord ID）、text（旧版选择题的记录是同一行摘要）。
+/// CSV 三列：time、member（Key 名 / 用户名 / Discord ID）、text（2.x 问卷的旧记录是同一行摘要）。
 async fn feedback_export(State(state): State<AppState>, _s: AdminSession, req: Request) -> R {
     let parts = req.into_parts().0;
     let st = state.clone();

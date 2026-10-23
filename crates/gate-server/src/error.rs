@@ -1,4 +1,4 @@
-//! 错误响应：三种格式，与旧版逐字节一致。
+//! 错误响应：三种固定格式，客户端依赖这些错误文案与字段布局，改动要先看客户端。
 //!
 //! 1. [`GateError`]（成员接口）：顶层 `statusCode` / `message` 与 NovelAI 官方错误格式一致，
 //!    客户端直接显示这句话；消息统一带「猫头鹰公益站提醒：」前缀，免得成员以为是 NovelAI 官方出错。
@@ -189,7 +189,7 @@ impl IntoResponse for InternalError {
     }
 }
 
-/// 上游传输层失败（连不上 / 超时 / 读断）。对成员仍是 500（与旧版一致），但原因在上游：
+/// 上游传输层失败（连不上 / 超时 / 读断）。对成员仍是 500，但原因在上游：
 /// 在请求上下文里留个记号，错误账本据此不记 Bug（用量日志里照常有一条 error）。
 pub fn upstream_transport(ctx: &crate::reqctx::ReqCtx, message: String) -> ApiError {
     ctx.mark_upstream_fault();

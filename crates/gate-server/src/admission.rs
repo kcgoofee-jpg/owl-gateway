@@ -1,13 +1,10 @@
-//! 出图准入与额度预留（旧版 `image_routes.py` 的 guard_precheck / image_admission / _acquire_slots /
-//! quota_image_check / ImageReservation / reserve_image_budget）。
+//! 出图准入与额度预留。
 //!
 //! 每一步都是一个 RAII 守卫：被拒或客户端断开时自动归还。真正发往上游之后，守卫随上游操作一起
 //! 移进后台任务（见 `routes::image::shielded`），保证「先记账、再释放额度预留和并发槽」。
 //!
 //! 每把 Key 的限速只有两层：这里的排队（同时生成 1 张，每人最多同时排 `queue_per_member` 张，默认 2）
 //! 和每分钟次数（RPM，`auth::check_rpm`）。
-//! 2.x 另有每把 Key 15 秒出图间隔（`wait_for_user_image_slot` / `refund_local_reject`）和每把 Key 一个的
-//! 信号量（`KEY_CONCURRENCY`），都与排队重复，已删除。
 
 use crate::auth::site_flag_f64;
 use crate::error::{ApiError, GateError, InternalError};
@@ -20,7 +17,7 @@ use std::sync::Arc;
 use std::sync::atomic::Ordering;
 use std::time::Duration;
 
-/// 一次出图的估算消耗（旧版 `est` 字典）。
+/// 一次出图的估算消耗。
 #[derive(Debug, Clone, Copy, Default, PartialEq)]
 pub struct Est {
     pub anlas: f64,
@@ -75,10 +72,10 @@ async fn block_reasons(state: &AppState, pool: &[String]) -> Result<Vec<Option<R
     Ok(out)
 }
 
-/// 所有可用账号都被账号保护拦下（安静时段 / 熔断 / 每日上限——都是「等也不会好」的原因）时直接 429 并说明原因。
-/// 每分钟次数检查之前先看一次：这时客户端的自动重试应该拿到真正的原因（例如 quiet_cap），
-/// 而不是被算成这把 Key 请求过快（key_rate）。出图准入（[`image_admission`]）再看一次。
-/// 以前「按时段放行（paced）」时替成员在网关里等最多 5 分钟，那一项已删除，这里不再等。
+/// 所有可用账号都被账号保护拦下（熔断 / 每日上限——都是「等也不会好」的原因）时直接 429 并说明原因。
+/// 每分钟次数检查之前先看一次：这时客户端的自动重试应该拿到真正的原因（例如 daily_cap），
+/// 而不是被算成这把 Key 请求过快（key_rate）。出图准入（[`image_admission`]）再看一次；
+/// 这里不替成员排队等，直接返回原因。
 pub async fn guard_hard_block(state: &AppState) -> Result<(), ApiError> {
     match all_blocked(state).await? {
         Some(r) => Err(gate(hard_block_status(r.code()), r)),
@@ -228,7 +225,8 @@ pub async fn member_anlas_cap_f64(state: &AppState, key: &Key) -> Result<f64, ga
     site_flag_f64(state, &site_flags::MEMBER_DAILY_ANLAS).await
 }
 
-/// 额度检查。调用方必须持有 `state.budget` 锁（与旧版 `image_budget_lock` 一样，检查和登记预留不可交错）。
+/// 额度检查。调用方必须持有 `state.budget` 锁：检查和登记预留不可交错。
+/// `legacy_free_images` 的 legacy 指 NovelAI 的「V4.5 及更早模型」（与 V5 相对，不是遗留代码）；
 /// `exclude`：更新自己的预留时不把自己算进去。
 pub async fn quota_image_check(
     state: &AppState,
@@ -269,8 +267,7 @@ pub async fn quota_image_check(
             )
             .into());
         }
-        // 每人只有每日上限：2.x 的「每人注水」（底仓 30 张、每小时补 4 张）和
-        // 「保底 + 全站空闲时借用」都已删除（全站按时段放行 10-22 也删了）。
+        // 每人只有每日上限，当天一次给足，没有注水或分批放行。
     }
     if est.v5 > 0 {
         // V5 周额度是账户级共享资源，用全站日计数镜像
@@ -386,7 +383,7 @@ pub async fn quota_image_check(
     Ok(())
 }
 
-/// 已登记的额度预留；释放时在预算锁下移除（与旧版一样不和进行中的检查交错）。
+/// 已登记的额度预留；释放时在预算锁下移除（不和进行中的额度检查交错）。
 pub struct Reserved {
     state: AppState,
     id: u64,

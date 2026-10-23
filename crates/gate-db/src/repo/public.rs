@@ -1,4 +1,4 @@
-//! 公开页面（首页首屏 / 实时看板）用到的两条查询（旧版 registration.py 里的裸 SQL）。
+//! 公开页面（首页首屏 / 实时看板）用到的两条查询。
 
 use crate::{Db, Result, value};
 use rusqlite::OptionalExtension;
@@ -7,7 +7,7 @@ use rusqlite::OptionalExtension;
 pub type DiscordProfileRow = (Option<String>, Option<String>, Option<String>);
 
 impl Db {
-    /// 首页「我」里的 Discord 资料（旧版 `registration_profile` 的查询）：没有登记行返回 None。
+    /// 首页「我」里的 Discord 资料：没有登记行返回 None。
     pub async fn discord_profile_row(&self, discord_id: &str) -> Result<Option<DiscordProfileRow>> {
         let id = discord_id.to_string();
         self.read(move |c| {
@@ -191,7 +191,7 @@ impl Db {
         .await
     }
 
-    /// 占用名额的人数（旧版 `registration.count_registered`）：持有未过期 Key 的已注册用户。
+    /// 占用名额的人数：持有未过期 Key 的已注册用户。
     /// Key 过期或被删则名额释放；被站长停用（暂停）的成员仍占名额。
     pub async fn registered_member_count(&self, now: f64) -> Result<i64> {
         self.read(move |c| {

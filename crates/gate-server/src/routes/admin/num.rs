@@ -1,4 +1,4 @@
-//! 后台数值字段的严格解析（旧版 `_num`），所有后台接口共用这一份。
+//! 后台数值字段的严格解析，所有后台接口共用这一份。
 
 use crate::error::HttpError;
 use gate_core::{pyc, pyval};
@@ -49,7 +49,7 @@ fn parse(value: &Value, kind: Kind, lo: f64, hi: f64, name: &str) -> Result<f64,
     Ok(v)
 }
 
-/// 旧版 `_num`：严格解析后台数值。
+/// 严格解析后台数值。
 /// 这些字段里 0 代表「不限」，绝不能把空值或非法值静默变成 0，否则一次误操作就会拆掉额度保护。
 /// 整数字段返回 JSON 整数，浮点字段返回 JSON 浮点。
 pub(super) fn strict_num(

@@ -1,6 +1,5 @@
 //! 每个请求的上下文：请求编号、计时（排队 / 上游耗时）、上游状态码、当前 Key、是否已记日志。
 //!
-//! 旧版用 ContextVar + 共享 dict（`request_timing.py`、`core/context.py`），子任务里写的值外层也能看到。
 //! 这里用 `Arc<Mutex<..>>` 放进请求扩展，同时用 tokio task-local 让错误响应等「拿不到 Request 的地方」
 //! 也能读到请求编号；派生出去的任务只要带上 `ReqCtx` 的克隆，同样能写回。
 

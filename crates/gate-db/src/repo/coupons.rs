@@ -6,7 +6,7 @@ use rusqlite::{OptionalExtension, params};
 use serde::Serialize;
 use serde_json::Value;
 
-/// `add_coupon` 返回的 dict（键顺序与旧版一致）。
+/// `add_coupon` 返回的对象（键顺序固定）。
 #[derive(Debug, Clone, Serialize)]
 pub struct NewCoupon {
     pub id: i64,

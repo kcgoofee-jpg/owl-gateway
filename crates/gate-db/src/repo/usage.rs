@@ -7,7 +7,7 @@ use rusqlite::params;
 use serde::Serialize;
 use serde_json::Value;
 
-/// 一次成功请求的记账内容（`record_success`）。字段缺省值与旧版关键字参数默认值一致。
+/// 一次成功请求的记账内容（`record_success`）。字段缺省值见各字段。
 #[derive(Debug, Clone, Default)]
 pub struct Success {
     pub key_id: i64,
@@ -102,12 +102,12 @@ impl ClientHints {
     }
 }
 
-/// 日志筛选条件（旧版 `_log_filter` 的参数）。
+/// 日志筛选条件。
 #[derive(Debug, Clone, Default)]
 pub struct LogFilter {
-    /// 0 与 None 一样表示不筛（旧版 `if key_id:`）。
+    /// 0 与 None 一样表示不筛。
     pub key_id: Option<i64>,
-    /// None = 不筛；Some(空) = 一条都不匹配（旧版生成 `0`）。
+    /// None = 不筛；Some(空) = 一条都不匹配（SQL 里绑定成 `0`）。
     pub kinds: Option<Vec<String>>,
     /// 空串 = 不筛。
     pub rid: String,
@@ -171,13 +171,12 @@ pub struct ImageTiming {
 }
 
 /// 真正出图（`image` / `image_stream`）成功才刷新 last_image_at：闲置回收只认它。
-/// 查额度、文本聊天、标签补全不算；放大、导演工具、Vibe 编码也不算
-/// （旧版前缀匹配 `image*` 并把这三种算进去，只用它们「保活」的 Key 不会被回收）。
+/// 查额度、标签补全不算；放大、导演工具、Vibe 编码也不算，只用它们「保活」的 Key 不会被回收。
 fn is_image_kind(kind: &str) -> bool {
     matches!(kind, "image" | "image_stream")
 }
 
-/// 旧版 `_log_filter`：返回 (` WHERE ...` 或空串, 绑定参数)。
+/// 组装日志筛选的 WHERE 子句：返回 (` WHERE ...` 或空串, 绑定参数)。
 fn log_filter(f: &LogFilter) -> (String, Vec<SqlValue>) {
     let mut clauses: Vec<String> = Vec::new();
     let mut args: Vec<SqlValue> = Vec::new();
@@ -224,8 +223,7 @@ fn log_filter(f: &LogFilter) -> (String, Vec<SqlValue>) {
 
 impl Db {
     /// 成功日志、额度与使用时间一起提交；写入失败时整笔回退（一个事务）。
-    /// 旧版在被别的写入短暂锁住时会重试几次（睡眠 0.5 / 1 / 2 秒）；这里写线程独占写连接，
-    /// 锁冲突由 `Db::write` 的 BUSY 重试兜住，可见结果相同。
+    /// 写线程独占写连接，锁冲突由 `Db::write` 的 BUSY 重试兜住。
     pub async fn record_success(&self, s: &Success, now: f64) -> Result<()> {
         let s = s.clone();
         self.write(move |tx| {
@@ -467,7 +465,7 @@ impl Db {
         since: f64,
         reason_label: &(dyn Fn(&str, &str) -> String + Sync),
     ) -> Result<PyMap<i64, Milestone>> {
-        // 先在读连接里取回原始分组行，再在这里按旧版逻辑合并（reason_label 不必跨线程）
+        // 先在读连接里取回原始分组行，再在写侧合并（reason_label 不必跨线程）
         type RawWhy = (i64, String, String, i64);
         type RawImg = (i64, Option<f64>, Option<f64>);
         let (img, rej, why): (Vec<RawImg>, Vec<(i64, i64)>, Vec<RawWhy>) = self

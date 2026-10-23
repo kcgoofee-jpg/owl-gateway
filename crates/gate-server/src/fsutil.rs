@@ -1,4 +1,4 @@
-//! 文件小工具：原子写入私密文件（0600）。旧版有三份几乎一样的实现（admin / token_store / params）。
+//! 文件小工具：原子写入私密文件（0600）。
 
 use std::io::Write;
 use std::path::Path;

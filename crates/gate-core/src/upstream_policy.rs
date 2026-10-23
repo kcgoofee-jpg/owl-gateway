@@ -74,7 +74,7 @@ struct Parsed {
     hour: i128,
     minute: i128,
     second: i128,
-    /// 时区偏移秒；`None` 表示没写时区、`-0000` 或认不出来（旧版随后按 UTC 处理）。
+    /// 时区偏移秒；`None` 表示没写时区、`-0000` 或认不出来（按 UTC 处理）。
     tz_seconds: Option<i128>,
 }
 
@@ -257,11 +257,11 @@ enum DateParse {
     Ts(f64),
     /// 格式不对 / 日期不合法：跳过这一段，试下一段。
     Skip,
-    /// 数值大到 C int 装不下（旧版抛 `OverflowError`，一路抛出去）：整个 header 按默认 20 秒。
+    /// 数值大到整数装不下：整个 header 按默认 20 秒。
     Abort,
 }
 
-/// `email.utils.parsedate_to_datetime(data)` 再按旧版 `parse_retry_after` 的写法取 UTC 时间戳（秒，f64）。
+/// 解析 RFC 5322 日期（`email.utils.parsedate_to_datetime` 的口径），取 UTC 时间戳（秒，f64）。
 fn parsedate_to_timestamp(data: &str) -> DateParse {
     let Some(p) = parsedate_tz(data) else {
         return DateParse::Skip;
@@ -299,11 +299,10 @@ fn parsedate_to_timestamp(data: &str) -> DateParse {
 /// 十进制秒数或 RFC 7231 HTTP 日期（Cloudflare / WAF 常用后者）；其它格式按默认 20 秒处理。
 ///
 /// 只认数字会让「Retry-After: Wed, 21 Oct 2026 07:28:00 GMT」退化成 20 秒，在真实限流窗口内提前重试。
-/// 旧版先按逗号拆开（RFC 允许多个日期），所以 `Wed, 21 Oct ...` 的第一段 `Wed` 解析失败被跳过，
-/// 靠第二段 `21 Oct 2026 07:28:00 GMT` 才解析成功 —— 行为照抄。
+/// RFC 允许「Wed, 21 Oct …」这种带星期前缀的写法：先按逗号拆开，第一段解析失败就跳过，
+/// 靠第二段 `21 Oct 2026 07:28:00 GMT` 解析成功。
 ///
-/// 旧版遇到超过 4300 位的纯数字串、数值溢出 C int / 浮点范围的日期会抛异常，导致冷却不生效；
-/// 这里一律按默认 20 秒。
+/// 超长（> 4300 位）或溢出的值不抛异常，一律按默认 20 秒，保证冷却生效。
 pub fn parse_retry_after(header: Option<&str>, now: f64) -> f64 {
     let value = pyc::strip(header.unwrap_or(""));
     if value.is_empty() {

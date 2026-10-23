@@ -1,6 +1,6 @@
-//! 后台「成员」接口（旧版 `app/admin.py` 的 Key / 成员 / 黑名单 / 券 / 标签部分）。
+//! 后台「成员」接口（Key / 成员 / 黑名单 / 券 / 标签）。
 //!
-//! 照旧版逐条移植：状态码、`{"detail": ...}` 文案、JSON 键顺序、写进库的行都与旧版一致。
+//! 状态码、`{"detail": ...}` 文案、JSON 键顺序都是固定契约：后台前端按它们渲染，不要随手改。
 //! 3.0 已删除的功能不移植：`anlas_auto` 自动分配（含 `anlas_mode`）、`v5_pinned`（V5 基础值）、
 //! 防分享证据；对应的数据库列原样留着，这里不读不写，也不再出现在返回的 JSON 里。
 
@@ -98,7 +98,7 @@ pub(super) fn gen_key() -> String {
     gate_core::policy::gen_key("nai", &rand::random::<[u8; 24]>())
 }
 
-/// 旧版 `_features_field`：缺省 / null = 沿用旧行为（全局开启的都可用）；列表 = 仅允许所列功能。
+/// `features` 字段：缺省 / null = 沿用全局开关；列表 = 仅允许所列功能。
 fn features_field(body: &JsonObject) -> Result<Option<String>, ApiError> {
     let Some(value) = body.get("features").filter(|v| !v.is_null()) else {
         return Ok(None);
@@ -164,8 +164,8 @@ fn role_of(invite: bool) -> &'static str {
     if invite { ROLE_INVITE } else { ROLE_REGULAR }
 }
 
-/// 旧版 `_key_json`。`role` 给了就覆盖（Key 列表按「邀请」标签识别身份组）；
-/// 不给时按普通——旧版如此，所以修改 / 新建接口返回的 role 不会是「邀请」。
+/// 组装返回给后台的 Key JSON。`role` 给了就覆盖（Key 列表按「邀请」标签识别身份组）；
+/// 不给时按普通，所以修改 / 新建接口返回的 role 不会是「邀请」。
 fn key_json(row: &Value, c: &Counter, generated: i64, role: Option<&str>) -> Value {
     let role = role.unwrap_or(ROLE_REGULAR);
     let anlas = c.anlas;
@@ -258,7 +258,7 @@ async fn create_invite_key(State(state): State<AppState>, _s: AdminSession) -> R
         cfg.image_scope,
         cfg.expires_days,
     );
-    // 旧版 `re.match(r"邀请-(\d+)", name)`：只看开头，数字可以是任何 Unicode 十进制数字
+    // 「邀请-N」编号：只看名字开头，数字可以是任何 Unicode 十进制数字
     let max_no = st
         .db
         .key_names()
@@ -361,7 +361,7 @@ async fn create_key(State(state): State<AppState>, _s: AdminSession, req: Reques
     };
     let truthy = |name: &str| body.get(name).is_some_and(pyval::truthy);
     // 配额检查只认 > 0 的上限：allow_anlas 开着而日 / 月上限都是 0 = 个人 Anlas 完全无上限，
-    // 可无限烧共享账号的付费点数（旧版的文案写「0 = 不限」，但实际 0 + 0 会被拒，照旧）
+    // 可无限烧共享账号的付费点数（422 文案写「0 = 不限」，但实际 0 + 0 会被拒——历史如此，文案不动）
     if truthy("allow_anlas") && daily_anlas <= 0.0 && monthly_anlas <= 0.0 {
         return Err(http(422, ANLAS_CAP));
     }
@@ -1067,7 +1067,7 @@ async fn members(State(state): State<AppState>, _s: AdminSession) -> R {
         .await?
         .into_iter()
         .collect();
-    // 旧版 `paused if paused > time.time() else 0`：过期的是整数 0，没过期的是浮点
+    // 暂停已过期的输出整数 0，没过期的输出浮点剩余秒数
     let pause_map: HashMap<i64, Value> = st
         .db
         .pause_rows()
@@ -1097,7 +1097,7 @@ async fn members(State(state): State<AppState>, _s: AdminSession) -> R {
     }
 
     // 今日「重置今日额度」痕迹：按服务日起点统计次数与最近一次（从操作日志取，只读）。
-    // 起点是**当前服务日**的 7 点。旧版用日历日期算起点，凌晨 0–7 点起点落在未来，这段时间一直显示「没重置过」。
+    // 起点是**当前服务日**的 7 点（不能用日历日期算，凌晨 0–7 点起点会落在未来）。
     let day_start = st.clock.service_day_start(&today).unwrap_or(0.0);
     let mut reset_map: HashMap<i64, (i64, f64)> = HashMap::new();
     for (a_ts, target) in st.db.quota_reset_marks(day_start).await? {

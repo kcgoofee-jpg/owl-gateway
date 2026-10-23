@@ -64,7 +64,7 @@ pub struct OverviewMonth {
     pub unconfirmed_anlas: f64,
 }
 
-/// 后台总览（键顺序与旧版 `overview()` 返回的 dict 一致）。
+/// 后台总览（键顺序固定，后台前端按它读）。
 #[derive(Debug, Clone, Serialize)]
 pub struct Overview {
     pub today: OverviewToday,
@@ -212,7 +212,7 @@ impl Db {
         .await
     }
 
-    /// 每个 Key 近一段时间的用量汇总（来自每日计数器）；值里带 key_id（旧版 `dict(row)`）。
+    /// 每个 Key 近一段时间的用量汇总（来自每日计数器）；值里带 key_id。
     pub async fn member_usage(&self, since_day: &str) -> Result<PyMap<i64, Value>> {
         let since_day = since_day.to_string();
         self.read(move |c| {
@@ -232,7 +232,7 @@ impl Db {
     }
 
     /// 后台总览。`today` 是服务日字符串；`week_days` 由调用方给（`state.week_days`）。
-    /// 异常统计的时间窗按 `today` 当天的**本地自然日 0 点**起算（不按 7 点重置，与旧版一致）。
+    /// 异常统计的时间窗按 `today` 当天的**本地自然日 0 点**起算（不按 7 点重置）。
     pub async fn overview(
         &self,
         today: &str,
@@ -242,7 +242,7 @@ impl Db {
     ) -> Result<Overview> {
         let today = today.to_string();
         let week_days = week_days.to_vec();
-        // 旧版：datetime.fromisoformat(today).replace(tzinfo=tz)；month 窗从当月 1 日 0 点起，两窗同止于次日 0 点
+        // today 当天的本地 0 点；month 窗从当月 1 日 0 点起，两窗同止于次日 0 点
         let date: jiff::civil::Date = today
             .parse()
             .map_err(|e| DbError::Invalid(format!("today 不是 YYYY-MM-DD：{e}")))?;
