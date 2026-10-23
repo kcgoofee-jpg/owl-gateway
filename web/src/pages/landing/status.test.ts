@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { createEstimator, dailyMeters, dailyUsage, deriveStatus } from "./status";
+import { dailyMeters, dailyUsage, deriveStatus } from "./status";
 import type { Live } from "./types";
 
 /**
@@ -41,43 +41,18 @@ describe("deriveStatus：正常与排队", () => {
     expect(v?.sentence).toBe("马上开始 · 通道空闲");
   });
 
-  it("有人排队：按 人数 × 放行间隔 估算，并说出前面有几张", () => {
-    const v = deriveStatus(idle({ queue: { waiting: 3, running: 1 }, cycle: 15 }), { nowMs: 0 });
+  it("有人排队：只显示排队状态，不显示数量或时间", () => {
+    const v = deriveStatus(idle({ queue: { waiting: 3, running: 1 } }), { nowMs: 0 });
     expect(v?.tone).toBe("busy");
-    expect(v?.headline).toBe("约 1 分钟后开始");
-    expect(v?.detail).toBe("前面有 4 张在等");
-    // 读屏播报不含倒计时
-    expect(v?.announce).toBe("排队中 · 前面有 4 张在等");
+    expect(v?.headline).toBe("排队中");
+    expect(v?.detail).toBe("");
+    expect(v?.announce).toBe("排队中");
+    expect(v?.sentence).not.toMatch(/秒|分钟|后开始|张/);
   });
 
-  it("两个账号同时出图：等待时间减半", () => {
-    const accounts = [{ usable: true }, { usable: true }, { usable: false }];
-    const v = deriveStatus(idle({ queue: { waiting: 3, running: 1 }, cycle: 15, accounts }), { nowMs: 0 });
-    expect(v?.headline).toBe("约 30 秒后开始");
-  });
-
-  it("今天出满的账号虽然可用，但不再接图：不算进同时出图的账号数", () => {
-    const accounts = [{ usable: true, full: true }, { usable: true }];
-    const v = deriveStatus(idle({ queue: { waiting: 3, running: 1 }, cycle: 15, accounts }), { nowMs: 0 });
-    expect(v?.headline).toBe("约 1 分钟后开始");
-  });
-
-  it("网关给了估计（guard.start_in）就用网关的", () => {
-    const v = deriveStatus(
-      idle({
-        queue: { waiting: 3, running: 1 },
-        cycle: 15,
-        guard: { cooldown: 0, blocked: null, start_in: 40 },
-      }),
-      { nowMs: 0 },
-    );
-    expect(v?.headline).toBe("约 40 秒后开始");
-    expect(v?.detail).toBe("前面有 4 张在等");
-  });
-
-  it("没有放行间隔时不编秒数", () => {
+  it("没有放行间隔时仍然只显示队列数量", () => {
     const v = deriveStatus(idle({ queue: { waiting: 2, running: 0 }, cycle: 0 }));
-    expect(v?.sentence).toBe("排队中 · 前面有 2 张在等");
+    expect(v?.sentence).toBe("排队中");
   });
 
   it("排队已满", () => {
@@ -161,22 +136,18 @@ describe("deriveStatus：与 API 的 429 原因同一句话", () => {
 
 describe("deriveStatus：我的图优先", () => {
   it("我的图正在生成", () => {
-    const v = deriveStatus(idle({ me: { mine: [{ state: "running" }], waiting: 0, running: 1 } }), {
-      avgDurS: 6.2,
-    });
+    const v = deriveStatus(idle({ me: { mine: [{ state: "running" }], waiting: 0, running: 1 } }));
     expect(v?.tone).toBe("mine");
-    expect(v?.sentence).toBe("你的图正在生成 · 平均约 6.2 秒");
+    expect(v?.sentence).toBe("你的图正在生成");
   });
 
-  it("我的图排第 N 位：用网关算好的 eta（网关已按账号数折算）", () => {
+  it("我的图只显示当前排位，不显示估算 ETA", () => {
     const v = deriveStatus(
       idle({
         me: { mine: [{ state: "waiting", position: 4, eta: 30 }], waiting: 4, running: 1 },
-        cycle: 15,
-        accounts: [{ usable: true }, { usable: true }],
       }),
     );
-    expect(v?.sentence).toBe("你的图排第 4 位 · 约 30 秒后开始画");
+    expect(v?.sentence).toBe("你的图排第 4 位");
     expect(v?.announce).toBe("你的图排第 4 位");
   });
 
@@ -187,23 +158,6 @@ describe("deriveStatus：我的图优先", () => {
       }),
     );
     expect(v?.headline).toBe("你的图排第 1 位");
-  });
-});
-
-describe("createEstimator", () => {
-  it("人数变了重新估，之后每秒倒数，最少 2 秒", () => {
-    const est = createEstimator();
-    expect(est(4, 15, 0)).toBe(60);
-    expect(est(4, 15, 10_000)).toBe(50);
-    expect(est(4, 15, 59_000)).toBe(2);
-    expect(est(4, 15, 120_000)).toBe(2);
-    expect(est(2, 15, 121_000)).toBe(30);
-  });
-  it("队伍清空后归零，再来人重新估", () => {
-    const est = createEstimator();
-    expect(est(3, 10, 0)).toBe(30);
-    expect(est(0, 10, 5000)).toBe(0);
-    expect(est(3, 10, 9000)).toBe(30);
   });
 });
 

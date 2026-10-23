@@ -5,7 +5,7 @@
  * 同时出现在 /public/live 的 guard.blocked.text 里；这里的措辞、数字都从那句话和 live 的字段里取，
  * 不自己编（见 status.test.ts：把 guard.rs 的原文贴进去，核对两边的数字和关键词一致）。
  */
-import { bjHour, duration } from "../../lib/format";
+import { bjHour } from "../../lib/format";
 import type { Live } from "./types";
 
 export type Tone = "ok" | "busy" | "mine" | "warn" | "bad" | "paced";
@@ -26,28 +26,6 @@ const view = (tone: Tone, headline: string, detail = "", announce?: string): Sta
   const sentence = detail ? `${headline} · ${detail}` : headline;
   return { tone, headline, detail, sentence, announce: announce ?? sentence };
 };
-
-/** 排队等待估算：队伍人数变了就重新按「人数 × 放行间隔」估一次，之后每秒倒数（最少 2 秒，不会越数越小到 0）。 */
-export type Estimator = (count: number, intervalSec: number, nowMs: number) => number;
-export function createEstimator(): Estimator {
-  let lastCount = -1;
-  let lastSec = 0;
-  let seenAt = 0;
-  return (count, intervalSec, nowMs) => {
-    if (count <= 0) {
-      lastCount = 0;
-      return 0;
-    }
-    if (count !== lastCount) {
-      lastCount = count;
-      lastSec = Math.round(count * intervalSec);
-      seenAt = nowMs;
-      return lastSec;
-    }
-    const passed = Math.floor((nowMs - seenAt) / 1000);
-    return Math.max(2, lastSec - passed);
-  };
-}
 
 const num = (v: unknown): number => {
   const n = Number(v);
@@ -95,17 +73,13 @@ function blockedView(code: string, text: string, nowMs: number): StatusView {
 }
 
 export type DeriveOpts = {
-  estimate?: Estimator;
   nowMs?: number;
-  /** 成员自己的平均出图耗时（秒），用来补「你的图正在生成」 */
-  avgDurS?: number | null;
 };
 
 /** live 还没到时返回 null（页面显示骨架屏）。判断顺序：上游冷却 → 全站拦截 → 排队满 → 排队 → 空闲；自己的图优先显示。 */
 export function deriveStatus(live: Live | null, opts: DeriveOpts = {}): StatusView | null {
   if (!live) return null;
   const nowMs = opts.nowMs ?? Date.now();
-  const estimate = opts.estimate ?? createEstimator();
   const g = live.guard ?? {};
   const r = live.rules ?? {};
   const mineView = live.me ?? null;
@@ -115,12 +89,6 @@ export function deriveStatus(live: Live | null, opts: DeriveOpts = {}): StatusVi
   const mine = mineView?.mine ?? [];
   const myRunning = mine.some((x) => x.state === "running");
   const myWaiting = mine.find((x): x is Extract<typeof x, { state: "waiting" }> => x.state === "waiting");
-  // 几个账号同时出图：全站每张的间隔 = 单账号周期（出图耗时 + 出完后歇的秒数）÷ 能接图的账号数
-  // （可用且今天没出满：出满的账号虽然「可用」，但不会再接图）
-  const accounts = Math.max(1, (live.accounts ?? []).filter((a) => a.usable && !a.full).length);
-  const interval = num(live.cycle) > 0 ? num(live.cycle) / accounts : 0;
-  // 网关自己估的「现在再来一张多久后开始」（含每个账号前面排着的、正在生成的）：有就用它
-  const serverStart = typeof g.start_in === "number" && g.start_in >= 0 ? g.start_in : null;
   const queueCap = num(r.queue_cap);
   const blocked = g.blocked ?? null;
 
@@ -136,37 +104,16 @@ export function deriveStatus(live: Live | null, opts: DeriveOpts = {}): StatusVi
   ) {
     out = view("warn", "排队已满", `最多 ${queueCap} 张，稍后再试`);
   } else if (waiting + running > 0) {
-    const ahead = waiting + running;
-    if (serverStart !== null || interval > 0) {
-      const sec =
-        serverStart !== null ? Math.max(2, Math.round(serverStart)) : estimate(ahead, interval, nowMs);
-      out = view(
-        "busy",
-        `约 ${duration(sec)}后开始`,
-        `前面有 ${ahead} 张在等`,
-        `排队中 · 前面有 ${ahead} 张在等`,
-      );
-    } else {
-      out = view("busy", "排队中", `前面有 ${ahead} 张在等`);
-    }
+    out = view("busy", "排队中");
   } else {
-    estimate(0, interval, nowMs);
     out = view("ok", "马上开始", "通道空闲");
   }
 
   if (myRunning) {
-    const avg = opts.avgDurS && opts.avgDurS > 0 ? `平均约 ${opts.avgDurS} 秒` : "";
-    out = view("mine", "你的图正在生成", avg);
+    out = view("mine", "你的图正在生成");
   } else if (myWaiting) {
-    // 网关的 eta 已按「全站每张间隔 = 单账号周期 ÷ 可用账号数」算好（live::mine）
-    const raw = num(myWaiting.eta);
-    const eta = raw > 0 ? Math.max(2, raw) : 0;
-    out = view(
-      "mine",
-      `你的图排第 ${myWaiting.position} 位`,
-      eta ? `约 ${duration(eta)}后开始画` : "",
-      `你的图排第 ${myWaiting.position} 位`,
-    );
+    const headline = `你的图排第 ${myWaiting.position} 位`;
+    out = view("mine", headline, "", headline);
   }
   return out;
 }

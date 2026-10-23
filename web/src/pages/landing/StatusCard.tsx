@@ -1,7 +1,7 @@
-import { useEffect, useRef, useState } from "preact/hooks";
+import { useEffect, useState } from "preact/hooks";
 import { cx, Skeleton } from "../../ui";
 import { useStore } from "./ctx";
-import { createEstimator, dailyMeters, dailyUsage, deriveStatus } from "./status";
+import { dailyMeters, dailyUsage, deriveStatus } from "./status";
 import { StatRows } from "./Usage";
 
 /**
@@ -9,29 +9,15 @@ import { StatRows } from "./Usage";
  * 游客登录入口统一放在顶栏。
  */
 export function StatusCard(props: { class?: string }) {
-  const { live, me, connection } = useStore();
-  const estimator = useRef(createEstimator());
-  // 排队倒计时每秒走一格（live 没有变化时也要动）
-  const [now, setNow] = useState(() => Date.now());
-  useEffect(() => {
-    const t = setInterval(() => {
-      if (!document.hidden) setNow(Date.now());
-    }, 1000);
-    return () => clearInterval(t);
-  }, []);
-
+  const { live, connection } = useStore();
   const data = live.value;
-  const who = me.value;
-  const timing = who?.logged_in ? who.timing : null;
   const view = deriveStatus(data, {
-    estimate: estimator.current,
-    nowMs: now,
-    avgDurS: timing?.avg_dur_s ?? null,
+    nowMs: Date.now(),
   });
   const meters = dailyMeters(data);
   const usage = dailyUsage(data);
 
-  // 读屏只在「状态本身」变化时播报（不含每秒变化的倒计时）
+  // 读屏只在实时状态变化时播报。
   const announce = view?.announce ?? "";
   const [spoken, setSpoken] = useState("");
   useEffect(() => {
