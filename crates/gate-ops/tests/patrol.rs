@@ -207,7 +207,7 @@ fn upstream_429_is_red_and_quiet_hours_are_ok() {
         rows(&rep),
         vec![(Sev::Ok, "通道", "近 60 分钟上游没有返回 429".to_string())]
     );
-    // 设置里的最近时间 + 日志里的次数
+    // 旧版留下的设置不再作为近期事故依据；只按用量日志计数。
     set_setting(&c, "guard_last_upstream_429", &format!("{}", NOW - 600.0));
     for i in 0..2 {
         add_log(
@@ -224,20 +224,21 @@ fn upstream_429_is_red_and_quiet_hours_are_ok() {
     check_upstream_429(&mut rep, &ro(&path), NOW).unwrap();
     assert_eq!(
         rows(&rep),
-        vec![
-            (Sev::Red, "通道", "上游 10 分钟前返回 429（限流）：上限已自动减半并进入冷却，请确认没有额外突发打到上游".to_string()),
-            (Sev::Red, "通道", "近 60 分钟上游 429 × 2（账号级限流，必须立刻降速）".to_string()),
-        ]
+        vec![(
+            Sev::Red,
+            "通道",
+            "近 60 分钟上游 429 × 2（账号级限流，必须立刻降速）".to_string()
+        )]
     );
-    assert_eq!(pkeys(&rep), ["upstream-429", "upstream-429-count"]);
+    assert_eq!(pkeys(&rep), ["upstream-429-count"]);
 }
 
 #[test]
-fn old_429_is_ignored() {
+fn legacy_429_setting_is_ignored_without_recent_logs() {
     let dir = tempfile::tempdir().unwrap();
     let path = new_db(dir.path());
     let c = rw(&path);
-    set_setting(&c, "guard_last_upstream_429", &format!("{}", NOW - 3600.0)); // 刚好满 1 小时：不再报
+    set_setting(&c, "guard_last_upstream_429", &format!("{}", NOW - 60.0));
     add_log(
         &c,
         &Log1 {
@@ -250,24 +251,6 @@ fn old_429_is_ignored() {
     let mut rep = Report::default();
     check_upstream_429(&mut rep, &ro(&path), NOW).unwrap();
     assert_eq!(rep.worst(), Sev::Ok, "{:?}", rows(&rep));
-}
-
-#[test]
-fn non_finite_last_429_setting_is_ignored() {
-    let dir = tempfile::tempdir().unwrap();
-    let path = new_db(dir.path());
-    let c = rw(&path);
-    for bad in ["inf", "-inf", "nan", "abc", ""] {
-        set_setting(&c, "guard_last_upstream_429", bad);
-        let mut rep = Report::default();
-        check_upstream_429(&mut rep, &ro(&path), NOW).unwrap();
-        assert_eq!(rep.worst(), Sev::Ok, "{bad:?}: {:?}", rows(&rep));
-    }
-    // 浮点文本按截断取整（网关写的是秒级时间戳，可能带小数或科学计数法）
-    set_setting(&c, "guard_last_upstream_429", &format!("{:e}", NOW - 120.5));
-    let mut rep = Report::default();
-    check_upstream_429(&mut rep, &ro(&path), NOW).unwrap();
-    assert_eq!(rep.worst(), Sev::Red, "{:?}", rows(&rep));
 }
 
 #[test]

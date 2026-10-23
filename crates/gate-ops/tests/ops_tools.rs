@@ -332,6 +332,7 @@ fn restart_note_only_when_recent() {
     let mut rep = Report::default();
     run_extra_checks(&mut rep, &conn, &c, NOW).unwrap();
     assert!(find(&rep, "系统")[0].text.contains("10 分钟前启动"));
+    assert!(!find(&rep, "系统")[0].text.contains("每小时出图计数"));
     c.gate_started_at = Some(NOW - 7200.0);
     let mut rep = Report::default();
     run_extra_checks(&mut rep, &conn, &c, NOW).unwrap();

@@ -178,15 +178,6 @@ impl Config {
 
 // ---------------------------------------------------------------- 取值小工具
 
-/// 数值设置：截断取整；读不到、不是数字、无穷或 NaN 都按默认值
-/// （`"inf"` 也能 parse 成功，`as i64` 会饱和成 `i64::MAX`，必须先挡掉）。
-fn setting_num(conn: &Connection, key: &str, default: i64) -> rusqlite::Result<i64> {
-    Ok(checks::setting(conn, key)?
-        .and_then(|s| s.trim().parse::<f64>().ok())
-        .filter(|f| f.is_finite())
-        .map_or(default, |f| f.trunc() as i64))
-}
-
 // ---------------------------------------------------------------- 系统探测（docker / http / 命令行）
 
 /// `check_infra` 需要的外部事实；探测和判断分开，判断部分可以不碰 docker 直接测。
@@ -370,19 +361,6 @@ pub fn check_registration(
 /// 上游 429 = 账号级红线（2026-10-13 01:30 第一次遇到）：一定要让站长立刻知道（网关对 429 只写日志、不私信）。
 /// 我们的限流器只能挡住自己放行出去的量，挡不住「绕过网关直连上游」的突发。
 pub fn check_upstream_429(rep: &mut Report, conn: &Connection, now: f64) -> rusqlite::Result<()> {
-    let last_429 = setting_num(conn, "guard_last_upstream_429", 0)?;
-    let recent = last_429 != 0 && now - (last_429 as f64) < 3600.0;
-    if recent {
-        rep.add_key(
-            Sev::Red,
-            "通道",
-            format!(
-                "上游 {} 分钟前返回 429（限流）：上限已自动减半并进入冷却，请确认没有额外突发打到上游",
-                1.max(((now - last_429 as f64) / 60.0).trunc() as i64)
-            ),
-            "upstream-429",
-        );
-    }
     let n429: i64 = conn.query_row(
         "SELECT COUNT(*) FROM usage_log WHERE ts>? AND up_status=429",
         [now - 3600.0],
@@ -396,7 +374,7 @@ pub fn check_upstream_429(rep: &mut Report, conn: &Connection, now: f64) -> rusq
             "upstream-429-count",
         );
     }
-    if !recent && n429 == 0 {
+    if n429 == 0 {
         rep.add(Sev::Ok, "通道", "近 60 分钟上游没有返回 429");
     }
     Ok(())

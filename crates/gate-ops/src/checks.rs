@@ -800,7 +800,7 @@ pub fn check_restart(rep: &mut Report, ctx: &ExtraCtx, now: f64) {
             Sev::Ok,
             "系统",
             format!(
-                "提示：{} 在 {:.0} 分钟前启动过。每小时出图计数重启后由用量日志补回，跨重启的那个小时窗口可能多算一次（仅供参考，不影响放行）",
+                "提示：{} 在 {:.0} 分钟前启动过（仅供参考，不影响放行）",
                 ctx.gate_container,
                 mins.max(1.0)
             ),
