@@ -142,7 +142,7 @@
 .lp-dot--paced {
   color: var(--info);
 }
-/* 「用 Discord 登录」：Discord 官方 Blurple，白字，Clyde 标志 22px；在状态行右边 */
+/* Discord 主操作：Discord 官方 Blurple，白字，Clyde 标志 22px。 */
 .btn--discord {
   gap: 8px;
   margin-left: auto;
@@ -162,12 +162,6 @@
   fill: currentColor;
 }
 @media (max-width: 520px) {
-  .lp-login {
-    width: max-content;
-    margin-left: 0;
-    min-height: 38px;
-    padding: 0 var(--sp-3);
-  }
   .lp-status {
     gap: var(--sp-3);
   }

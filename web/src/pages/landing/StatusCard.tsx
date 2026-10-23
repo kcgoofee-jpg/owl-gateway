@@ -1,18 +1,15 @@
 import { useEffect, useRef, useState } from "preact/hooks";
-import { useLoginHref } from "../../lib/deviceid";
 import { cx, Skeleton } from "../../ui";
 import { useStore } from "./ctx";
-import { DiscordMark } from "./icons";
 import { createEstimator, dailyMeters, dailyUsage, deriveStatus } from "./status";
 import { StatRows } from "./Usage";
 
 /**
  * 全站实时状态：一句话（能不能马上出图 + 原因）+ 全站今日用量。所有访客都看得到。
- * 游客首页的唯一登录入口放在状态摘要下方。
+ * 游客登录入口统一放在顶栏。
  */
-export function StatusCard(props: { login?: boolean; class?: string }) {
+export function StatusCard(props: { class?: string }) {
   const { live, me, connection } = useStore();
-  const loginHref = useLoginHref();
   const estimator = useRef(createEstimator());
   // 排队倒计时每秒走一格（live 没有变化时也要动）
   const [now, setNow] = useState(() => Date.now());
@@ -62,11 +59,6 @@ export function StatusCard(props: { login?: boolean; class?: string }) {
           <span class="lp-status__wait" aria-busy="true">
             <Skeleton h="32px" />
           </span>
-        )}
-        {props.login && (
-          <a class="btn btn--lg btn--discord lp-login" href={loginHref}>
-            <DiscordMark />用 Discord 登录
-          </a>
         )}
         {/* 读屏播报和断线提示放在第一行里：卡片的直接子元素就是四条行线，不能多出来 */}
         <p class="sr-only" role="status" aria-live="polite" aria-atomic="true">

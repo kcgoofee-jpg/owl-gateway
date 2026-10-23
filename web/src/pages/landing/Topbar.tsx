@@ -113,7 +113,7 @@ export type TopbarUser = {
 };
 
 /**
- * 全站顶栏：Logo（两只眼睛 + 站名，就是回首页的链接）、主题切换、头像菜单。
+ * 全站顶栏：Logo（两只眼睛 + 站名，就是回首页的链接）、游客登录、主题切换、头像菜单。
  * 首页、问卷共用；独立状态页（网关渲染）照同样的结构和类名画一份。
  */
 export function Topbar(props: {
@@ -136,16 +136,13 @@ export function Topbar(props: {
           <span class="brand__name">猫头鹰公益站</span>
         </a>
         <div class="site-top__right">
-          <ThemeButton />
-          {props.user ? (
-            <Account user={props.user} />
-          ) : (
-            props.loginOpen && (
-              <a class="btn btn--primary" href={loginHref} aria-label="用 Discord 登录">
-                登录
-              </a>
-            )
+          {!props.user && props.loginOpen && (
+            <a class="btn btn--primary" href={loginHref} aria-label="用 Discord 登录">
+              登录
+            </a>
           )}
+          <ThemeButton />
+          {props.user && <Account user={props.user} />}
         </div>
       </div>
     </header>

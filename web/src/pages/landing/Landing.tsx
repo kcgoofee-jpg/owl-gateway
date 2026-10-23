@@ -1,6 +1,6 @@
 /**
  * 成员首页（/）。三种人看到三种首屏：
- * - 游客：只有状态区（内含「用 Discord 登录」），下面客户端设置、使用须知；
+ * - 游客：首屏显示实时状态，登录入口位于顶栏，下面是客户端设置和使用须知；
  * - 有 Key 的成员：今天的额度圆环，下面状态区、重置券和请求记录；
  * - 登录了还没有 Key：加入服务器的入口排最前，状态区占满整行。
  * 开屏每天播一次，见 Splash.tsx。
@@ -99,7 +99,7 @@ function Loading() {
   );
 }
 
-/** 游客：首屏只有状态区（内含登录按钮），下面是客户端设置、使用须知；全在一个 760px 的列里。 */
+/** 游客：首屏显示状态，登录入口位于顶栏；下面是客户端设置、使用须知。 */
 function GuestHome() {
   return (
     <>
@@ -107,7 +107,7 @@ function GuestHome() {
         <Grain />
         <div class="wrap wrap--narrow">
           <h1 class="sr-only">猫头鹰公益站</h1>
-          <StatusCard login />
+          <StatusCard />
         </div>
       </section>
       <div class="wrap wrap--narrow lp-body">
@@ -205,8 +205,7 @@ function Page({ store }: { store: Store }) {
               }
             : undefined
         }
-        // 首页游客的登录入口在状态区里，顶栏不再放第二个
-        loginOpen={false}
+        loginOpen={me !== undefined && !member}
         brandHref="/#gallery"
       />
       <main class="lp-main">

@@ -9,6 +9,7 @@
 ### 成员可感知
 
 - **Mobile usage legend stays on one line.** V4.5 counts and V5 pause status no longer wrap into tall stacked labels on narrow screens; long secondary hints are ellipsized while their full accessible text remains available.
+- **Guest login moved into the top bar.** The homepage Discord sign-in control now sits beside the theme switch, leaving the live status and usage arc unobstructed.
 - **A simpler account and survey flow.** Members who have a key now find its copy controls in the avatar menu; members without a completed survey are prompted after login, and `/register` explains where to find the key and survey. Removed donation and direct member-reward pages, controls and API handlers. Historical database tables and rows remain intact for compatibility; no bot donor-DM behavior exists.
 - **Tighter homepage proportions.** Reduced the status headline, detail and Discord login control sizes on desktop and mobile; removed the usage-guide heading and generic-client note.
 
