@@ -610,6 +610,12 @@
 .lp-gallery:focus {
   outline: none;
 }
+/* 常驻的复制提示：悬停 title 触屏上看不到，手机也要能发现图片可点 */
+.lp-gallery__hint {
+  margin: 0 0 var(--sp-3);
+  color: var(--muted);
+  font-size: var(--fs-sm);
+}
 .lp-gallery__images {
   columns: 4;
   column-gap: var(--sp-3);

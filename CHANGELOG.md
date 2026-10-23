@@ -8,6 +8,8 @@
 
 ### 成员可感知
 
+- **The survey page pins its footer; the gallery explains its tap shortcut.** Short `/survey` pages stretch to fill the viewport so the footer sits at the bottom instead of floating mid-page, and the homepage gallery carries a standing hint (点击图片复制提示词) so touch visitors can find tap-to-copy without hovering.
+
 - **Mobile usage legend stays on one line.** V4.5 counts and V5 pause status no longer wrap into tall stacked labels on narrow screens; long secondary hints are ellipsized while their full accessible text remains available.
 - **Guest login moved into the top bar.** The homepage Discord sign-in control now sits beside the theme switch, leaving the live status and usage arc unobstructed.
 - **A simpler account and survey flow.** Members who have a key now find its copy controls in the avatar menu; members without a completed survey are prompted after login, and `/register` explains where to find the key and survey. Removed donation and direct member-reward pages, controls and API handlers. Historical database tables and rows remain intact for compatibility; no bot donor-DM behavior exists.

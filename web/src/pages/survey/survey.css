@@ -1,8 +1,19 @@
 /* 问卷页：沿用 ui 令牌；顶栏、页脚、.lp-err 复用首页样式（landing.css）。字号手机与桌面一致。 */
-.sv-main {
-  max-width: 720px;
+
+/* 内容不足一屏时页脚也要贴底：#app 拉成整视口高的纵向 flex，main 弹性占满剩余高度。
+   用 :has 限定问卷页：SurveyForm 也在首页的弹窗里用，survey.css 会打进首页包，不能波及首页的布局。
+   width: 100%：flex 纵向排布里 auto 左右外边距会让 main 缩成内容宽，先撑满、再靠 max-width 收窄居中。 */
+#app:has(> .sv-main) {
   display: flex;
   flex-direction: column;
+  min-height: 100dvh;
+}
+.sv-main {
+  max-width: 720px;
+  width: 100%;
+  display: flex;
+  flex-direction: column;
+  flex: 1;
   gap: var(--sp-4);
 }
 .sv-head {
