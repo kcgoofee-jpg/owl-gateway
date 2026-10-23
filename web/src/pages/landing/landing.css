@@ -661,10 +661,22 @@
   font-size: var(--fs-sm);
 }
 
-@media (max-width: 380px) {
+@media (max-width: 760px) {
+  .lp-meter__legend {
+    column-gap: var(--sp-2);
+  }
+
   .lp-meter {
-    display: grid;
-    gap: var(--sp-1);
+    flex-wrap: nowrap;
+    column-gap: var(--sp-1);
+    min-width: 0;
+  }
+
+  .lp-meter__caption {
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
   }
 }
 
