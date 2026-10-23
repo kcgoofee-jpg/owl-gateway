@@ -47,6 +47,7 @@ const ALL: &[(&str, &str, Option<&str>)] = &[
     ("PARAM", reasons::PARAM, None),
     ("KEY_DISABLED", reasons::KEY_DISABLED, Some("Key 已停用")),
     ("KEY_INVALID", reasons::KEY_INVALID, Some("Key 无效")),
+    ("WEB_LOGIN", reasons::WEB_LOGIN, Some("请先网页登录")),
 ];
 
 #[test]
@@ -59,7 +60,7 @@ fn codes_are_the_frozen_snake_case_names() {
     codes.sort_unstable();
     codes.dedup();
     assert_eq!(codes.len(), ALL.len(), "原因码不能重复");
-    assert_eq!(ALL.len(), 24);
+    assert_eq!(ALL.len(), 25);
 }
 
 #[test]

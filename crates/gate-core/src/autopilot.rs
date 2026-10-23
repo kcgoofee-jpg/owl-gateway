@@ -1,7 +1,7 @@
 //! 自动驾驶的两条规则（旧 `app/autopilot.py`）：全站熔断、单个 Key 限流。
 //!
 //! 两个纯函数 [`breaker`] 和 [`key_guard`]，各自由服务层的一个定时任务调用：输入是已经查好的数字，
-//! 输出是有序的 [`Effect`] 和一句摘要（写进后台「定时任务」卡片）。判定与文案照旧版；
+//! 输出是有序的 [`Effect`] 和一句摘要（写进后台「定时任务」卡片）。判定与文案固定（快照对拍）；
 //! 不再写 `autopilot_last` / `autopilot_history`（旧的几行留在库里，不读不写）。
 //!
 //! # 服务层要实现的查询 / 内存读取
@@ -33,12 +33,14 @@ use crate::reasons::{
     BODY_ABORT, BREAKER, BURST_CAP, CAP_3H, COOLDOWN, DAILY_CAP, FEATURE_OFF, HOURLY_CAP, KEY_BUSY,
     KEY_DISABLED, KEY_INVALID, KEY_PAUSED, KEY_RATE, MEMBER_QUEUE_FULL, MEMBER_QUOTA, PACED, PARAM,
     QUEUE_FULL, QUEUE_TIMEOUT, QUIET_CAP, SITE_QUOTA, TEST_REQUEST, UPSTREAM_LOCKED, V5_EXHAUSTED,
+    WEB_LOGIN,
 };
 use std::collections::HashMap;
 
 /// 单 Key 限流统计要排除的拒绝原因码：已暂停（`KEY_PAUSED`）+ 全站层面的拒绝（原因在站点：排队满、
 /// 账号上限、熔断、冷却……，不是这个成员的客户端出了问题）。忙时自动重试的正常成员不能被误判为死循环。
-pub const KEY_GUARD_SKIP_REASONS: [&str; 16] = [
+/// 网页登录门槛（`WEB_LOGIN`）同理：拦的是「还没到网页登录过」，不是客户端出了问题。
+pub const KEY_GUARD_SKIP_REASONS: [&str; 17] = [
     KEY_PAUSED,
     KEY_DISABLED,
     KEY_INVALID,
@@ -55,6 +57,7 @@ pub const KEY_GUARD_SKIP_REASONS: [&str; 16] = [
     QUEUE_TIMEOUT,
     SITE_QUOTA,
     UPSTREAM_LOCKED,
+    WEB_LOGIN,
 ];
 
 /// 计入单 Key 限流时只按半次算的原因：站点拥堵时排队变长，客户端「上一张没出完就重发」
@@ -89,7 +92,7 @@ pub const BREAKER_MIN_KEYS: i64 = 2;
 /// 熔断时全站暂停出图的秒数。
 pub const BREAKER_SECS: i64 = 300;
 
-/// 最近 15 分钟上游失败 ≥ 5 次且占比 ≥ 30% → 熔断（旧版规则；另加 Key 数门槛，见 [`breaker_rule_keys`]）。
+/// 最近 15 分钟上游失败 ≥ 5 次且占比 ≥ 30% → 熔断（另加 Key 数门槛，见 [`breaker_rule_keys`]）。
 pub fn breaker_rule(fails: i64, total: i64) -> (bool, String) {
     if fails >= 5 && total != 0 && (fails as f64 / total as f64) >= 0.3 {
         return (
@@ -175,7 +178,7 @@ pub struct BreakerOutcome {
     pub trip: bool,
     /// 这一轮真的触发了（判定要熔断且此刻不在熔断中）。
     pub applied: bool,
-    /// 判定说明（旧版 `why`，也是操作日志的前半句）。
+    /// 判定说明（也是操作日志的前半句）。
     pub why: String,
     /// 一句摘要（后台「定时任务」卡片）。
     pub summary: String,

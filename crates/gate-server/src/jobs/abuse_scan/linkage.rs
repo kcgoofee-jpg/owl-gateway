@@ -9,6 +9,7 @@
 //! | `same_connection` | 同一个外部账号（Steam / GitHub …）绑在多个 Discord 账号上 | 100 |
 //! | `guild_overlap` | 两个账号所在服务器的 Jaccard ≥0.6，且共同的冷门服务器（本站记录里不到 5 个账号在）≥2 个 | 50 起，最高 80 |
 //! | `same_battery` | 两个账号 30 分钟内网页登录时电量和充电状态一模一样（满电 100% 太常见，不算） | 50 起，最高 80 |
+//! | `foreign_origin` | 一把 Key 近 14 天的请求带着第三方网站的 Origin（Key 被填进了别的网站，会流经对方服务器）；已知域（本站 + `https://novelai.net` + 社区公益站，精确匹配）之外都算 | 30（只提醒，不封） |
 
 use super::{DAY, Signal, ev, subject};
 use gate_core::clock::Clock;
@@ -33,6 +34,16 @@ const RARE_GUILD_MEMBERS: usize = 5;
 const RARE_GUILD_MIN: usize = 2;
 /// 电量：多少秒内算「同时」
 const BATTERY_SECS: f64 = 1800.0;
+/// 第三方站点来源：看最近几天
+const FOREIGN_ORIGIN_DAYS: f64 = 14.0;
+/// 已知的非本站 origin（精确匹配，不猜子域）：这些来源的请求不算第三方，不出信号。
+/// 本站的 origin（`SITE_URL`）由调用方传入，不在这个名单里。
+const KNOWN_ORIGINS: [&str; 2] = [
+    // 官方站
+    "https://novelai.net",
+    // 站长 10-24 确认的社区公益站
+    "https://novelai-draw.minijiu.cfd",
+];
 
 /// 网段：IPv4 取前两段（/16），IPv6 取前两组。
 pub fn net_prefix(ip: &str) -> String {
@@ -240,13 +251,15 @@ fn samples(h: &Hits) -> String {
     h.samples.iter().cloned().collect::<Vec<_>>().join("、")
 }
 
-/// 跑一遍六项，返回信号（由调用方统一写库）。
+/// 跑一遍七项，返回信号（由调用方统一写库）。`official` 是本站的 origin（`SITE_URL`，精确匹配）；
+/// 它之外的已知域见 [`KNOWN_ORIGINS`]，都不算第三方。其余来源的请求说明 Key 被填进了第三方网站。
 pub(super) fn scan(
     c: &Connection,
     now: f64,
     clock: &Clock,
     keys_of: &HashMap<String, Vec<i64>>,
     did_of: &HashMap<i64, String>,
+    official: &[String],
 ) -> rusqlite::Result<Vec<Signal>> {
     let mut out = Vec::new();
     let kids = |ids: &BTreeSet<String>| -> String {
@@ -547,6 +560,56 @@ pub(super) fn scan(
                     ev("时间", when(clock, &h)),
                 ],
             );
+        }
+    }
+    // ---------- 第三方站点来源（Key 被填进了别的网站） ----------
+    {
+        let mut st = c.prepare(
+            "SELECT key_id, origin, COUNT(*), MIN(ts), MAX(ts) FROM usage_log \
+             WHERE ts>=? AND COALESCE(origin,'')!='' GROUP BY key_id, origin",
+        )?;
+        let rows = st.query_map([now - FOREIGN_ORIGIN_DAYS * DAY], |r| {
+            Ok((
+                r.get::<_, i64>(0)?,
+                r.get::<_, String>(1)?,
+                r.get::<_, i64>(2)?,
+                r.get::<_, f64>(3)?,
+                r.get::<_, f64>(4)?,
+            ))
+        })?;
+        // 一把 Key → 非官方来源的命中（次数、首末时刻、域名样例）
+        let mut foreign: BTreeMap<i64, Hits> = BTreeMap::new();
+        for row in rows {
+            let (k, origin, n, first, last) = row?;
+            if !did_of.contains_key(&k)
+                || official.contains(&origin)
+                || KNOWN_ORIGINS.contains(&origin.as_str())
+            {
+                continue;
+            }
+            let h = foreign.entry(k).or_default();
+            if h.n == 0 || first < h.first {
+                h.first = first;
+            }
+            h.last = h.last.max(last);
+            h.n += n as usize;
+            if h.samples.len() < 5 {
+                h.samples.insert(format!("{origin} ×{n}"));
+            }
+        }
+        for (k, h) in &foreign {
+            out.push(Signal {
+                kind: "foreign_origin",
+                subject: format!("key:{k}"),
+                key_ids: k.to_string(),
+                score: 30.0,
+                detail: json!({
+                    "summary": "这把 Key 的请求来自第三方网站（Key 会流经对方服务器，有泄露风险）",
+                    "evidence": [ev("域名", samples(h)), ev("时间", when(clock, h)), ev("Discord", &did_of[k])],
+                }),
+                alert: None,
+                all_banned: false,
+            });
         }
     }
     Ok(out)

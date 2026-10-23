@@ -16,8 +16,8 @@
 //! 涉及的账号已经全部封禁的信号不带来新信息：写进去就标成已确认，不留在待审里。
 //! 涉及的账号一个 Key 都没有的信号是噪音（站长 10-23）：不写（`banned_link` 除外，领 Key 拦截靠它的忽略状态放行）。
 //!
-//! 另有六项关联信号（`ip_switch` / `key_concurrent` / `same_ref_image` / `same_connection` / `guild_overlap` /
-//! `same_battery`），见 [`linkage`]。
+//! 另有七项关联信号（`ip_switch` / `key_concurrent` / `same_ref_image` / `same_connection` / `guild_overlap` /
+//! `same_battery` / `foreign_origin`——Key 的请求来自第三方网站，分数 30，只提醒不封），见 [`linkage`]。
 //!
 //! 新号信号同时看：进服当天就领 Key（+15）、退群后又进（+10）、没头像（+5）、系统自动生成的用户名（+5）。
 //! 行为信号另看「轮流使用」：时间线上频繁这个号停、那个号接着用（+10）。登录用过机房 / VPN IP 的账号，
@@ -247,6 +247,12 @@ pub async fn run(state: &AppState) -> Result<String, JobError> {
     };
 
     let clock = state.clock.clone();
+    // 官方 origin（精确匹配，不猜子域）：本站 + 官方站。之外的来源说明 Key 被填进了第三方网站。
+    let mut official = vec!["https://novelai.net".to_string()];
+    let site = crate::client_hints::origin_only(&state.env.site_url);
+    if !site.is_empty() {
+        official.push(site);
+    }
     let signals = state
         .db
         .read(move |c| {
@@ -714,8 +720,8 @@ pub async fn run(state: &AppState) -> Result<String, JobError> {
                     }
                 }
             }
-            // ---------- 关联扫描（同 IP 换号 / 同时异地 / 同参考图 / 同外部账号 / 服务器重合 / 电量相同） ----------
-            out.extend(linkage::scan(c, now, &clock, &keys_of, &did_of)?);
+            // ---------- 关联扫描（同 IP 换号 / 同时异地 / 同参考图 / 同外部账号 / 服务器重合 / 电量相同 / 第三方站点来源） ----------
+            out.extend(linkage::scan(c, now, &clock, &keys_of, &did_of, &official)?);
             for sig in &mut out {
                 sig.all_banned = !sig.subject.starts_with("key:")
                     && sig.subject.split(',').all(|d| bans.contains_key(d));

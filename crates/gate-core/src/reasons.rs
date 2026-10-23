@@ -37,8 +37,11 @@ pub const TEST_REQUEST: &str = "test_request"; // 客户端的「连接测试」
 pub const KEY_DISABLED: &str = "key_disabled"; // Key 已停用 / 已过期（站点层面的状态，单 Key 限流不再重复暂停它）
 pub const KEY_INVALID: &str = "key_invalid"; // 没带 Key / Key 无效（没有 key_id，按 IP 拦截，不进单 Key 限流）
 pub const PARAM: &str = "param"; // 参数不被支持（模型、采样器、角色数、权重写法……），成员按提示改就好
+/// 站长开了「每位成员到网页登录一次」之后，还没登录过的 Key 被拦：登录一次立即恢复。
+/// 不是处罚性暂停（那是 [`KEY_PAUSED`]），两个码必须分得开，站长看日志才不会误会。
+pub const WEB_LOGIN: &str = "web_login";
 
-/// 带原因码的拒绝说明（旧版是 `str` 子类，旧调用方照常当字符串用）。
+/// 带原因码的拒绝说明（`Deref<Target = str>` 并实现 `Display`，调用方照常当字符串用）。
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Reason {
     text: String,
@@ -53,7 +56,7 @@ impl Reason {
         }
     }
 
-    /// 没有原因码的普通说明（对应旧版里直接传 `str`）。
+    /// 没有原因码的普通说明（`code` 为空串）。
     pub fn plain(text: impl Into<String>) -> Self {
         Self::new(text, "")
     }
@@ -183,7 +186,7 @@ pub const BACKFILL: &[(&str, &str)] = &[
     (PARAM, "%角色数量超限%"),
 ];
 
-/// 原因码 → 给站长看的短说明（`LABELS`，顺序同旧版）。
+/// 原因码 → 给站长看的短说明（`LABELS`，新增的码追加在末尾）。
 pub const LABELS: &[(&str, &str)] = &[
     (KEY_PAUSED, "Key 被暂停"),
     (QUEUE_FULL, "排队满"),
@@ -207,6 +210,7 @@ pub const LABELS: &[(&str, &str)] = &[
     (TEST_REQUEST, "连接测试（未出图）"),
     (KEY_DISABLED, "Key 已停用"),
     (KEY_INVALID, "Key 无效"),
+    (WEB_LOGIN, "请先网页登录"),
 ];
 
 /// `^\d{3}\s*`：开头三个十进制数字（HTTP 状态码）加后面的空白。

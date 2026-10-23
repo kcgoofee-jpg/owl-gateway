@@ -270,13 +270,13 @@ async fn site_level_rejections_do_not_count() {
     let _clock = clock(Some(NOW)).await;
     let e = setup(&[]).await;
     let k = member_key(&e.state, 1, &[]).await;
-    // 16 种站点层面的原因（含 key_paused 本身、上游并发锁）各 120 次：都不是这个成员的问题
+    // 17 种站点层面的原因（含 key_paused 本身、上游并发锁、网页登录门槛）各 120 次：都不是这个成员的问题
     let mut rows = Vec::new();
     for reason in KEY_GUARD_SKIP_REASONS {
         rows.extend(rejects(k, reason, 120, 60.0));
     }
     run_sql(&e, rows).await;
-    assert_eq!(KEY_GUARD_SKIP_REASONS.len(), 16);
+    assert_eq!(KEY_GUARD_SKIP_REASONS.len(), 17);
     assert_eq!(
         run_job(&e.state, "key_guard").await.unwrap(),
         "没有 Key 触发"

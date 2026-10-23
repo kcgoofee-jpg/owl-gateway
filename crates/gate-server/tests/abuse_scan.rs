@@ -266,3 +266,62 @@ async fn linkage_signals_are_written() {
         "没有 Key 的账号不进"
     );
 }
+
+/// 一把 Key 的请求带着第三方网站的 Origin（Key 被填进了别的网站，会流经对方服务器）→
+/// 「foreign_origin」信号（分数 30，只提醒不封）；已知域（本站 / novelai.net / 社区公益站，精确匹配）的不出信号。
+#[tokio::test]
+async fn foreign_origin_requests_are_flagged() {
+    let e = setup(&[("SITE_URL", "https://gate.test")]).await;
+    let st = &e.state;
+    let (da, db_) = ("900000000000000941", "900000000000000942");
+    let leaked = member_key(st, 1, &[("discord_id", json!(da))]).await;
+    let clean = member_key(st, 2, &[("discord_id", json!(db_))]).await;
+    let now = st.now();
+    let log = |t: f64, k: i64, origin: &str| {
+        format!(
+            "INSERT INTO usage_log(ts, key_id, key_name, kind, model, status, images, detail, client, src, reason, origin) \
+             VALUES ({t}, {k}, 'x', 'image', 'm', 'ok', 1, '', '', '', '', '{origin}')"
+        )
+    };
+    st.db
+        .run_script(vec![
+            // 已知域（本站 + 官方站 + 站长确认的社区公益站）不算；名单之外的第三方网站算
+            log(now - 3600.0, leaked, "https://gate.test"),
+            log(now - 3500.0, leaked, "https://novelai.net"),
+            log(now - 3400.0, leaked, "https://novelai-draw.minijiu.cfd"),
+            log(now - 3000.0, leaked, "https://draw.example"),
+            log(now - 2000.0, leaked, "https://draw.example"),
+            log(now - 1500.0, clean, "https://gate.test"),
+        ])
+        .await
+        .unwrap();
+    let summary = run_job(st, "abuse_scan").await.unwrap();
+    assert!(summary.contains("foreign_origin 1"), "{summary}");
+    let rows = query(
+        &st.db,
+        "SELECT subject, key_ids, score, detail FROM abuse_signals WHERE kind='foreign_origin'",
+    )
+    .await;
+    assert_eq!(rows.len(), 1, "{rows:?}");
+    assert_eq!(rows[0]["subject"], format!("key:{leaked}"));
+    assert_eq!(rows[0]["key_ids"], leaked.to_string());
+    assert_eq!(rows[0]["score"], 30.0);
+    let detail: serde_json::Value =
+        serde_json::from_str(rows[0]["detail"].as_str().unwrap()).unwrap();
+    assert_eq!(
+        detail["summary"],
+        "这把 Key 的请求来自第三方网站（Key 会流经对方服务器，有泄露风险）"
+    );
+    let item = |k: &str| {
+        detail["evidence"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|e| e["k"] == k)
+            .map(|e| e["v"].as_str().unwrap().to_string())
+            .unwrap_or_else(|| panic!("没有 {k}：{detail}"))
+    };
+    assert_eq!(item("域名"), "https://draw.example ×2");
+    assert_eq!(item("Discord"), da);
+    assert!(item("时间").contains("~"), "{detail}");
+}

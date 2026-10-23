@@ -198,7 +198,7 @@ pub async fn authenticate(state: &AppState, parts: &Parts, passive: bool) -> Res
                     "请先在 {} 用 Discord 登录一次，登录后自动恢复。",
                     state.env.site_url.trim_end_matches('/')
                 ),
-                reasons::KEY_PAUSED,
+                reasons::WEB_LOGIN,
             )
             .into());
         }
