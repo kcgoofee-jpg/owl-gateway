@@ -29,7 +29,7 @@ pub const V5_FULL_PERCENT: f64 = 99.5;
 // 错误与副作用
 // ---------------------------------------------------------------------------
 
-/// 旧版会抛出的异常（只区分类型名）。
+/// 额度判定失败，按异常类型分类（错误文案以 [`DecideError::py_type`] 的类型名开头）。
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
 pub enum DecideError {
     #[error("ValueError: {0}")]
@@ -46,7 +46,7 @@ pub enum DecideError {
     Overflow(String),
     #[error("ZeroDivisionError: {0}")]
     ZeroDivision(String),
-    /// 服务层没按约定提供某组输入（旧版没有对应异常）。
+    /// 服务层没按约定提供某组输入（内部 bug，不属于上游判定失败）。
     #[error("缺少输入: {0}")]
     MissingInput(String),
 }
@@ -102,7 +102,7 @@ pub enum Effect {
         reason: String,
         now: f64,
     },
-    /// 自动驾驶：临时暂停单把 Key（旧版 `share.pause_key(key_id, seconds, reason, now)`；落 `share_state` 表并更新内存暂停表）。
+    /// 自动驾驶：临时暂停单把 Key（落 `share_state` 表并更新内存暂停表）。
     PauseKey {
         key_id: i64,
         seconds: i64,
@@ -246,7 +246,7 @@ pub fn quiet_snaps_since(now: f64) -> f64 {
     now - QUIET_WINDOW_SECS
 }
 
-/// 旧版会去数 V5 条数的相邻快照对（间隔 ≤ 3 小时）的下标 `i`（即 `snaps[i]` → `snaps[i+1]`）。
+/// 要数 V5 条数的相邻快照对（间隔 ≤ 3 小时）的下标 `i`（即 `snaps[i]` → `snaps[i+1]`）。
 /// 服务层只需要对这些下标执行 `quiet.counts[i]` 那条查询，其余位置填 0 即可。
 pub fn quiet_count_pairs(snaps: &[QuietSnap]) -> Vec<usize> {
     snaps

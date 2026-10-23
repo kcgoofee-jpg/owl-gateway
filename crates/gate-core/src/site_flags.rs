@@ -6,9 +6,8 @@
 //! - `put(db, spec, value)`：`db.set_setting(spec.key, encode(spec, value))`，即 `site_settings` 写 `spec.key`，
 //!   值是 [`encode`] 的返回串。
 //!
-//! 与旧版一致的怪癖：`parse` 里的 `max(lo, num)` / `min(hi, num)` 返回的是「胜出的那个对象」，
-//! 所以 float 类型的设置被夹到边界时得到的是 **int**（`lo` / `hi` 在登记表里都是整数字面量），
-//! `encode` 因此写出 `"0"` 而不是 `"0.0"`；没夹到边界才是 float。
+//! 格式怪癖：float 类型的设置被夹到边界时得到的是 **int**（`lo` / `hi` 在登记表里都是整数字面量，
+//! 夹取返回「胜出的那个值」），`encode` 因此写出 `"0"` 而不是 `"0.0"`；没夹到边界才是 float。
 
 use crate::{pyc, pyext, pyval};
 use serde_json::Value;
@@ -259,7 +258,7 @@ pub static V5_MEDIUM_MODE: Spec = Spec {
     )
 };
 
-/// 登记表（顺序与旧版 `ALL` 一致，已删除的设置不在里面；新增的追加在末尾）。
+/// 登记表（已删除的设置不在里面；新增的追加在末尾）。
 pub static ALL: [&Spec; 11] = [
     &MEMBER_SWEEP,
     &ISSUE_HOURLY_CAP,

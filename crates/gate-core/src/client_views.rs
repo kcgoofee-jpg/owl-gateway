@@ -1,14 +1,14 @@
 //! 客户端兼容视图（`app/client_views.py`）：只由已认证的虚拟 Key 推出，供官方风格的客户端读订阅信息。
 //!
-//! 旧版 `subscription_payload(state, key)` 是 async，因为要读四个库里的数字；计算本身是纯的，
-//! 所以这里把「读库」留给调用方、只移植计算：调用方按 [`SubscriptionData`] 把数字查好传进来
+//! 订阅数字来自四个单行库查询，计算本身是纯的，所以「读库」留给调用方、这里只做计算：
+//! 调用方按 [`SubscriptionData`] 把数字查好传进来
 //! （都是便宜的单行查询；用不上的会被忽略，调用方也可以跳过）。
 //!
-//! 对应关系（旧版 → 入参）：
-//! - `state.db.month_anlas(key["id"], month)` → `month_anlas_used`（`month = state.month(now)`）；
-//! - `state.db.get_counter(key["id"], day)["v5"]` → `daily_v5_used`（`day = state.day(now)`）；
-//! - `site_flags.get(db, GLOBAL_DAILY_V5, settings)` → `global_v5_limit`（0 = 不限）；
-//! - `state.db.day_v5_total(day)` → `global_v5_total`；
+//! 各入参的来源：
+//! - `month_anlas_used`：该 Key 当月的 Anlas 用量（`month = state.month(now)`）；
+//! - `daily_v5_used`：该 Key 当天已用的 V5（`day = state.day(now)`）；
+//! - `global_v5_limit`：全站每日 V5 上限（`site_flags` 的 `GLOBAL_DAILY_V5`，0 = 不限）；
+//! - `global_v5_total`：全站当天的 V5 总用量；
 //! - 站长的 V5 暂停开关（`v5_paused`，10-23 起）→ `v5_paused`：暂停时 V5 显示 0 / 0、不是「不限」。
 
 use serde_json::{Value, json};
@@ -25,7 +25,7 @@ pub struct SubscriptionData {
     pub v5_paused: bool,
 }
 
-/// Key 行缺字段或类型不对（旧版会抛 KeyError / TypeError / ValueError；线上 Key 行总是完整的）。
+/// Key 行缺字段或类型不对（线上 Key 行总是完整的，这只在数据损坏时出现）。
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
 pub enum SubscriptionError {
     #[error("Key 缺少字段 {0}")]
@@ -139,7 +139,7 @@ pub fn subscription_payload(
             "v5DailyLimit": v5_limit,
             "v5Unlimited": limits.is_empty() && !paused,
             "v5Paused": paused,
-            // 旧版面板接受 null 并隐藏共享账号信息。
+            // `account` 恒为 null：客户端面板接受 null 并隐藏共享账号信息。
             "account": Value::Null,
         },
     }))

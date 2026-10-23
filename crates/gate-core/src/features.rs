@@ -45,7 +45,8 @@ pub type Flags = BTreeMap<&'static str, bool>;
 
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
 pub enum FeaturesError {
-    /// `features_global` 是合法 JSON 但不是对象：旧版 `saved.get` 抛 AttributeError（没有被捕获 → 500）
+    /// `features_global` 是合法 JSON 但不是对象（库里存了坏值才会出现；文案带 `AttributeError`
+    /// 类型名前缀，调用方原样转成 500 上报）
     #[error("AttributeError: {0}")]
     Attribute(String),
     /// 未登记的功能名走到 `FEATURES[name]`
@@ -160,7 +161,7 @@ fn has_anlas(key: &Value) -> bool {
 }
 
 /// 走到 `check` 里读全站 Anlas 设置的那个分支吗？服务层用它决定要不要去读 `site_settings`
-/// （旧版是惰性读取，只有真走到这里才读库）。`global_raw` 是 `features_global` 的取值。
+/// （惰性读取：只有真走到这里才读库）。`global_raw` 是 `features_global` 的取值。
 /// 开关坏了（[`parse_global_flags`] 报错）时返回 false，随后 [`check_decision`] 会返回同一个错误。
 pub fn needs_vibe_site_flags(global_raw: Option<&str>, key: &Value, name: &str) -> bool {
     let Ok(flags) = parse_global_flags(global_raw) else {

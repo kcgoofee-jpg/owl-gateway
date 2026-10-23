@@ -623,9 +623,8 @@ fn replace(s: &[u8], old: &[u8], new: &[u8]) -> Vec<u8> {
 // ---------------------------------------------------------------------------------------------
 // 测试
 //
-// 期望值来自旧版：用 Python 3.12 + requirements.txt 解析出的依赖（starlette 1.8 / python-multipart 0.0.32）
-// 直接调用 `app.image_payload.read_image_body` / `app.body.read_bounded_body` 得到。
-// 体的构造方式与 httpx / 浏览器一致：`--边界` 行、`Content-Disposition`（文件 part 带 `filename="blob"`）、
+// 期望值逐字节固定（改动断言 = 行为变更，要显式评审）。
+// 体的构造方式与浏览器一致：`--边界` 行、`Content-Disposition`（文件 part 带 `filename="blob"`）、
 // 可选 `Content-Type`、空行、数据，最后是 `--边界--`。
 // ---------------------------------------------------------------------------------------------
 #[cfg(test)]
@@ -815,7 +814,7 @@ mod tests {
             file("director_ref_0", b"abc"),
             req(payload.to_string()),
         ]));
-        // 旧版输出：同一指针只编码一次、各处共用；只展开图片槽位，其他字符串（input / negative_prompt /
+        // 输出约定：同一指针只编码一次、各处共用；只展开图片槽位，其他字符串（input / negative_prompt /
         // 嵌套对象里的 image / 已经是 Base64 的 data）原样保留
         let expected = json!({
             "input": "image",
@@ -890,7 +889,7 @@ mod tests {
             req_text(r#"{"image":"image","n":"é"}"#),
         ]));
         assert_eq!(got, json!({"image": "iVBORw0KGgoAAQID", "n": "é"}));
-        // 字段里不是 UTF-8 的字节：旧版按 latin-1 兜底（0xE9 → é）
+        // 字段里不是 UTF-8 的字节按 latin-1 兜底（0xE9 → é）：解码不会失败，坏 JSON 走 400
         let got = ok_value(parse(&[
             file("image", PNG),
             req_text(b"{\"n\":\"\xe9\",\"image\":\"image\"}"),
@@ -1019,7 +1018,7 @@ mod tests {
         assert_400(run(&content_type(), b"", LIMIT), E_NO_REQUEST);
         assert_400(run(&content_type(), b"\r\n\r\n", LIMIT), E_NO_REQUEST);
         assert_400(run(&content_type(), &closing(), LIMIT), E_NO_REQUEST);
-        // 最后一个 part 没有收到结束边界：旧版静默丢弃它（于是 request 不见了）
+        // 最后一个 part 没有收到结束边界：静默丢弃它（于是 request 不见了）
         let unterminated = build_with(
             &[file("image", PNG), req(r#"{"image":"image"}"#)],
             BOUNDARY,
@@ -1169,7 +1168,7 @@ mod tests {
             ("空串", ""),
             ("NaN", r#"{"image": NaN}"#),
             ("Infinity", r#"{"x": [-Infinity]}"#),
-            // 旧版放行、但 serde_json::Value 装不下的内容（孤立代理 / 超大整数 / 溢出浮点，即 `Lossy`）
+            // serde_json::Value 装不下的内容（孤立代理 / 超大整数 / 溢出浮点，即 `Lossy`）
             // 按「不是合法 JSON」拒绝，见模块文档
             ("孤立代理", r#"{"n":"\ud800"}"#),
             ("溢出浮点", r#"{"n":1e999}"#),
@@ -1383,8 +1382,7 @@ mod tests {
 
     #[test]
     fn repeated_pointers_are_charged_every_time() {
-        // 旧版测试 `test_repeated_pointer_expansion_cannot_bypass_json_size_limit` 的形态：
-        // 同一个附件被两个槽位引用，每引用一次都计入展开后大小
+        // 同一个附件被两个槽位引用：每引用一次都计入展开后大小，重复引用不能绕过 JSON 大小限制
         let body = build(&[
             file("image", &vec![b'x'; 3072]),
             req(r#"{"image":"image","mask":"image"}"#),

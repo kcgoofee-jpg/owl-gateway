@@ -1,7 +1,7 @@
 //! 请求体 JSON 解析（`app/body.py` 的纯逻辑部分）：`parse_json` / `_reject_constant` / `_too_deep` /
 //! `parse_json_body` 里的判定。读取请求体的异步函数（`read_bounded_body` / `read_json_body`）不在这里。
 //!
-//! 接受 / 拒绝与旧版逐条一致（见 `pyloads`）：拒绝 NaN / Infinity、嵌套超过 `MAX_JSON_DEPTH` 层的容器、
+//! 接受 / 拒绝的判定（实现在 `pyloads`）：拒绝 NaN / Infinity、嵌套超过 `MAX_JSON_DEPTH` 层的容器、
 //! 非法 UTF-8 / 语法错误；重复键以最后一个为准（位置保持第一次出现的位置）；`1.0` 与 `1` 类型分开；
 //! `-0` 是整数 0；bytes 输入识别 BOM / UTF-16 / UTF-32。
 //!
@@ -11,12 +11,12 @@
 //! - 超出 `i64` / `u64` 的整数：Python 保留任意精度，这里取最近的 f64；
 //! - 溢出的浮点（`1e999` → `inf`）：这里取 ±`f64::MAX`。
 //!
-//! 这三类只会出现在刻意构造的请求里。旧版对它们并不友好：`1e999`（inf）和孤立代理要等到 httpx 0.28
-//! 序列化转发给上游时才抛 `ValueError` / `UnicodeEncodeError`（多半变成 500，而不是 400）；超大整数则被原样转发。
+//! 这三类只会出现在刻意构造的请求里。放行的风险：`1e999`（inf）和孤立代理要等到序列化转发给上游时才抛错
+//! （多半变成 500，而不是 400）；超大整数则带着失真的值被原样转发。
 //! 建议网关层看到 `Lossy::any()` 就直接按「请求体不是合法 JSON」拒绝。
 //!
-//! 另一处只影响错误「类型」而不影响接受与否的差异：嵌套接近 Python C 扫描器的递归上限（约 1 万层）时，
-//! 旧版可能先抛 `RecursionError` 再抛 `JSONDecodeError`；`pyloads::RECURSION_DEPTH` 是 CPython 3.12.14 实测值。
+//! 另一处只影响错误「类型」而不影响接受与否的边界：容器嵌套接近递归上限（约 1 万层，见
+//! `pyloads::RECURSION_DEPTH`）时，报的是递归超限错误而不是普通 JSON 语法错误。
 
 use serde_json::{Map, Number, Value};
 
@@ -25,7 +25,7 @@ use crate::pyobj::{DictKey, Obj};
 
 /// `body.MAX_JSON_DEPTH`
 pub const MAX_JSON_DEPTH: usize = 32;
-/// `body._THREAD_PARSE_BYTES`：超过这个大小旧版放到线程里解析（Rust 侧由调用方决定是否 `spawn_blocking`）。
+/// 超过这个大小的请求体放到阻塞线程里解析（是否 `spawn_blocking` 由调用方决定）。
 pub const THREAD_PARSE_BYTES: usize = 256 * 1024;
 
 /// `parse_json_body` 的两种 400 文案。

@@ -16,8 +16,8 @@ use std::path::PathBuf;
 #[folder = "../../web/dist"]
 struct Dist;
 
-/// 首页 / 问卷的安全头（比旧版更严：去掉 'unsafe-inline'；保留 Discord CDN 头像源，
-/// 并额外允许 NovelAI 静态图源）。
+/// 首页 / 问卷的安全头（不含 'unsafe-inline'；保留 Discord CDN 头像源，
+/// 并允许 NovelAI 静态图源）。
 /// 字体只允许同源：开屏标题的 Newsreader 子集是 `/_owl/` 下的文件，不从 Google Fonts 加载。
 pub const PUBLIC_CSP: &str = "default-src 'none'; script-src 'self'; style-src 'self'; font-src 'self'; connect-src 'self'; \
     img-src 'self' data: https://cdn.discordapp.com https://static.novelai.net; frame-src 'self'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'";
@@ -214,7 +214,7 @@ mod tests {
     fn csp_has_no_unsafe_inline() {
         assert!(!PUBLIC_CSP.contains("unsafe-inline") && !ADMIN_CSP.contains("unsafe-inline"));
         assert!(PUBLIC_CSP.contains("https://static.novelai.net"));
-        // 旧版测试锁定的三条（test_landing.py）
+        // 公开页安全头必须保留的关键指令（页面靠它们隔离第三方脚本）
         for need in [
             "default-src 'none'",
             "frame-ancestors 'none'",

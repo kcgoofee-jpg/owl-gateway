@@ -1,8 +1,8 @@
 //! 与 Python `json.dumps` 逐字节一致的序列化。
 //!
-//! 用在三处，都要求与旧版字节相同：
-//! - 转发给上游的请求体（httpx：`ensure_ascii=False, separators=(",", ":")`）——请求体本身就是指纹的一部分；
-//! - 返回给客户端的 JSON（Starlette `JSONResponse`：同上）；
+//! 用在三处，字节格式固定，下游依赖确切的字节：
+//! - 转发给上游的请求体（紧凑分隔符 `ensure_ascii=False, separators=(",", ":")`）——请求体本身就是指纹的一部分；
+//! - 返回给客户端的 JSON（同上，紧凑分隔符）；
 //! - 写进库 / 状态文件的 JSON（`ensure_ascii=False`，分隔符 `", "` / `": "`；非 ASCII 原样输出，不转义成 `\uXXXX`）。
 //!
 //! 浮点用 Python 的 repr（`1e-05`、`1e+16`），不是 Rust 的 `1e-5`。

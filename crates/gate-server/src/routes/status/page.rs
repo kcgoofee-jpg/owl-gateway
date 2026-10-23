@@ -103,6 +103,19 @@ fn bars_svg(days: &[Day]) -> Markup {
     }
 }
 
+/// 色条左端的标注：左端是灰色「无数据」段时，显示数据真正开始的日期（开始记录之前没有数据，
+/// 灰段不是故障）。左端第一天就有数据、或整条都没有数据时，保持「N 天前」。
+fn legend_start(days: &[Day]) -> String {
+    match days.first() {
+        Some(d) if d.level.is_none() => days
+            .iter()
+            .find(|d| d.level.is_some())
+            .map(|d| d.day.clone())
+            .unwrap_or_else(|| format!("{} 天前", DAYS)),
+        _ => format!("{} 天前", DAYS),
+    }
+}
+
 fn history_day(clock: &Clock, snap: &Snapshot, day: Date, is_today: bool) -> Markup {
     let d0 = midnight(clock, day);
     let incs: Vec<&Incident> = snap
@@ -221,7 +234,7 @@ pub fn render(snap: &Snapshot, clock: &Clock, subscribe_url: &str, assets: &Asse
                                 }
                                 div class="sp-bars" { (bars_svg(&comp.days)) }
                                 div class="sp-legend" {
-                                    span { (DAYS) " 天前" }
+                                    span { (legend_start(&comp.days)) }
                                     span class="sp-uptime" {
                                         @match comp.uptime {
                                             Some(u) => { b { (format!("{u:.2}%")) } " 正常运行" }

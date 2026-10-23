@@ -1,6 +1,6 @@
 //! 图片事件流校验（`app/image_events.py`）：转发前逐条检查 SSE / msgpack 事件，只数「完整的最终图」。
 //!
-//! 规则（与旧版一致，都有快照测试）：
+//! 规则（有快照测试锁定）：
 //! - 进度事件、EOF、传输字节数都不代表成功；只有合法的 `final`（样本序号在范围内、图片能 base64 解出且
 //!   信封完整）才计数；同一个 `samp_ix` 重复只算一次；
 //! - 显式 `error` 事件（`event_type == "error"` 或 payload 里有 `error` 键）让流失败，但此前已计数的 final 保留，
@@ -10,7 +10,7 @@
 //! - msgpack 帧 = 4 字节大端长度 + msgpack map；长度必须在 `1..=单事件上限`，声明长度先校验再缓冲；
 //! - SSE 事件转发的是**重新编码**后的 `encode_sse(data, event)`，不是原始字节。
 //!
-//! 解析语义也与旧版一致：SSE 事件体走的是**默认的** `json.loads`（接受 `NaN` / `Infinity`、不限深度，约 1 万层才抛
+//! 解析语义：SSE 事件体走的是**默认的** `json.loads`（接受 `NaN` / `Infinity`、不限深度，约 1 万层才抛
 //! `RecursionError`——见 `pyloads`），msgpack 走 `unpackb(raw=False)`（键只能是 str / bytes、str 必须是合法 UTF-8、
 //! 容器嵌套 ≤ 1024，见 `pymsgpack`）；`base64.b64decode(validate=True)` 按 CPython 3.12.14 的严格模式（不同补丁版本
 //! 对多余的 `=` 处理不同，所以这个版本号要和线上镜像保持一致）。
@@ -40,7 +40,8 @@ pub const MAX_STREAM_BYTES: u64 = 128 * 1024 * 1024;
 /// 上游 error 事件原话进日志时的截断长度。
 pub const ERROR_DETAIL_MAX_CHARS: usize = 120;
 
-/// 线上格式。旧版里「不是 `msgpack` 的一律按 SSE 处理」。
+/// 线上格式。客户端 `stream` 取值不是 msgpack / messagepack / binary 的一律按 SSE 处理
+/// （路由层对认不出的写法返回 400）。
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum WireFormat {
     Sse,
@@ -114,7 +115,7 @@ pub fn image_envelope(data: &[u8]) -> bool {
         return data.len() >= 5 && data.ends_with(b"\xff\xd9");
     }
     if data.starts_with(b"RIFF") {
-        // 先判长度再取字段（与旧版的求值顺序一致，短数据不会越界）
+        // 先判长度再取字段，短数据不会越界
         if data.len() < 20 {
             return false;
         }

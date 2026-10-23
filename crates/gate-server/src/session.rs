@@ -1,4 +1,4 @@
-//! 后台与成员网页的会话 Cookie（格式自 2.x 延续至今，成员与站长的登录一直有效）。
+//! 后台与成员网页的会话 Cookie（格式长期不变，成员与站长的登录一直有效）。
 //!
 //! - 后台 `nai_gate_admin`：`<到期秒>.<HMAC-SHA256 hex>`，密钥 = `secret + ":" + sha256(密码哈希或 ADMIN_PASSWORD)`，
 //!   改密码即令所有旧会话失效；有效期 7 天；SameSite=Strict。
@@ -52,7 +52,8 @@ pub fn cookie(headers: &HeaderMap, name: &str) -> Option<String> {
     found
 }
 
-/// Starlette `set_cookie` 的输出（属性按名字排序，与 `http.cookies.Morsel` 一致）。
+/// `Set-Cookie` 输出：`<name>=<value>; HttpOnly; Max-Age=<秒>; Path=/; SameSite=<策略>`，
+/// `secure` 时追加 `; Secure`（属性顺序固定）。
 pub fn set_cookie_header(
     name: &str,
     value: &str,
@@ -67,7 +68,7 @@ pub fn set_cookie_header(
     HeaderValue::from_str(&s).unwrap_or(HeaderValue::from_static(""))
 }
 
-/// Starlette `delete_cookie`。
+/// 注销用的 `Set-Cookie`：空值 + 已过期的 `expires` / `Max-Age=0`，浏览器随即删掉该 Cookie。
 pub fn delete_cookie_header(
     name: &str,
     secure: bool,

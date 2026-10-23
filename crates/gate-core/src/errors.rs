@@ -8,7 +8,7 @@
 //!   （例如 panic 的 `file:line` 或模块路径），传给 [`signature`] 即可；同一个位置要稳定。
 //! - `traceback.format_exception` 生成的堆栈文本：由调用方传入（[`ExcInfo::stack`]）。
 //!
-//! 3.0 新增（旧版没有）：「自动处理」的纯判断——哪些噪音不算 Bug、哪条未处理的 Bug
+//! 「自动处理」的纯判断：哪些噪音不算 Bug、哪条未处理的 Bug
 //! 该自动关闭（[`auto_resolve_reason`]）。I/O 在 gate-db（查询 / 更新）与 gate-server（`bugs.rs`、维护循环）。
 //!
 //! 特征码 = `sha1(basis)` 的前 12 个十六进制字符。SHA-1 在这里只是去重用的指纹，不涉及安全，
@@ -153,7 +153,7 @@ pub struct Capture<'a> {
     pub level: &'a str,
 }
 
-/// 入库 / 保留在内存里的事件（字段顺序即旧版 dict 的键顺序）。
+/// 入库 / 保留在内存里的事件（字段顺序固定）。
 #[derive(Debug, Clone, PartialEq)]
 pub struct ErrorEvent {
     pub sig: String,
@@ -262,7 +262,7 @@ pub enum AutoReason {
     Network,
     /// 上游（NovelAI）返回 5xx 或连不上：已在用量日志和「上游」页里，不是我们的缺陷。
     Upstream,
-    /// 不是本站脚本出的错（旧版缓存页、浏览器插件、手机自带浏览器注入）。
+    /// 不是本站脚本出的错（浏览器缓存的旧页面、浏览器插件、手机自带浏览器注入）。
     ForeignScript,
     /// 注意级超过 [`STALE_WARN_SECS`] 没再出现。
     StaleWarn,
@@ -542,7 +542,7 @@ mod tests {
         );
         b.detail = "https://gate.example.top/_owl/assets/app-abc.js:7\nMozilla/5.0 (synthetic)\nTypeError: x";
         assert_eq!(auto_resolve_reason(&b, now), None);
-        // 没有 /_owl/ 的 Uncaught（旧版页面 / 插件）立刻关
+        // 没有 /_owl/ 的 Uncaught（缓存旧页面 / 浏览器插件）立刻关
         b.detail = "/:7\nMozilla/5.0 (synthetic)\nTypeError: x";
         assert_eq!(
             auto_resolve_reason(&b, now),
