@@ -4,7 +4,7 @@
 #   tools/deploy.sh              latest successful push run of CI on main
 #   tools/deploy.sh --wait       wait for the CI run of origin main HEAD, then deploy it
 #   tools/deploy.sh <run-id>     a specific run (must have succeeded)
-#   tools/deploy.sh ... --force  pass --force to cutover.sh (skip its busy-traffic guard)
+#   tools/deploy.sh ... --force  pass --force to cutover.sh (skip its active-queue guard)
 #
 # Steps: pick run -> refuse unless every job passed -> skip if already live -> download
 # artifacts -> sync cutover.sh / compose.yml from this checkout -> load image -> install

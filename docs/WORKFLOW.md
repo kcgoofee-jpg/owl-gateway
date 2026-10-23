@@ -51,7 +51,7 @@ tools/deploy.sh            # deploy the latest green run
 tools/deploy.sh <run-id>   # deploy a specific green run
 ```
 
-The script refuses runs that did not fully succeed, skips if that build is already live, syncs `cutover.sh` and `compose.yml` from the checkout, loads the image, installs `nai-ops`, restarts, then checks `healthcheck`, `nai-ops smoke` and the public `/healthz`. `cutover.sh` refuses during busy traffic unless `--force`.
+The script refuses runs that did not fully succeed, skips if that build is already live, syncs `cutover.sh` and `compose.yml` from the checkout, loads the image, installs `nai-ops`, restarts, then checks `healthcheck`, `nai-ops smoke` and the public `/healthz`. Before load and restart, `cutover.sh` reads `/public/live` and refuses while any image is queued or generating; it also honors an optional `CUTOVER_BUSY_HOURS` window. `--force` skips these guards.
 
 Rollback: `ssh` in and run `/opt/owl/cutover.sh previous`.
 

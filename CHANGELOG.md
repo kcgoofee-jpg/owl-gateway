@@ -59,6 +59,8 @@
 
 ### 站长 / 运维
 
+- **Deploy guard checks active image work, not recent history.** Before loading or restarting an image, `cutover.sh` reads the live waiting + running queue and defaults to refusing while any image is active; an unavailable queue fails closed. Previously it counted all image requests from the last ten minutes, so completed traffic could block a safe deploy.
+
 - **删除全部自动额度算法（站长 10-23）。** 删掉：V4.5 每人上限自动调整（`quota_ceiling` 等）、新号爬坡（`newbie_ramp_*`）、按电量定的 V5 当天方案与临时加量 / 自动暂停（`quota_v5_day_plan` / `quota_v5_bonus` / `quota_v5_paused`）、动态额度总开关 `quota_auto_enabled` 与每日复盘、账号日上限自动版（`quota_account_caps` / `quota_account_cap_auto`）、出图间隔 AIMD 的四个 `guard_interval_*` 参数、V5 Medium 的 `auto` 档、后台接口 `/admin/api/quota-algo`。旧设置行留在库里不再读写，没有破坏性迁移。新增手动设置 `v5_paused`；`register_daily_images`（没设过 150）/ `register_daily_v5` 改由「额度与保护」页编辑，「领 Key」页不再能改。定时任务「动态额度」改名「额度同步」，只把手动值同步给 `quota_auto=1` 的 Key 和首页文案。后台「额度与保护」页改成一张张手动表单，加一张只读「记录」（`/admin/api/quota-records`：各账号 V5 电量、官方 / 实测恢复速度、Anlas、今天 / 昨天出图量）。`nai-ops manual` 只剩 `guard_token_daily_caps` 和 `v5_paid_tokens`。
 - **后台再瘦一圈（站长 10-23：日志留全，要看什么让 Claude 查）。** 删掉：总览页（`/admin` 直接是成员页；`/admin/api/overview` 只剩「上游」页用的令牌池两项，`/admin/api/status-codes` 删除）、上游页的「上游表现」（`/admin/api/perf` 和 `perf` 分析）、V5 余量里的「恢复速度怎么算的」、账号对比里的本小时计数 / 分担占比 / 1 小时等待 / 到期预测、每把 Token 的「图片并发」设置（固定 1，`upstream_token_image_concurrency` 旧行不再读）、「领 Key」页的新成员每日张数和模型范围（新成员固定含 V5，每日张数跟随全站手动额度）、「V5 余量低提示线」（固定 20%）、安静时段（`guard_quiet_*`，连同按账号的最近 3 小时出图窗口）。账号保护和出图间隔 / 冷却合成一张卡。日志和数据表都不动。
 - **删除网关里 NAI 工作台的残留**：`deploy/Caddyfile.production` 的 `/workbench`、`/api/*` 等转发块，`nai-ops traffic` 的 `workbench` 分组。
@@ -135,7 +137,7 @@
 - **`nai-ops set` / `get`**：后台设置接口的薄客户端（白名单，`set --list`），打印 改前 → 改后，没有 `--yes` 不写；校验、操作日志和内存刷新与后台页面一致。`issue_hourly_cap` 因后台没有接口而明确不支持。
 - **`nai-ops report`**：只读周报（重试轰炸、最长连续使用、额度打满天数、多设备、共用 UA、相同长提示词、新号领取、领取突发、现有暂停）；输出只有 Key 编号、显示名和计数。内容风险词表放服务器外部文件，仓库只带空示例 `deploy/risk-terms.example.txt`。
 - **`nai-ops traffic`**：汇总 Caddy JSON 访问日志（路径分组、状态码、p50 / p95、每分钟峰值），不读 IP、不输出查询参数；附 `deploy/Caddyfile.access-log.example`（需运维手工应用）。
-- **`deploy/v3/cutover.sh`**：`load` / `up` / `previous` / `rollback` 之前先看最近 10 分钟出图数，超过 `CUTOVER_BUSY_THRESHOLD`（默认 30）或落在 `CUTOVER_BUSY_HOURS` 内拒绝执行，`--force` 放行。
+- **`deploy/v3/cutover.sh`**：`load` / `restart` / `previous` 之前检查 `/public/live` 的当前排队与生成中图片数，默认要求队列为空；读取失败时拒绝切换。可配置 `CUTOVER_BUSY_THRESHOLD` / `CUTOVER_BUSY_HOURS`，`--force` 放行。
 
 ## [3.0.0] - 2026-10-15（Rust + Preact 全量重写）
 

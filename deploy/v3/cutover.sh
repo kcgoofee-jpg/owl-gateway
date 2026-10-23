@@ -9,8 +9,8 @@
 # 改 Caddy 配置用 deploy/v3/caddy-reload.sh（不要 docker exec caddy caddy reload，原因见那个脚本）。
 #   deploy/v3/cutover.sh status
 #
-# load / previous 之前会先看最近 10 分钟的出图请求数（只读 sqlite）：超过阈值
-# （环境变量 CUTOVER_BUSY_THRESHOLD，默认 30）或现在正落在忙时（CUTOVER_BUSY_HOURS，如 "20-24"，默认不设）
+# load / restart / previous 之前会读取网关实时队列（/public/live 的排队 + 生成中）：超过阈值
+# （环境变量 CUTOVER_BUSY_THRESHOLD，默认 0）或现在正落在忙时（CUTOVER_BUSY_HOURS，如 "20-24"，默认不设）
 # 就拒绝执行，除非加 --force（放在子命令后面或前面都行）。
 set -euo pipefail
 
@@ -24,22 +24,19 @@ GATE_URL=${OWL_GATE_URL:-http://127.0.0.1:3003}
 # 换网关时实测用的公网地址（经本机 Caddy，不出机器）
 PROBE_URL=${OWL_PROBE_URL:-https://gate.davidzhao.top}
 ENV_FILE=$LEGACY_DIR/.env
-DB=$LEGACY_DIR/data/nai_gate.db
 COMPOSE=(docker compose -p "$PROJECT" --env-file "$ENV_FILE" -f "$OWL_DIR/compose.yml")
 
-BUSY_THRESHOLD=${CUTOVER_BUSY_THRESHOLD:-30}
+BUSY_THRESHOLD=${CUTOVER_BUSY_THRESHOLD:-0}
 BUSY_HOURS=${CUTOVER_BUSY_HOURS:-}
 FORCE=0
 
 log() { printf '[%(%F %T)T] %s\n' -1 "$*"; }
 die() { log "✗ $*"; exit 1; }
 
-# 最近 10 分钟的图片请求数（只读打开库；读不到返回空）
-recent_images() {
-  [[ -f $DB ]] || return 0
-  sqlite3 -readonly "$DB" ".timeout 5000" \
-    "SELECT COUNT(*) FROM usage_log WHERE kind LIKE 'image%' AND ts > CAST(strftime('%s','now') AS INTEGER) - 600;" \
-    2>/dev/null | tail -1
+# 网关当前排队与生成中的图片数；历史完成量不代表重启会中断任务。
+current_images() {
+  curl -fsS -m 3 "$GATE_URL/public/live" |
+    jq -er '.queue | if (.running | type) == "number" and (.waiting | type) == "number" then .running + .waiting else error("queue counts unavailable") end'
 }
 
 # 现在是不是落在 CUTOVER_BUSY_HOURS（如 "20-24"，含起点、不含终点，可跨午夜 "22-6"）里
@@ -53,22 +50,19 @@ in_busy_hours() {
 # 部署 / 重启前的忙碌检查：忙就拒绝，--force 才放行
 busy_guard() {
   local n reason=""
-  n=$(recent_images || true)
-  if [[ -z $n ]]; then
-    log "! 读不到最近 10 分钟的出图数（库不可读？），跳过忙碌检查"
-  else
-    log "最近 10 分钟图片请求：$n（阈值 $BUSY_THRESHOLD）"
-    if ((n > BUSY_THRESHOLD)); then reason="最近 10 分钟有 $n 张图片请求，超过阈值 $BUSY_THRESHOLD"; fi
-  fi
+  n=$(current_images) || die "无法读取网关当前排队 / 生成任务数；为避免中断图片，取消切换"
+  [[ $n =~ ^[0-9]+$ ]] || die "网关返回的当前队列数无效；为避免中断图片，取消切换"
+  log "当前排队 / 生成中的图片：$n（阈值 $BUSY_THRESHOLD）"
+  if ((n > BUSY_THRESHOLD)); then reason="当前有 $n 张图片正在排队或生成，超过安全阈值 $BUSY_THRESHOLD"; fi
   if [[ -z $reason ]] && in_busy_hours; then reason="现在（$(date +%H:%M)）在忙时 $BUSY_HOURS 内"; fi
   if [[ -n $reason ]]; then
     if ((FORCE)); then
       log "! $reason；已加 --force，继续"
     else
-      die "$reason；生成中的图会被打断。等一等再来，或加 --force 强行执行"
+      die "$reason；等队列清空或忙时结束后再试，--force 会跳过保护"
     fi
   fi
-  log "提醒：重启后每小时出图计数由用量日志补回，跨重启的那个小时窗口可能多算一次（只会更保守）"
+  log "切换前会再次检查实时队列；网关停机时会先排空已接收的图片请求（最多 120 秒）"
 }
 
 wait_healthy() {
@@ -154,6 +148,7 @@ cmd_install_ops() {
 # 会让同一账号同时出两张而被上游回 429，所以部署不再让新旧网关重叠。
 # 旧网关收到 SIGTERM 立即关掉监听，在途和已排队的图出完（最多 120 秒）才退出；这期间 Caddy 连不上网关，显示「网关自检中」。
 cmd_restart() {
+  busy_guard
   docker image inspect "$IMAGE:current" >/dev/null 2>&1 || die "先 load 镜像"
   probe_start
   log "停 $GATE：不再接新请求，手上的图出完（最多 120 秒）再退出；这期间网站显示「网关自检中」"
