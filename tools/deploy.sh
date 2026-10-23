@@ -1,4 +1,5 @@
 #!/usr/bin/env bash
+# shellcheck disable=SC2016,SC2029  # remote snippets intentionally interpolate on the server
 # Deploy a green CI build of main to production, end to end.
 #
 #   tools/deploy.sh              latest successful push run of CI on main
@@ -7,8 +8,8 @@
 #   tools/deploy.sh ... --force  pass --force to cutover.sh (skip its active-queue guard)
 #
 # Steps: pick run -> refuse unless every job passed -> skip if already live -> download
-# artifacts -> sync cutover.sh / compose.yml from this checkout -> load image -> install
-# nai-ops -> stop-then-start (cutover.sh restart: the old gateway finishes its images and exits before
+# artifacts -> sync deployment scripts -> stage image without touching the rollback tag -> wait for
+# an idle queue -> promote staged image and stop-then-start (the old gateway finishes accepted work before
 # the new one starts, so only one gateway ever sends to an upstream account; the site is down 1-2 minutes)
 # -> healthcheck + smoke inside the container -> public /healthz.
 # Rollback on failure: ssh in and run `/opt/owl/cutover.sh previous`.
@@ -16,7 +17,6 @@
 # Needs: gh (logged in), ~/.config/owl/owl.env exporting OWL_IP (never printed),
 # ~/.ssh/naigate_ed25519. Output masks IPv4 addresses.
 set -euo pipefail
-# shellcheck disable=SC2016,SC2029  # remote snippets are meant to expand on the server
 cd "$(dirname "$0")/.."
 
 REPO=${OWL_REPO:-kcgoofee-jpg/owl-gateway}
@@ -25,11 +25,16 @@ DOMAIN=${OWL_DOMAIN:-gate.davidzhao.top}
 source "$HOME/.config/owl/owl.env"
 : "${OWL_IP:?OWL_IP missing in ~/.config/owl/owl.env}"
 KEY=(-i "$HOME/.ssh/naigate_ed25519" -o IdentitiesOnly=yes -o BatchMode=yes -o LogLevel=QUIET)
+CI_WAIT_TIMEOUT=${OWL_CI_WAIT_TIMEOUT_SECONDS:-3600}
+QUEUE_WAIT_TIMEOUT=${OWL_QUEUE_WAIT_TIMEOUT_SECONDS:-1800}
+QUEUE_POLL_SECONDS=${OWL_QUEUE_POLL_SECONDS:-5}
 
 mask() { sed -E 's/[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}/x.x.x.x/g'; }
 remote() { ssh "${KEY[@]}" "root@$OWL_IP" "$@" 2>&1 | mask; return "${PIPESTATUS[0]}"; }
 say() { printf '\033[1m==> %s\033[0m\n' "$*"; }
 die() { printf '\033[31mxx %s\033[0m\n' "$*" >&2; exit 1; }
+[[ $QUEUE_WAIT_TIMEOUT =~ ^(0|[1-9][0-9]*)$ && $QUEUE_POLL_SECONDS =~ ^[1-9][0-9]*$ ]] ||
+  die "OWL_QUEUE_WAIT_TIMEOUT_SECONDS / OWL_QUEUE_POLL_SECONDS must be integers"
 
 run_id="" wait=0 force=""
 for a in "$@"; do
@@ -50,8 +55,20 @@ if [[ -z $run_id && $wait == 1 ]]; then
     sleep 10
   done
   [[ -n $run_id ]] || die "no CI run found for ${sha:0:7}"
-  # gh run watch can return before the run ends (no TTY); poll the status instead
-  until [[ $(gh run view "$run_id" -R "$REPO" --json status -q .status) == completed ]]; do sleep 30; done
+  # Poll status instead of gh run watch, which can return before completion without a TTY.
+  [[ $CI_WAIT_TIMEOUT =~ ^[1-9][0-9]*$ ]] || die "OWL_CI_WAIT_TIMEOUT_SECONDS must be a positive integer"
+  start=$SECONDS last_report=-60
+  while :; do
+    status=$(gh run view "$run_id" -R "$REPO" --json status -q .status)
+    [[ $status == completed ]] && break
+    elapsed=$((SECONDS - start))
+    ((elapsed < CI_WAIT_TIMEOUT)) || die "CI still $status after ${elapsed}s: https://github.com/$REPO/actions/runs/$run_id"
+    if ((elapsed - last_report >= 60)); then
+      say "CI $status · ${elapsed}s elapsed · https://github.com/$REPO/actions/runs/$run_id"
+      last_report=$elapsed
+    fi
+    sleep 10
+  done
 elif [[ -z $run_id ]]; then
   run_id=$(gh run list -R "$REPO" --workflow CI --branch main --event push --status success --limit 1 --json databaseId -q '.[0].databaseId')
   [[ -n $run_id ]] || die "no successful CI run on main"
@@ -72,15 +89,15 @@ trap 'rm -rf "$tmp"' EXIT
 say "downloading artifacts"
 gh run download "$run_id" -R "$REPO" -n owl-gate-image -n nai-ops-linux-musl -D "$tmp"
 
-say "uploading image, nai-ops, cutover.sh, caddy-reload.sh, compose.yml"
+say "uploading candidate image, nai-ops, cutover.sh, caddy-reload.sh, compose.yml"
 scp -q "${KEY[@]}" "$tmp/owl-gate-image/owl-gate.tar.gz" "$tmp/nai-ops-linux-musl/nai-ops" \
   deploy/v3/cutover.sh deploy/v3/caddy-reload.sh deploy/v3/compose.yml "root@$OWL_IP:/opt/owl/" 2>&1 | mask
 
 say "cutover"
 remote "set -e; cd /opt/owl; chmod +x cutover.sh caddy-reload.sh
   ./cutover.sh load owl-gate.tar.gz $force
+  CUTOVER_QUEUE_WAIT_TIMEOUT=$QUEUE_WAIT_TIMEOUT CUTOVER_QUEUE_POLL_SECONDS=$QUEUE_POLL_SECONDS ./cutover.sh restart --wait-idle $force
   ./cutover.sh install-ops /opt/owl/nai-ops
-  ./cutover.sh restart
   rm -f owl-gate.tar.gz" || die "cutover failed; consider: ssh in and run /opt/owl/cutover.sh previous"
 
 say "verifying"

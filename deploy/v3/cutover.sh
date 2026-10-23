@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # 3.0 部署 / 重启 / 回上一版（在服务器上以 root 运行）。
 #
-#   deploy/v3/cutover.sh load <owl-gate.tar.gz>   载入 CI 构建的镜像：旧的 current 改名 previous，新的成为 current
+#   deploy/v3/cutover.sh load <owl-gate.tar.gz>   载入并暂存 CI 镜像，不改 current / previous
 #   deploy/v3/cutover.sh install-ops <nai-ops>     安装宿主机用的运维命令（静态二进制，巡检要用宿主机的 docker / 磁盘 / .env）
 #   deploy/v3/cutover.sh restart                   先停后起换上 owl-gate:current（tools/deploy.sh 用它）：旧网关在途的图收尾、
 #                                                  完全退出后再起新的。网站断 1–2 分钟（Caddy 显示「网关自检中」），但同一时刻只有一个网关在用账号
@@ -9,7 +9,7 @@
 # 改 Caddy 配置用 deploy/v3/caddy-reload.sh（不要 docker exec caddy caddy reload，原因见那个脚本）。
 #   deploy/v3/cutover.sh status
 #
-# load / restart / previous 之前会读取网关实时队列（/public/live 的排队 + 生成中）：超过阈值
+# restart / previous 之前会读取网关实时队列（/public/live 的排队 + 生成中）：超过阈值
 # （环境变量 CUTOVER_BUSY_THRESHOLD，默认 0）或现在正落在忙时（CUTOVER_BUSY_HOURS，如 "20-24"，默认不设）
 # 就拒绝执行，除非加 --force（放在子命令后面或前面都行）。
 set -euo pipefail
@@ -29,6 +29,9 @@ COMPOSE=(docker compose -p "$PROJECT" --env-file "$ENV_FILE" -f "$OWL_DIR/compos
 BUSY_THRESHOLD=${CUTOVER_BUSY_THRESHOLD:-0}
 BUSY_HOURS=${CUTOVER_BUSY_HOURS:-}
 FORCE=0
+WAIT_IDLE=0
+QUEUE_WAIT_TIMEOUT=${CUTOVER_QUEUE_WAIT_TIMEOUT:-1800}
+QUEUE_POLL_SECONDS=${CUTOVER_QUEUE_POLL_SECONDS:-5}
 
 log() { printf '[%(%F %T)T] %s\n' -1 "$*"; }
 die() { log "✗ $*"; exit 1; }
@@ -63,6 +66,29 @@ busy_guard() {
     fi
   fi
   log "切换前会再次检查实时队列；网关停机时会先排空已接收的图片请求（最多 120 秒）"
+}
+
+# 自动发布可等待任务自然完成；手动 restart 仍立即失败，除非显式传 --wait-idle。
+wait_until_safe() {
+  if ((FORCE)); then busy_guard; return; fi
+  [[ $QUEUE_WAIT_TIMEOUT =~ ^(0|[1-9][0-9]*)$ && $QUEUE_POLL_SECONDS =~ ^[1-9][0-9]*$ ]] ||
+    die "CUTOVER_QUEUE_WAIT_TIMEOUT / CUTOVER_QUEUE_POLL_SECONDS 必须是正整数"
+  local deadline=$((SECONDS + QUEUE_WAIT_TIMEOUT)) last_report=-60 n
+  while :; do
+    n=$(current_images) || die "无法读取网关当前排队 / 生成任务数；为避免中断图片，取消切换"
+    [[ $n =~ ^[0-9]+$ ]] || die "网关返回的当前队列数无效；为避免中断图片，取消切换"
+    if ((n <= BUSY_THRESHOLD)) && ! in_busy_hours; then
+      busy_guard
+      return
+    fi
+    local elapsed=$((SECONDS - (deadline - QUEUE_WAIT_TIMEOUT)))
+    ((elapsed < QUEUE_WAIT_TIMEOUT)) || die "等待安全切换超时（队列 $n，阈值 $BUSY_THRESHOLD）；当前版本保持运行，可稍后重试"
+    if ((elapsed - last_report >= 60)); then
+      log "等待安全窗口：当前在途图片 $n，阈值 $BUSY_THRESHOLD；已等 ${elapsed}s / 最多 ${QUEUE_WAIT_TIMEOUT}s"
+      last_report=$elapsed
+    fi
+    sleep "$QUEUE_POLL_SECONDS"
+  done
 }
 
 wait_healthy() {
@@ -125,11 +151,8 @@ cmd_load() {
   local loaded
   loaded=$(gunzip -c "$tar" | docker load | sed -n 's/^Loaded image: //p' | tail -1)
   [[ -n $loaded ]] || die "docker load 没有输出镜像名"
-  if docker image inspect "$IMAGE:current" >/dev/null 2>&1; then
-    docker tag "$IMAGE:current" "$IMAGE:previous"
-  fi
-  docker tag "$loaded" "$IMAGE:current"
-  log "✓ owl-gate:current = $loaded（$(docker image inspect -f '{{.Id}}' "$IMAGE:current" | cut -c8-19)）"
+  docker tag "$loaded" "$IMAGE:staged"
+  log "✓ owl-gate:staged = $loaded；正在运行的 current / 回滚用 previous 均未改动"
 }
 
 cmd_install_ops() {
@@ -147,8 +170,7 @@ cmd_install_ops() {
 # 每个账号「有没有图在出、下一张什么时候能发」只记在网关进程的内存里，两个网关同时在线时互相看不到，
 # 会让同一账号同时出两张而被上游回 429，所以部署不再让新旧网关重叠。
 # 旧网关收到 SIGTERM 立即关掉监听，在途和已排队的图出完（最多 120 秒）才退出；这期间 Caddy 连不上网关，显示「网关自检中」。
-cmd_restart() {
-  busy_guard
+restart_container() {
   docker image inspect "$IMAGE:current" >/dev/null 2>&1 || die "先 load 镜像"
   probe_start
   log "停 $GATE：不再接新请求，手上的图出完（最多 120 秒）再退出；这期间网站显示「网关自检中」"
@@ -164,11 +186,34 @@ cmd_restart() {
   log "$GATE = $(docker inspect -f '{{.Image}}' "$GATE" | cut -c8-19)"
 }
 
+cmd_restart() {
+  if ((WAIT_IDLE)); then wait_until_safe; else busy_guard; fi
+  if docker image inspect "$IMAGE:staged" >/dev/null 2>&1; then
+    local staged_id current_id running_id
+    staged_id=$(docker image inspect -f '{{.Id}}' "$IMAGE:staged")
+    current_id=$(docker image inspect -f '{{.Id}}' "$IMAGE:current" 2>/dev/null || true)
+    if [[ $current_id != "$staged_id" ]]; then
+      # Only replace the rollback image when the current tag is the healthy image actually serving traffic.
+      # This keeps `previous` pointing to the last working release after a failed/partial cutover retry.
+      running_id=$(docker inspect -f '{{.Image}}' "$GATE" 2>/dev/null || true)
+      if [[ -n $current_id && $current_id == "$running_id" ]] &&
+        docker exec "$GATE" /usr/local/bin/nai-gate healthcheck >/dev/null 2>&1; then
+        docker tag "$IMAGE:current" "$IMAGE:previous"
+      fi
+      docker tag "$IMAGE:staged" "$IMAGE:current"
+    fi
+    docker image rm "$IMAGE:staged" >/dev/null 2>&1 || true
+    log "✓ staged 镜像已提升为 current；原 current 保留为 previous"
+  fi
+  restart_container
+}
+
 cmd_previous() {
+  if ((WAIT_IDLE)); then wait_until_safe; else busy_guard; fi
   docker image inspect "$IMAGE:previous" >/dev/null 2>&1 || die "没有 owl-gate:previous"
   docker tag "$IMAGE:current" "$IMAGE:failed"
   docker tag "$IMAGE:previous" "$IMAGE:current"
-  (cmd_restart) || die "上一版也起不来：看上面的日志（docker logs $GATE）"
+  restart_container || die "上一版也起不来：看上面的日志（docker logs $GATE）"
   log "✓ 已回到上一版 3.0（坏的那版标成 owl-gate:failed）"
 }
 
@@ -179,15 +224,19 @@ cmd_status() {
 
 args=()
 for a in "$@"; do
-  if [[ $a == --force ]]; then FORCE=1; else args+=("$a"); fi
+  case $a in
+    --force) FORCE=1 ;;
+    --wait-idle) WAIT_IDLE=1 ;;
+    *) args+=("$a") ;;
+  esac
 done
 set -- "${args[@]+"${args[@]}"}"
 
 case ${1:-status} in
-  load) shift; busy_guard; cmd_load "$@" ;;
+  load) shift; cmd_load "$@" ;;
   install-ops) shift; cmd_install_ops "$@" ;;
   restart) cmd_restart ;;
-  previous) busy_guard; cmd_previous ;;
+  previous) cmd_previous ;;
   status) cmd_status ;;
   *) die "未知子命令：$1" ;;
 esac

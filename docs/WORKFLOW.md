@@ -41,7 +41,7 @@ User-facing strings (errors, UI, bot replies) stay in Chinese: members read them
 
 ## 4. CI (push to `main`)
 
-`web`, `rust`, `e2e`, `secrets`, `image` and `nai-ops` run in parallel; `e2e` waits for `web`. Artifacts are built alongside the checks, so a red run still uploads them, but a red run is never deployable.
+`web`, `rust`, `e2e`, `secrets`, `deploy-safety`, `image` and `nai-ops` run in parallel; `e2e` waits for `web`. The E2E layout checks use a lightweight Chinese font instead of downloading the 61 MB Noto CJK package. Apt setup, browser installation and Playwright each have explicit timeouts so a stalled dependency cannot hold a run indefinitely. Artifacts are built alongside the checks, so a red run still uploads them, but a red run is never deployable.
 
 ## 5. Deploy
 
@@ -51,7 +51,9 @@ tools/deploy.sh            # deploy the latest green run
 tools/deploy.sh <run-id>   # deploy a specific green run
 ```
 
-The script refuses runs that did not fully succeed, skips if that build is already live, syncs `cutover.sh` and `compose.yml` from the checkout, loads the image, installs `nai-ops`, restarts, then checks `healthcheck`, `nai-ops smoke` and the public `/healthz`. Before load and restart, `cutover.sh` reads `/public/live` and refuses while any image is queued or generating; it also honors an optional `CUTOVER_BUSY_HOURS` window. `--force` skips these guards.
+The script refuses runs that did not fully succeed and skips if that build is already live. It downloads and stages the candidate image without changing `current` or `previous`, then waits up to 30 minutes for the live queue to reach the configured safe threshold before promoting the candidate and restarting. A timeout leaves the running version and rollback tag unchanged; retry `tools/deploy.sh <run-id>` later. After restart it checks `healthcheck`, `nai-ops smoke` and the public `/healthz`. Queue reads fail closed and an optional `CUTOVER_BUSY_HOURS` window is honored. `--force` skips the queue/window protection.
+
+`tools/deploy.sh --wait` reports CI state and its GitHub run URL every minute, and stops waiting after one hour by default (`OWL_CI_WAIT_TIMEOUT_SECONDS` changes that limit). Queue waiting defaults to 1800 seconds with 5-second polling; set `OWL_QUEUE_WAIT_TIMEOUT_SECONDS` and `OWL_QUEUE_POLL_SECONDS` in the local deployment environment file to change these values.
 
 Rollback: `ssh` in and run `/opt/owl/cutover.sh previous`.
 

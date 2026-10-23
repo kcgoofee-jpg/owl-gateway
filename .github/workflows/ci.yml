@@ -58,11 +58,17 @@ jobs:
     needs: web
     steps:
       - uses: actions/checkout@v7
-      # man-db rebuilds its index after every apt install; on the runner that alone took ~25 of e2e's 30 minutes.
+      - name: Update apt indexes
+        run: sudo apt-get update
+        timeout-minutes: 5
+      # Prevent dpkg from rebuilding the man-db index after each package install.
       - name: Skip man-db triggers
         run: sudo rm -f /var/lib/man-db/auto-update
-      - name: BoringSSL build deps + CJK fonts (orphan-character checks need real glyph widths)
-        run: sudo apt-get update && sudo apt-get install -y --no-install-recommends cmake clang libclang-dev fonts-noto-cjk
+      - name: Install BoringSSL build deps and lightweight CJK font
+        # WQY MicroHei covers the simplified-Chinese UI text used by the layout checks;
+        # Noto CJK was a 61 MB package and dominated E2E setup downloads.
+        run: sudo apt-get install -y --no-install-recommends cmake clang libclang-dev fonts-wqy-microhei
+        timeout-minutes: 10
       - run: rustup show active-toolchain || rustup toolchain install
       - uses: Swatinem/rust-cache@v2
         with:
@@ -83,6 +89,7 @@ jobs:
           key: playwright-${{ runner.os }}-${{ hashFiles('web/pnpm-lock.yaml') }}
       - run: pnpm exec playwright install --with-deps chromium
         working-directory: web
+        timeout-minutes: 10
       - run: cargo build --locked -p xtask
       - name: Start the full local stack (fake upstream, synthetic data) and the web dev server
         run: |
@@ -97,6 +104,17 @@ jobs:
         working-directory: web
         env:
           E2E_BASE: http://localhost:5174
+        timeout-minutes: 20
+
+  deploy-safety:
+    name: deploy-safety (shell and cutover guards)
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v7
+      - name: Check deployment shell syntax
+        run: bash -n tools/deploy.sh deploy/v3/cutover.sh tools/ci/test-cutover.sh
+      - name: Exercise safe image staging and queue wait
+        run: bash tools/ci/test-cutover.sh
 
   secrets:
     name: secrets (gitleaks, synthetic fixtures only)

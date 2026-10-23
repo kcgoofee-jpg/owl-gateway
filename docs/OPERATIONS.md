@@ -16,8 +16,10 @@
 See [WORKFLOW.md](WORKFLOW.md). In short: push to `main`, then `tools/deploy.sh --wait`.
 The server never compiles (2 cores) and holds no GitHub credentials: the script downloads the CI artifacts
 locally, copies them over with `scp`, syncs `cutover.sh` / `compose.yml`, and runs `cutover.sh load`
-(new image becomes `owl-gate:current`, the old one stays as `:previous`), `cutover.sh install-ops`, `cutover.sh restart`,
-then healthcheck and smoke.
+(new image becomes `owl-gate:staged`; `current` and rollback tag `previous` stay untouched), waits for
+an idle queue, promotes the candidate while retaining the old `current` as `previous`, restarts, then runs
+healthcheck and smoke. If waiting times out, the current container and rollback tag are unchanged; retry the
+same run after traffic subsides.
 
 `restart` 是先停后起：旧网关收到 SIGTERM 立即关掉监听，在途和已排队的图出完（最多 120 秒）才退出，然后起新的，同一时刻只有一个网关在用账号。
 这期间网站断 1–2 分钟，Caddy 显示降级页（「网关自检中」）；脚本每 0.5 秒经本机 Caddy 打一次公网地址的 `/healthz` 和 `/`，最后按**实测**打印停站时长。
@@ -40,7 +42,7 @@ compose 的 `stop_grace_period` 是 120 秒，所以发布时进行中的图不�
 **页面降级**（10-18）：首页 / 服务条款 / 隐私政策在网关不可用时（Caddy 连不上网关，或网关回 502/503/504），2 秒内显示静态降级页（503 + `Retry-After`，附独立状态页镜像链接）；`/status` 同样降级但保持 200。
 出图和用户接口**不降级**，仍最长等 150 秒让重启中的网关接上、拿到真实错误码。镜像只显示状态，不能出图，也不会连 NovelAI（不会换出口 IP）。
 
-`load`、`restart` 和 `previous` 之前，`cutover.sh` 会读取 `/public/live` 的实时队列，只按当前排队和生成中的图片数判断；默认阈值为 0，队列无法读取时会停止切换。它不再用过去 10 分钟的累计出图数，因为已完成的请求不代表切换会中断图片。可用 `CUTOVER_BUSY_THRESHOLD` 调整可容许的在途数，或用 `CUTOVER_BUSY_HOURS` 配置忙时禁切；`--force` 会跳过这些保护。
+`restart` 和 `previous` 会读取 `/public/live` 的实时队列，只按当前排队和生成中的图片数判断；默认阈值为 0，队列无法读取时会停止切换。`load` 只将候选镜像打上 `staged` 标签，不改正在运行的版本或回滚标签。自动发布会等到阈值内且不在忙时再切换，默认最多等 30 分钟；超时后旧版本继续运行，可重试。它不再用过去 10 分钟的累计出图数，因为已完成的请求不代表切换会中断图片。可用 `CUTOVER_BUSY_THRESHOLD` 调整容许的在途数，或用 `CUTOVER_BUSY_HOURS` 配置忙时禁切；`--force` 会跳过这些保护。
 
 ## 回上一版
 

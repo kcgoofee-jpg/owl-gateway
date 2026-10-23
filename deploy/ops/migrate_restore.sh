@@ -66,6 +66,9 @@ echo "== 6/6 启动 =="
 docker network inspect service-tools_edge >/dev/null 2>&1 \
   || docker network create --subnet 172.30.0.0/24 service-tools_edge
 /opt/owl/cutover.sh load /opt/owl/owl-gate.tar.gz
+# This restore flow runs before the gateway is started on the destination host.
+docker image tag owl-gate:staged owl-gate:current
+docker image rm owl-gate:staged >/dev/null 2>&1 || true
 /opt/owl/cutover.sh install-ops /opt/owl/nai-ops
 docker compose -p owl --env-file /opt/service-tools/.env -f /opt/owl/compose.yml up -d
 for _ in $(seq 1 30); do curl -fsS -m 2 http://127.0.0.1:3003/healthz >/dev/null 2>&1 && break; sleep 2; done
