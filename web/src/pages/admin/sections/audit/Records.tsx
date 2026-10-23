@@ -346,7 +346,8 @@ export function Audit() {
                       type="button"
                       class="lg-thumb"
                       style={{ aspectRatio: String(aspectOf(ex)) }}
-                      aria-label={`放大查看 ${it.key_name} 的记录`}
+                      title={pic ? undefined : "未记录原图"}
+                      aria-label={`放大查看 ${it.key_name} 的记录${pic ? "" : "（未记录原图）"}`}
                       onClick={() => setZoom(i)}
                     >
                       {pic ? (
@@ -391,7 +392,8 @@ export function Audit() {
                     <button
                       type="button"
                       class={cx("lg-tile", !pic && "is-none")}
-                      aria-label={`查看 ${it.key_name} 的${statusText(it.status)}记录`}
+                      title={pic ? undefined : "未记录原图"}
+                      aria-label={`查看 ${it.key_name} 的${statusText(it.status)}记录${pic ? "" : "（未记录原图）"}`}
                       onClick={() => setZoom(i)}
                     >
                       {pic ? (

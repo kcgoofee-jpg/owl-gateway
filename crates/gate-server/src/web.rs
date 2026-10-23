@@ -16,12 +16,14 @@ use std::path::PathBuf;
 #[folder = "../../web/dist"]
 struct Dist;
 
-/// 首页 / 问卷的安全头（比旧版更严：去掉 'unsafe-inline' 与 Discord CDN 头像源）。
+/// 首页 / 问卷的安全头（比旧版更严：去掉 'unsafe-inline'；保留 Discord CDN 头像源，
+/// 并额外允许 NovelAI 静态图源）。
 /// 字体只允许同源：开屏标题的 Newsreader 子集是 `/_owl/` 下的文件，不从 Google Fonts 加载。
 pub const PUBLIC_CSP: &str = "default-src 'none'; script-src 'self'; style-src 'self'; font-src 'self'; connect-src 'self'; \
     img-src 'self' data: https://cdn.discordapp.com https://static.novelai.net; frame-src 'self'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'";
-/// 后台的安全头。
-pub const ADMIN_CSP: &str = "default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data: blob:; \
+/// 后台的安全头。头像同样来自 Discord CDN（img-src 与 PUBLIC_CSP 保持一致）。
+pub const ADMIN_CSP: &str = "default-src 'self'; script-src 'self'; style-src 'self'; \
+    img-src 'self' data: blob: https://cdn.discordapp.com; \
     connect-src 'self'; frame-src 'self'; object-src 'none'; base-uri 'none'; form-action 'self'; frame-ancestors 'none'";
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]

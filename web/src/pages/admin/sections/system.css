@@ -1,6 +1,3 @@
-.pwform {
-  max-width: 440px;
-}
 .pwbox {
   display: flex;
   gap: var(--sp-2);

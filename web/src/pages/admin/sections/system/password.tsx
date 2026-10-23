@@ -87,7 +87,7 @@ export default function PasswordCard() {
   return (
     <Card title="后台密码" sub="修改后所有已登录的会话（包括当前）都会失效，需要用新密码重新登录。">
       <form
-        class="stack-sm pwform"
+        class="stack-sm"
         autoComplete="off"
         onSubmit={(e) => {
           e.preventDefault();
@@ -96,15 +96,17 @@ export default function PasswordCard() {
       >
         {/* 隐藏的用户名字段：让密码管理器把新密码和本站关联保存 */}
         <input type="text" name="username" autoComplete="username" value="admin" hidden readOnly />
-        <PwInput label="当前密码" value={cur} onInput={setCur} autoComplete="current-password" />
-        <PwInput
-          label="新密码"
-          value={next}
-          onInput={setNext}
-          autoComplete="new-password"
-          hint="至少 12 个字符，且不能与当前密码相同"
-        />
-        <PwInput label="确认新密码" value={again} onInput={setAgain} autoComplete="new-password" />
+        <div class="form-grid">
+          <PwInput label="当前密码" value={cur} onInput={setCur} autoComplete="current-password" />
+          <PwInput
+            label="新密码"
+            value={next}
+            onInput={setNext}
+            autoComplete="new-password"
+            hint="至少 12 个字符，且不能与当前密码相同"
+          />
+          <PwInput label="确认新密码" value={again} onInput={setAgain} autoComplete="new-password" />
+        </div>
         {err && (
           <p class="field__error" role="alert">
             {err}

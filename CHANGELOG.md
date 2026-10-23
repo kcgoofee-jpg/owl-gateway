@@ -59,6 +59,8 @@
 
 ### 站长 / 运维
 
+- **Admin avatars load and destructive menu items read as dangerous.** `ADMIN_CSP` img-src now allows the Discord avatar CDN like the public header already did, so admin member lists show real avatars instead of initial fallbacks, and the header comment matches the code again. `.menu__item.btn--danger` keeps the danger color (the later plain `.menu__item` rule had overridden it by source order), so 全站重置 Key / 停用账号 / 删除 stand out in menus. From the same live-page audit sweep: picture-less audit tiles get a 未记录原图 tooltip, the three samplers seen in fixtures display as Euler / Euler A / DPM++ 2M (unknown enums pass through), the zero-means-keep-forever retention hints agree on one wording, the admin password card spans the shared form grid, and the section-count comment says eight.
+
 - **Deploy guard checks active image work, not recent history.** `cutover.sh` reads the live waiting + running queue and defaults to refusing a restart while any image is active; an unavailable queue fails closed. Previously it counted all image requests from the last ten minutes, so completed traffic could block a safe deploy.
 - **Stage releases before draining traffic.** Candidate images no longer replace `current` or `previous` until the live queue is safe to restart. Automated deploys wait up to 30 minutes for idle traffic; a timeout leaves the live version and rollback tag intact. CI now uses a small Chinese UI font for layout tests, separates and bounds dependency-install steps, and tests the staging/timeout/promotion safety paths.
 

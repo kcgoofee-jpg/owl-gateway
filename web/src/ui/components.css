@@ -413,6 +413,10 @@
   background: var(--surface-2);
   outline: none;
 }
+/* 菜单项复用 .btn--danger 时，红色要盖过上面 .menu__item 的默认文字色（源顺序在后） */
+.menu__item.btn--danger {
+  color: var(--danger);
+}
 
 /* ---------- Skeleton ---------- */
 .skel {

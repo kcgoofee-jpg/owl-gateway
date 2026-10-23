@@ -146,7 +146,7 @@ export const AUDIT_SPECS: Record<string, FieldSpec> = {
     unit: "小时",
     hint: "到点自动删；0 = 只按容量上限删",
   },
-  retention_days: { kind: "int", label: "提示词保留", min: 0, max: 3650, unit: "天", hint: "0 = 长期保留" },
+  retention_days: { kind: "int", label: "提示词保留", min: 0, max: 3650, unit: "天", hint: "0 = 永久" },
   origin_keep_days: {
     kind: "int",
     label: "IP / UA 保留",

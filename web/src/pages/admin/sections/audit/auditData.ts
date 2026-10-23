@@ -22,13 +22,20 @@ export function aspectOf(ex: AuditExtra): number {
   return w > 0 && h > 0 ? w / h : 2 / 3;
 }
 
+/** 采样器枚举 → 显示名。只映射仓库里出现过（测试 / 快照）的值，没见过的原样显示。 */
+const SAMPLER_LABELS: Record<string, string> = {
+  k_euler: "Euler",
+  k_euler_ancestral: "Euler A",
+  k_dpmpp_2m: "DPM++ 2M",
+};
+
 /** 「种子 123 · Euler · 28 步 · CFG 5 · 832×1216」 */
 export function paramsLine(ex: AuditExtra): string {
   const p = ex.params ?? {};
   const size = p.width && p.height ? `${p.width}×${p.height}` : "";
   return [
     p.seed != null ? `种子 ${p.seed}` : "",
-    p.sampler ?? "",
+    p.sampler ? (SAMPLER_LABELS[p.sampler] ?? p.sampler) : "",
     p.steps ? `${p.steps} 步` : "",
     p.scale != null ? `CFG ${p.scale}` : "",
     size,

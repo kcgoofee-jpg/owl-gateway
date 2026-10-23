@@ -29,10 +29,14 @@ describe("aspectOf / paramsLine", () => {
     expect(aspectOf({})).toBeCloseTo(2 / 3, 5);
     expect(aspectOf({ params: { width: 0, height: 10 } })).toBeCloseTo(2 / 3, 5);
   });
-  it("参数摘要只列有值的项，种子 0 也要显示", () => {
+  it("参数摘要只列有值的项，种子 0 也要显示；采样器枚举显示成友好名", () => {
     expect(
       paramsLine({ params: { seed: 0, sampler: "k_euler", steps: 28, scale: 5, width: 832, height: 1216 } }),
-    ).toBe("种子 0 · k_euler · 28 步 · CFG 5 · 832×1216");
+    ).toBe("种子 0 · Euler · 28 步 · CFG 5 · 832×1216");
+    expect(paramsLine({ params: { sampler: "k_dpmpp_2m" } })).toBe("DPM++ 2M");
+    expect(paramsLine({ params: { sampler: "k_euler_ancestral" } })).toBe("Euler A");
+    // 没见过的枚举原样显示
+    expect(paramsLine({ params: { sampler: "k_something_new" } })).toBe("k_something_new");
     expect(paramsLine({})).toBe("");
   });
 });
@@ -51,7 +55,7 @@ describe("大图下方一行与复制文本", () => {
     const ex = { params: { seed: 7, sampler: "k_euler", steps: 28, scale: 5, width: 832, height: 1216 } };
     const line = infoLine({ rid: "edae7aa9", ts: 1_800_000_000, key_name: "月见" }, ex);
     expect(line).toMatch(
-      /^编号 edae7aa9 · 种子 7 · k_euler · 28 步 · CFG 5 · 832×1216 · \d{2}-\d{2} \d{2}:\d{2}:\d{2} · 月见$/,
+      /^编号 edae7aa9 · 种子 7 · Euler · 28 步 · CFG 5 · 832×1216 · \d{2}-\d{2} \d{2}:\d{2}:\d{2} · 月见$/,
     );
     expect(infoLine({ rid: "", ts: 1_800_000_000, key_name: "" }, {})).toMatch(
       /^\d{2}-\d{2} [\d:]+ · 已删除的 Key$/,
