@@ -45,7 +45,8 @@ jobs:
     steps:
       - uses: actions/checkout@v7
       - name: BoringSSL build deps
-        run: sudo apt-get update && sudo apt-get install -y --no-install-recommends cmake clang libclang-dev
+        run: bash tools/ci/build-deps.sh
+        timeout-minutes: 5
       - run: rustup show active-toolchain || rustup toolchain install
       - uses: Swatinem/rust-cache@v2
       - run: cargo fmt --all --check
@@ -58,16 +59,19 @@ jobs:
     needs: web
     steps:
       - uses: actions/checkout@v7
+      - name: Use runner BoringSSL build tools
+        run: bash tools/ci/build-deps.sh
+        timeout-minutes: 5
       - name: Update apt indexes
         run: sudo apt-get update
         timeout-minutes: 5
       # Prevent dpkg from rebuilding the man-db index after each package install.
       - name: Skip man-db triggers
         run: sudo rm -f /var/lib/man-db/auto-update
-      - name: Install BoringSSL build deps and lightweight CJK font
+      - name: Install lightweight CJK font
         # WQY MicroHei covers the simplified-Chinese UI text used by the layout checks;
         # Noto CJK was a 61 MB package and dominated E2E setup downloads.
-        run: sudo apt-get install -y --no-install-recommends cmake clang libclang-dev fonts-wqy-microhei
+        run: sudo apt-get install -y --no-install-recommends fonts-wqy-microhei
         timeout-minutes: 10
       - run: rustup show active-toolchain || rustup toolchain install
       - uses: Swatinem/rust-cache@v2

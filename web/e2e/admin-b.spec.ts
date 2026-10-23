@@ -150,7 +150,7 @@ test("额度与保护：全是手动表单 + 只读记录；没有算法说明",
   await expect(page.getByLabel("V4.5 每人每天", { exact: false })).toHaveValue("150");
   await expect(page.getByLabel("单号每天上限", { exact: false })).toHaveValue("2400");
   await expect(page.getByLabel("每人排队", { exact: false })).toHaveValue("2");
-  await expect(page.getByLabel("V5 Medium 降档").locator("option")).toHaveCount(2);
+  await expect(page.getByLabel("V5 Full 转为 Medium").locator("option")).toHaveCount(2);
   await expect(page.getByRole("switch", { name: "暂停 V5" })).toBeVisible();
   await expect(page.getByTestId("guard-pace")).toBeVisible();
   await expect(page.getByTestId("quota-records")).toBeVisible();

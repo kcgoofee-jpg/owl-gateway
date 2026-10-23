@@ -310,7 +310,7 @@ export function SaveBar(props: { form: Form; onSave: () => unknown; saving?: boo
         </Button>
       )}
       <span class="savebar__state" role="status">
-        {f.dirty ? (f.valid ? `有 ${f.dirtyCount} 项未保存` : "有输入不合法，请先修改") : ""}
+        {f.dirty ? (f.valid ? `有 ${f.dirtyCount} 项未保存` : "有输入不合法，请先修改") : "暂无修改"}
       </span>
     </div>
   );

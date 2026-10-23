@@ -35,6 +35,25 @@ const VIEWS: Array<{ id: View; label: string }> = [
 
 const thumbUrl = (id: number) => `/admin/api/audit/${id}/thumb`;
 
+function AuditImage(props: { src: string; alt: string; lazy?: boolean }) {
+  const [failed, setFailed] = useState(false);
+  if (failed)
+    return (
+      <span class="muted small" role="img" aria-label="图片加载失败">
+        图片暂不可用
+      </span>
+    );
+  return (
+    <img
+      src={props.src}
+      alt={props.alt}
+      loading={props.lazy ? "lazy" : "eager"}
+      decoding="async"
+      onError={() => setFailed(true)}
+    />
+  );
+}
+
 /* ---------------- 复制按钮（框里的反馈写在按钮上，不依赖 toast） ---------------- */
 function CopyBtn(props: { text: string; label: string }) {
   const [state, setState] = useState<"" | "ok" | "fail">("");
@@ -103,6 +122,7 @@ function Lightbox(props: {
             {props.index + 1} / {props.items.length}
           </span>
           <span class="spacer" />
+          {(pos || neg) && <CopyBtn text={allPromptText(it, ex)} label="复制完整提示词" />}
           <Button
             icon
             aria-label="上一张"
@@ -125,7 +145,7 @@ function Lightbox(props: {
       <div class="lg-lb">
         <div class="lg-lb__pic">
           {hasPicture(it) ? (
-            <img
+            <AuditImage
               key={it.id}
               src={`/admin/api/audit/${it.id}/${it.has_image ? "image" : "thumb"}`}
               alt={`${it.key_name} 生成的图${it.has_image ? "" : "（原图已过期，这是缩略图）"}`}
@@ -141,7 +161,6 @@ function Lightbox(props: {
           {it.status !== "ok" && <Badge tone={statusTone(it.status)}>{statusText(it.status)}</Badge>}
           <span class="small mono lg-lb__info">{infoLine(it, ex)}</span>
           <span class="spacer" />
-          {(pos || neg) && <CopyBtn text={allPromptText(it, ex)} label="复制完整提示词" />}
         </div>
       </div>
     </Dialog>
@@ -331,7 +350,7 @@ export function Audit() {
                       onClick={() => setZoom(i)}
                     >
                       {pic ? (
-                        <img src={thumbUrl(it.id)} alt="" loading="lazy" decoding="async" />
+                        <AuditImage key={it.id} src={thumbUrl(it.id)} alt="" lazy />
                       ) : (
                         <ImageOff size={22} aria-hidden="true" />
                       )}
@@ -376,7 +395,7 @@ export function Audit() {
                       onClick={() => setZoom(i)}
                     >
                       {pic ? (
-                        <img src={thumbUrl(it.id)} alt="" loading="lazy" decoding="async" />
+                        <AuditImage key={it.id} src={thumbUrl(it.id)} alt="" lazy />
                       ) : (
                         <ImageOff size={26} aria-hidden="true" />
                       )}

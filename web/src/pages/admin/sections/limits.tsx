@@ -68,7 +68,7 @@ const V5_PAUSED_FIELDS: Record<string, string> = {
 
 function QuotaCard() {
   const { data, error, loading } = useAdmin<Settings>("/admin/api/settings");
-  if (!data) return <CardPending title="额度（手动）" loading={loading} error={error} />;
+  if (!data) return <CardPending title="额度" loading={loading} error={error} />;
   const setPaused = (on: boolean) =>
     act("PUT", "/admin/api/settings", { v5_paused: on }, on ? "V5 已暂停" : "V5 已恢复");
   return (
@@ -86,14 +86,33 @@ function QuotaCard() {
         />
       </Card>
       <FormCard
-        title="额度（手动）"
-        sub="改了立刻同步给所有成员 Key 和首页文案"
+        title="成员统一额度"
+        sub="保存后生效。图片额度同步至采用统一额度的 Key；独立额度保留。"
         url="/admin/api/settings"
-        specs={QUOTA_SPECS}
+        specs={Object.fromEntries(
+          Object.entries(QUOTA_SPECS).filter(([k]) => k !== "v5_medium_mode" && !k.startsWith("global_")),
+        )}
         server={data as unknown as Record<string, unknown>}
         done="额度已保存并同步"
         saveLabel="保存额度"
         {...(data.v5_paused ? { disabled: V5_PAUSED_FIELDS } : {})}
+      />
+      <FormCard
+        title="全站预算"
+        url="/admin/api/settings"
+        specs={Object.fromEntries(Object.entries(QUOTA_SPECS).filter(([k]) => k.startsWith("global_")))}
+        server={data as unknown as Record<string, unknown>}
+        done="全站预算已保存"
+        saveLabel="保存全站预算"
+        {...(data.v5_paused ? { disabled: V5_PAUSED_FIELDS } : {})}
+      />
+      <FormCard
+        title="模型转换"
+        url="/admin/api/settings"
+        specs={Object.fromEntries(Object.entries(QUOTA_SPECS).filter(([k]) => k === "v5_medium_mode"))}
+        server={data as unknown as Record<string, unknown>}
+        done="模型转换已保存"
+        saveLabel="保存模型转换"
       />
     </>
   );
