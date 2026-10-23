@@ -119,7 +119,7 @@ export type TopbarUser = {
 export function Topbar(props: {
   /** 已登录成员；游客不传 */
   user?: TopbarUser | undefined;
-  /** 顶栏右侧放不放「登录」：首页的登录入口在状态卡片里，只有问卷页放这里 */
+  /** 顶栏右侧是否显示游客登录入口 */
   loginOpen: boolean;
   /** Homepage brand links directly to the inspiration gallery. */
   brandHref?: string;

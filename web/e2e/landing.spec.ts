@@ -48,8 +48,8 @@ test.describe("游客", () => {
     await expect(status).not.toContainText("全站剩余");
     await expect(status).not.toContainText(/已用 \d+%/);
     await expect(status).not.toContainText("登录时会读取");
-    await expect(status.getByRole("link", { name: "用 Discord 登录" })).toBeVisible();
-    await expect(page.locator(".site-nav")).toHaveCount(0);
+    await expect(page.getByRole("banner").getByRole("link", { name: "用 Discord 登录" })).toBeVisible();
+    await expect(status.getByRole("link", { name: "用 Discord 登录" })).toHaveCount(0);
     await expect(status.locator(".lp-meter").nth(1)).toContainText("V5");
     await expect(page.getByRole("status").filter({ hasText: /\S/ })).not.toHaveCount(0);
 
@@ -148,36 +148,32 @@ test.describe("游客", () => {
     expect(meRequests).toEqual([]);
   });
 
-  test("网页登录开放时：整页只有首屏一个登录入口（顶栏不放），指向 /login", async ({ page }) => {
+  test("网页登录开放时：整页只有顶栏一个登录入口，指向 /login", async ({ page }) => {
     await patch(page, STATUS, (b) => ({ ...b, web_login: true }));
     await patch(page, LIVE, (b) => ({ ...b, web_login: true }));
     await page.goto("/");
     const login = page.getByRole("link", { name: "用 Discord 登录" });
     await expect(login).toHaveCount(1);
     await expect(login.first()).toHaveAttribute("href", /^\/login(\?dev=[0-9a-f]{32})?$/);
-    await expect(page.locator(".lp-hero").getByRole("link", { name: "用 Discord 登录" })).toBeVisible();
-    await expect(page.getByRole("banner").getByRole("link", { name: "用 Discord 登录" })).toHaveCount(0);
+    await expect(page.getByRole("banner").getByRole("link", { name: "用 Discord 登录" })).toBeVisible();
+    await expect(page.locator(".lp-hero").getByRole("link", { name: "用 Discord 登录" })).toHaveCount(0);
     // 登录前不出现「加入 Discord」按钮
     await expect(page.getByRole("link", { name: "加入 Discord" })).toHaveCount(0);
   });
 
-  test("首屏：「用 Discord 登录」在状态行右边，Blurple 底白字、带 Clyde 标志；内容都在同一个 760px 的列里", async ({
-    page,
-  }) => {
+  test("顶栏：登录入口靠右显示；首页内容仍在同一个 760px 的列里", async ({ page }) => {
     await page.setViewportSize({ width: 1280, height: 900 });
     await patch(page, STATUS, (b) => ({ ...b, web_login: true }));
     await patch(page, LIVE, (b) => ({ ...b, web_login: true }));
     await page.goto("/");
     const login = page.getByRole("link", { name: "用 Discord 登录" });
-    const head = page.locator(".lp-status__head");
-    await expect(head).not.toBeEmpty();
-    const [lb, hb] = [await login.boundingBox(), await head.boundingBox()];
-    expect(
-      lb && hb && lb.x > hb.x + hb.width && Math.abs(lb.y + lb.height / 2 - (hb.y + hb.height / 2)) < 12,
-    ).toBe(true);
-    expect(await login.evaluate((el) => getComputedStyle(el).backgroundColor)).toBe("rgb(88, 101, 242)");
-    await expect(login.locator("svg path")).toHaveCount(1);
-    expect(await head.evaluate((el) => getComputedStyle(el).fontSize)).toBe("20px");
+    const topbar = page.getByRole("banner");
+    const controls = topbar.locator(".site-top__right");
+    const [lb, cb] = [await login.boundingBox(), await controls.boundingBox()];
+    expect(lb && cb && lb.x >= cb.x && lb.x + lb.width <= cb.x + cb.width).toBe(true);
+    expect(await login.evaluate((el) => getComputedStyle(el).backgroundColor)).toBe("rgb(91, 91, 214)");
+    await expect(login).toHaveText("登录");
+    await expect(page.locator(".lp-status__head")).not.toBeEmpty();
     // 状态和说明区左右对齐，宽 760 以内
     const edges = await page
       .locator("main .lp-status, main .card:visible")
@@ -292,13 +288,11 @@ test.describe("游客", () => {
     await patch(page, STATUS, (b) => ({ ...b, web_login: true }));
     await patch(page, LIVE, (b) => ({ ...b, web_login: true }));
     await page.goto("/");
-    await expect(page.locator(".lp-hero").getByRole("link", { name: "用 Discord 登录" })).toBeVisible();
+    const login = page.getByRole("banner").getByRole("link", { name: "用 Discord 登录" });
+    await expect(login).toBeVisible();
     expect(await noHorizontalScroll(page)).toBe(true);
     // 顶栏的几个控件都在视口内
-    for (const el of [
-      page.getByRole("button", { name: /切换到/ }),
-      page.locator(".lp-hero").getByRole("link", { name: "用 Discord 登录" }),
-    ]) {
+    for (const el of [page.getByRole("button", { name: /切换到/ }), login]) {
       const box = await el.boundingBox();
       expect(box && box.x >= 0 && box.x + box.width <= 375).toBe(true);
     }
