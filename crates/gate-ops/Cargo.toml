@@ -1,0 +1,40 @@
+[package]
+name = "gate-ops"
+description = "运维命令：巡检、快照、脱敏、冒烟。"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[lib]
+name = "gate_ops"
+path = "src/lib.rs"
+
+[[bin]]
+name = "nai-ops"
+path = "src/main.rs"
+
+[dependencies]
+gate-core.workspace = true
+anyhow.workspace = true
+clap.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+rusqlite.workspace = true
+tokio.workspace = true
+reqwest.workspace = true
+jiff.workspace = true
+regex.workspace = true
+sha2.workspace = true
+hex.workspace = true
+base64.workspace = true
+flate2 = "1"
+
+[dev-dependencies]
+gate-db.workspace = true
+axum.workspace = true
+tempfile = "3"
+
+[lints]
+workspace = true

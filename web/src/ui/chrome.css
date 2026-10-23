@@ -1,0 +1,173 @@
+/*
+ * 全站外框：顶栏、版心、页面转场、滚动显影、页面顶部的天色。
+ * 首页 / 问卷（Vite）和独立状态页（网关把 tokens.css + 本文件 + status-page.css 拼成一份样式）共用这一份，
+ * 所以这里不能引用任何外部资源（不导入别的样式表、不引图片 / 字体；状态页的 CSP 是 default-src 'none'）。
+ * 系统开了「减少动态效果」时，所有动效都不出现。
+ */
+
+/* ---------- 版心 ---------- */
+.wrap {
+  width: 100%;
+  max-width: var(--content);
+  margin: 0 auto;
+  padding-left: max(var(--sp-4), env(safe-area-inset-left, 0px));
+  padding-right: max(var(--sp-4), env(safe-area-inset-right, 0px));
+}
+/* 游客首页、状态页：所有卡片在同一个 760px 的列里，左右对齐 */
+.wrap--narrow {
+  max-width: 760px;
+}
+
+/* ---------- 顶栏 ---------- */
+.site-top {
+  position: sticky;
+  top: 0;
+  z-index: 20;
+  border-bottom: 1px solid var(--border);
+  background: color-mix(in oklab, var(--bg) 82%, transparent);
+  backdrop-filter: blur(10px);
+}
+.site-top__in {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-4);
+  min-height: 60px;
+  padding-top: var(--sp-3);
+  padding-bottom: var(--sp-3);
+}
+/* Logo：两只眼睛 + 站名，整体就是回首页的链接 */
+.brand {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--sp-2);
+  border-radius: var(--radius-sm);
+  color: var(--text);
+  font-size: var(--fs-md);
+  font-weight: 700;
+  white-space: nowrap;
+  text-decoration: none;
+}
+.brand:hover {
+  text-decoration: none;
+}
+.brand__eyes {
+  display: inline-flex;
+  gap: 4px;
+}
+.brand__eyes i {
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  background: var(--eye);
+}
+.site-top__right {
+  margin-left: auto;
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+}
+/* 主题切换：无边框的圆形图标按钮，悬停时出现浅底 */
+.icon-btn {
+  flex: none;
+  display: grid;
+  place-items: center;
+  width: var(--control-h);
+  height: var(--control-h);
+  padding: 0;
+  border: 0;
+  border-radius: 50%;
+  background: transparent;
+  color: var(--text-2);
+  cursor: pointer;
+  transition: background 0.15s;
+}
+.icon-btn:hover {
+  background: var(--surface-3);
+  color: var(--text);
+}
+.icon-btn svg {
+  width: 18px;
+  height: 18px;
+}
+@media (max-width: 560px) {
+  /* 窄屏只留两只眼睛；站名仍给读屏 */
+  .brand__name {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    overflow: hidden;
+    clip: rect(0, 0, 0, 0);
+    white-space: nowrap;
+  }
+  .site-top__in {
+    gap: var(--sp-2);
+  }
+}
+
+/* ---------- 页面顶部的天色：滚动时由夜色转成晨色 ---------- */
+@property --dawn {
+  syntax: "<number>";
+  inherits: true;
+  initial-value: 0;
+}
+@keyframes owl-dawn {
+  from {
+    --dawn: 0;
+  }
+  to {
+    --dawn: 1;
+  }
+}
+.sky {
+  position: fixed;
+  inset: 0;
+  z-index: -1;
+  pointer-events: none;
+  background: linear-gradient(
+    180deg,
+    color-mix(in oklab, var(--sky-night), var(--sky-dawn) calc(var(--dawn) * 100%)) 0%,
+    var(--bg) 70%
+  );
+}
+
+/* ---------- 动效（只在没开「减少动态效果」时） ---------- */
+@media (prefers-reduced-motion: no-preference) {
+  .brand:hover .brand__eyes i {
+    animation: owl-blink 0.32s ease-in-out;
+  }
+}
+@supports (animation-timeline: scroll()) {
+  @media (prefers-reduced-motion: no-preference) {
+    html {
+      animation: owl-dawn linear both;
+      animation-timeline: scroll(root);
+    }
+  }
+}
+/* 区块滚进来时从模糊里显影（12 步）。不支持 scroll-driven animations 的浏览器直接显示最终状态 */
+@supports (animation-timeline: view()) {
+  @media (prefers-reduced-motion: no-preference) {
+    .reveal {
+      animation: owl-develop steps(12, jump-none) both;
+      animation-timeline: view();
+      animation-range: entry 0% entry 70%;
+    }
+  }
+}
+@keyframes owl-blink {
+  50% {
+    transform: scaleY(0.1);
+  }
+}
+@keyframes owl-develop {
+  from {
+    filter: blur(10px) saturate(0.3);
+    opacity: 0.4;
+    transform: translateY(18px);
+  }
+  to {
+    filter: none;
+    opacity: 1;
+    transform: none;
+  }
+}

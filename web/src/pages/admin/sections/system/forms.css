@@ -1,0 +1,317 @@
+/* 设置类分区共用的表单与展示样式。只用 tokens.css 的变量；字号手机与桌面一致。 */
+
+/* 分区根容器：卡片之间留白；min-width:0 防止宽表格把页面撑出横向滚动条 */
+.sect {
+  display: grid;
+  gap: var(--sp-4);
+  min-width: 0;
+}
+.sect > * {
+  min-width: 0;
+}
+
+/* 表单网格：窄屏单列，宽屏多列 */
+.form-grid {
+  display: grid;
+  gap: var(--sp-4);
+  grid-template-columns: repeat(auto-fill, minmax(min(100%, 230px), 1fr));
+  align-items: start;
+}
+/* 每个字段占 4 行（标题 / 控件 / 说明 / 错误），用 subgrid 共用行高：
+   同一排里有的标题折成两行，控件也照样上下对齐 */
+.form-grid > .field {
+  grid-row: span 4;
+  display: grid;
+  grid-template-rows: subgrid;
+  row-gap: 0; /* 空的提示 / 错误行不占间距；间距跟着有内容的元素走（下面三条 margin） */
+  align-content: start;
+}
+.form-grid > .field > .field__label {
+  margin-bottom: var(--sp-2);
+}
+.form-grid > .field > .field__hint {
+  margin-top: var(--sp-2);
+}
+.form-grid > .field > .field__error {
+  margin-top: var(--sp-1);
+}
+.form-section {
+  display: grid;
+  gap: var(--sp-3);
+  margin-top: var(--sp-5);
+  padding-top: var(--sp-4);
+  border-top: 1px solid var(--border);
+}
+.form-section:first-child {
+  margin-top: 0;
+  padding-top: 0;
+  border-top: 0;
+}
+.form-section__title {
+  font-size: var(--fs-md);
+  font-weight: 650;
+}
+
+.inputwrap {
+  position: relative;
+  display: flex;
+  align-items: center;
+}
+.inputwrap .input {
+  padding-right: 3.4em;
+}
+.inputwrap__unit {
+  position: absolute;
+  right: var(--sp-3);
+  color: var(--muted);
+  font-size: var(--fs-sm);
+  pointer-events: none;
+}
+.input[aria-invalid="true"] {
+  border-color: var(--danger);
+}
+.input:disabled,
+.select:disabled {
+  background-color: var(--surface-2);
+  color: var(--muted);
+  cursor: not-allowed;
+}
+.field__error {
+  font-size: var(--fs-xs);
+  color: var(--danger);
+  font-weight: 600;
+}
+
+/* 保存条 */
+.savebar {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: var(--sp-3);
+  margin-top: var(--sp-4);
+}
+.savebar__state {
+  font-size: var(--fs-sm);
+  color: var(--muted);
+}
+
+/* 开关 */
+.switch {
+  position: relative;
+  flex: none;
+  width: 44px;
+  height: 24px;
+  padding: 0;
+  border: 1px solid var(--border-strong);
+  border-radius: 999px;
+  background: var(--surface-3);
+  cursor: pointer;
+  transition: background 0.15s;
+}
+.switch[aria-checked="true"] {
+  background: var(--accent);
+  border-color: var(--accent);
+}
+.switch:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+.switch__thumb {
+  position: absolute;
+  top: 2px;
+  left: 2px;
+  width: 18px;
+  height: 18px;
+  border-radius: 50%;
+  background: var(--text-2);
+  transition:
+    transform 0.15s,
+    background 0.15s;
+}
+.switch[aria-checked="true"] .switch__thumb {
+  transform: translateX(20px);
+  background: var(--accent-fg);
+}
+.switch-row {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-4);
+  padding: var(--sp-3) 0;
+  border-bottom: 1px solid var(--border);
+}
+.switch-row:last-child {
+  border-bottom: 0;
+}
+.switch-row__body {
+  flex: 1;
+  min-width: 0;
+}
+.switch-row__title {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: var(--sp-2);
+  font-weight: 600;
+  font-size: var(--fs-md);
+}
+.switch-row__desc {
+  color: var(--muted);
+  font-size: var(--fs-sm);
+}
+
+/* 推算过程框 */
+.derive {
+  padding: var(--sp-3) var(--sp-4);
+  border: 1px dashed var(--border-strong);
+  border-radius: var(--radius);
+  background: var(--surface-2);
+  font-size: var(--fs-sm);
+  display: grid;
+  gap: var(--sp-1);
+}
+.derive__title {
+  font-size: var(--fs-xs);
+  font-weight: 650;
+  color: var(--muted);
+  letter-spacing: 0.04em;
+}
+.derive__body {
+  display: grid;
+  gap: var(--sp-1);
+  font-variant-numeric: tabular-nums;
+}
+.derive b {
+  font-weight: 650;
+}
+
+/* 名称 / 值 */
+.kv {
+  display: grid;
+  margin: 0;
+  gap: 0;
+}
+.kv__row {
+  display: grid;
+  grid-template-columns: minmax(7em, 14em) minmax(0, 1fr);
+  gap: var(--sp-3);
+  padding: var(--sp-2) 0;
+  border-bottom: 1px solid var(--border);
+  font-size: var(--fs-sm);
+}
+.kv__row:last-child {
+  border-bottom: 0;
+}
+.kv dt {
+  color: var(--muted);
+}
+.kv dd {
+  margin: 0;
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+/* 卡片里的并排操作 */
+.actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--sp-2);
+}
+.chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--sp-2);
+}
+.stack-sm {
+  display: grid;
+  gap: var(--sp-3);
+}
+.table td .muted,
+.table th .muted {
+  font-weight: 400;
+}
+
+/* 复选框 */
+.checks {
+  border: 0;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  gap: var(--sp-2);
+  min-width: 0;
+}
+/* fieldset 里的 legend 不参与 grid 的 gap，标题要自己留 8px，否则贴着下面的选项 */
+.checks > legend {
+  padding: 0;
+  margin-bottom: var(--sp-2);
+}
+.check {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--sp-2);
+  font-size: var(--fs-md);
+  cursor: pointer;
+}
+.check input {
+  width: 18px;
+  height: 18px;
+  margin: 0;
+  accent-color: var(--accent);
+}
+
+/* 三选一分段控件：等宽等高；原生单选框保证方向键可用 */
+.seg {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 0;
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius);
+  overflow: hidden;
+  background: var(--surface-2);
+}
+.seg__opt {
+  position: relative;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 40px;
+  padding: 0 var(--sp-3);
+  cursor: pointer;
+  font-weight: 600;
+  font-size: var(--fs-md);
+  color: var(--text-2);
+  white-space: nowrap;
+}
+.seg__opt + .seg__opt {
+  border-left: 1px solid var(--border-strong);
+}
+.seg__opt input {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  margin: 0;
+  opacity: 0;
+  cursor: pointer;
+}
+.seg__opt:has(input:checked) {
+  background: var(--accent);
+  color: var(--accent-fg);
+}
+.seg__opt:has(input:focus-visible) {
+  outline: 2px solid var(--accent);
+  outline-offset: -3px;
+}
+.seg__opt:has(input:disabled) {
+  opacity: 0.6;
+  cursor: wait;
+}
+
+/* Folded explanation lines under a card (e.g. dynamic quota details) */
+.detail-list {
+  margin: 0;
+  padding-left: 1.2em;
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-1);
+}

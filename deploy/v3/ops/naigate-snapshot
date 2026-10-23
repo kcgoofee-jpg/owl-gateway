@@ -1,0 +1,6 @@
+#!/bin/bash
+# 用法：naigate-snapshot <输出文件.db.gz>（装在 /usr/local/bin；部署前快照、每晚备份、脱敏快照共用）
+# 3.0：宿主机上的 nai-ops 在一个只读事务里逐表复制（不含原图、不锁库、不经过网关容器）→ 完整性校验 → gzip（权限 600）。
+# 不要用宿主机 sqlite3 .backup 整库复制：库大时磁盘 IO 打满，网关写库超时（2026-10-10）。
+set -euo pipefail
+exec /opt/owl/nai-ops snapshot "${1:?usage: naigate-snapshot <out.db.gz>}" --db /opt/service-tools/data/nai_gate.db

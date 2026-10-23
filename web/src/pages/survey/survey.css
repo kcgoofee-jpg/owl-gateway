@@ -1,0 +1,87 @@
+/* 问卷页：沿用 ui 令牌；顶栏、页脚、.lp-err 复用首页样式（landing.css）。字号手机与桌面一致。 */
+.sv-main {
+  max-width: 720px;
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-4);
+}
+.sv-head {
+  display: grid;
+  gap: var(--sp-2);
+  padding-top: var(--sp-2);
+}
+
+/* 题目卡片：fieldset 的 legend 默认骑在边框上，这里让它像普通标题一样排在卡片内 */
+.sv-q {
+  min-width: 0;
+  margin: 0;
+}
+fieldset.sv-q {
+  display: block;
+}
+.sv-legend {
+  float: left;
+  width: 100%;
+  margin: 0 0 var(--sp-2);
+  padding: 0;
+  font-size: var(--fs-md);
+  font-weight: 650;
+  line-height: var(--lh-tight);
+}
+.sv-legend + * {
+  clear: left;
+}
+.sv-req {
+  margin-left: var(--sp-1);
+  font-weight: 400;
+  color: var(--muted);
+}
+.sv-hint {
+  margin-bottom: var(--sp-3);
+  font-size: var(--fs-sm);
+  color: var(--muted);
+}
+
+/* 选项：整行可点；选中高亮；键盘聚焦时整行出焦点环（原生单选框太小，光靠它看不清） */
+.sv-opt {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--sp-3);
+  margin-bottom: var(--sp-2);
+  padding: var(--sp-2) var(--sp-3);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  cursor: pointer;
+  font-size: var(--fs-md);
+}
+.sv-opt:hover {
+  background: var(--surface-2);
+}
+.sv-opt input {
+  flex: none;
+  margin: 4px 0 0;
+  accent-color: var(--accent);
+}
+.sv-opt:has(input:checked) {
+  border-color: var(--accent);
+  background: var(--accent-soft);
+}
+.sv-opt:has(input:focus-visible) {
+  outline: 2px solid var(--focus);
+  outline-offset: 2px;
+}
+.sv-other {
+  margin-top: var(--sp-3);
+}
+.sv-ok {
+  font-size: var(--fs-md);
+  font-weight: 600;
+  color: var(--ok);
+}
+
+/* 第 1 题的标签与另外几题的 legend 同一档字号 */
+.sv-q > .field > .field__label {
+  font-size: var(--fs-md);
+  font-weight: 650;
+  color: var(--text);
+}

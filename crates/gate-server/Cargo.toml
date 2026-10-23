@@ -1,0 +1,67 @@
+[package]
+name = "gate-server"
+description = "网关主程序：axum 路由、鉴权、准入、记账、后台任务、状态页、内嵌前端。"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[[bin]]
+name = "nai-gate"
+path = "src/main.rs"
+
+[lib]
+name = "gate_server"
+path = "src/lib.rs"
+
+[dependencies]
+gate-core.workspace = true
+gate-db.workspace = true
+gate-upstream.workspace = true
+anyhow.workspace = true
+axum.workspace = true
+tower.workspace = true
+tower-http.workspace = true
+tokio.workspace = true
+tokio-util.workspace = true
+futures.workspace = true
+bytes.workspace = true
+http-body-util.workspace = true
+multer.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+tracing.workspace = true
+tracing-subscriber.workspace = true
+clap.workspace = true
+rust-embed.workspace = true
+maud.workspace = true
+hmac.workspace = true
+sha2.workspace = true
+scrypt.workspace = true
+subtle.workspace = true
+hex.workspace = true
+rand.workspace = true
+jiff.workspace = true
+thiserror.workspace = true
+image.workspace = true
+# jobs/abuse_scan/linkage.rs：在 Db::read 的闭包里拿到的 Connection 类型
+rusqlite.workspace = true
+zip = { workspace = true, features = ["deflate"] }
+base64.workspace = true
+# asn.rs：解 iptoasn 的 .tsv.gz（版本已在 Cargo.lock 里，zip 的 deflate 带进来的）
+flate2 = "1"
+reqwest.workspace = true
+rustix = { version = "1", default-features = false, features = ["std", "fs"] }
+# 只给 nai-gate 二进制当全局分配器用（src/main.rs）
+mimalloc.workspace = true
+
+[dev-dependencies]
+tokio = { workspace = true, features = ["test-util"] }
+gate-testkit = { path = "../gate-testkit" }
+gate-snapshot = { path = "../gate-snapshot" }
+tempfile = "3"
+rmpv.workspace = true
+
+[lints]
+workspace = true

@@ -1,0 +1,713 @@
+/*
+ * 首页布局。颜色、字号、间距一律用 ui/tokens.css 的变量；顶栏、版心、转场、显影在 ui/chrome.css（状态页共用）。
+ * 字号手机与桌面完全一致（站长规定），断点只改布局。
+ */
+
+/* 已登录：右上角圆形头像（Discord 头像，拿不到就显示名字首字），点开是名字 + 退出 */
+.lp-avatar {
+  display: grid;
+  place-items: center;
+  width: var(--control-h);
+  height: var(--control-h);
+  padding: 0;
+  border: 1px solid var(--border);
+  border-radius: 50%;
+  overflow: hidden;
+  background: var(--accent-soft);
+  color: var(--accent-text);
+  font: 700 var(--fs-md) / 1 var(--font);
+  cursor: pointer;
+}
+.lp-avatar img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+.lp-avatar:hover {
+  border-color: var(--border-strong);
+}
+.lp-account__key {
+  display: grid;
+  gap: var(--sp-1);
+  width: min(280px, calc(100vw - 56px));
+  margin-top: var(--sp-3);
+  text-align: left;
+}
+.menu__list:has(.lp-account__key) {
+  width: min(320px, calc(100vw - 32px));
+}
+
+/* ---------- 版面 ---------- */
+.lp-main {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+}
+/* 首屏：背后一层随排队人数呼吸的颗粒 */
+.lp-hero {
+  position: relative;
+  isolation: isolate;
+  padding: var(--sp-10) 0 var(--sp-8);
+}
+.grain {
+  position: absolute;
+  inset: 0;
+  z-index: -1;
+  pointer-events: none;
+  /* 底部渐隐：不留一条硬边压在下面的卡片上 */
+  mask-image: linear-gradient(to bottom, #000 55%, transparent);
+}
+.grain canvas {
+  display: block;
+  width: 100%;
+  height: 100%;
+  opacity: 0.06;
+}
+/* 首屏以下：卡片之间 32 */
+.lp-body {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: var(--sp-8);
+  padding-bottom: var(--sp-10);
+}
+.lp-body--top {
+  padding-top: var(--sp-8);
+}
+/* 首屏下面的卡片和首屏隔开 24，不贴着首屏的下沿 */
+.lp-hero + .lp-body {
+  padding-top: var(--sp-6);
+}
+
+/* 客户端标签：窄屏折行，不出现需要横向滑动才看得到的标签 */
+.lp-main .tabs__list {
+  flex-wrap: wrap;
+}
+
+/* ---------- 实时状态卡片 ---------- */
+.lp-status {
+  display: grid;
+  gap: var(--sp-4);
+}
+.lp-status__line {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--sp-3) var(--sp-3);
+}
+.lp-status__wait {
+  flex: 1;
+}
+.lp-status__text {
+  flex: 1 1 auto;
+  min-width: 0;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  column-gap: var(--sp-2);
+}
+/* 首页状态信息与额度刻度保持同一视觉层级，避免状态标题压过其它组件。 */
+.lp-status__head {
+  font-size: var(--fs-xl);
+  font-weight: 700;
+  line-height: 1.2;
+  overflow-wrap: break-word;
+}
+/* 「 · 」只留在文本里（测试与复制），不画出来 */
+.lp-status__sep {
+  display: none;
+}
+.lp-status__detail {
+  font-size: var(--fs-sm);
+  color: var(--muted);
+}
+.lp-dot {
+  display: inline-block;
+  width: 10px;
+  height: 10px;
+  margin-right: 0.45em;
+  vertical-align: 0.18em;
+}
+.lp-dot--ok {
+  color: var(--ok);
+}
+.lp-dot--busy,
+.lp-dot--mine {
+  color: var(--accent);
+}
+.lp-dot--warn {
+  color: var(--warn);
+}
+.lp-dot--bad {
+  color: var(--danger);
+}
+.lp-dot--paced {
+  color: var(--info);
+}
+/* 「用 Discord 登录」：Discord 官方 Blurple，白字，Clyde 标志 22px；在状态行右边 */
+.btn--discord {
+  gap: 8px;
+  margin-left: auto;
+  min-height: 42px;
+  padding: 0 var(--sp-4);
+  font-size: var(--fs-sm);
+  background: var(--discord);
+  border-color: var(--discord);
+  color: var(--discord-fg);
+}
+.btn--discord:hover:not(:disabled) {
+  background: var(--discord-hover);
+  border-color: var(--discord-hover);
+}
+.discord-mark {
+  flex: none;
+  fill: currentColor;
+}
+@media (max-width: 520px) {
+  .lp-login {
+    width: max-content;
+    margin-left: 0;
+    min-height: 38px;
+    padding: 0 var(--sp-3);
+  }
+  .lp-status {
+    gap: var(--sp-3);
+  }
+  .lp-status__line {
+    gap: var(--sp-2);
+  }
+  .lp-status__head {
+    font-size: var(--fs-lg);
+  }
+}
+
+/* ---------- 额度圆环（有 Key 的首屏） ---------- */
+.lp-quota {
+  display: grid;
+  gap: var(--sp-6);
+  justify-items: center;
+  text-align: center;
+  --ring: 112px;
+}
+.rings {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: var(--sp-8);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.ring-item {
+  display: grid;
+  justify-items: center;
+  gap: var(--sp-2);
+}
+.t-v45 {
+  --ring-c: var(--c-v45);
+}
+.t-v5 {
+  --ring-c: var(--c-v5);
+}
+.t-anlas {
+  --ring-c: var(--c-anlas);
+}
+.ring {
+  position: relative;
+  display: grid;
+  place-items: center;
+  width: var(--ring);
+  height: var(--ring);
+}
+.ring[data-tone="warn"] {
+  --ring-c: var(--warn);
+}
+.ring[data-tone="danger"] {
+  --ring-c: var(--danger);
+}
+/* 全站今天的额度用完：灰色空环，中间写「暂停」 */
+.ring[data-tone="paused"] {
+  --ring-c: var(--muted);
+}
+.ring svg {
+  position: absolute;
+  inset: 0;
+  display: block;
+  width: 100%;
+  height: 100%;
+  transform: rotate(-90deg);
+}
+.ring circle {
+  fill: none;
+  stroke-width: 6;
+}
+.ring__track {
+  stroke: color-mix(in oklab, var(--ring-c) 16%, transparent);
+}
+.ring__arc {
+  stroke: var(--ring-c);
+  stroke-linecap: round;
+  stroke-dasharray: 100;
+}
+/* 不限额：一整圈淡色实线 */
+.ring__arc--unlimited {
+  stroke-dasharray: none;
+  opacity: 0.45;
+}
+.ring__num {
+  position: relative;
+  font-size: var(--fs-2xl);
+  font-weight: 600;
+  line-height: 1;
+  font-variant-numeric: tabular-nums;
+}
+.ring__num--paused {
+  font-size: var(--fs-lg);
+  color: var(--muted);
+  white-space: nowrap;
+}
+/* 圆环下面一行：「V5 10」——类型 17px、600，总量 13px 灰；不加「/」和圆点 */
+.ring-label {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  line-height: 1;
+  white-space: nowrap;
+}
+/* 让字形（而不是行框）居中：裁到大写字高 */
+.ring-label b {
+  font-size: var(--fs-lg);
+  font-weight: 600;
+  text-box: trim-both cap alphabetic;
+}
+@media (max-width: 420px) {
+  .lp-quota {
+    --ring: 96px;
+  }
+  .rings {
+    gap: var(--sp-4);
+  }
+  .ring__num {
+    font-size: var(--fs-xl);
+  }
+}
+
+/* ---------- Key / 重置券 ---------- */
+.lp-coupons {
+  display: grid;
+  gap: var(--sp-3);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.lp-coupon {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-3);
+  padding: var(--sp-3) var(--sp-4);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--surface-2);
+}
+.lp-coupon__body {
+  flex: 1;
+  min-width: 0;
+  display: grid;
+  gap: 2px;
+}
+.lp-coupon__body p:first-child {
+  font-weight: 600;
+}
+/* 倒计时放在「使用」按钮里，竖线隔开 */
+.lp-coupon__cd {
+  padding-left: var(--sp-2);
+  border-left: 1px solid rgb(255 255 255 / 35%);
+  font-family: var(--mono);
+  font-weight: 500;
+  font-variant-numeric: tabular-nums;
+}
+
+/* ---------- 我的请求 ---------- */
+.lp-reqs {
+  display: grid;
+  gap: var(--sp-2);
+  margin: var(--sp-3) 0 0;
+  padding: 0;
+  list-style: none;
+}
+.lp-req {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  min-width: 0;
+  gap: 2px;
+  padding: var(--sp-2) var(--sp-3);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--surface-2);
+}
+.lp-req__head {
+  display: flex;
+  flex-wrap: wrap; /* 手机上时间 / 模型 / 编号 / 结果放不下一行就折行，不撑出横向滚动 */
+  align-items: center;
+  gap: var(--sp-1) var(--sp-2);
+  min-width: 0;
+}
+.lp-req__time {
+  white-space: nowrap;
+  font-family: var(--mono);
+  font-variant-numeric: tabular-nums;
+  color: var(--text-2);
+}
+.lp-req__id {
+  white-space: nowrap;
+  font-family: var(--mono);
+  font-size: var(--fs-xs, 0.75rem);
+  color: var(--text-3, var(--text-2));
+}
+.lp-req__model {
+  font-weight: 600;
+}
+.lp-req__line {
+  margin: 0;
+  overflow-wrap: anywhere;
+}
+.lp-req__code {
+  margin-right: var(--sp-2);
+  font-family: var(--mono);
+  color: var(--text-2);
+}
+.lp-req__meta {
+  margin: 0;
+}
+.lp-reqs__more {
+  margin-top: var(--sp-3);
+  width: 100%;
+}
+
+.lp-err {
+  color: var(--danger);
+  font-size: var(--fs-sm);
+}
+.lp-form .textarea[aria-invalid="true"] {
+  border-color: var(--danger);
+}
+
+/* ---------- 客户端 / 须知 ---------- */
+.lp-list {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-2);
+  margin: 0;
+  padding-left: var(--sp-6);
+  color: var(--text-2);
+}
+/* 使用须知：左边一列固定宽度的小标题，右边是正文（悬挂缩进）；窄屏上下排 */
+.lp-rules {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: var(--sp-4);
+  margin: 0;
+  color: var(--text-2);
+}
+.lp-rule {
+  display: grid;
+  grid-template-columns: 5.5em minmax(0, 1fr);
+  gap: var(--sp-3);
+  align-items: start;
+}
+.lp-rule dt {
+  margin: 0;
+  color: var(--text);
+  font-weight: 700;
+  white-space: nowrap;
+}
+.lp-rule dd {
+  margin: 0;
+  text-wrap: pretty;
+}
+.lp-rule code {
+  white-space: nowrap; /* 「V5 Full」不在中间折行 */
+}
+@media (max-width: 520px) {
+  .lp-rule {
+    grid-template-columns: minmax(0, 1fr);
+    gap: 2px;
+  }
+}
+.lp-nb {
+  white-space: nowrap;
+}
+.lp-list code,
+.lp-rule code,
+.lp-main p code {
+  padding: 1px var(--sp-2);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--surface-2);
+  color: var(--text);
+  overflow-wrap: anywhere;
+}
+
+/* ---------- 页脚 ---------- */
+.lp-foot {
+  padding: var(--sp-6) var(--sp-4) var(--sp-10);
+  border-top: 1px solid var(--border);
+  text-align: center;
+  font-size: var(--fs-sm);
+  color: var(--muted);
+}
+.lp-foot a,
+.lp-main p a {
+  color: var(--accent-text);
+  text-decoration: underline;
+}
+.lp-foot .lp-foot__nowrap {
+  white-space: nowrap; /* 链接名不拆开：不让「使用体验问卷」折出孤字 */
+}
+
+/* 没有 Key：左边一段说明，右边 Discord 按钮（按钮按内容宽，不撑满）；窄屏上下排，按钮占满一行 */
+.lp-join__row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--sp-4) var(--sp-6);
+}
+.lp-join__text {
+  flex: 1 1 280px;
+  min-width: 0;
+  margin: 0;
+  color: var(--text-2);
+}
+.lp-join .btn--discord {
+  flex: none;
+  margin-left: 0;
+}
+@media (max-width: 520px) {
+  .lp-join .btn--discord {
+    width: 100%;
+  }
+}
+
+/* ---------- 「我的 Key」+「状态」一排：两张卡等高（顶边、底边对齐），各自内部紧凑排列 ----------
+ * 状态卡：状态行在上，两条仪表成一组贴底，多出来的高度留在两者之间，仪表之间不留空。 */
+.lp-pair {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: var(--sp-4);
+  align-items: stretch;
+}
+@media (min-width: 761px) {
+  .lp-pair {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+.lp-rows {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-3);
+}
+.lp-rows__head {
+  display: flex;
+  align-items: baseline;
+  gap: var(--sp-3);
+  min-width: 0;
+}
+.lp-rows__aside {
+  margin-left: auto;
+  font-size: var(--fs-sm);
+  color: var(--muted);
+  white-space: nowrap;
+}
+.lp-pair .lp-status__head {
+  font-size: var(--fs-xl);
+}
+.lp-status__down {
+  flex-basis: 100%;
+}
+.lp-meters {
+  margin-top: auto;
+  padding-top: var(--sp-2);
+}
+.lp-site-gauge {
+  display: block;
+  width: 100%;
+  height: 20px;
+  margin: var(--sp-2) 0;
+  fill: none;
+  overflow: visible;
+}
+.stat--v45 {
+  --stat-c: var(--c-site);
+}
+.stat--v5 {
+  --stat-c: var(--c-site-v5);
+}
+.lp-site-gauge__track,
+.lp-site-gauge__fill {
+  stroke-width: 3;
+  stroke-linecap: round;
+}
+.lp-site-gauge__track {
+  stroke: var(--surface-3);
+}
+.lp-site-gauge__fill {
+  stroke: var(--stat-c);
+}
+.lp-meter__legend {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: var(--sp-4);
+}
+.lp-meter {
+  display: flex;
+  align-items: baseline;
+  flex-wrap: wrap;
+  column-gap: var(--sp-2);
+}
+.lp-meter__name {
+  color: var(--muted);
+  font-size: var(--fs-sm);
+  white-space: nowrap;
+}
+.lp-meter__name i {
+  display: inline-block;
+  width: 5px;
+  height: 5px;
+  margin-right: var(--sp-1);
+  border-radius: 50%;
+  background: var(--stat-c);
+  vertical-align: middle;
+}
+.lp-meter__num {
+  color: var(--text);
+  font-size: var(--fs-md);
+  font-weight: 500;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+.lp-meter__num small {
+  margin-left: var(--sp-1);
+  color: var(--muted);
+  font-size: var(--fs-xs);
+  font-weight: 400;
+}
+.lp-meter__caption {
+  color: var(--muted);
+  font-size: var(--fs-xs);
+}
+.lp-meter.stat--warn .lp-meter__num {
+  color: var(--warn);
+}
+.lp-meter.stat--danger .lp-meter__num {
+  color: var(--danger);
+}
+.lp-meter.lp-meter--paused .lp-meter__num {
+  color: var(--muted);
+}
+
+/* Status and allowance sit directly on the page, without a card surface. */
+.lp-status {
+  padding: var(--sp-4) 0;
+}
+.lp-gallery {
+  width: min(1440px, calc(100% - 32px));
+  margin: var(--sp-8) auto 0;
+  scroll-margin-top: 80px;
+}
+.lp-gallery:focus {
+  outline: none;
+}
+.lp-gallery__images {
+  columns: 4;
+  column-gap: var(--sp-3);
+}
+.lp-gallery__item {
+  display: block;
+  margin-bottom: var(--sp-3);
+  break-inside: avoid;
+}
+.lp-gallery__item img {
+  display: block;
+  width: 100%;
+  height: auto;
+  border-radius: var(--radius-sm);
+  background: var(--surface-2);
+}
+
+@media (max-width: 760px) {
+  .lp-gallery__images {
+    columns: 2;
+  }
+}
+@media (prefers-reduced-motion: no-preference) {
+  html:has(.lp-main) {
+    scroll-behavior: smooth;
+  }
+}
+
+.lp-main .card {
+  padding: var(--sp-4) 0;
+  border: 0;
+  border-radius: 0;
+  background: none;
+  box-shadow: none;
+}
+.lp-gallery__unavailable {
+  display: grid;
+  place-items: center;
+  aspect-ratio: 832 / 1216;
+  padding: var(--sp-4);
+  color: var(--muted);
+  background: var(--surface-2);
+  font-size: var(--fs-sm);
+}
+
+@media (max-width: 380px) {
+  .lp-meter {
+    display: grid;
+    gap: var(--sp-1);
+  }
+}
+
+.lp-gallery__copy {
+  position: relative;
+  display: block;
+  width: 100%;
+  padding: 0;
+  border: 0;
+  border-radius: var(--radius-sm);
+  background: none;
+  color: var(--text);
+  cursor: copy;
+  overflow: hidden;
+  transition: transform 0.2s ease;
+}
+.lp-gallery__copy:hover {
+  transform: scale(1.02);
+  z-index: 1;
+}
+.lp-gallery__feedback {
+  position: absolute;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  padding: var(--sp-3);
+  background: #101119a6;
+  color: #fff;
+  font-size: var(--fs-lg);
+  font-weight: 600;
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 0.2s ease;
+}
+.lp-gallery__feedback.is-visible {
+  opacity: 1;
+}
+@media (prefers-reduced-motion: reduce) {
+  .lp-gallery__copy,
+  .lp-gallery__feedback {
+    transition: none;
+  }
+  .lp-gallery__copy:hover {
+    transform: none;
+  }
+}

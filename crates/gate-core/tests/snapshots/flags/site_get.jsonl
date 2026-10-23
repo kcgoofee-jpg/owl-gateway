@@ -1,0 +1,80 @@
+{"in":{"spec":{"ref":"member_sweep"},"raw":null,"present":false},"out":true}
+{"in":{"spec":{"ref":"member_sweep"},"raw":"","present":true},"out":true}
+{"in":{"spec":{"ref":"member_sweep"},"raw":" ","present":true},"out":true}
+{"in":{"spec":{"ref":"member_sweep"},"raw":"0","present":true},"out":false}
+{"in":{"spec":{"ref":"member_sweep"},"raw":"1","present":true},"out":true}
+{"in":{"spec":{"ref":"member_sweep"},"raw":"true","present":true},"out":true}
+{"in":{"spec":{"ref":"member_sweep"},"raw":"off","present":true},"out":false}
+{"in":{"spec":{"ref":"member_sweep"},"raw":"7","present":true},"out":true}
+{"in":{"spec":{"ref":"member_sweep"},"raw":"x","present":true},"out":true}
+{"in":{"spec":{"ref":"member_sweep"},"raw":"-3","present":true},"out":true}
+{"in":{"spec":{"ref":"issue_hourly_cap"},"raw":"","present":true},"out":12}
+{"in":{"spec":{"ref":"issue_hourly_cap"},"raw":"0","present":true},"out":0}
+{"in":{"spec":{"ref":"issue_hourly_cap"},"raw":"1","present":true},"out":1}
+{"in":{"spec":{"ref":"issue_hourly_cap"},"raw":"7","present":true},"out":7}
+{"in":{"spec":{"ref":"issue_hourly_cap"},"raw":"x","present":true},"out":12}
+{"in":{"spec":{"ref":"issue_hourly_cap"},"raw":"-3","present":true},"out":0}
+{"in":{"spec":{"ref":"issue_hourly_cap"},"raw":"9999999","present":true},"out":500}
+{"in":{"spec":{"ref":"register_open"},"raw":"","present":true},"out":false}
+{"in":{"spec":{"ref":"register_open"},"raw":" ","present":true},"out":false}
+{"in":{"spec":{"ref":"register_open"},"raw":"0","present":true},"out":false}
+{"in":{"spec":{"ref":"register_open"},"raw":"1","present":true},"out":true}
+{"in":{"spec":{"ref":"register_open"},"raw":"7","present":true},"out":false}
+{"in":{"spec":{"ref":"register_open"},"raw":"x","present":true},"out":false}
+{"in":{"spec":{"ref":"global_daily_v5"},"raw":"","present":true},"out":150}
+{"in":{"spec":{"ref":"global_daily_v5"},"raw":"0","present":true},"out":0}
+{"in":{"spec":{"ref":"global_daily_v5"},"raw":"1","present":true},"out":1}
+{"in":{"spec":{"ref":"global_daily_v5"},"raw":"7","present":true},"out":7}
+{"in":{"spec":{"ref":"global_daily_v5"},"raw":"-3","present":true},"out":0}
+{"in":{"spec":{"ref":"global_daily_anlas"},"raw":null,"present":false},"out":200}
+{"in":{"spec":{"ref":"global_daily_anlas"},"raw":"0","present":true},"out":0}
+{"in":{"spec":{"ref":"global_daily_anlas"},"raw":"-3","present":true},"out":0}
+{"in":{"spec":{"ref":"global_monthly_anlas"},"raw":null,"present":false},"out":10000.0}
+{"in":{"spec":{"ref":"global_monthly_anlas"},"raw":"","present":true},"out":10000.0}
+{"in":{"spec":{"ref":"global_monthly_anlas"},"raw":" ","present":true},"out":10000.0}
+{"in":{"spec":{"ref":"global_monthly_anlas"},"raw":"1","present":true},"out":1.0}
+{"in":{"spec":{"ref":"global_monthly_anlas"},"raw":"7","present":true},"out":7.0}
+{"in":{"spec":{"ref":"global_monthly_anlas"},"raw":"x","present":true},"out":10000.0}
+{"in":{"spec":{"ref":"global_monthly_anlas"},"raw":"12.5","present":true},"out":12.5}
+{"in":{"spec":{"ref":"algo_notice"},"raw":null,"present":false},"out":""}
+{"in":{"spec":{"ref":"algo_notice"},"raw":"","present":true},"out":""}
+{"in":{"spec":{"ref":"algo_notice"},"raw":" ","present":true},"out":" "}
+{"in":{"spec":{"ref":"algo_notice"},"raw":"0","present":true},"out":"0"}
+{"in":{"spec":{"ref":"algo_notice"},"raw":"1","present":true},"out":"1"}
+{"in":{"spec":{"ref":"algo_notice"},"raw":"true","present":true},"out":"true"}
+{"in":{"spec":{"ref":"algo_notice"},"raw":"off","present":true},"out":"off"}
+{"in":{"spec":{"ref":"algo_notice"},"raw":"7","present":true},"out":"7"}
+{"in":{"spec":{"ref":"algo_notice"},"raw":"x","present":true},"out":"x"}
+{"in":{"spec":{"ref":"algo_notice"},"raw":"-3","present":true},"out":"-3"}
+{"in":{"spec":{"ref":"algo_notice"},"raw":"9999999","present":true},"out":"9999999"}
+{"in":{"spec":{"ref":"algo_notice"},"raw":"nan","present":true},"out":"nan"}
+{"in":{"spec":{"ref":"algo_notice"},"raw":"c d","present":true},"out":"c d"}
+{"in":{"spec":{"ref":"algo_notice"},"raw":"猫","present":true},"out":"猫"}
+{"in":{"spec":{"ref":"audit_image_cap_mb"},"raw":null,"present":false},"out":0}
+{"in":{"spec":{"ref":"audit_image_cap_mb"},"raw":"0","present":true},"out":0}
+{"in":{"spec":{"ref":"audit_image_cap_mb"},"raw":"-3","present":true},"out":0}
+{"in":{"spec":{"ref":"audit_image_keep_hours"},"raw":null,"present":false},"out":24}
+{"in":{"spec":{"ref":"audit_image_keep_hours"},"raw":"","present":true},"out":24}
+{"in":{"spec":{"inline":{"key":"x_choice","kind":"choice","default":"a","owner":"t","doc":"d","lo":null,"hi":null,"choices":["a","B","c d"]}},"raw":"0","present":true},"out":"a"}
+{"in":{"spec":{"inline":{"key":"x_choice","kind":"choice","default":"a","owner":"t","doc":"d","lo":null,"hi":null,"choices":["a","B","c d"]}},"raw":"c d","present":true},"out":"c d"}
+{"in":{"spec":{"inline":{"key":"x_int_free","kind":"int","default":5,"owner":"t","doc":"d","lo":null,"hi":null,"choices":[]}},"raw":"0","present":true},"out":0}
+{"in":{"spec":{"inline":{"key":"x_int_free","kind":"int","default":5,"owner":"t","doc":"d","lo":null,"hi":null,"choices":[]}},"raw":"-3","present":true},"out":-3}
+{"in":{"spec":{"inline":{"key":"x_int_lo","kind":"int","default":5,"owner":"t","doc":"d","lo":0,"hi":null,"choices":[]}},"raw":"0","present":true},"out":0}
+{"in":{"spec":{"inline":{"key":"x_int_lo","kind":"int","default":5,"owner":"t","doc":"d","lo":0,"hi":null,"choices":[]}},"raw":"1","present":true},"out":1}
+{"in":{"spec":{"inline":{"key":"x_int_hi","kind":"int","default":5,"owner":"t","doc":"d","lo":null,"hi":10,"choices":[]}},"raw":"0","present":true},"out":0}
+{"in":{"spec":{"inline":{"key":"x_int_hi","kind":"int","default":5,"owner":"t","doc":"d","lo":null,"hi":10,"choices":[]}},"raw":"-3","present":true},"out":-3}
+{"in":{"spec":{"inline":{"key":"x_int_hi","kind":"int","default":5,"owner":"t","doc":"d","lo":null,"hi":10,"choices":[]}},"raw":"12.5","present":true},"out":10}
+{"in":{"spec":{"inline":{"key":"x_float_neg","kind":"float","default":1.5,"owner":"t","doc":"d","lo":-10,"hi":10,"choices":[]}},"raw":"","present":true},"out":1.5}
+{"in":{"spec":{"inline":{"key":"x_float_neg","kind":"float","default":1.5,"owner":"t","doc":"d","lo":-10,"hi":10,"choices":[]}},"raw":"0","present":true},"out":0.0}
+{"in":{"spec":{"inline":{"key":"x_float_neg","kind":"float","default":1.5,"owner":"t","doc":"d","lo":-10,"hi":10,"choices":[]}},"raw":"-3","present":true},"out":-3.0}
+{"in":{"spec":{"inline":{"key":"x_float_free","kind":"float","default":0.0,"owner":"t","doc":"d","lo":null,"hi":null,"choices":[]}},"raw":null,"present":false},"out":0.0}
+{"in":{"spec":{"inline":{"key":"x_float_free","kind":"float","default":0.0,"owner":"t","doc":"d","lo":null,"hi":null,"choices":[]}},"raw":"","present":true},"out":0.0}
+{"in":{"spec":{"inline":{"key":"x_float_free","kind":"float","default":0.0,"owner":"t","doc":"d","lo":null,"hi":null,"choices":[]}},"raw":" ","present":true},"out":0.0}
+{"in":{"spec":{"inline":{"key":"x_float_free","kind":"float","default":0.0,"owner":"t","doc":"d","lo":null,"hi":null,"choices":[]}},"raw":"0","present":true},"out":0.0}
+{"in":{"spec":{"inline":{"key":"x_float_free","kind":"float","default":0.0,"owner":"t","doc":"d","lo":null,"hi":null,"choices":[]}},"raw":"x","present":true},"out":0.0}
+{"in":{"spec":{"inline":{"key":"x_float_free","kind":"float","default":0.0,"owner":"t","doc":"d","lo":null,"hi":null,"choices":[]}},"raw":"-3","present":true},"out":-3.0}
+{"in":{"spec":{"inline":{"key":"x_float_free","kind":"float","default":0.0,"owner":"t","doc":"d","lo":null,"hi":null,"choices":[]}},"raw":"猫","present":true},"out":0.0}
+{"in":{"spec":{"inline":{"key":"x_str","kind":"str","default":"dflt","owner":"t","doc":"d","lo":null,"hi":null,"choices":[]}},"raw":"","present":true},"out":""}
+{"in":{"spec":{"inline":{"key":"x_str","kind":"str","default":"dflt","owner":"t","doc":"d","lo":null,"hi":null,"choices":[]}},"raw":"-3","present":true},"out":"-3"}
+{"in":{"spec":{"inline":{"key":"x_str","kind":"str","default":"dflt","owner":"t","doc":"d","lo":null,"hi":null,"choices":[]}},"raw":"9999999","present":true},"out":"9999999"}
+{"in":{"spec":{"inline":{"key":"x_flag","kind":"flag","default":false,"owner":"t","doc":"d","lo":null,"hi":null,"choices":[]}},"raw":"off","present":true},"out":false}

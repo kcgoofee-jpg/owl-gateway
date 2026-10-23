@@ -1,0 +1,50 @@
+{"in":{"args":["nai-diffusion-5"]},"out":true}
+{"in":{"args":["nai-diffusion-5-full"]},"out":true}
+{"in":{"args":["nai-v5"]},"out":true}
+{"in":{"args":["nai-v5-full"]},"out":true}
+{"in":{"args":[""]},"out":false}
+{"in":{"args":[" "]},"out":false}
+{"in":{"args":["NAI-V5"]},"out":true}
+{"in":{"args":["İ"]},"out":false}
+{"in":{"args":["Σ"]},"out":false}
+{"in":{"args":["K"]},"out":false}
+{"in":{"args":["text-model"]},"out":false}
+{"in":{"args":["nai-diffusion-5-"]},"out":true}
+{"in":{"args":["nai-v5-"]},"out":true}
+{"in":{"args":["NAI-V5-FULL"]},"out":true}
+{"in":{"args":["nai-diffusion-5\n"]},"out":true}
+{"in":{"args":["NAI-DIFFUSION-5"]},"out":true}
+{"in":{"args":[null]},"out":false}
+{"in":{"args":["　nai-v5　"]},"out":true}
+{"in":{"args":["ſ"]},"out":false}
+{"in":{"args":["ǅ"]},"out":false}
+{"in":{"args":["\n"]},"out":false}
+{"in":{"args":["nai-v5-full-"]},"out":true}
+{"in":{"args":["x"]},"out":false}
+{"in":{"args":["nai-v5-full\n"]},"out":true}
+{"in":{"args":["nai-v5\n"]},"out":true}
+{"in":{"args":["nai-v5-full "]},"out":true}
+{"in":{"args":["K-x"]},"out":false}
+{"in":{"args":["nai-diffusion-5-full-medium-inpainting-x"]},"out":true}
+{"in":{"args":["İ-x"]},"out":false}
+{"in":{"args":["nai-v5 "]},"out":true}
+{"in":{"args":["nai-diffusion-5-full-inpainting\n"]},"out":true}
+{"in":{"args":["nai-diffusion-5-full-"]},"out":true}
+{"in":{"args":["NAI-V5\n"]},"out":true}
+{"in":{"args":[" x"]},"out":false}
+{"in":{"args":[" \n"]},"out":false}
+{"in":{"args":["İ\n"]},"out":false}
+{"in":{"args":["text-modelx"]},"out":false}
+{"in":{"args":["-x"]},"out":false}
+{"in":{"args":["-"]},"out":false}
+{"in":{"args":["  "]},"out":false}
+{"in":{"args":["Σ "]},"out":false}
+{"in":{"args":["　nai-diffusion-5-full　x"]},"out":true}
+{"in":{"args":["NAI-V5-x"]},"out":true}
+{"in":{"args":["nai-v5-x"]},"out":true}
+{"in":{"args":["NAI-V5-"]},"out":true}
+{"in":{"args":["Kx"]},"out":false}
+{"in":{"args":["nai-v5-full-x"]},"out":true}
+{"in":{"args":["Σ\n"]},"out":false}
+{"in":{"args":["K-"]},"out":false}
+{"in":{"args":[" -"]},"out":false}

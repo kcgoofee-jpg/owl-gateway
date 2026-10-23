@@ -1,0 +1,171 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+env:
+  CARGO_TERM_COLOR: always
+  CARGO_INCREMENTAL: 0
+
+jobs:
+  web:
+    name: web (biome / tsc / vitest / build)
+    runs-on: ubuntu-24.04
+    defaults:
+      run:
+        working-directory: web
+    steps:
+      - uses: actions/checkout@v7
+      - uses: pnpm/action-setup@v6
+        with:
+          package_json_file: web/package.json
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 24
+          cache: pnpm
+          cache-dependency-path: web/pnpm-lock.yaml
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm biome check .
+      - run: pnpm tsc --noEmit
+      - run: pnpm vitest run
+      - run: pnpm vite build
+
+  rust:
+    name: rust (fmt / clippy / test)
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v7
+      - name: BoringSSL build deps
+        run: sudo apt-get update && sudo apt-get install -y --no-install-recommends cmake clang libclang-dev
+      - run: rustup show active-toolchain || rustup toolchain install
+      - uses: Swatinem/rust-cache@v2
+      - run: cargo fmt --all --check
+      - run: cargo clippy --workspace --all-targets --locked -- -D warnings
+      - run: cargo test --workspace --locked
+
+  e2e:
+    name: e2e (playwright, layout rules)
+    runs-on: ubuntu-24.04
+    needs: web
+    steps:
+      - uses: actions/checkout@v7
+      # man-db rebuilds its index after every apt install; on the runner that alone took ~25 of e2e's 30 minutes.
+      - name: Skip man-db triggers
+        run: sudo rm -f /var/lib/man-db/auto-update
+      - name: BoringSSL build deps + CJK fonts (orphan-character checks need real glyph widths)
+        run: sudo apt-get update && sudo apt-get install -y --no-install-recommends cmake clang libclang-dev fonts-noto-cjk
+      - run: rustup show active-toolchain || rustup toolchain install
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: e2e
+      - uses: pnpm/action-setup@v6
+        with:
+          package_json_file: web/package.json
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 24
+          cache: pnpm
+          cache-dependency-path: web/pnpm-lock.yaml
+      - run: pnpm install --frozen-lockfile
+        working-directory: web
+      - uses: actions/cache@v4
+        with:
+          path: ~/.cache/ms-playwright
+          key: playwright-${{ runner.os }}-${{ hashFiles('web/pnpm-lock.yaml') }}
+      - run: pnpm exec playwright install --with-deps chromium
+        working-directory: web
+      - run: cargo build --locked -p xtask
+      - name: Start the full local stack (fake upstream, synthetic data) and the web dev server
+        run: |
+          cargo xtask dev > /tmp/gate.log 2>&1 &
+          (cd web && pnpm exec vite --port 5174 --strictPort > /tmp/vite.log 2>&1 &)
+          for _ in $(seq 1 90); do
+            curl -fsS -m 2 http://127.0.0.1:18000/healthz >/dev/null 2>&1 && curl -fsS -m 2 -o /dev/null http://localhost:5174/ && exit 0
+            sleep 2
+          done
+          cat /tmp/gate.log /tmp/vite.log; exit 1
+      - run: pnpm exec playwright test
+        working-directory: web
+        env:
+          E2E_BASE: http://localhost:5174
+
+  secrets:
+    name: secrets (gitleaks, synthetic fixtures only)
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+      - uses: gitleaks/gitleaks-action@v3
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      - name: Fixture checker self-test (the rules really block)
+        run: tools/ci/check-fixtures.sh --self-test
+      - name: Fixtures and test data contain synthetic values only
+        run: tools/ci/check-fixtures.sh
+
+  # Artifacts build in parallel with the checks to save wall time. They are only deployable
+  # when the whole run succeeded: tools/deploy.sh refuses any run whose conclusion is not success.
+  ops-binary:
+    name: nai-ops (static musl binary)
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v7
+      - run: sudo apt-get update && sudo apt-get install -y --no-install-recommends musl-tools
+      - run: rustup target add x86_64-unknown-linux-musl
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: musl
+      - run: cargo build --release --locked --target x86_64-unknown-linux-musl -p gate-ops --bin nai-ops
+      - uses: actions/upload-artifact@v7
+        with:
+          name: nai-ops-linux-musl
+          path: target/x86_64-unknown-linux-musl/release/nai-ops
+          retention-days: 7
+
+  image:
+    name: image (docker tar artifact)
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v7
+      - uses: docker/setup-buildx-action@v4
+      # No registry push: the server holds no GitHub credentials. tools/deploy.sh downloads this tar and docker-loads it.
+      - uses: docker/build-push-action@v7
+        with:
+          context: .
+          platforms: linux/amd64
+          tags: owl-gate:${{ github.sha }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+          outputs: type=docker,dest=/tmp/owl-gate.tar
+      # Smoke: the image starts, /healthz reads and writes the DB, and the landing page embeds the web bundle
+      # (rust-embed does not fail on a missing dist). No upstream token, no Discord, data on tmpfs.
+      - name: Image smoke test
+        run: |
+          docker load -i /tmp/owl-gate.tar
+          docker run -d --name smoke -p 18080:8000 --tmpfs /app/data:uid=10001,gid=10001 owl-gate:${{ github.sha }}
+          ok=0
+          for _ in $(seq 1 30); do
+            if curl -fsS -m 3 http://127.0.0.1:18080/healthz | grep -q '"ok":true'; then ok=1; break; fi
+            sleep 2
+          done
+          [ "$ok" = 1 ] || { docker logs smoke; exit 1; }
+          curl -fsS -m 5 http://127.0.0.1:18080/ | grep -q '/_owl/' || { echo "landing page does not embed the web bundle"; docker logs smoke; exit 1; }
+          docker exec smoke /usr/local/bin/nai-gate healthcheck
+          docker rm -f smoke
+      - run: gzip -1 /tmp/owl-gate.tar
+      - uses: actions/upload-artifact@v7
+        with:
+          name: owl-gate-image
+          path: /tmp/owl-gate.tar.gz
+          retention-days: 7
+          compression-level: 0

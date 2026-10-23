@@ -1,0 +1,319 @@
+/* 总览 / 成员 / 日志共用零件。字号只用 tokens 的阶梯，手机与桌面一致，只改布局。 */
+
+/* 分段按钮 */
+/* 外框高度 = 控件高度（2px 内边距 + 1px 边框），和同一行的输入框、下拉框等高 */
+.xa-seg {
+  display: inline-flex;
+  flex-wrap: wrap;
+  gap: 2px;
+  padding: 2px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--surface-2);
+}
+.xa-seg__btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  min-height: calc(var(--control-h) - 6px);
+  padding: 0 var(--sp-3);
+  border: 0;
+  border-radius: 4px;
+  background: none;
+  color: var(--text-2);
+  font: 600 var(--fs-sm) / 1.2 var(--font);
+  cursor: pointer;
+  white-space: nowrap;
+}
+.xa-seg__btn:hover:not(:disabled) {
+  color: var(--text);
+}
+.xa-seg__btn[aria-pressed="true"] {
+  background: var(--surface);
+  color: var(--accent-text);
+  box-shadow: var(--shadow-1);
+}
+.xa-seg__btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+/* 复选 / 单选行 */
+.xa-check {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--sp-2);
+  font-size: var(--fs-sm);
+  color: var(--text);
+  cursor: pointer;
+}
+.xa-check input {
+  margin-top: 3px;
+  accent-color: var(--accent);
+  flex: none;
+}
+.xa-check small {
+  display: block;
+  color: var(--muted);
+  font-size: var(--fs-xs);
+}
+
+/* 分页 */
+.xa-pager {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: var(--sp-3);
+  padding: var(--sp-3) 0 0;
+  font-size: var(--fs-sm);
+  color: var(--muted);
+}
+.xa-pager__size,
+.xa-pager__jump {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--sp-2);
+}
+.xa-pager__size .select,
+.xa-pager__jump .input {
+  height: var(--control-h-sm);
+}
+.xa-pager__jump .input {
+  width: 64px;
+}
+.xa-pager__nav {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: var(--sp-1);
+}
+.xa-pager__nav .btn--sm {
+  min-width: 30px;
+}
+
+/* 空状态 / 确认框正文 */
+.xa-empty {
+  display: grid;
+  gap: var(--sp-1);
+  padding: var(--sp-8) var(--sp-4);
+  text-align: center;
+}
+.xa-empty__title {
+  font-weight: 650;
+}
+.xa-confirm {
+  display: grid;
+  gap: var(--sp-4);
+  font-size: var(--fs-md);
+}
+.xa-confirm p {
+  margin: 0;
+  line-height: var(--lh);
+}
+
+/* 头像 */
+.xa-avatar {
+  position: relative;
+  display: inline-grid;
+  place-items: center;
+  flex: none;
+  border-radius: 50%;
+  overflow: hidden;
+  background: var(--accent-soft);
+  color: var(--accent-text);
+  font-size: var(--fs-sm);
+  font-weight: 700;
+}
+.xa-avatar img {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+/* 用量小条 */
+.xa-minibar {
+  display: grid;
+  grid-template-columns: 38px minmax(40px, 1fr) auto;
+  align-items: center;
+  gap: var(--sp-2);
+  font-size: var(--fs-xs);
+  color: var(--text-2);
+}
+.xa-minibar__track {
+  height: 6px;
+  border-radius: 999px;
+  background: var(--surface-3);
+  overflow: hidden;
+}
+.xa-minibar__fill {
+  display: block;
+  height: 100%;
+  border-radius: inherit;
+  background: var(--accent);
+}
+.xa-minibar__fill.is-v5 {
+  background: var(--v5);
+}
+.xa-minibar__fill.is-full {
+  background: var(--warn);
+}
+.xa-minibar__n {
+  min-width: 64px;
+  text-align: right;
+  white-space: nowrap;
+}
+
+/* 表格：外框内滚动，表头粘在框顶（sticky） */
+.xa-tbl {
+  max-height: min(74vh, 860px);
+}
+.xa-tbl .table th {
+  box-shadow: inset 0 -1px 0 var(--border);
+}
+.xa-tbl .table td {
+  vertical-align: middle;
+}
+.xa-tbl .table th .xa-sort {
+  all: unset;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  cursor: pointer;
+  font: inherit;
+  color: inherit;
+  border-radius: var(--radius-sm);
+}
+.xa-tbl .table th .xa-sort:focus-visible {
+  outline: 2px solid var(--focus);
+  outline-offset: 2px;
+}
+.xa-tbl .table th[aria-sort="ascending"],
+.xa-tbl .table th[aria-sort="descending"] {
+  color: var(--accent-text);
+}
+
+/* 表单 */
+.xa-form {
+  display: grid;
+  gap: var(--sp-4);
+}
+.xa-form__grid {
+  display: grid;
+  gap: var(--sp-3);
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 200px), 1fr));
+}
+.xa-form__sec {
+  margin: var(--sp-2) 0 calc(var(--sp-1) * -1);
+  font-size: var(--fs-sm);
+  font-weight: 650;
+  color: var(--text-2);
+}
+.xa-form__opts {
+  display: grid;
+  gap: var(--sp-2);
+}
+.xa-form__opts > legend {
+  padding: 0;
+  margin-bottom: var(--sp-2);
+}
+.field__err {
+  font-size: var(--fs-xs);
+  color: var(--danger);
+}
+.input[aria-invalid="true"],
+.select[aria-invalid="true"] {
+  border-color: var(--danger);
+}
+.xa-formerr {
+  padding: var(--sp-2) var(--sp-3);
+  border-radius: var(--radius-sm);
+  background: var(--danger-soft);
+  color: var(--danger);
+  font-size: var(--fs-sm);
+}
+
+/* 工具栏 */
+.xa-toolbar {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: var(--sp-2) var(--sp-3);
+}
+.xa-toolbar .input {
+  width: auto;
+  min-width: 0;
+}
+.xa-toolbar .input[type="search"] {
+  width: min(100%, 260px);
+}
+
+/* 小标签（Chip） */
+.xa-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 1px 8px;
+  border-radius: 999px;
+  background: var(--surface-2);
+  color: var(--text-2);
+  font-size: var(--fs-xs);
+  line-height: 20px;
+  white-space: nowrap;
+}
+.xa-chip button {
+  all: unset;
+  cursor: pointer;
+  padding: 0 2px;
+  border-radius: 50%;
+  line-height: 1;
+  color: var(--muted);
+}
+.xa-chip button:hover {
+  color: var(--danger);
+}
+.xa-chip button:focus-visible {
+  outline: 2px solid var(--focus);
+}
+
+/* 已选成员的 chips 独占一行，不和上面的工具栏抢同排等高 */
+.xa-chips {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--sp-2);
+}
+.xa-chips__lead {
+  color: var(--muted);
+  font-size: var(--fs-sm);
+}
+.xa-chips__clear {
+  all: unset;
+  cursor: pointer;
+  padding: 1px 8px;
+  border-radius: 999px;
+  color: var(--muted);
+  font-size: var(--fs-xs);
+  line-height: 20px;
+}
+.xa-chips__clear:hover {
+  color: var(--text);
+  background: var(--surface-2);
+}
+.xa-chips__clear:focus-visible {
+  outline: 2px solid var(--focus);
+}
+
+.xa-busy {
+  opacity: 0.6;
+  transition: opacity 0.15s;
+}
+
+/* 分区根容器：外壳的内容区是 grid（列宽 auto），宽表格会把整列撑出屏幕；这里固定成 minmax(0, 1fr)，宽内容只在自己的滚动框里滚 */
+.xa-page {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: var(--sp-4);
+  min-width: 0;
+}

@@ -1,0 +1,34 @@
+/* 令牌池 */
+.token-grid {
+  display: grid;
+  gap: var(--sp-4);
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 360px), 1fr));
+}
+.token {
+  display: grid;
+  gap: var(--sp-3);
+  align-content: start;
+  padding: var(--sp-4);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--surface);
+  min-width: 0;
+}
+.token__head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--sp-2);
+}
+.token__name {
+  font-weight: 650;
+  font-size: var(--fs-md);
+  overflow-wrap: anywhere;
+}
+.token__form {
+  padding-top: var(--sp-3);
+  border-top: 1px solid var(--border);
+}
+.token__form .savebar {
+  margin-top: var(--sp-3);
+}

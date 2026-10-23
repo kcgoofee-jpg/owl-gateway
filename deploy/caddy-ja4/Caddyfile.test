@@ -1,0 +1,35 @@
+# Test Caddyfile (instabox only). Production: copy the marked lines into the real site block.
+{
+	admin off
+	order ja4h_header first # JA4H module needs an explicit order; ja3_ja4 registers itself before `header`
+	servers {
+		protocols h1 h2 # mirror production if h3 is disabled; remove to test h3
+	}
+}
+
+https://ja4.test:8443 {
+	tls internal
+
+	ja3_ja4 # <-- JA4: populates {tls.ja4}, {tls.ja3}
+	ja4h_header # <-- JA4H: populates {ja4h} (FoxIO license!)
+
+	log {
+		output stdout
+		format json
+	}
+	log_append ja4 {tls.ja4} # <-- fingerprint in JSON access log
+	log_append ja3 {tls.ja3}
+	log_append ja4h {ja4h}
+
+	reverse_proxy 127.0.0.1:9000 {
+		header_up X-JA4 {tls.ja4} # <-- overwrite (never trust client-supplied X-JA4)
+		header_up X-JA4H {ja4h}
+		header_up -Ja4h # the ja4h module also injects a raw `Ja4h:` request header; drop it
+	}
+}
+
+# Baseline site (no fingerprinting handlers) on another port, for latency comparison
+https://ja4.test:8444 {
+	tls internal
+	reverse_proxy 127.0.0.1:9000
+}

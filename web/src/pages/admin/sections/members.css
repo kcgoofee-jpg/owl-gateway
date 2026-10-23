@@ -1,0 +1,411 @@
+/* 成员页。字号只用 tokens 的阶梯；窄屏只改布局（表格 → 卡片）。 */
+
+.mb-tools {
+  display: grid;
+  gap: var(--sp-3);
+}
+.mb-search {
+  position: relative;
+  display: block;
+  flex: 1 1 240px;
+  max-width: 360px;
+}
+.mb-search svg {
+  position: absolute;
+  left: 10px;
+  top: 50%;
+  transform: translateY(-50%);
+  color: var(--muted);
+  pointer-events: none;
+}
+.xa-toolbar .mb-search .input[type="search"] {
+  width: 100%;
+  padding-left: 32px;
+}
+.mb-tools > * {
+  min-width: 0;
+}
+
+/* 横栏 + 下面另起一行的被拒原因 */
+.mb-filter {
+  display: grid;
+  gap: var(--sp-2);
+  min-width: 0;
+}
+.mb-filter > * {
+  min-width: 0;
+}
+/* 被拒原因：自己一行，放不下就整颗标签折行（不横向滚，切换时不左右跳） */
+.mb-reasons {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--sp-2);
+}
+/* 筛选横栏：永远单行，放不下就横向滚动（不换行、不再分页签和下拉两处） */
+.mb-bar {
+  display: flex;
+  flex-wrap: nowrap;
+  align-items: center;
+  gap: var(--sp-2);
+  overflow-x: auto;
+  overscroll-behavior-x: contain;
+  scrollbar-width: thin;
+  /* 给焦点环 / 阴影留位置，不被 overflow 裁掉 */
+  padding: 2px;
+  margin: -2px;
+}
+.mb-chip {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-height: var(--control-h);
+  padding: 0 10px;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  background: var(--surface-2);
+  color: var(--text-2);
+  font: 600 var(--fs-sm) / 1.2 var(--font);
+  white-space: nowrap;
+  cursor: pointer;
+}
+.mb-chip:hover {
+  color: var(--text);
+}
+.mb-chip[aria-pressed="true"] {
+  background: var(--accent-soft);
+  border-color: var(--accent);
+  color: var(--accent-text);
+}
+.mb-chip.is-sub {
+  background: none;
+  border-style: dashed;
+}
+.mb-chip.is-sub[aria-pressed="true"] {
+  background: var(--accent-soft);
+  border-style: solid;
+}
+.mb-reasons__lead {
+  flex: none;
+  color: var(--muted);
+  font-size: var(--fs-sm);
+  white-space: nowrap;
+}
+.mb-n {
+  display: inline-block;
+  min-width: 18px;
+  padding: 0 5px;
+  margin-left: 2px;
+  border-radius: 999px;
+  background: var(--surface-3);
+  color: var(--text-2);
+  font-size: var(--fs-xs);
+  line-height: 18px;
+  text-align: center;
+  font-variant-numeric: tabular-nums;
+}
+.mb-chip[aria-pressed="true"] .mb-n {
+  background: var(--accent-soft);
+  color: var(--accent-text);
+}
+.mb-n.is-hot {
+  background: var(--warn-soft);
+  color: var(--warn);
+}
+.mb-more-row {
+  display: flex;
+  justify-content: center;
+  padding-top: var(--sp-2);
+}
+
+/* 通用小块 */
+.mb-h4 {
+  font-size: var(--fs-sm);
+  font-weight: 650;
+  color: var(--text-2);
+  margin: 0;
+}
+.mb-fieldset {
+  border: 0;
+  padding: 0;
+  margin: 0;
+  display: grid;
+  gap: var(--sp-2);
+}
+.mb-fieldset legend {
+  padding: 0;
+  margin-bottom: var(--sp-2);
+}
+.mb-feats {
+  display: grid;
+  gap: var(--sp-2);
+  min-width: 0;
+  margin: 0;
+  padding: 0 0 0 var(--sp-6);
+  border: 0;
+}
+.mb-msg {
+  font-family: var(--mono);
+  font-size: var(--fs-sm);
+  line-height: 1.5;
+}
+.mb-plain {
+  list-style: none;
+  margin: var(--sp-2) 0 0;
+  padding: 0;
+  display: grid;
+  gap: var(--sp-2);
+}
+.mb-plain li {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: var(--sp-2);
+}
+.mb-banadd {
+  display: grid;
+  gap: var(--sp-3);
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1.4fr) auto;
+  align-items: end;
+}
+.mb-ask {
+  margin-bottom: var(--sp-3);
+}
+.mb-ask .notice {
+  align-items: center;
+  flex-wrap: wrap;
+}
+
+/* 成员身份 */
+.mb-ident {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-3);
+  min-width: 0;
+}
+.mb-ident__t {
+  min-width: 0;
+}
+.mb-name {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: var(--sp-2);
+  font-weight: 650;
+}
+.mb-name__t {
+  overflow-wrap: anywhere;
+}
+.mb-sub {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+  min-height: 20px;
+}
+.mb-status {
+  display: inline-flex;
+  flex-wrap: wrap;
+  gap: var(--sp-1);
+}
+.mb-bars {
+  display: grid;
+  gap: var(--sp-2);
+  min-width: 150px;
+}
+.mb-today {
+  min-width: 190px;
+}
+
+/* 表格 */
+.mb-table .mb-detail-row:hover {
+  background: none;
+}
+.mb-table .mb-detail-row > td {
+  padding: var(--sp-4) var(--sp-5);
+  background: var(--surface-2);
+  vertical-align: top;
+}
+.mb-expander svg {
+  transition: transform 0.15s;
+}
+.mb-expander.is-open svg {
+  transform: rotate(180deg);
+}
+
+/* 卡片（窄屏） */
+.mb-cards {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  gap: var(--sp-3);
+}
+.mb-card {
+  font-size: var(--fs-sm); /* 与表格里的字号一致：手机与桌面只换布局，不换字号 */
+  display: grid;
+  gap: var(--sp-3);
+  padding: var(--sp-4);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--surface);
+}
+.mb-card.is-focus {
+  border-color: var(--accent);
+}
+.mb-card__top {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: var(--sp-2);
+}
+
+/* 定位高亮 */
+@keyframes mb-focus {
+  0%,
+  35% {
+    background: var(--accent-soft);
+    box-shadow: 0 0 0 2px var(--accent);
+  }
+  100% {
+    box-shadow: 0 0 0 0 transparent;
+  }
+}
+.mb-card.is-focus {
+  animation: mb-focus 2.4s ease-out;
+}
+
+/* 表格行状态（放在最后，特异性最高） */
+.mb-table .mb-row {
+  cursor: pointer;
+}
+.mb-table .mb-row.is-open td {
+  background: var(--accent-soft);
+}
+.mb-table .mb-row.is-open td:first-child {
+  box-shadow: inset 3px 0 0 var(--accent);
+}
+.mb-table .mb-row.is-focus td {
+  animation: mb-focus 2.4s ease-out;
+}
+
+/* 详情 */
+.mb-detail {
+  display: grid;
+  gap: var(--sp-4);
+  min-width: 0;
+}
+.mb-card .mb-detail {
+  padding-top: var(--sp-3);
+  border-top: 1px solid var(--border);
+}
+.mb-verdict {
+  font-size: var(--fs-md);
+  font-weight: 650;
+}
+.mb-cols {
+  display: grid;
+  gap: var(--sp-5);
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 260px), 1fr));
+}
+.mb-sec {
+  display: grid;
+  gap: var(--sp-3);
+  align-content: start;
+  min-width: 0;
+}
+.mb-kv {
+  display: grid;
+  grid-template-columns: max-content minmax(0, 1fr);
+  /* 每行至少一个按钮的高度并垂直居中：有按钮的行和纯文字行不再忽高忽低 */
+  grid-auto-rows: minmax(32px, auto);
+  align-items: center;
+  gap: var(--sp-1) var(--sp-4);
+  margin: 0;
+  font-size: var(--fs-sm);
+}
+.mb-kv dt {
+  color: var(--muted);
+}
+.mb-kv dd {
+  margin: 0;
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+.mb-key {
+  display: inline-flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: var(--sp-1);
+}
+.mb-key__v {
+  font-family: var(--mono);
+  font-size: var(--fs-sm);
+  overflow-wrap: anywhere;
+}
+.mb-chips {
+  display: inline-flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--sp-1);
+}
+.mb-foot {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: var(--sp-2);
+  padding-top: var(--sp-3);
+  border-top: 1px solid var(--border);
+}
+
+/* 待处理列表 */
+.mb-issues {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  gap: var(--sp-2);
+}
+.mb-issue {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: var(--sp-3);
+  padding: var(--sp-3);
+  border: 1px solid var(--border);
+  border-left-width: 3px;
+  border-radius: var(--radius-sm);
+  background: var(--surface);
+}
+.mb-issue.is-bad {
+  border-left-color: var(--danger);
+}
+.mb-issue.is-warn {
+  border-left-color: var(--warn);
+}
+.mb-issue.is-info {
+  border-left-color: var(--info);
+}
+.mb-issue__t {
+  display: grid;
+  flex: 1 1 220px;
+  min-width: 0;
+}
+.mb-issue__a {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--sp-2);
+}
+
+@media (max-width: 860px) {
+  .mb-banadd {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .mb-kv {
+    grid-template-columns: minmax(0, 1fr);
+    gap: 2px;
+  }
+  .mb-kv dd {
+    margin-bottom: var(--sp-2);
+  }
+}

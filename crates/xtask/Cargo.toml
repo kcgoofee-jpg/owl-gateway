@@ -1,0 +1,29 @@
+[package]
+name = "xtask"
+description = "开发用：`cargo xtask dev` 起本地网关 + 假上游 + 合成演示数据（前端开发与 Playwright 端到端的后端）。"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[dependencies]
+gate-core.workspace = true
+gate-db.workspace = true
+gate-upstream.workspace = true
+# 开发专用：只有 xtask 依赖它们，不进发布的二进制（Dockerfile 只构建 nai-gate / nai-bots / nai-ops）
+gate-server = { path = "../gate-server" }
+gate-testkit = { path = "../gate-testkit" }
+anyhow.workspace = true
+axum.workspace = true
+clap.workspace = true
+tokio.workspace = true
+serde_json.workspace = true
+rand.workspace = true
+tracing-subscriber.workspace = true
+
+[dev-dependencies]
+tempfile = "3"
+
+[lints]
+workspace = true

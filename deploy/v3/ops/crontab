@@ -1,0 +1,11 @@
+# 线上 root 的 crontab（`crontab -l` 看到的就是这三条；脚本放在服务器 /opt/owl/ops/，源在本目录）。
+# 不在这里的：每晚 03:30 的本机 GFS 备份是 /etc/cron.d/naigate-backup（deploy/harden.sh 装的），
+# 巡检是 systemd 定时器 nai-patrol.timer（deploy/ops/systemd/）。
+# 备份、快照、巡检和镜像各自的说明见 docs/OPERATIONS.md。
+
+# 每天 05:10：脱敏只读快照 → /opt/backups/ro/（保留 7 份，本机用 deploy/ops/pull-ro-snapshot.sh 拉取）
+10 5 * * * bash /opt/owl/ops/ro-snapshot.sh >> /var/log/ro-snapshot.log 2>&1
+# 每 5 分钟：状态页独立镜像 → S3（主站挂了镜像还在；页面快照时间停了超过 10 分钟 = 主站可能故障）
+*/5 * * * * /opt/owl/ops/status_mirror.sh >> /var/log/nai-mirror.log 2>&1
+# 每天 04:30：加密异地备份 → S3（库快照 + .env + secret_key + 3.0 部署文件；口令在服务器 /root/.backup_pass）
+30 4 * * * /opt/owl/ops/nightly_backup.sh >> /var/log/nai-backup.log 2>&1

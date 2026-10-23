@@ -1,0 +1,25 @@
+[package]
+name = "gate-testkit"
+description = "测试工具：可编程的假 NovelAI 上游（记录每个请求、按脚本回放 429 / 403 / 5xx / 流式事件 / 卡死）。"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[dependencies]
+axum.workspace = true
+tokio.workspace = true
+futures.workspace = true
+serde_json.workspace = true
+rmpv.workspace = true
+base64.workspace = true
+image.workspace = true
+zip.workspace = true
+# 按 Accept-Encoding 压缩响应（逐块 flush，流式回复照样一块一块到）：与 wreq-util 用的是同一版
+flate2 = "1"
+brotli = "8"
+zstd = "0.13"
+
+[lints]
+workspace = true

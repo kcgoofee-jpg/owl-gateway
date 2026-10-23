@@ -1,0 +1,50 @@
+{"in":{"args":["nai-diffusion-4-5-full"]},"out":false}
+{"in":{"args":["nai-diffusion-4-5-curated"]},"out":false}
+{"in":{"args":["nai-diffusion-4-5-full-inpainting"]},"out":false}
+{"in":{"args":["nai-diffusion-4-5"]},"out":false}
+{"in":{"args":["nai-diffusion-4-full"]},"out":false}
+{"in":{"args":["nai-diffusion-4-curated-preview"]},"out":false}
+{"in":{"args":["nai-diffusion-4-curated"]},"out":false}
+{"in":{"args":["nai-diffusion-4"]},"out":false}
+{"in":{"args":["nai-diffusion-4-full-inpainting"]},"out":false}
+{"in":{"args":["nai-diffusion-3"]},"out":false}
+{"in":{"args":["nai-diffusion-3-inpainting"]},"out":false}
+{"in":{"args":["nai-diffusion-furry-3"]},"out":false}
+{"in":{"args":["nai-diffusion-furry-3-inpainting"]},"out":false}
+{"in":{"args":["nai-diffusion-2"]},"out":false}
+{"in":{"args":["nai-diffusion"]},"out":false}
+{"in":{"args":["safe-diffusion"]},"out":false}
+{"in":{"args":["nai-diffusion-furry"]},"out":false}
+{"in":{"args":["nai-diffusion-5"]},"out":false}
+{"in":{"args":["nai-diffusion-5-full"]},"out":false}
+{"in":{"args":["nai-diffusion-5-curated"]},"out":false}
+{"in":{"args":["nai-diffusion-5-full-medium"]},"out":true}
+{"in":{"args":["nai-diffusion-5-full-inpainting"]},"out":false}
+{"in":{"args":["nai-diffusion-5-full-medium-inpainting"]},"out":true}
+{"in":{"args":["nai-v5"]},"out":false}
+{"in":{"args":["nai-v5-full"]},"out":false}
+{"in":{"args":["NAI-Diffusion-4-5-Full"]},"out":false}
+{"in":{"args":[" nai-diffusion-3 "]},"out":false}
+{"in":{"args":["nai-diffusion-6"]},"out":false}
+{"in":{"args":["made-up"]},"out":false}
+{"in":{"args":[""]},"out":false}
+{"in":{"args":[" "]},"out":false}
+{"in":{"args":["nai-diffusion-4-5-fullx"]},"out":false}
+{"in":{"args":["nai-diffusion-45"]},"out":false}
+{"in":{"args":["nai-diffusion-5x"]},"out":false}
+{"in":{"args":["nai-v5x"]},"out":false}
+{"in":{"args":["nai-diffusion-3-"]},"out":false}
+{"in":{"args":["nai-diffusion-furry-3-x"]},"out":false}
+{"in":{"args":["　nai-diffusion-5-full　"]},"out":false}
+{"in":{"args":["NAI-V5"]},"out":false}
+{"in":{"args":["İ"]},"out":false}
+{"in":{"args":["Σ"]},"out":false}
+{"in":{"args":["K"]},"out":false}
+{"in":{"args":["nai-diffusion-4-5\n"]},"out":false}
+{"in":{"args":["text-model"]},"out":false}
+{"in":{"args":["kayra-v1"]},"out":false}
+{"in":{"args":[null]},"out":false}
+{"in":{"args":[" nai-diffusion-5-full-medium "]},"out":true}
+{"in":{"args":["NAI-DIFFUSION-5-FULL-MEDIUM-INPAINTING"]},"out":true}
+{"in":{"args":["nai-diffusion-5-full-medium-x"]},"out":false}
+{"in":{"args":["nai-diffusion-5-medium"]},"out":false}

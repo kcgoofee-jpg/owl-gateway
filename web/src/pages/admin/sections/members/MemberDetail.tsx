@@ -1,0 +1,328 @@
+/** 成员展开后的详情：一句话结论 → 待处理 → 额度与权限 / 资料 → 日常操作。今天的用量只在列表行里显示一次。 */
+import { ExternalLink, Plus } from "lucide-preact";
+import { useState } from "preact/hooks";
+import { dayOf, fullTime, rel } from "../../../../lib/format";
+import { Badge, Button, copyText, Menu, toast } from "../../../../ui";
+import { FEATURES } from "../features";
+import {
+  type Issue,
+  type IssueAction,
+  memberIssues,
+  memberLabel,
+  memberVerdict,
+  roleOf,
+  userTags,
+} from "./logic";
+import { Seg } from "./shared";
+import { type MemberRow, ROLE_LABEL, type Role } from "./types";
+
+export type DetailActions = {
+  edit: (m: MemberRow, manual?: boolean) => void;
+  quotaAuto: (m: MemberRow) => void;
+  role: (m: MemberRow, r: Role) => void;
+  issue: (m: MemberRow, a: IssueAction) => void;
+  bind: (m: MemberRow) => void;
+  addTag: (m: MemberRow) => void;
+  removeTag: (m: MemberRow, tag: string) => void;
+  coupon: (m: MemberRow) => void;
+  audit: (m: MemberRow) => void;
+  requests: (m: MemberRow) => void;
+  resetQuota: (m: MemberRow) => void;
+  disable: (m: MemberRow) => void;
+  regenerate: (m: MemberRow) => void;
+  remove: (m: MemberRow, ban: boolean) => void;
+};
+
+const LEVEL_TEXT = { bad: "紧急", warn: "注意", info: "提示" } as const;
+const ISSUE_BTN: Record<IssueAction["kind"], string> = {
+  "share-clear": "误判，解除",
+  edit: "改到期时间",
+  ack: "没问题",
+  "tag-del": "查完了，移除标记",
+};
+
+const mask = (t: string): string => `${t.slice(0, 8)}····${t.slice(-4)}`;
+const inf = (n: number): string | number => (n > 0 ? n : "不限");
+
+function IssueList(props: { m: MemberRow; issues: Issue[]; act: DetailActions }) {
+  const serious = props.issues.some((x) => x.level !== "info");
+  return (
+    <section class="mb-sec" aria-label={serious ? "要处理" : "注意到"}>
+      <h4 class="mb-h4">{serious ? "要处理" : "注意到"}</h4>
+      <ul class="mb-issues">
+        {props.issues.map((i) => (
+          <li key={i.id} class={`mb-issue is-${i.level}`}>
+            <Badge tone={i.level === "bad" ? "danger" : i.level === "warn" ? "warn" : "info"}>
+              {LEVEL_TEXT[i.level]}
+            </Badge>
+            <div class="mb-issue__t">
+              <b>{i.title}</b>
+              <span class="small muted">{i.detail}</span>
+            </div>
+            <div class="mb-issue__a">
+              {i.actions.map((a) => (
+                <Button key={a.kind} size="sm" onClick={() => props.act.issue(props.m, a)}>
+                  {ISSUE_BTN[a.kind]}
+                </Button>
+              ))}
+            </div>
+          </li>
+        ))}
+      </ul>
+    </section>
+  );
+}
+
+export function MemberDetail(props: { m: MemberRow; now: number; act: DetailActions }) {
+  const { m, now, act } = props;
+  const k = m.k;
+  const verdict = memberVerdict(m, now);
+  const [reveal, setReveal] = useState(false);
+  const role = roleOf(m);
+  const dc = m.discord;
+  const dcId = dc ? String(dc.id) : m.discord_id ? String(m.discord_id) : "";
+  const tags = userTags(m);
+  const profile = dc?.profile_url?.startsWith("https://discord.com/") ? dc.profile_url : "";
+  const issues = memberIssues(m, now);
+
+  if (!k) {
+    return (
+      <div class="mb-detail">
+        <p class="mb-verdict">{verdict.title}</p>
+        <p class="small muted">这把 Key 的详细信息读取失败，稍后会自动重试。</p>
+      </div>
+    );
+  }
+  const u = k.used;
+  const quotaSource = k.quota_auto ? "auto" : "manual";
+  // 今天的 V4.5 / V5 用量在列表行里已经有了，这里只补行里没有的 Anlas
+  const anlasUsed = Math.round(u.anlas || 0);
+  const anlas = !k.allow_anlas
+    ? "关闭"
+    : `今天 ${anlasUsed} / ${k.daily_anlas > 0 ? Math.round(k.daily_anlas) : "不限"}`;
+  const feats = k.features ?? null;
+
+  return (
+    <div class="mb-detail">
+      <div>
+        <p class="mb-verdict">{verdict.title}</p>
+        {verdict.sub && <p class="small muted">{verdict.sub}</p>}
+      </div>
+
+      {issues.length > 0 && <IssueList m={m} issues={issues} act={act} />}
+
+      <div class="mb-cols">
+        <section class="mb-sec" aria-label="额度与权限">
+          <h4 class="mb-h4">额度与权限</h4>
+          <dl class="mb-kv">
+            <dt>身份组</dt>
+            <dd>
+              <Seg
+                label={`${memberLabel(m)} 的身份组`}
+                value={role}
+                options={(["regular", "invite"] as Role[]).map((r) => ({
+                  id: r,
+                  label: ROLE_LABEL[r],
+                }))}
+                onChange={(r) => r !== role && act.role(m, r)}
+              />
+            </dd>
+            <dt>额度来源</dt>
+            <dd>
+              <Seg
+                label={`${memberLabel(m)} 的额度来源`}
+                value={quotaSource}
+                options={[
+                  { id: "auto", label: "统一", title: "跟随全站手动的每人每日额度" },
+                  { id: "manual", label: "手动", title: "手动填具体数字" },
+                ]}
+                onChange={(v) => {
+                  if (v === quotaSource) return;
+                  if (v === "auto") act.quotaAuto(m);
+                  else act.edit(m, true);
+                }}
+              />
+            </dd>
+            <dt>每天</dt>
+            <dd>
+              V4.5 {inf(k.daily_images)}
+              {k.image_model_scope === "all" ? ` · V5 ${inf(k.daily_v5)}` : " · 不能用 V5"}
+            </dd>
+            {m.reset_today && m.reset_today.count > 0 && (
+              <>
+                <dt>今日重置</dt>
+                <dd title={`最近重置：${fullTime(m.reset_today.last_ts)}`}>
+                  已重置 {m.reset_today.count} 次（最近 {rel(m.reset_today.last_ts, now)}）
+                </dd>
+              </>
+            )}
+            <dt>Anlas</dt>
+            <dd>{anlas}</dd>
+            <dt>功能</dt>
+            <dd>
+              <span class="mb-chips">
+                {feats == null ? (
+                  <span class="xa-chip">全部已开放功能</span>
+                ) : feats.length ? (
+                  feats.map((f) => (
+                    <span class="xa-chip" key={f}>
+                      {FEATURES.find((x) => x.id === f)?.short ?? f}
+                    </span>
+                  ))
+                ) : (
+                  <span class="muted">未开通任何功能</span>
+                )}
+              </span>
+            </dd>
+            <dt>到期</dt>
+            <dd>{k.expires_at ? dayOf(k.expires_at) : "永久"}</dd>
+            {(k.allow_img2img || k.exclude_global_v5) && (
+              <>
+                <dt>其他</dt>
+                <dd>
+                  {[k.allow_img2img ? "可以图生图" : "", k.exclude_global_v5 ? "V5 不占全站额度" : ""]
+                    .filter(Boolean)
+                    .join(" · ")}
+                </dd>
+              </>
+            )}
+          </dl>
+          <div>
+            <Button size="sm" onClick={() => act.edit(m)}>
+              全部设置…
+            </Button>
+          </div>
+        </section>
+
+        <section class="mb-sec" aria-label="资料">
+          <h4 class="mb-h4">资料</h4>
+          <dl class="mb-kv">
+            <dt>Discord</dt>
+            <dd>
+              {dcId ? (
+                <span class="mb-key">
+                  <span>{dc?.username ? `@${dc.username}` : dcId}</span>
+                  {profile && (
+                    <a
+                      class="btn btn--sm btn--ghost"
+                      href={profile}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      aria-label={`在 Discord 打开 ${memberLabel(m)} 的主页（新标签页）`}
+                    >
+                      打开 <ExternalLink size={12} aria-hidden="true" />
+                    </a>
+                  )}
+                  <Button
+                    size="sm"
+                    variant="ghost"
+                    onClick={async () => {
+                      const ok = await copyText(dcId);
+                      toast(ok ? "Discord ID 已复制" : "复制失败，请手动选择文字", { error: !ok });
+                    }}
+                  >
+                    复制 ID
+                  </Button>
+                  <Button size="sm" variant="ghost" onClick={() => act.bind(m)}>
+                    换绑
+                  </Button>
+                </span>
+              ) : (
+                <span class="mb-key">
+                  <span class="muted">未绑定</span>
+                  <Button size="sm" variant="ghost" onClick={() => act.bind(m)}>
+                    手动绑定
+                  </Button>
+                </span>
+              )}
+            </dd>
+            <dt>Key</dt>
+            <dd>
+              <span class="mb-key">
+                <code class="mb-key__v">{reveal ? k.token : mask(k.token)}</code>
+                <Button size="sm" variant="ghost" aria-pressed={reveal} onClick={() => setReveal(!reveal)}>
+                  {reveal ? "隐藏" : "显示"}
+                </Button>
+                <Button
+                  size="sm"
+                  variant="ghost"
+                  aria-label={`复制 ${memberLabel(m)} 的 Key`}
+                  onClick={async () => {
+                    const ok = await copyText(k.token);
+                    toast(ok ? "Key 已复制" : "复制失败，请点「显示」后手动复制", { error: !ok });
+                  }}
+                >
+                  复制
+                </Button>
+              </span>
+            </dd>
+            <dt>{m.discord_id ? "领取" : "创建"}</dt>
+            <dd title={fullTime(m.registered_at)}>{m.registered_at ? rel(m.registered_at, now) : "—"}</dd>
+            <dt>最近使用</dt>
+            <dd title={fullTime(k.last_used_at)}>{k.last_used_at ? rel(k.last_used_at, now) : "从未使用"}</dd>
+            <dt>标签</dt>
+            <dd>
+              <span class="mb-chips">
+                {tags.map((t) => (
+                  <span
+                    class="xa-chip"
+                    key={t.tag}
+                    title={`${t.note ? `${t.note} · ` : ""}${t.by || ""} · ${fullTime(t.ts)}`}
+                  >
+                    {t.tag}
+                    <button
+                      type="button"
+                      aria-label={`移除标签 ${t.tag}`}
+                      onClick={() => act.removeTag(m, t.tag)}
+                    >
+                      ×
+                    </button>
+                  </span>
+                ))}
+                <Button size="sm" variant="ghost" onClick={() => act.addTag(m)}>
+                  <Plus size={12} aria-hidden="true" />
+                  标签
+                </Button>
+              </span>
+            </dd>
+          </dl>
+        </section>
+      </div>
+
+      <div class="mb-foot">
+        <Button size="sm" onClick={() => act.resetQuota(m)}>
+          重置今日额度{m.reset_today?.count ? `（${m.reset_today.count}）` : ""}
+        </Button>
+        <Button size="sm" onClick={() => act.audit(m)}>
+          生成记录
+        </Button>
+        <Button size="sm" onClick={() => act.requests(m)}>
+          请求
+        </Button>
+        <Button size="sm" onClick={() => act.coupon(m)}>
+          发重置券
+        </Button>
+        <span class="spacer" />
+        <Menu
+          button={(p) => (
+            <Button size="sm" variant="ghost" {...p}>
+              更多
+            </Button>
+          )}
+          items={[
+            { label: "重新生成 Key（旧的立即失效）", onSelect: () => act.regenerate(m) },
+            { label: "停用", onSelect: () => act.disable(m) },
+            {
+              label: dcId ? "删除（可以重新领取）" : "删除",
+              onSelect: () => act.remove(m, false),
+              danger: true,
+            },
+            ...(!dcId
+              ? []
+              : [{ label: "删除并永久禁止领取", onSelect: () => act.remove(m, true), danger: true }]),
+          ]}
+        />
+      </div>
+    </div>
+  );
+}

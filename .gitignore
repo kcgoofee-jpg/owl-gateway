@@ -1,0 +1,39 @@
+data/
+.env
+*.db
+.local/
+.DS_Store
+*.db-wal
+*.db-shm
+
+# Claude Code local session dirs
+.claude/
+.agents/
+exports/
+
+# 含成员身份的审计报告只放本地 exports/，不进公开仓库
+docs/AUDIT_*
+
+# 浏览器检查工具（playwright-cli）的运行残留
+.playwright-cli/
+
+# 3.0：Rust / 前端构建产物与更多敏感文件
+/target/
+web/node_modules/
+web/dist/
+web/test-results/
+web/playwright-report/
+.env.*
+!.env.example
+*.zip
+*.db.gz
+*.enc
+*.log
+
+# Python 残留（2.x 已删除；工具脚本本地运行时的缓存与虚拟环境）
+__pycache__/
+*.pyc
+.venv/
+
+# cargo llvm-cov 的覆盖率原始数据
+*.profraw

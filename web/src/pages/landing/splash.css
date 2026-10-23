@@ -1,0 +1,70 @@
+/*
+ * 开屏（Splash）：永远是夜色（本来就是夜里）。
+ * 字体 Newsreader 自托管：只含「Drawingfantsy」这几个字母的 woff2 子集（保留光学尺寸轴，字重固定 400；
+ * SIL OFL 1.1，许可证见 src/assets/newsreader-OFL.txt）。CSP 只允许同源字体。
+ */
+@font-face {
+  font-family: "Newsreader Splash";
+  src: url("../../assets/newsreader-splash.woff2") format("woff2");
+  font-weight: 400;
+  font-style: normal;
+  font-display: block;
+}
+
+.splash {
+  position: fixed;
+  inset: 0;
+  z-index: 50;
+  display: grid;
+  place-items: center;
+  cursor: pointer;
+}
+.splash--flying {
+  pointer-events: none;
+}
+.splash__bg {
+  position: absolute;
+  inset: 0;
+  background: var(--night);
+}
+.splash__stack {
+  position: relative;
+  display: grid;
+  justify-items: center;
+  gap: var(--sp-8);
+}
+.splash__eyes {
+  display: flex;
+  gap: 30px;
+}
+.splash__eye {
+  display: block;
+  width: 34px;
+  height: 34px;
+  border: 0 solid var(--eye);
+  border-radius: 50%;
+  background: var(--eye);
+  box-shadow: 0 0 24px color-mix(in oklab, var(--eye) 45%, transparent);
+}
+/* 两行大字，书籍衬线体，排得紧，像封面上的一行字 */
+.splash__title {
+  margin: 0;
+  font-family: "Newsreader Splash", Georgia, "Times New Roman", serif;
+  font-weight: 400;
+  font-size: clamp(48px, 11vw, 104px);
+  font-optical-sizing: auto;
+  line-height: 0.98;
+  letter-spacing: -0.02em;
+  text-align: center;
+  text-wrap: nowrap;
+  color: var(--night-fg);
+  opacity: 0;
+}
+
+/* 开屏期间，眼睛的落点先藏起来，落地时再出现 */
+html[data-splash="pending"] .brand__eyes i,
+html[data-splash="pending"] .ring-item,
+html[data-splash="logo"] .brand__eyes i,
+html[data-splash="rings"] .ring-item {
+  opacity: 0;
+}

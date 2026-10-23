@@ -1,0 +1,50 @@
+{"in":{"args":["nai-diffusion-4"]},"out":"legacy"}
+{"in":{"args":["nai-diffusion-3"]},"out":"legacy"}
+{"in":{"args":["nai-diffusion-2"]},"out":"legacy"}
+{"in":{"args":["nai-diffusion"]},"out":"legacy"}
+{"in":{"args":["safe-diffusion"]},"out":"legacy"}
+{"in":{"args":["nai-diffusion-5"]},"out":"v5"}
+{"in":{"args":["nai-v5"]},"out":"v5"}
+{"in":{"args":["nai-v5-full"]},"out":"v5"}
+{"in":{"args":[""]},"out":null}
+{"in":{"args":[" "]},"out":null}
+{"in":{"args":["nai-diffusion-3-"]},"out":"legacy"}
+{"in":{"args":["NAI-V5"]},"out":"v5"}
+{"in":{"args":["İ"]},"out":null}
+{"in":{"args":["Σ"]},"out":null}
+{"in":{"args":["K"]},"out":null}
+{"in":{"args":["text-model"]},"out":null}
+{"in":{"args":[null]},"out":null}
+{"in":{"args":["nai-diffusion-4-"]},"out":"legacy"}
+{"in":{"args":["NAI-DIFFUSION-3"]},"out":"legacy"}
+{"in":{"args":["Safe-Diffusion"]},"out":"legacy"}
+{"in":{"args":["nai-diffusion-4 "]},"out":"legacy"}
+{"in":{"args":[" nai-diffusion-4"]},"out":"legacy"}
+{"in":{"args":["nai-diffusion "]},"out":"legacy"}
+{"in":{"args":["text-modelx"]},"out":null}
+{"in":{"args":["　nai-diffusion-5-full　-inpainting"]},"out":"v5"}
+{"in":{"args":["nai-v5-full-"]},"out":"v5"}
+{"in":{"args":["nai-v5-"]},"out":"v5"}
+{"in":{"args":["nai-diffusion-5-full-inpainting\n"]},"out":"v5"}
+{"in":{"args":["Σ-"]},"out":null}
+{"in":{"args":["nai-diffusion\n"]},"out":"legacy"}
+{"in":{"args":[" x"]},"out":null}
+{"in":{"args":["nai-diffusion-5-full-medium-inpainting-x"]},"out":"v5"}
+{"in":{"args":["K-"]},"out":null}
+{"in":{"args":["İ "]},"out":null}
+{"in":{"args":["nai-v5\n"]},"out":"v5"}
+{"in":{"args":["K "]},"out":null}
+{"in":{"args":["　nai-diffusion-5-full　\n"]},"out":"v5"}
+{"in":{"args":["\n"]},"out":null}
+{"in":{"args":["İ-"]},"out":null}
+{"in":{"args":["NAI-V5-inpainting"]},"out":"v5"}
+{"in":{"args":["nai-v5 "]},"out":"v5"}
+{"in":{"args":["K-x"]},"out":null}
+{"in":{"args":[" -"]},"out":null}
+{"in":{"args":["nai-diffusion-4-curated-preview-inpainting"]},"out":"legacy"}
+{"in":{"args":["nai-diffusion-5\n"]},"out":"v5"}
+{"in":{"args":["  "]},"out":null}
+{"in":{"args":["nai-v5-full-x"]},"out":"v5"}
+{"in":{"args":["nai-diffusion-5-x"]},"out":"v5"}
+{"in":{"args":["NAI-V5-"]},"out":"v5"}
+{"in":{"args":["nai-v5-fullx"]},"out":"v5"}

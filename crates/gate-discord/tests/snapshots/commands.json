@@ -1,0 +1,42 @@
+[
+  {
+    "name": "register",
+    "description": "领取你的猫头鹰公益站 API Key",
+    "type": 1,
+    "options": [
+      {
+        "type": 3,
+        "name": "key",
+        "description": "收到站长发的邀请 Key 时粘贴在这里，绑定到你的账号（可选）",
+        "required": false
+      }
+    ],
+    "nsfw": false,
+    "dm_permission": true,
+    "default_member_permissions": null,
+    "contexts": null,
+    "integration_types": null
+  },
+  {
+    "name": "反馈",
+    "description": "写几句话给站长（只有你能看到，不会私信你）",
+    "type": 1,
+    "options": [],
+    "nsfw": false,
+    "dm_permission": true,
+    "default_member_permissions": null,
+    "contexts": null,
+    "integration_types": null
+  },
+  {
+    "name": "resetkey",
+    "description": "Key 丢了或泄露了？换一把新的（旧的立即失效）",
+    "type": 1,
+    "options": [],
+    "nsfw": false,
+    "dm_permission": true,
+    "default_member_permissions": null,
+    "contexts": null,
+    "integration_types": null
+  }
+]

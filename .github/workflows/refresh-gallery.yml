@@ -1,0 +1,33 @@
+name: Refresh public inspiration gallery
+
+on:
+  schedule:
+    - cron: "17 3 * * 3"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  pull-requests: write
+
+jobs:
+  refresh:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.x"
+      - name: Fetch current public examples
+        run: python3 tools/sync-novelai-gallery.py
+      - name: Open a reviewable update
+        uses: peter-evans/create-pull-request@v7
+        with:
+          branch: automation/gallery-refresh
+          delete-branch: true
+          commit-message: "Refresh public NovelAI gallery examples"
+          title: "Refresh public NovelAI gallery examples"
+          body: |
+            Automated weekly snapshot of the public NovelAI image gallery.
+
+            Review the image IDs and prompt text before merging. This change does not deploy the website.
+          add-paths: web/src/pages/landing/gallery-data.json

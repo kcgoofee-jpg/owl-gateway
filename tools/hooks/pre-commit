@@ -1,0 +1,22 @@
+#!/usr/bin/env bash
+# Fast local gate before every commit (CI runs the full suite on push):
+#   1. the production server IP never enters the repo (read from ~/.config/owl/owl.env if present)
+#   2. fixtures only contain synthetic IDs / IPs (same script CI runs)
+#   3. Rust formatting, when .rs files are staged
+set -euo pipefail
+cd "$(git rev-parse --show-toplevel)"
+
+if [[ -f $HOME/.config/owl/owl.env ]]; then
+  # shellcheck source=/dev/null
+  source "$HOME/.config/owl/owl.env"
+  if [[ -n ${OWL_IP:-} ]] && git diff --cached -U0 | grep -qF "$OWL_IP"; then
+    echo "pre-commit: staged changes contain the production server IP" >&2
+    exit 1
+  fi
+fi
+
+tools/ci/check-fixtures.sh >/dev/null 2>&1 || { tools/ci/check-fixtures.sh; exit 1; }
+
+if git diff --cached --name-only --diff-filter=ACM | grep -q '\.rs$'; then
+  cargo fmt --all --check >/dev/null 2>&1 || { echo "pre-commit: run cargo fmt --all" >&2; exit 1; }
+fi

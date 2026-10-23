@@ -1,0 +1,29 @@
+#!/bin/bash
+# 从数据库快照（.db.gz）里清掉生成记录表 generation_audit：提示词、负面提示词、参数、图片指纹。
+# 用法：naigate-strip-prompts <快照.db.gz> [更多快照...]
+# 线上库 30 天后自动删提示词；备份留得更久（本机 GFS 最长 6 个月），所以备份里一律不留（站长 10-18）。
+# 每份先解压到临时文件、删表、VACUUM（真正释放页，不留可恢复的残片）、完整性检查，全部通过才替换原文件。
+set -euo pipefail
+for f in "$@"; do
+  tmp=$(mktemp /tmp/nai-strip.XXXXXX.db)
+  trap 'rm -f "$tmp" "$tmp-journal" "$f.stripping"' EXIT
+  gunzip -c "$f" > "$tmp"
+  # Snapshots older than the generation log have no such table: nothing to strip
+  if [ -z "$(sqlite3 "$tmp" "SELECT name FROM sqlite_master WHERE type='table' AND name='generation_audit';")" ]; then
+    rm -f "$tmp"
+    echo "- $f: no generation_audit table, skipped"
+    continue
+  fi
+  sqlite3 "$tmp" "DELETE FROM generation_audit; VACUUM;"
+  check=$(sqlite3 "$tmp" "PRAGMA integrity_check;")
+  left=$(sqlite3 "$tmp" "SELECT count(*) FROM generation_audit;")
+  if [ "$check" != "ok" ] || [ "$left" != "0" ]; then
+    echo "✗ $f：清理后检查不通过（integrity=$check，剩余 $left 行），保留原文件" >&2
+    exit 1
+  fi
+  gzip -c "$tmp" > "$f.stripping"
+  touch -r "$f" "$f.stripping"
+  mv "$f.stripping" "$f"
+  rm -f "$tmp"
+  echo "✓ $f：已清掉生成记录"
+done

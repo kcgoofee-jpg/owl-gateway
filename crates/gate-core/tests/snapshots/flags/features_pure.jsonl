@@ -1,0 +1,74 @@
+{"in":{"fn":"kinds_for","args":["image"]},"out":["image","image_stream"]}
+{"in":{"fn":"kinds_for","args":["upscale"]},"out":["upscale"]}
+{"in":{"fn":"kinds_for","args":["augment"]},"out":["augment-image"]}
+{"in":{"fn":"kinds_for","args":["vibe"]},"out":["vibe_encode"]}
+{"in":{"fn":"kinds_for","args":["tags"]},"out":["tags"]}
+{"in":{"fn":"kinds_for","args":["bogus"]},"out":[]}
+{"in":{"fn":"kinds_for","args":[""]},"out":[]}
+{"in":{"fn":"parse_list","args":[null]},"out":null}
+{"in":{"fn":"parse_list","args":[""]},"out":[]}
+{"in":{"fn":"parse_list","args":["image"]},"out":["image"]}
+{"in":{"fn":"parse_list","args":["image,vibe"]},"out":["image","vibe"]}
+{"in":{"fn":"parse_list","args":["image, vibe"]},"out":["image"]}
+{"in":{"fn":"parse_list","args":["bogus,tags"]},"out":["tags"]}
+{"in":{"fn":"parse_list","args":["image,image"]},"out":["image","image"]}
+{"in":{"fn":"parse_list","args":[","]},"out":[]}
+{"in":{"fn":"parse_list","args":[",,"]},"out":[]}
+{"in":{"fn":"parse_list","args":[" "]},"out":[]}
+{"in":{"fn":"parse_list","args":["IMAGE"]},"out":[]}
+{"in":{"fn":"parse_list","args":["image,"]},"out":["image"]}
+{"in":{"fn":"parse_list","args":[",image"]},"out":["image"]}
+{"in":{"fn":"parse_list","args":["image;vibe"]},"out":[]}
+{"in":{"fn":"parse_list","args":[5]},"out":[]}
+{"in":{"fn":"parse_list","args":[0]},"out":[]}
+{"in":{"fn":"parse_list","args":[true]},"out":[]}
+{"in":{"fn":"parse_list","args":[false]},"out":[]}
+{"in":{"fn":"parse_list","args":[1.5]},"out":[]}
+{"in":{"fn":"parse_list","args":[["image"]]},"out":[]}
+{"in":{"fn":"parse_list","args":[["image","vibe"]]},"out":[]}
+{"in":{"fn":"parse_list","args":[{}]},"out":[]}
+{"in":{"fn":"parse_list","args":[{"image":1}]},"out":[]}
+{"in":{"fn":"parse_list","args":["猫"]},"out":[]}
+{"in":{"fn":"parse_list","args":["image,猫"]},"out":["image"]}
+{"in":{"fn":"normalize","args":[[]]},"out":[]}
+{"in":{"fn":"normalize","args":[["image"]]},"out":["image"]}
+{"in":{"fn":"normalize","args":[["image","image"]]},"out":["image"]}
+{"in":{"fn":"normalize","args":[["bogus"]]},"out":[]}
+{"in":{"fn":"normalize","args":[["IMAGE"]]},"out":[]}
+{"in":{"fn":"normalize","args":[[""]]},"out":[]}
+{"in":{"fn":"normalize","args":[["image,vibe"]]},"out":[]}
+{"in":{"fn":"dump","args":[[]]},"out":""}
+{"in":{"fn":"dump","args":[["image"]]},"out":"image"}
+{"in":{"fn":"dump","args":[["image","image"]]},"out":"image"}
+{"in":{"fn":"dump","args":[["bogus"]]},"out":""}
+{"in":{"fn":"dump","args":[["IMAGE"]]},"out":""}
+{"in":{"fn":"dump","args":[[""]]},"out":""}
+{"in":{"fn":"dump","args":[["image,vibe"]]},"out":""}
+{"in":{"fn":"dump","args":[null]},"out":null}
+{"in":{"fn":"key_features","args":[{}]},"out":null}
+{"in":{"fn":"key_features","args":[{"features":null}]},"out":null}
+{"in":{"fn":"key_features","args":[{"features":""}]},"out":[]}
+{"in":{"fn":"key_features","args":[{"features":"image"}]},"out":["image"]}
+{"in":{"fn":"key_features","args":[{"features":"image,vibe,upscale"}]},"out":["image","vibe","upscale"]}
+{"in":{"fn":"key_features","args":[{"features":"bogus"}]},"out":[]}
+{"in":{"fn":"key_features","args":[{"features":5}]},"out":[]}
+{"in":{"fn":"key_features","args":[{"id":3}]},"out":null}
+{"in":{"fn":"global_flags","args":[null]},"out":{"image":true,"upscale":true,"augment":true,"vibe":true,"tags":true}}
+{"in":{"fn":"global_flags","args":[""]},"out":{"image":true,"upscale":true,"augment":true,"vibe":true,"tags":true}}
+{"in":{"fn":"global_flags","args":["{}"]},"out":{"image":true,"upscale":true,"augment":true,"vibe":true,"tags":true}}
+{"in":{"fn":"global_flags","args":["{\"image\": false}"]},"out":{"image":false,"upscale":true,"augment":true,"vibe":true,"tags":true}}
+{"in":{"fn":"global_flags","args":["{\"image\": 0}"]},"out":{"image":true,"upscale":true,"augment":true,"vibe":true,"tags":true}}
+{"in":{"fn":"global_flags","args":["{\"vibe\": \"no\"}"]},"out":{"image":true,"upscale":true,"augment":true,"vibe":true,"tags":true}}
+{"in":{"fn":"global_flags","args":["[1]"]},"out":{"err":"AttributeError","msg":"'list' object has no attribute 'get'"}}
+{"in":{"fn":"global_flags","args":["null"]},"out":{"err":"AttributeError","msg":"'NoneType' object has no attribute 'get'"}}
+{"in":{"fn":"global_flags","args":["garbage"]},"out":{"image":true,"upscale":true,"augment":true,"vibe":true,"tags":true}}
+{"in":{"fn":"global_flags","args":["5"]},"out":{"err":"AttributeError","msg":"'int' object has no attribute 'get'"}}
+{"in":{"fn":"global_flags","args":["\"s\""]},"out":{"err":"AttributeError","msg":"'str' object has no attribute 'get'"}}
+{"in":{"fn":"global_flags","args":["true"]},"out":{"err":"AttributeError","msg":"'bool' object has no attribute 'get'"}}
+{"in":{"fn":"global_flags","args":["1.5"]},"out":{"err":"AttributeError","msg":"'float' object has no attribute 'get'"}}
+{"in":{"fn":"global_flags","args":["{\"image\": null}"]},"out":{"image":true,"upscale":true,"augment":true,"vibe":true,"tags":true}}
+{"in":{"fn":"global_flags","args":["{\"augment\": false, \"upscale\": false, \"vibe\": false}"]},"out":{"image":true,"upscale":false,"augment":false,"vibe":false,"tags":true}}
+{"in":{"fn":"global_flags","args":[" "]},"out":{"image":true,"upscale":true,"augment":true,"vibe":true,"tags":true}}
+{"in":{"fn":"global_flags","args":["{\"image\": false"]},"out":{"image":true,"upscale":true,"augment":true,"vibe":true,"tags":true}}
+{"in":{"fn":"global_flags","args":["[]"]},"out":{"err":"AttributeError","msg":"'list' object has no attribute 'get'"}}
+{"in":{"fn":"global_flags","args":["{\"a\":1}"]},"out":{"image":true,"upscale":true,"augment":true,"vibe":true,"tags":true}}

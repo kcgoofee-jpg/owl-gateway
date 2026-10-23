@@ -1,0 +1,16 @@
+# Production snippet (JA4 only; add the JA4H lines only after the FoxIO-license decision).
+# Paste into the existing NovelAI relay site block; keep the existing log { format json } block.
+#
+#	ja3_ja4
+#	log_append ja4 {tls.ja4}
+#	reverse_proxy <existing upstream> {
+#		header_up X-JA4 {tls.ja4}        # always overwritten by Caddy; client-sent X-JA4 is discarded
+#		# existing header_up lines ...
+#	}
+#
+# Optional JA4H (FoxIO License 1.1, non-commercial only):
+#	{ order ja4h_header first }          # global options
+#	ja4h_header
+#	log_append ja4h {ja4h}
+#	header_up X-JA4H {ja4h}
+#	header_up -Ja4h                      # module also injects a raw Ja4h header; strip it

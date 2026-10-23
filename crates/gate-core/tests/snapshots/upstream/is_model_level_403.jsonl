@@ -1,0 +1,100 @@
+{"in":{"args":[""]},"out":false}
+{"in":{"args":[null]},"out":false}
+{"in":{"args":["model 'nai-glm-4-6' doesn't exist"]},"out":true}
+{"in":{"args":["model 'x' does not exist"]},"out":true}
+{"in":{"args":["model 'x' is only available via OpenAI-compatible API"]},"out":true}
+{"in":{"args":["model must be a valid enum"]},"out":true}
+{"in":{"args":["MODEL MUST BE A VALID ENUM"]},"out":true}
+{"in":{"args":["Doesn't Exist"]},"out":true}
+{"in":{"args":["DOES NOT EXIST"]},"out":true}
+{"in":{"args":["does not\nexist"]},"out":false}
+{"in":{"args":["blocked"]},"out":false}
+{"in":{"args":["{\"statusCode\":403,\"message\":\"blocked\"}"]},"out":false}
+{"in":{"args":["{\"statusCode\":403,\"message\":\"model 'nai-glm-4-6' doesn't exist\"}"]},"out":true}
+{"in":{"args":["IS ONLY AVAILABLE VIA"]},"out":true}
+{"in":{"args":["猫头鹰 doesn't exist"]},"out":true}
+{"in":{"args":["xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxdoes not exist"]},"out":true}
+{"in":{"args":["KKKKKKKKKK"]},"out":false}
+{"in":{"args":["ſ"]},"out":false}
+{"in":{"args":["K"]},"out":false}
+{"in":{"args":["must be"]},"out":false}
+{"in":{"args":["X"]},"out":false}
+{"in":{"args":["does"]},"out":false}
+{"in":{"args":["not must be"]},"out":false}
+{"in":{"args":["enum doesn't"]},"out":false}
+{"in":{"args":["exist"]},"out":false}
+{"in":{"args":["a valid"]},"out":false}
+{"in":{"args":["enum"]},"out":false}
+{"in":{"args":["via a valid"]},"out":false}
+{"in":{"args":["model"]},"out":false}
+{"in":{"args":["a valid not"]},"out":false}
+{"in":{"args":["  猫 does  "]},"out":false}
+{"in":{"args":["猫 doesn't"]},"out":false}
+{"in":{"args":["model exist"]},"out":false}
+{"in":{"args":["X exist via"]},"out":false}
+{"in":{"args":["doesn't exist not not available X"]},"out":true}
+{"in":{"args":["not not"]},"out":false}
+{"in":{"args":["  enum"]},"out":false}
+{"in":{"args":["via exist"]},"out":false}
+{"in":{"args":["exist doesn't exist"]},"out":true}
+{"in":{"args":["does via"]},"out":false}
+{"in":{"args":["is only via"]},"out":false}
+{"in":{"args":["  X"]},"out":false}
+{"in":{"args":["doesn't"]},"out":false}
+{"in":{"args":["X a valid"]},"out":false}
+{"in":{"args":["not"]},"out":false}
+{"in":{"args":["available"]},"out":false}
+{"in":{"args":["  via model"]},"out":false}
+{"in":{"args":["exist via"]},"out":false}
+{"in":{"args":["not is only"]},"out":false}
+{"in":{"args":["猫 exist enum model X  "]},"out":false}
+{"in":{"args":["猫 via not"]},"out":false}
+{"in":{"args":["not  "]},"out":false}
+{"in":{"args":["doesn't exist a valid available"]},"out":true}
+{"in":{"args":["must be X"]},"out":false}
+{"in":{"args":["exist not"]},"out":false}
+{"in":{"args":["does not exist"]},"out":true}
+{"in":{"args":["model 猫"]},"out":false}
+{"in":{"args":["is only"]},"out":false}
+{"in":{"args":["猫 must be"]},"out":false}
+{"in":{"args":["  doesn't"]},"out":false}
+{"in":{"args":["via"]},"out":false}
+{"in":{"args":["X exist"]},"out":false}
+{"in":{"args":["  does model"]},"out":false}
+{"in":{"args":["model X  "]},"out":false}
+{"in":{"args":["does exist"]},"out":false}
+{"in":{"args":["is only  "]},"out":false}
+{"in":{"args":["not X X 猫"]},"out":false}
+{"in":{"args":["  not exist"]},"out":false}
+{"in":{"args":["  not"]},"out":false}
+{"in":{"args":["does does  "]},"out":false}
+{"in":{"args":["enum enum"]},"out":false}
+{"in":{"args":["doesn't exist"]},"out":true}
+{"in":{"args":[" "]},"out":false}
+{"in":{"args":["not X exist"]},"out":false}
+{"in":{"args":["X via"]},"out":false}
+{"in":{"args":["via must be"]},"out":false}
+{"in":{"args":["猫"]},"out":false}
+{"in":{"args":["a valid via"]},"out":false}
+{"in":{"args":["enum not"]},"out":false}
+{"in":{"args":["via via  "]},"out":false}
+{"in":{"args":["  exist"]},"out":false}
+{"in":{"args":["model enum"]},"out":false}
+{"in":{"args":["enum model"]},"out":false}
+{"in":{"args":["X available"]},"out":false}
+{"in":{"args":["via is only"]},"out":false}
+{"in":{"args":["exist model"]},"out":false}
+{"in":{"args":["  a valid"]},"out":false}
+{"in":{"args":["model not"]},"out":false}
+{"in":{"args":["a valid exist enum X doesn't exist"]},"out":true}
+{"in":{"args":["X must be"]},"out":false}
+{"in":{"args":["X not via"]},"out":false}
+{"in":{"args":["model model"]},"out":false}
+{"in":{"args":["not does"]},"out":false}
+{"in":{"args":["model via"]},"out":false}
+{"in":{"args":["猫 is only"]},"out":false}
+{"in":{"args":["enum via"]},"out":false}
+{"in":{"args":["via   model"]},"out":false}
+{"in":{"args":["exist  "]},"out":false}
+{"in":{"args":["model  "]},"out":false}
+{"in":{"args":["is only available doesn't exist available doesn't"]},"out":true}

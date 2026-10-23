@@ -1,0 +1,32 @@
+{
+  "name": "owl-web",
+  "private": true,
+  "type": "module",
+  "packageManager": "pnpm@12.5.1",
+  "scripts": {
+    "dev": "vite",
+    "build": "tsc --noEmit && vite build",
+    "check": "biome check . && tsc --noEmit",
+    "fmt": "biome format --write .",
+    "test": "vitest run",
+    "e2e": "playwright test"
+  },
+  "dependencies": {
+    "@preact/signals": "2.11.3",
+    "lucide-preact": "1.49.0",
+    "motion": "13.5.1",
+    "preact": "11.0.1",
+    "preact-iso": "2.12.2"
+  },
+  "devDependencies": {
+    "@axe-core/playwright": "4.13.0",
+    "@babel/core": "8.0.7",
+    "@biomejs/biome": "2.5.15",
+    "@playwright/test": "1.64.0",
+    "@preact/preset-vite": "2.10.6",
+    "happy-dom": "21.0.1",
+    "typescript": "7.0.2",
+    "vite": "8.3.4",
+    "vitest": "5.0.4"
+  }
+}

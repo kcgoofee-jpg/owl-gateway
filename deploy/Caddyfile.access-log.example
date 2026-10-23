@@ -1,0 +1,39 @@
+# Caddy 访问日志片段（给 `nai-ops traffic` 用）：JSON、写文件、自动滚动，并且日志里不留 IP / 请求头 / Cookie。
+# 这只是示例，不会被任何脚本自动应用：由站长 / 运维手工把 `log { ... }` 整段放进站点块里（见 docs/OPERATIONS.md「流量」）。
+# 没有改动线上 Caddyfile（deploy/Caddyfile.production）。
+#
+# 应用前务必先校验，再重载（不重启容器）：
+#   docker exec caddy caddy validate --config /etc/caddy/Caddyfile
+#   docker exec caddy caddy reload   --config /etc/caddy/Caddyfile
+# 日志目录要挂进 caddy 容器（compose 里给 caddy 加一条卷，如 /var/log/caddy:/var/log/caddy）。
+#
+# 字段说明（Caddy 2 的 `log` 指令 + `filter` 编码器，官方文档 https://caddyserver.com/docs/caddyfile/directives/log ）：
+# - `output file ... { roll_size / roll_keep / roll_keep_for }`：按大小滚动，只留最近几份；滚动后的文件默认 gzip，
+#   `nai-ops traffic --log /var/log/caddy` 能直接读目录里的 .log 和 .log.gz。
+# - `format filter { wrap json  fields { <字段路径> <过滤器> } }`：字段路径用 `>` 分层。
+#   `delete` 会把整个字段从日志里删掉。这里删掉的是：客户端 IP / 端口、全部请求头（含 Authorization、Cookie）、
+#   响应头（含 Set-Cookie）、TLS 细节。
+# - 查询参数：Caddy 的 `query` 过滤器只能按名字删，没法一刀切；而 `request>uri` 要保留（要靠它分路径）。
+#   所以这里不改 uri——`nai-ops traffic` 读日志时自己在 `?` 处截断，输出里永远没有查询参数。
+#   如果还想让日志文件本身也不含查询参数，可以试下面被注释掉的 `regexp` 行
+#   （语法 `regexp <正则> <替换>`，没有在线上验证过，一定先 `caddy validate`）。
+
+	log {
+		output file /var/log/caddy/access.log {
+			roll_size 50MiB
+			roll_keep 10
+			roll_keep_for 720h
+		}
+		format filter {
+			wrap json
+			fields {
+				request>remote_ip delete
+				request>remote_port delete
+				request>client_ip delete
+				request>headers delete
+				request>tls delete
+				resp_headers delete
+				# request>uri regexp \?.* ""
+			}
+		}
+	}

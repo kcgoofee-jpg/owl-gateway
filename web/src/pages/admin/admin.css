@@ -1,0 +1,260 @@
+/* 后台外壳布局：桌面固定侧栏；窄屏顶栏 + 抽屉。字号与首页同一套阶梯。 */
+.admin {
+  display: grid;
+  grid-template-columns: 232px minmax(0, 1fr);
+  min-height: 100vh;
+}
+.admin-side {
+  position: sticky;
+  top: 0;
+  height: 100vh;
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-3);
+  padding: var(--sp-4) var(--sp-3);
+  border-right: 1px solid var(--border);
+  background: var(--surface);
+  overflow-y: auto;
+}
+.admin-brand {
+  font-weight: 700;
+  font-size: var(--fs-md);
+  padding: 0 var(--sp-2);
+}
+.admin-search {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+  padding: var(--sp-2) var(--sp-3);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--surface-2);
+  color: var(--muted);
+  font: var(--fs-sm) / 1.4 var(--font);
+  cursor: pointer;
+  text-align: left;
+}
+.admin-search kbd {
+  margin-left: auto;
+  font-size: var(--fs-xs);
+  color: var(--muted);
+}
+.admin-nav {
+  display: grid;
+  gap: 2px;
+}
+.admin-nav__group {
+  margin: var(--sp-3) var(--sp-2) var(--sp-1);
+  font-size: var(--fs-xs);
+  font-weight: 600;
+  color: var(--muted);
+}
+.admin-nav__item {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+  padding: var(--sp-2) var(--sp-3);
+  border-radius: var(--radius-sm);
+  color: var(--text-2);
+  font-size: var(--fs-sm);
+  font-weight: 550;
+}
+.admin-nav__item:hover {
+  background: var(--surface-2);
+  text-decoration: none;
+}
+.admin-nav__item.is-active {
+  background: var(--accent-soft);
+  color: var(--accent-text);
+}
+.admin-nav__badge {
+  margin-left: auto;
+  min-width: 20px;
+  padding: 0 6px;
+  border-radius: 999px;
+  background: var(--danger);
+  color: #fff;
+  font-size: var(--fs-xs);
+  line-height: 20px;
+  text-align: center;
+}
+.admin-side__foot {
+  margin-top: auto;
+  display: flex;
+  gap: var(--sp-1);
+}
+.admin-main {
+  min-width: 0;
+}
+.admin-top {
+  display: none;
+}
+.admin-content {
+  max-width: 1240px;
+  padding: var(--sp-6);
+  display: grid;
+  gap: var(--sp-4);
+}
+.admin-scrim {
+  display: none;
+}
+
+@media (max-width: 860px) {
+  .admin {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .admin-side {
+    position: fixed;
+    z-index: 60;
+    inset: 0 auto 0 0;
+    width: min(280px, 84vw);
+    transform: translateX(-102%);
+    transition: transform 0.2s ease;
+    box-shadow: var(--shadow-2);
+  }
+  .drawer-open .admin-side {
+    transform: none;
+  }
+  .drawer-open .admin-scrim {
+    display: block;
+    position: fixed;
+    inset: 0;
+    z-index: 55;
+    border: 0;
+    background: rgb(17 17 16 / 45%);
+  }
+  .admin-top {
+    position: sticky;
+    top: 0;
+    z-index: 40;
+    display: flex;
+    align-items: center;
+    gap: var(--sp-2);
+    padding: var(--sp-2) var(--sp-3);
+    border-bottom: 1px solid var(--border);
+    background: color-mix(in srgb, var(--surface) 92%, transparent);
+    backdrop-filter: blur(8px);
+  }
+  .admin-content {
+    padding: var(--sp-4);
+  }
+}
+
+/* 登录 */
+.admin-login {
+  min-height: 100vh;
+  display: grid;
+  place-items: center;
+  padding: var(--sp-4);
+}
+.admin-login__card {
+  width: min(400px, 100%);
+  display: grid;
+  gap: var(--sp-4);
+}
+.admin-login__title {
+  font-size: var(--fs-xl);
+}
+.admin-login__err {
+  color: var(--danger);
+  font-size: var(--fs-sm);
+}
+
+/* 命令面板 */
+.cmdk {
+  display: grid;
+  gap: var(--sp-3);
+}
+.cmdk__search {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+  color: var(--muted);
+}
+.cmdk__list {
+  display: grid;
+  gap: 2px;
+  max-height: 50vh;
+  overflow: auto;
+}
+.cmdk__item {
+  display: flex;
+  justify-content: space-between;
+  gap: var(--sp-3);
+  padding: var(--sp-2) var(--sp-3);
+  border: 0;
+  border-radius: var(--radius-sm);
+  background: none;
+  color: var(--text);
+  font: var(--fs-sm) / 1.4 var(--font);
+  text-align: left;
+  cursor: pointer;
+}
+.cmdk__item.is-sel {
+  background: var(--accent-soft);
+}
+.cmdk__empty {
+  padding: var(--sp-3);
+}
+
+/* 分区通用：页头 + 指标格 */
+.section-head {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-3);
+  flex-wrap: wrap;
+  margin-bottom: var(--sp-2); /* 页头和内容拉开：页头 + 8 + 页面间距 16 = 24 */
+}
+.section-head h1 {
+  font-size: var(--fs-xl);
+}
+.section-head p {
+  color: var(--muted);
+  font-size: var(--fs-sm);
+}
+.stats {
+  display: grid;
+  gap: var(--sp-4);
+  grid-template-columns: repeat(auto-fit, minmax(170px, 1fr));
+}
+.stat {
+  padding: var(--sp-5);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--surface);
+}
+.stat__label {
+  font-size: var(--fs-xs);
+  color: var(--muted);
+}
+.stat__value {
+  margin-top: 2px;
+  font-size: var(--fs-xl);
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+}
+.stat__hint {
+  font-size: var(--fs-xs);
+  color: var(--muted);
+}
+
+/* 列表冻结期间攒下的新数据：吸在列表上方，点一下放进来（sections/live.tsx） */
+.xa-fresh {
+  position: sticky;
+  top: var(--sp-3);
+  z-index: 5;
+  display: flex;
+  justify-content: center;
+  margin-bottom: var(--sp-2);
+  pointer-events: none;
+}
+.xa-fresh .btn {
+  pointer-events: auto;
+  box-shadow: var(--shadow-2);
+}
+/* 窄屏顶部有吸顶标题栏：提示条落在它下面 */
+@media (max-width: 860px) {
+  .xa-fresh {
+    top: calc(56px + var(--sp-2));
+  }
+}

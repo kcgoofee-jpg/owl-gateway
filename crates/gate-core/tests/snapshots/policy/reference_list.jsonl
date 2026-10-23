@@ -1,0 +1,10 @@
+{"in":{"args":[{"a":[1]},"a"]},"out":[1]}
+{"in":{"args":[{"a":[]},"a"]},"out":[]}
+{"in":{"args":[{"a":null},"a"]},"out":{"err":"ValueError","msg":"a 必须是数组"}}
+{"in":{"args":[{"a":"x"},"a"]},"out":{"err":"ValueError","msg":"a 必须是数组"}}
+{"in":{"args":[{"a":{}},"a"]},"out":{"err":"ValueError","msg":"a 必须是数组"}}
+{"in":{"args":[{"a":0},"a"]},"out":{"err":"ValueError","msg":"a 必须是数组"}}
+{"in":{"args":[{"a":false},"a"]},"out":{"err":"ValueError","msg":"a 必须是数组"}}
+{"in":{"args":[{"a":[1]},"b"]},"out":[]}
+{"in":{"args":[{},"x"]},"out":[]}
+{"in":{"args":[{"x":[1,2]},"x"]},"out":[1,2]}

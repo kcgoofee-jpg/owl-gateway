@@ -1,0 +1,32 @@
+[package]
+name = "gate-upstream"
+description = "NovelAI 上游客户端：wreq 模拟 Chrome 指纹、Token 池与逐账号调度。"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[dependencies]
+gate-core.workspace = true
+wreq.workspace = true
+wreq-util.workspace = true
+tokio.workspace = true
+bytes.workspace = true
+futures.workspace = true
+serde_json.workspace = true
+sha2.workspace = true
+hex.workspace = true
+thiserror.workspace = true
+tracing.workspace = true
+rand.workspace = true
+
+[dev-dependencies]
+tempfile = "3"
+gate-testkit = { path = "../gate-testkit" }
+# 假上游开 HTTP/2（明文 h2c）：测 HTTP/2 下的请求头顺序
+axum = { workspace = true, features = ["http2"] }
+rmpv.workspace = true
+
+[lints]
+workspace = true

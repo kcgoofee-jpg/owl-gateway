@@ -1,0 +1,567 @@
+/**
+ * 后台外壳：登录门、侧栏导航（10 个分区）、路由、⌘K 命令面板、全局刷新节拍。
+ *
+ * 分区组件放在 ./sections/<id>.tsx，默认导出一个无参组件；数据用 useAdmin(url) 取，
+ * 它跟着全局「刷新节拍」自动重取（SSE 推送事件时，或 SSE 不可用时页面可见每 15 秒一次）。
+ * 站长规定：后台不放刷新按钮。
+ */
+import { signal } from "@preact/signals";
+import {
+  Activity,
+  Gauge,
+  Images,
+  Inbox,
+  ListTree,
+  LogOut,
+  Menu as MenuIcon,
+  Moon,
+  Search,
+  Server,
+  SlidersHorizontal,
+  Sun,
+  Users,
+} from "lucide-preact";
+import type { ComponentChildren, ComponentType } from "preact";
+import { useEffect, useMemo, useRef, useState } from "preact/hooks";
+import { LocationProvider, lazy, Route, Router, useLocation } from "preact-iso";
+import { ApiError, getJSON, sendJSON } from "../../lib/api";
+import { effectiveTheme, themeChoice, toggleTheme } from "../../lib/theme";
+import { Button, cx, Dialog, Field, Skeleton, toast } from "../../ui";
+import "./admin.css";
+import { SitepaidBanner } from "./SitepaidHints";
+import { edits } from "./sections/live";
+import { memberLabel } from "./sections/members/logic";
+import type { Member } from "./sections/members/types";
+
+/* ---------------- 分区注册表 ---------------- */
+export type SectionId =
+  | "members"
+  | "audit"
+  | "logs"
+  | "inbox"
+  | "upstream"
+  | "onboarding"
+  | "limits"
+  | "system";
+
+type Section = {
+  id: SectionId;
+  label: string;
+  group: "" | "日常" | "监控" | "设置";
+  path: string;
+  icon: ComponentType<{ size?: number; "aria-hidden"?: boolean }>;
+  view: ComponentType;
+};
+
+export const SECTIONS: Section[] = [
+  {
+    id: "members",
+    label: "成员",
+    group: "日常",
+    path: "/admin/members",
+    icon: Users,
+    view: lazy(() => import("./sections/members")),
+  },
+  {
+    id: "audit",
+    label: "生成记录",
+    group: "日常",
+    path: "/admin/audit",
+    icon: Images,
+    view: lazy(() => import("./sections/audit")),
+  },
+  {
+    id: "logs",
+    label: "日志",
+    group: "日常",
+    path: "/admin/logs",
+    icon: ListTree,
+    view: lazy(() => import("./sections/logs")),
+  },
+  {
+    id: "inbox",
+    label: "来信",
+    group: "日常",
+    path: "/admin/inbox",
+    icon: Inbox,
+    view: lazy(() => import("./sections/inbox")),
+  },
+  {
+    id: "upstream",
+    label: "上游",
+    group: "监控",
+    path: "/admin/upstream",
+    icon: Activity,
+    view: lazy(() => import("./sections/upstream")),
+  },
+  {
+    id: "onboarding",
+    label: "领 Key 与功能",
+    group: "设置",
+    path: "/admin/onboarding",
+    icon: Server,
+    view: lazy(() => import("./sections/onboarding")),
+  },
+  {
+    id: "limits",
+    label: "额度与保护",
+    group: "设置",
+    path: "/admin/limits",
+    icon: SlidersHorizontal,
+    view: lazy(() => import("./sections/limits")),
+  },
+  {
+    id: "system",
+    label: "系统",
+    group: "设置",
+    path: "/admin/system",
+    icon: Gauge,
+    view: lazy(() => import("./sections/system")),
+  },
+];
+
+/* ---------------- 全局刷新节拍 ---------------- */
+/** 每次 +1 都会让所有 useAdmin 重新取数。由 SSE 事件或可见时 15 秒定时器驱动。 */
+export const tick = signal(0);
+/** 用户正在编辑表单 / 打开对话框时暂停自动刷新，避免把输入冲掉。 */
+export const busy = signal(0);
+/** 导航角标：分区 id → 数字。 */
+export const navBadges = signal<Partial<Record<SectionId, number | string>>>({});
+
+function startTicker(): () => void {
+  let es: EventSource | null = null;
+  let timer: ReturnType<typeof setInterval> | undefined;
+  // 暂停期间（编辑 / 对话框）错过的节拍：恢复时补一次，不用等下一条推送
+  let missed = false;
+  const bump = () => {
+    if (document.hidden || busy.value > 0) {
+      missed = true;
+      return;
+    }
+    missed = false;
+    tick.value++;
+  };
+  const stopBusyWatch = busy.subscribe((n) => {
+    if (n === 0 && missed && !document.hidden) bump();
+  });
+  const fallback = () => {
+    if (!timer) timer = setInterval(bump, 15_000);
+  };
+  try {
+    es = new EventSource("/admin/api/events");
+    es.onmessage = bump;
+    // 晚于 3 秒才连上：停掉退回的定时器，不要两边一起刷
+    es.onopen = () => {
+      clearInterval(timer);
+      timer = undefined;
+    };
+    es.onerror = () => {
+      if (es?.readyState === EventSource.CLOSED) fallback();
+    };
+    // 旧版后端没有 SSE：3 秒内没连上就退回定时刷新
+    setTimeout(() => {
+      if (!es || es.readyState !== EventSource.OPEN) fallback();
+    }, 3000);
+  } catch {
+    fallback();
+  }
+  const onVis = () => !document.hidden && bump();
+  document.addEventListener("visibilitychange", onVis);
+  return () => {
+    es?.close();
+    clearInterval(timer);
+    stopBusyWatch();
+    document.removeEventListener("visibilitychange", onVis);
+  };
+}
+
+/** 同一拍里同一个地址只取一次（总览、角标、日志页常常同时要 /errors、/status、/jobs）。 */
+const inflight = new Map<string, { t: number; p: Promise<unknown> }>();
+export function getShared<T>(url: string, t = tick.value): Promise<T> {
+  const hit = inflight.get(url);
+  if (hit && hit.t === t) return hit.p as Promise<T>;
+  const p = getJSON<T>(url);
+  inflight.set(url, { t, p });
+  // 失败的不留：下一次（同一拍里别的组件）重新取
+  p.catch(() => inflight.get(url)?.p === p && inflight.delete(url));
+  return p;
+}
+
+/** 取后台数据：url 为 null 时不取。返回 {data, error, loading}；之后跟着全局刷新节拍自动重取。 */
+export function useAdmin<T>(url: string | null): {
+  data: T | null;
+  error: string | null;
+  loading: boolean;
+} {
+  const [state, setState] = useState<{ data: T | null; error: string | null; loading: boolean }>({
+    data: null,
+    error: null,
+    loading: !!url,
+  });
+  const t = tick.value;
+  useEffect(() => {
+    if (!url) return;
+    let alive = true;
+    getShared<T>(url, t)
+      .then((data) => alive && setState({ data, error: null, loading: false }))
+      .catch((e: unknown) => {
+        if (!alive) return;
+        if (e instanceof ApiError && e.status === 401) authed.value = false;
+        setState((s) => ({ ...s, error: e instanceof Error ? e.message : String(e), loading: false }));
+      });
+    return () => {
+      alive = false;
+    };
+  }, [url, t]);
+  return state;
+}
+
+/** 后台写操作：成功 toast，失败 toast 错误；返回结果或 null。成功后触发一次全局刷新。 */
+export async function act<T = unknown>(
+  method: "POST" | "PUT" | "PATCH" | "DELETE",
+  url: string,
+  body?: unknown,
+  okText = "已保存",
+): Promise<T | null> {
+  try {
+    const r = await sendJSON<T>(method, url, body);
+    if (okText) toast(okText);
+    edits.value++;
+    tick.value++;
+    return r;
+  } catch (e) {
+    if (e instanceof ApiError && e.status === 401) authed.value = false;
+    toast(e instanceof Error ? e.message : String(e), { error: true });
+    return null;
+  }
+}
+
+/* ---------------- 侧栏角标（任何分区都在提醒，直到问题处理掉） ---------------- */
+function setNav(id: SectionId, value: number | string | null): void {
+  const next = { ...navBadges.value };
+  if (value === null || value === 0 || value === "") delete next[id];
+  else next[id] = value;
+  navBadges.value = next;
+}
+
+/** 侧栏角标的唯一来源：每次刷新节拍都看一次未处理 Bug。 */
+function BadgePoller() {
+  const t = tick.value;
+  useEffect(() => {
+    let alive = true;
+    const quiet = <T,>(url: string) => getShared<T>(url, t).catch(() => null);
+    void quiet<{ open?: number }>("/admin/api/errors").then((bugs) => {
+      if (!alive) return;
+      if (bugs) setNav("logs", bugs.open ?? 0);
+    });
+    return () => {
+      alive = false;
+    };
+  }, [t]);
+  return null;
+}
+
+/* ---------------- 登录 ---------------- */
+const authed = signal<boolean | null>(null);
+
+function Login() {
+  const [pw, setPw] = useState("");
+  const [err, setErr] = useState("");
+  const [pending, setPending] = useState(false);
+  return (
+    <main class="admin-login">
+      <form
+        class="card admin-login__card"
+        onSubmit={async (e) => {
+          e.preventDefault();
+          setPending(true);
+          setErr("");
+          try {
+            await sendJSON("POST", "/admin/api/login", { password: pw });
+            authed.value = true;
+          } catch (x) {
+            setErr(x instanceof Error ? x.message : String(x));
+          } finally {
+            setPending(false);
+          }
+        }}
+      >
+        <h1 class="admin-login__title">
+          <span aria-hidden="true">🦉</span> 猫头鹰公益站 · 后台
+        </h1>
+        {/* 隐藏的用户名字段：让密码管理器能把密码和本站关联保存 */}
+        <input type="text" name="username" autoComplete="username" value="admin" hidden readOnly />
+        <Field label="后台密码">
+          <input
+            class="input"
+            type="password"
+            name="password"
+            autoComplete="current-password"
+            required
+            value={pw}
+            onInput={(e) => setPw((e.target as HTMLInputElement).value)}
+          />
+        </Field>
+        {err && (
+          <p class="admin-login__err" role="alert">
+            {err}
+          </p>
+        )}
+        <Button type="submit" variant="primary" size="lg" disabled={pending || !pw}>
+          {pending ? "登录中…" : "登录"}
+        </Button>
+      </form>
+    </main>
+  );
+}
+
+/* ---------------- 命令面板（⌘K / Ctrl+K） ---------------- */
+function CommandPalette(props: { open: boolean; onClose: () => void }) {
+  const { route } = useLocation();
+  const [q, setQ] = useState("");
+  const [members, setMembers] = useState<Member[]>([]);
+  const [sel, setSel] = useState(0);
+  const input = useRef<HTMLInputElement>(null);
+  useEffect(() => {
+    if (!props.open) return;
+    setQ("");
+    setSel(0);
+    setTimeout(() => input.current?.focus(), 0);
+    getShared<{ members: Member[] }>("/admin/api/members")
+      // 以成员为主：停用的 Key 不列出（谁用过、什么时候停用的，操作日志里都有）
+      .then((r) => setMembers(r.members.filter((m) => m.enabled)))
+      .catch(() => setMembers([]));
+  }, [props.open]);
+  const items = useMemo(() => {
+    const needle = q.trim().toLowerCase();
+    const secs = SECTIONS.filter((s) => !needle || s.label.toLowerCase().includes(needle)).map((s) => ({
+      key: `s:${s.id}`,
+      label: s.label,
+      hint: "分区",
+      go: () => route(s.path),
+    }));
+    const mem = needle
+      ? members
+          .filter((m) =>
+            `${m.name} ${m.discord?.username ?? ""} ${m.discord?.display_name ?? ""} ${m.discord_id ?? ""} #${m.id}`
+              .toLowerCase()
+              .includes(needle),
+          )
+          .slice(0, 8)
+          .map((m) => ({
+            key: `m:${m.id}`,
+            label: memberLabel(m),
+            hint: `成员 #${m.id}`,
+            go: () => route(`/admin/members?focus=${m.id}`),
+          }))
+      : [];
+    return [...secs, ...mem];
+  }, [q, members, route]);
+  const run = (i: number) => {
+    items[i]?.go();
+    props.onClose();
+  };
+  return (
+    <Dialog open={props.open} onClose={props.onClose} title="跳转">
+      <div class="cmdk">
+        <div class="cmdk__search">
+          <Search size={16} aria-hidden="true" />
+          <input
+            ref={input}
+            class="input"
+            placeholder="分区名、成员名、Discord ID、#Key 编号"
+            aria-label="搜索"
+            value={q}
+            onInput={(e) => {
+              setQ((e.target as HTMLInputElement).value);
+              setSel(0);
+            }}
+            onKeyDown={(e) => {
+              if (e.key === "ArrowDown") {
+                e.preventDefault();
+                setSel((s) => Math.min(items.length - 1, s + 1));
+              } else if (e.key === "ArrowUp") {
+                e.preventDefault();
+                setSel((s) => Math.max(0, s - 1));
+              } else if (e.key === "Enter") {
+                e.preventDefault();
+                run(sel);
+              }
+            }}
+          />
+        </div>
+        <div class="cmdk__list" role="listbox" aria-label="结果">
+          {items.map((it, i) => (
+            <button
+              type="button"
+              key={it.key}
+              role="option"
+              aria-selected={i === sel}
+              class={cx("cmdk__item", i === sel && "is-sel")}
+              onMouseEnter={() => setSel(i)}
+              onClick={() => run(i)}
+            >
+              <span>{it.label}</span>
+              <span class="muted small">{it.hint}</span>
+            </button>
+          ))}
+          {!items.length && <p class="muted small cmdk__empty">没有匹配的结果</p>}
+        </div>
+      </div>
+    </Dialog>
+  );
+}
+
+/* ---------------- 外壳 ---------------- */
+const drawerOpen = signal(false);
+
+function Nav() {
+  const { path } = useLocation();
+  const active = (s: Section) =>
+    path.startsWith(s.path) || (s.id === "members" && (path === "/admin" || path === "/admin/"));
+  let lastGroup = "";
+  return (
+    <nav class="admin-nav" aria-label="后台导航">
+      {SECTIONS.map((s) => {
+        const header = s.group && s.group !== lastGroup ? s.group : "";
+        lastGroup = s.group;
+        const badge = navBadges.value[s.id];
+        const Icon = s.icon;
+        return (
+          <div key={s.id}>
+            {header && <div class="admin-nav__group">{header}</div>}
+            <a
+              href={s.path}
+              class={cx("admin-nav__item", active(s) && "is-active")}
+              aria-current={active(s) ? "page" : undefined}
+              onClick={() => {
+                drawerOpen.value = false;
+              }}
+            >
+              <Icon size={17} aria-hidden={true} />
+              <span>{s.label}</span>
+              {badge != null && badge !== 0 && <span class="admin-nav__badge">{badge}</span>}
+            </a>
+          </div>
+        );
+      })}
+    </nav>
+  );
+}
+
+function Shell(props: { children: ComponentChildren }) {
+  const [palette, setPalette] = useState(false);
+  useEffect(() => startTicker(), []);
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === "k") {
+        e.preventDefault();
+        setPalette(true);
+      }
+    };
+    addEventListener("keydown", onKey);
+    return () => removeEventListener("keydown", onKey);
+  }, []);
+  const dark = themeChoice.value ? themeChoice.value === "dark" : effectiveTheme() === "dark";
+  const ThemeIcon = dark ? Sun : Moon;
+  return (
+    <div class={cx("admin", drawerOpen.value && "drawer-open")}>
+      <aside class="admin-side">
+        <div class="admin-brand">
+          <span aria-hidden="true">🦉</span> 猫头鹰公益站
+        </div>
+        <button type="button" class="admin-search" onClick={() => setPalette(true)}>
+          <Search size={15} aria-hidden="true" />
+          <span>跳转…</span>
+          <kbd>⌘K</kbd>
+        </button>
+        <Nav />
+        <div class="admin-side__foot">
+          <Button variant="ghost" onClick={toggleTheme}>
+            <ThemeIcon size={16} aria-hidden="true" />
+            {dark ? "浅色" : "深色"}
+          </Button>
+          <Button
+            variant="ghost"
+            onClick={async () => {
+              await sendJSON("POST", "/admin/api/logout").catch(() => null);
+              authed.value = false;
+            }}
+          >
+            <LogOut size={16} aria-hidden="true" />
+            退出
+          </Button>
+        </div>
+      </aside>
+      <button
+        type="button"
+        class="admin-scrim"
+        aria-label="关闭菜单"
+        tabIndex={-1}
+        onClick={() => {
+          drawerOpen.value = false;
+        }}
+      />
+      <div class="admin-main">
+        <header class="admin-top">
+          <Button
+            variant="ghost"
+            icon
+            aria-label="打开菜单"
+            onClick={() => {
+              drawerOpen.value = true;
+            }}
+          >
+            <MenuIcon size={18} aria-hidden="true" />
+          </Button>
+          <span class="admin-brand">🦉 猫头鹰公益站</span>
+          <span class="spacer" />
+          <Button variant="ghost" icon aria-label="跳转" onClick={() => setPalette(true)}>
+            <Search size={18} aria-hidden="true" />
+          </Button>
+        </header>
+        <main class="admin-content">
+          <SitepaidBanner />
+          {props.children}
+        </main>
+      </div>
+      <CommandPalette open={palette} onClose={() => setPalette(false)} />
+      <BadgePoller />
+    </div>
+  );
+}
+
+export function Admin() {
+  useEffect(() => {
+    getJSON("/admin/api/me")
+      .then(() => {
+        authed.value = true;
+      })
+      .catch(() => {
+        authed.value = false;
+      });
+  }, []);
+  if (authed.value === null) {
+    return (
+      <main class="admin-login">
+        <Skeleton w="240px" h="24px" />
+      </main>
+    );
+  }
+  if (!authed.value) return <Login />;
+  return (
+    <LocationProvider>
+      <Shell>
+        <Router>
+          {SECTIONS.flatMap((s) => [
+            // preact-iso 的 `/*` 至少要多一段路径：分区根路径单独注册一条
+            <Route key={s.id} path={s.path} component={s.view} />,
+            <Route key={`${s.id}-sub`} path={`${s.path}/*`} component={s.view} />,
+          ])}
+          {/* 总览页 10-23 删除：/admin 直接是成员页 */}
+          <Route default component={SECTIONS[0]?.view as ComponentType} />
+        </Router>
+      </Shell>
+    </LocationProvider>
+  );
+}

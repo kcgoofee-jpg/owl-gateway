@@ -1,0 +1,95 @@
+{"in":{"spec":{"ref":"member_sweep"},"args":[true]},"out":"1"}
+{"in":{"spec":{"ref":"member_sweep"},"args":[""]},"out":"0"}
+{"in":{"spec":{"ref":"member_sweep"},"args":[null]},"out":"0"}
+{"in":{"spec":{"ref":"member_sweep"},"args":[[]]},"out":"0"}
+{"in":{"spec":{"ref":"member_sweep"},"args":[{}]},"out":"0"}
+{"in":{"spec":{"ref":"issue_hourly_cap"},"args":[500]},"out":"500"}
+{"in":{"spec":{"ref":"issue_hourly_cap"},"args":[""]},"out":{"err":"ValueError","msg":"issue_hourly_cap 必须是数字"}}
+{"in":{"spec":{"ref":"issue_hourly_cap"},"args":[[]]},"out":{"err":"ValueError","msg":"issue_hourly_cap 必须是数字"}}
+{"in":{"spec":{"ref":"issue_hourly_cap"},"args":[{}]},"out":{"err":"ValueError","msg":"issue_hourly_cap 必须是数字"}}
+{"in":{"spec":{"ref":"issue_hourly_cap"},"args":[["猫","😀"]]},"out":{"err":"ValueError","msg":"issue_hourly_cap 必须是数字"}}
+{"in":{"spec":{"ref":"register_open"},"args":[500]},"out":"1"}
+{"in":{"spec":{"ref":"register_open"},"args":[100000]},"out":"1"}
+{"in":{"spec":{"ref":"global_daily_v5"},"args":[0.0]},"out":"0"}
+{"in":{"spec":{"ref":"global_daily_v5"},"args":[1.5]},"out":"1"}
+{"in":{"spec":{"ref":"global_daily_v5"},"args":[1e+22]},"out":"100000"}
+{"in":{"spec":{"ref":"global_daily_v5"},"args":[""]},"out":{"err":"ValueError","msg":"global_daily_v5 必须是数字"}}
+{"in":{"spec":{"ref":"global_daily_v5"},"args":[" "]},"out":{"err":"ValueError","msg":"global_daily_v5 必须是数字"}}
+{"in":{"spec":{"ref":"global_daily_v5"},"args":["0"]},"out":"0"}
+{"in":{"spec":{"ref":"global_daily_v5"},"args":["1"]},"out":"1"}
+{"in":{"spec":{"ref":"global_daily_v5"},"args":["猫"]},"out":{"err":"ValueError","msg":"global_daily_v5 必须是数字"}}
+{"in":{"spec":{"ref":"global_daily_v5"},"args":[null]},"out":{"err":"ValueError","msg":"global_daily_v5 必须是数字"}}
+{"in":{"spec":{"ref":"global_daily_v5"},"args":[[]]},"out":{"err":"ValueError","msg":"global_daily_v5 必须是数字"}}
+{"in":{"spec":{"ref":"global_daily_v5"},"args":[{}]},"out":{"err":"ValueError","msg":"global_daily_v5 必须是数字"}}
+{"in":{"spec":{"ref":"global_daily_anlas"},"args":[100000]},"out":"100000"}
+{"in":{"spec":{"ref":"global_daily_anlas"},"args":[-0.5]},"out":"0"}
+{"in":{"spec":{"ref":"global_monthly_anlas"},"args":[""]},"out":{"err":"ValueError","msg":"global_monthly_anlas 必须是数字"}}
+{"in":{"spec":{"ref":"global_monthly_anlas"},"args":[" "]},"out":{"err":"ValueError","msg":"global_monthly_anlas 必须是数字"}}
+{"in":{"spec":{"ref":"global_monthly_anlas"},"args":["1"]},"out":"1.0"}
+{"in":{"spec":{"ref":"global_monthly_anlas"},"args":[[]]},"out":{"err":"ValueError","msg":"global_monthly_anlas 必须是数字"}}
+{"in":{"spec":{"ref":"global_monthly_anlas"},"args":[{}]},"out":{"err":"ValueError","msg":"global_monthly_anlas 必须是数字"}}
+{"in":{"spec":{"ref":"algo_notice"},"args":[false]},"out":"False"}
+{"in":{"spec":{"ref":"algo_notice"},"args":[0]},"out":"0"}
+{"in":{"spec":{"ref":"algo_notice"},"args":[1]},"out":"1"}
+{"in":{"spec":{"ref":"algo_notice"},"args":[-1]},"out":"-1"}
+{"in":{"spec":{"ref":"algo_notice"},"args":[50]},"out":"50"}
+{"in":{"spec":{"ref":"algo_notice"},"args":[100000]},"out":"100000"}
+{"in":{"spec":{"ref":"algo_notice"},"args":[-0.5]},"out":"-0.5"}
+{"in":{"spec":{"ref":"algo_notice"},"args":[""]},"out":""}
+{"in":{"spec":{"ref":"algo_notice"},"args":[null]},"out":"None"}
+{"in":{"spec":{"ref":"algo_notice"},"args":[[]]},"out":"[]"}
+{"in":{"spec":{"ref":"algo_notice"},"args":[[1,"a"]]},"out":"[1, 'a']"}
+{"in":{"spec":{"ref":"algo_notice"},"args":[{}]},"out":"{}"}
+{"in":{"spec":{"ref":"algo_notice"},"args":[{"k":"v"}]},"out":"{'k': 'v'}"}
+{"in":{"spec":{"ref":"algo_notice"},"args":[["a\bb\f\u001f","~","a~b"," ","'"]]},"out":"['a\\x08b\\x0c\\x1f\\x7f', '~', 'a~b', ' ', \"'\"]"}
+{"in":{"spec":{"ref":"algo_notice"},"args":[["a\nb\\c"]]},"out":"['a\\nb\\\\c']"}
+{"in":{"spec":{"ref":"algo_notice"},"args":[["猫","😀"]]},"out":"['猫', '😀']"}
+{"in":{"spec":{"ref":"algo_notice"},"args":[[1.5,2.0,1e+22,1e-7]]},"out":"[1.5, 2.0, 1e+22, 1e-07]"}
+{"in":{"spec":{"ref":"audit_image_cap_mb"},"args":[""]},"out":{"err":"ValueError","msg":"audit_image_cap_mb 必须是数字"}}
+{"in":{"spec":{"ref":"audit_image_cap_mb"},"args":[[]]},"out":{"err":"ValueError","msg":"audit_image_cap_mb 必须是数字"}}
+{"in":{"spec":{"ref":"audit_image_cap_mb"},"args":[{}]},"out":{"err":"ValueError","msg":"audit_image_cap_mb 必须是数字"}}
+{"in":{"spec":{"ref":"audit_image_cap_mb"},"args":[[1.5,2.0,1e+22,1e-7]]},"out":{"err":"ValueError","msg":"audit_image_cap_mb 必须是数字"}}
+{"in":{"spec":{"ref":"audit_image_keep_hours"},"args":[0]},"out":"0"}
+{"in":{"spec":{"ref":"audit_image_keep_hours"},"args":[1]},"out":"1"}
+{"in":{"spec":{"inline":{"key":"x_choice","kind":"choice","default":"a","owner":"t","doc":"d","lo":null,"hi":null,"choices":["a","B","c d"]}},"args":[0]},"out":{"err":"ValueError","msg":"x_choice 只能是 a / B / c d"}}
+{"in":{"spec":{"inline":{"key":"x_choice","kind":"choice","default":"a","owner":"t","doc":"d","lo":null,"hi":null,"choices":["a","B","c d"]}},"args":[1]},"out":{"err":"ValueError","msg":"x_choice 只能是 a / B / c d"}}
+{"in":{"spec":{"inline":{"key":"x_choice","kind":"choice","default":"a","owner":"t","doc":"d","lo":null,"hi":null,"choices":["a","B","c d"]}},"args":[2]},"out":{"err":"ValueError","msg":"x_choice 只能是 a / B / c d"}}
+{"in":{"spec":{"inline":{"key":"x_choice","kind":"choice","default":"a","owner":"t","doc":"d","lo":null,"hi":null,"choices":["a","B","c d"]}},"args":[""]},"out":{"err":"ValueError","msg":"x_choice 只能是 a / B / c d"}}
+{"in":{"spec":{"inline":{"key":"x_choice","kind":"choice","default":"a","owner":"t","doc":"d","lo":null,"hi":null,"choices":["a","B","c d"]}},"args":["a"]},"out":"a"}
+{"in":{"spec":{"inline":{"key":"x_int_free","kind":"int","default":5,"owner":"t","doc":"d","lo":null,"hi":null,"choices":[]}},"args":[0]},"out":"0"}
+{"in":{"spec":{"inline":{"key":"x_int_free","kind":"int","default":5,"owner":"t","doc":"d","lo":null,"hi":null,"choices":[]}},"args":[""]},"out":{"err":"ValueError","msg":"x_int_free 必须是数字"}}
+{"in":{"spec":{"inline":{"key":"x_int_free","kind":"int","default":5,"owner":"t","doc":"d","lo":null,"hi":null,"choices":[]}},"args":[" "]},"out":{"err":"ValueError","msg":"x_int_free 必须是数字"}}
+{"in":{"spec":{"inline":{"key":"x_int_free","kind":"int","default":5,"owner":"t","doc":"d","lo":null,"hi":null,"choices":[]}},"args":["0"]},"out":"0"}
+{"in":{"spec":{"inline":{"key":"x_int_free","kind":"int","default":5,"owner":"t","doc":"d","lo":null,"hi":null,"choices":[]}},"args":[[]]},"out":{"err":"ValueError","msg":"x_int_free 必须是数字"}}
+{"in":{"spec":{"inline":{"key":"x_int_free","kind":"int","default":5,"owner":"t","doc":"d","lo":null,"hi":null,"choices":[]}},"args":[{}]},"out":{"err":"ValueError","msg":"x_int_free 必须是数字"}}
+{"in":{"spec":{"inline":{"key":"x_int_lo","kind":"int","default":5,"owner":"t","doc":"d","lo":0,"hi":null,"choices":[]}},"args":[0]},"out":"0"}
+{"in":{"spec":{"inline":{"key":"x_int_lo","kind":"int","default":5,"owner":"t","doc":"d","lo":0,"hi":null,"choices":[]}},"args":[1]},"out":"1"}
+{"in":{"spec":{"inline":{"key":"x_int_lo","kind":"int","default":5,"owner":"t","doc":"d","lo":0,"hi":null,"choices":[]}},"args":[""]},"out":{"err":"ValueError","msg":"x_int_lo 必须是数字"}}
+{"in":{"spec":{"inline":{"key":"x_int_lo","kind":"int","default":5,"owner":"t","doc":"d","lo":0,"hi":null,"choices":[]}},"args":[" "]},"out":{"err":"ValueError","msg":"x_int_lo 必须是数字"}}
+{"in":{"spec":{"inline":{"key":"x_int_lo","kind":"int","default":5,"owner":"t","doc":"d","lo":0,"hi":null,"choices":[]}},"args":["0"]},"out":"0"}
+{"in":{"spec":{"inline":{"key":"x_int_lo","kind":"int","default":5,"owner":"t","doc":"d","lo":0,"hi":null,"choices":[]}},"args":["1"]},"out":"1"}
+{"in":{"spec":{"inline":{"key":"x_int_lo","kind":"int","default":5,"owner":"t","doc":"d","lo":0,"hi":null,"choices":[]}},"args":[[]]},"out":{"err":"ValueError","msg":"x_int_lo 必须是数字"}}
+{"in":{"spec":{"inline":{"key":"x_int_lo","kind":"int","default":5,"owner":"t","doc":"d","lo":0,"hi":null,"choices":[]}},"args":[{}]},"out":{"err":"ValueError","msg":"x_int_lo 必须是数字"}}
+{"in":{"spec":{"inline":{"key":"x_int_hi","kind":"int","default":5,"owner":"t","doc":"d","lo":null,"hi":10,"choices":[]}},"args":[0]},"out":"0"}
+{"in":{"spec":{"inline":{"key":"x_int_hi","kind":"int","default":5,"owner":"t","doc":"d","lo":null,"hi":10,"choices":[]}},"args":[50]},"out":"10"}
+{"in":{"spec":{"inline":{"key":"x_int_hi","kind":"int","default":5,"owner":"t","doc":"d","lo":null,"hi":10,"choices":[]}},"args":[""]},"out":{"err":"ValueError","msg":"x_int_hi 必须是数字"}}
+{"in":{"spec":{"inline":{"key":"x_int_hi","kind":"int","default":5,"owner":"t","doc":"d","lo":null,"hi":10,"choices":[]}},"args":[" "]},"out":{"err":"ValueError","msg":"x_int_hi 必须是数字"}}
+{"in":{"spec":{"inline":{"key":"x_int_hi","kind":"int","default":5,"owner":"t","doc":"d","lo":null,"hi":10,"choices":[]}},"args":["0"]},"out":"0"}
+{"in":{"spec":{"inline":{"key":"x_int_hi","kind":"int","default":5,"owner":"t","doc":"d","lo":null,"hi":10,"choices":[]}},"args":["12.5"]},"out":"10"}
+{"in":{"spec":{"inline":{"key":"x_int_hi","kind":"int","default":5,"owner":"t","doc":"d","lo":null,"hi":10,"choices":[]}},"args":[[]]},"out":{"err":"ValueError","msg":"x_int_hi 必须是数字"}}
+{"in":{"spec":{"inline":{"key":"x_int_hi","kind":"int","default":5,"owner":"t","doc":"d","lo":null,"hi":10,"choices":[]}},"args":[{}]},"out":{"err":"ValueError","msg":"x_int_hi 必须是数字"}}
+{"in":{"spec":{"inline":{"key":"x_float_neg","kind":"float","default":1.5,"owner":"t","doc":"d","lo":-10,"hi":10,"choices":[]}},"args":[-1]},"out":"-1.0"}
+{"in":{"spec":{"inline":{"key":"x_float_neg","kind":"float","default":1.5,"owner":"t","doc":"d","lo":-10,"hi":10,"choices":[]}},"args":[""]},"out":{"err":"ValueError","msg":"x_float_neg 必须是数字"}}
+{"in":{"spec":{"inline":{"key":"x_float_neg","kind":"float","default":1.5,"owner":"t","doc":"d","lo":-10,"hi":10,"choices":[]}},"args":[" "]},"out":{"err":"ValueError","msg":"x_float_neg 必须是数字"}}
+{"in":{"spec":{"inline":{"key":"x_float_neg","kind":"float","default":1.5,"owner":"t","doc":"d","lo":-10,"hi":10,"choices":[]}},"args":["12.5"]},"out":"10"}
+{"in":{"spec":{"inline":{"key":"x_float_neg","kind":"float","default":1.5,"owner":"t","doc":"d","lo":-10,"hi":10,"choices":[]}},"args":[[]]},"out":{"err":"ValueError","msg":"x_float_neg 必须是数字"}}
+{"in":{"spec":{"inline":{"key":"x_float_neg","kind":"float","default":1.5,"owner":"t","doc":"d","lo":-10,"hi":10,"choices":[]}},"args":[{}]},"out":{"err":"ValueError","msg":"x_float_neg 必须是数字"}}
+{"in":{"spec":{"inline":{"key":"x_float_free","kind":"float","default":0.0,"owner":"t","doc":"d","lo":null,"hi":null,"choices":[]}},"args":[1e+22]},"out":"1e+22"}
+{"in":{"spec":{"inline":{"key":"x_float_free","kind":"float","default":0.0,"owner":"t","doc":"d","lo":null,"hi":null,"choices":[]}},"args":[""]},"out":{"err":"ValueError","msg":"x_float_free 必须是数字"}}
+{"in":{"spec":{"inline":{"key":"x_float_free","kind":"float","default":0.0,"owner":"t","doc":"d","lo":null,"hi":null,"choices":[]}},"args":[" "]},"out":{"err":"ValueError","msg":"x_float_free 必须是数字"}}
+{"in":{"spec":{"inline":{"key":"x_float_free","kind":"float","default":0.0,"owner":"t","doc":"d","lo":null,"hi":null,"choices":[]}},"args":["0"]},"out":"0.0"}
+{"in":{"spec":{"inline":{"key":"x_float_free","kind":"float","default":0.0,"owner":"t","doc":"d","lo":null,"hi":null,"choices":[]}},"args":[[]]},"out":{"err":"ValueError","msg":"x_float_free 必须是数字"}}
+{"in":{"spec":{"inline":{"key":"x_float_free","kind":"float","default":0.0,"owner":"t","doc":"d","lo":null,"hi":null,"choices":[]}},"args":[{}]},"out":{"err":"ValueError","msg":"x_float_free 必须是数字"}}
+{"in":{"spec":{"inline":{"key":"x_str","kind":"str","default":"dflt","owner":"t","doc":"d","lo":null,"hi":null,"choices":[]}},"args":[""]},"out":""}
+{"in":{"spec":{"inline":{"key":"x_str","kind":"str","default":"dflt","owner":"t","doc":"d","lo":null,"hi":null,"choices":[]}},"args":[{"k":[1,null,true,"it's","say \"hi\""]}]},"out":"{'k': [1, None, True, \"it's\", 'say \"hi\"']}"}
+{"in":{"spec":{"inline":{"key":"x_flag","kind":"flag","default":false,"owner":"t","doc":"d","lo":null,"hi":null,"choices":[]}},"args":[1]},"out":"1"}

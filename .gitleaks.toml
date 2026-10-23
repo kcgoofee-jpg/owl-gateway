@@ -1,0 +1,13 @@
+# gitleaks：默认规则 + 放行合成测试数据。
+# 测试 / golden 夹具里的 Key、Token 都是合成的（nai-test-…、pst-synthetic-…），
+# 这些目录另由 tools/ci/check-fixtures.sh 检查真实 Discord ID、公网 IP 和真实上游 Token。
+[extend]
+useDefault = true
+
+[allowlist]
+description = "合成测试数据"
+paths = [
+  '''crates/[^/]+/tests/''',
+  # 误报指纹清单本身（只有提交号、文件名、规则名）
+  '''^\.gitleaksignore$''',
+]

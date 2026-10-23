@@ -1,0 +1,72 @@
+# 猫头鹰公益站 3.0（Rust）：一个镜像两个进程（网关 + 奶妹）。放在服务器 /opt/owl/compose.yml，项目名 owl。
+#
+# 使用 /opt/service-tools/.env（配置）、/opt/service-tools/data（库、secret_key）、Caddy 直连的固定地址 172.30.0.10（service-tools_edge 网络）。
+#
+# 镜像不在服务器上编译（2 核）：CI 构建的 owl-gate 镜像以 tar 附件下载后 docker load，
+# 打成 owl-gate:current；上一版留作 owl-gate:previous。
+
+name: owl
+
+x-env: &env
+  env_file: /opt/service-tools/.env
+  restart: unless-stopped
+  # journald 而不是 json-file：日志文件不跟着容器走，部署重建容器后历史还在
+  # （journalctl CONTAINER_NAME=owl-gate；docker logs 照样能读当前容器）。总量受 journald 的 300M 上限约束。
+  logging:
+    driver: journald
+    options: {tag: "{{.Name}}"}
+
+x-gate: &gate
+  image: owl-gate:current
+  # 部署 / 重启时给正在生成的图留足时间收尾并记账（网关内部最多等 110 秒）
+  stop_grace_period: 120s
+  environment:
+    - DATA_DIR=/app/data
+    - TZ=Asia/Shanghai
+    # 只信任本机和 Docker 网桥上的 Caddy 带来的 X-Forwarded-For
+    - FORWARDED_ALLOW_IPS=127.0.0.1,172.30.0.1
+  volumes:
+    - /opt/service-tools/data:/app/data
+  mem_limit: 768m
+
+services:
+  gate:
+    <<: [*env, *gate]
+    container_name: owl-gate
+    ports:
+      - "127.0.0.1:3003:8000"
+    networks:
+      edge:
+        ipv4_address: 172.30.0.10
+      internal:
+        aliases: [nai-gate]
+
+  # 奶妹（/register /quota /resetkey /help /反馈）。只拿它需要的变量，不带上游 Token。
+  # REGISTRATION_BRIDGE_SECRET 不能为空：没配机器人启动即失败（容器会一直重启，日志里有原因）。
+  naimei:
+    image: owl-gate:current
+    container_name: owl-naimei
+    restart: unless-stopped
+    entrypoint: ["/usr/local/bin/nai-bots"]
+    command: ["naimei"]
+    # 镜像自带的健康检查是查网关的 /healthz，机器人进程用不上
+    healthcheck: {disable: true}
+    depends_on: [gate]
+    environment:
+      - DISCORD_BOT_TOKEN=${DISCORD_BOT_TOKEN}
+      - DISCORD_GUILD_ID=${DISCORD_GUILD_ID}
+      - REGISTRATION_BRIDGE_SECRET=${REGISTRATION_BRIDGE_SECRET}
+      - REGISTRATION_BACKEND_URL=http://nai-gate:8000
+      - SITE_URL=${SITE_URL}
+      - TZ=Asia/Shanghai
+    mem_limit: 128m
+    networks: [internal]
+    logging:
+      driver: journald
+      options: {tag: "{{.Name}}"}
+
+networks:
+  edge:
+    external: true
+    name: service-tools_edge
+  internal: {}

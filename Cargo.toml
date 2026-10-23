@@ -1,0 +1,80 @@
+[workspace]
+resolver = "3"
+members = ["crates/*"]
+
+[workspace.package]
+version = "3.0.0"
+edition = "2024"
+rust-version = "1.99"
+license = "UNLICENSED"
+publish = false
+
+[workspace.dependencies]
+gate-core = { path = "crates/gate-core" }
+gate-db = { path = "crates/gate-db" }
+gate-upstream = { path = "crates/gate-upstream" }
+
+anyhow = "1"
+thiserror = "2"
+serde = { version = "1", features = ["derive"] }
+serde_json = { version = "1", features = ["preserve_order", "float_roundtrip"] }
+rmpv = "1.3"
+tokio = { version = "1.53", features = ["full"] }
+tokio-util = { version = "0.7", features = ["rt"] }
+futures = "0.3"
+bytes = "1"
+axum = { version = "0.8", features = ["macros"] }
+tower = { version = "0.5", features = ["util"] }
+tower-http = { version = "0.7", features = ["trace", "request-id", "limit", "timeout", "compression-gzip", "set-header", "util", "cors"] }
+http-body-util = "0.1"
+multer = "=3.1.0"
+# 上游指纹：wreq 2026-08-22 起冻结 6.0.0-rc 线，改走 0.x 稳定版号；精确锁版本，升级要重跑指纹测试
+# （gate-upstream/tests/headers_wire.rs）。解压四种都开：Chrome 的 Accept-Encoding 带 br / zstd。
+# wreq-util 的 emulation-compression 让 emulation 自己给出 Accept-Encoding（与 UA 同一个 profile）。
+wreq = { version = "=0.16.1", features = ["json", "stream", "gzip", "deflate", "brotli", "zstd", "socks"] }
+wreq-util = { version = "=0.2.0", features = ["emulation-compression"] }
+reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls"] }
+rustls = { version = "0.23", default-features = false, features = ["ring", "std", "tls12"] }
+rusqlite = { version = "0.40", features = ["bundled", "backup"] }
+jiff = { version = "0.2", features = ["tzdb-bundle-always"] }
+fancy-regex = "0.19"
+regex = "1"
+rand = "0.9"
+image = { version = "=0.25.10", default-features = false, features = ["png", "jpeg", "webp"] }
+zip = { version = "9", default-features = false, features = ["deflate"] }
+maud = "=0.27.0"
+rust-embed = "8.13"
+clap = { version = "4.6", features = ["derive", "env"] }
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter", "json"] }
+hmac = "0.13"
+sha2 = "0.11"
+scrypt = { version = "0.12", default-features = false }
+subtle = "2.6"
+base64 = "0.22"
+hex = "0.4"
+twilight-gateway = "0.17"
+twilight-http = "0.17"
+twilight-model = "0.17"
+proptest = "1.12"
+mimalloc = "0.1"
+
+[workspace.lints.rust]
+unsafe_code = "forbid"
+
+[workspace.lints.clippy]
+all = { level = "warn", priority = -1 }
+
+# Debug builds keep line tables only (readable backtraces) and no debug info for dependencies:
+# roughly halves target/ per worktree.
+[profile.dev]
+debug = "line-tables-only"
+
+[profile.dev.package."*"]
+debug = false
+
+[profile.release]
+lto = "thin"
+codegen-units = 1
+strip = "symbols"
+panic = "unwind"

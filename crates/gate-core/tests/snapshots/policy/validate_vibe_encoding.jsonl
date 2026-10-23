@@ -1,0 +1,50 @@
+{"in":{"args":[{"image":128,"model":"nai-diffusion-4-full-inpainting","informationExtracted":null}]},"out":"Vibe 参考图无法读取，未扣费。请改用 PNG、JPEG 或 WebP 图片。给客户端作者：image 须为不带 data URL 前缀的 base64"}
+{"in":{"args":[{"image":250,"model":"nai-diffusion-4-curated","informationExtracted":"1"}]},"out":"Vibe 参考图无法读取，未扣费。请改用 PNG、JPEG 或 WebP 图片。给客户端作者：image 须为不带 data URL 前缀的 base64"}
+{"in":{"args":[{"image":"/9j/4AAQSkZJRgABAQAAAQABAAD/2Q==","model":"nai-diffusion-4","informationExtracted":0.999}]},"out":null}
+{"in":{"args":[{"image":0.0,"model":"nai-diffusion-4","informationExtracted":2}]},"out":"Vibe 参考图无法读取，未扣费。请改用 PNG、JPEG 或 WebP 图片。给客户端作者：image 须为不带 data URL 前缀的 base64"}
+{"in":{"args":[{"image":"1e3","model":"nai-diffusion-4-curated-preview","informationExtracted":1.0}]},"out":"Vibe 参考图无法读取，未扣费。请改用 PNG、JPEG 或 WebP 图片。给客户端作者：image 须为不带 data URL 前缀的 base64"}
+{"in":{"args":[{"image":[0.5],"model":"nai-diffusion-4-5\n","informationExtracted":"0.5"}]},"out":"Vibe 编码只支持 V4 / V4.5 模型，未扣费。请切换到 V4 或 V4.5。"}
+{"in":{"args":[{"image":"UklGRhQAAABXRUJQVlA4TAgAAAAvAAAAAAAAAA==","model":"nai-diffusion-4","informationExtracted":{}}]},"out":"Vibe 的「信息提取」须在 0 到 1 之间，未扣费。请在客户端中修改。给客户端作者：informationExtracted 须为 0 到 1 的有限数值"}
+{"in":{"args":[{"model":"nai-diffusion-4","informationExtracted":0}]},"out":"Vibe 参考图无法读取，未扣费。请改用 PNG、JPEG 或 WebP 图片。给客户端作者：image 须为不带 data URL 前缀的 base64"}
+{"in":{"args":[{"image":[1],"model":"nai-diffusion-4-5-curated","informationExtracted":-1}]},"out":"Vibe 参考图无法读取，未扣费。请改用 PNG、JPEG 或 WebP 图片。给客户端作者：image 须为不带 data URL 前缀的 base64"}
+{"in":{"args":[{"image":"iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAIAAACQd1PeAAAADElEQVR4nGNgYGAAAAAEAAH2FzhVAAAAAElFTkSuQmCC","model":-5,"informationExtracted":1e+300}]},"out":"Vibe 编码只支持 V4 / V4.5 模型，未扣费。请切换到 V4 或 V4.5。"}
+{"in":{"args":[{"image":"/9j/4AAQSkZJRgABAQAAAQABAAD/2Q==","model":-9223372036854775808,"informationExtracted":1000000000000000}]},"out":"Vibe 编码只支持 V4 / V4.5 模型，未扣费。请切换到 V4 或 V4.5。"}
+{"in":{"args":[{"image":"data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAIAAACQd1PeAAAADElEQVR4nGNgYGAAAAAEAAH2FzhVAAAAAElFTkSuQmCC","model":"","informationExtracted":null}]},"out":"Vibe 编码只支持 V4 / V4.5 模型，未扣费。请切换到 V4 或 V4.5。"}
+{"in":{"args":[{"model":"","informationExtracted":1e-300}]},"out":"Vibe 编码只支持 V4 / V4.5 模型，未扣费。请切换到 V4 或 V4.5。"}
+{"in":{"args":[{"image":"iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAIAAACQd1PeAAAADElEQVR4nGNgYGAAAAAEAAH2FzhVAAAAAElFTkSuQmCC","model":"nai-diffusion-4-5","informationExtracted":18446744073709551615}]},"out":"Vibe 的「信息提取」须在 0 到 1 之间，未扣费。请在客户端中修改。给客户端作者：informationExtracted 须为 0 到 1 的有限数值"}
+{"in":{"args":[{"image":"/9j/4AAQSkZJRgABAQAAAQABAAD/2Q==","model":"nai-diffusion-4","informationExtracted":0.0}]},"out":null}
+{"in":{"args":[{"image":"AAAAAAA=","model":"nai-diffusion-4-5-full","informationExtracted":2}]},"out":"Vibe 参考图无法读取，未扣费。请改用 PNG、JPEG 或 WebP 图片。给客户端作者：image 须为不带 data URL 前缀的 base64"}
+{"in":{"args":[{"image":0,"model":"nai-diffusion-4-5-fullx","informationExtracted":true}]},"out":"Vibe 编码只支持 V4 / V4.5 模型，未扣费。请切换到 V4 或 V4.5。"}
+{"in":{"args":[{"image":"AAAA","model":"Σ"}]},"out":"Vibe 编码只支持 V4 / V4.5 模型，未扣费。请切换到 V4 或 V4.5。"}
+{"in":{"args":[{"image":" 28 ","model":"nai-diffusion-4-5","informationExtracted":0.0001}]},"out":"Vibe 参考图无法读取，未扣费。请改用 PNG、JPEG 或 WebP 图片。给客户端作者：image 须为不带 data URL 前缀的 base64"}
+{"in":{"args":[{"image":"////","model":"nai-diffusion-4-5"}]},"out":"Vibe 参考图无法读取，未扣费。请改用 PNG、JPEG 或 WebP 图片。给客户端作者：image 须为不带 data URL 前缀的 base64"}
+{"in":{"args":[{"image":-1.5,"model":"text-model","informationExtracted":1e-300}]},"out":"Vibe 编码只支持 V4 / V4.5 模型，未扣费。请切换到 V4 或 V4.5。"}
+{"in":{"args":[{"image":"12.5","model":"nai-diffusion-4-5-curated-inpainting","informationExtracted":1}]},"out":"Vibe 参考图无法读取，未扣费。请改用 PNG、JPEG 或 WebP 图片。给客户端作者：image 须为不带 data URL 前缀的 base64"}
+{"in":{"args":[{"image":"Q===","model":"nai-diffusion-4-curated","informationExtracted":false}]},"out":"Vibe 参考图无法读取，未扣费。请改用 PNG、JPEG 或 WebP 图片。给客户端作者：image 须为不带 data URL 前缀的 base64"}
+{"in":{"args":[{"image":"/9j/4AAQSkZJRgABAQAAAQABAAD/2Q==","model":true,"informationExtracted":-9223372036854775808,"extra":1}]},"out":"Vibe 编码只支持 V4 / V4.5 模型，未扣费。请切换到 V4 或 V4.5。"}
+{"in":{"args":[{"image":-0.001,"model":"nai-v5","informationExtracted":-0.1}]},"out":"Vibe 编码只支持 V4 / V4.5 模型，未扣费。请切换到 V4 或 V4.5。"}
+{"in":{"args":[{"image":"/9j/4AAQSkZJRgABAQAAAQABAAD/2Q==","model":"nai-diffusion-4","informationExtracted":0.0001}]},"out":null}
+{"in":{"args":[{"image":"iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAIAAACQd1PeAAAADElEQVR4nGNgYGAAA^AEAAH2FzhVAAAAAElFTkSuQmCC","model":"nai-diffusion-4-5-curated"}]},"out":"Vibe 参考图无法读取，未扣费。请改用 PNG、JPEG 或 WebP 图片。给客户端作者：image 须为不带 data URL 前缀的 base64"}
+{"in":{"args":[{"image":2147483648,"model":"nai-diffusion-4-5\n","informationExtracted":0.3}]},"out":"Vibe 编码只支持 V4 / V4.5 模型，未扣费。请切换到 V4 或 V4.5。"}
+{"in":{"args":[{"image":"/9j/4AAQSkZJRgABAQAAAQABAAD/2Q==","model":"nai-diffusion-4","informationExtracted":1}]},"out":null}
+{"in":{"args":[{"image":"832","model":"nai-diffusion-4-curated-preview","informationExtracted":false}]},"out":"Vibe 参考图无法读取，未扣费。请改用 PNG、JPEG 或 WebP 图片。给客户端作者：image 须为不带 data URL 前缀的 base64"}
+{"in":{"args":[{"image":"R0lGODlhAQABAAAAADs=","model":"nai-diffusion-4"}]},"out":"Vibe 参考图无法读取，未扣费。请改用 PNG、JPEG 或 WebP 图片。给客户端作者：image 须为不带 data URL 前缀的 base64"}
+{"in":{"args":[{"image":"/9j/4AAQSkZJRgABAQAAAQABAAD/2Q==","model":"nai-diffusion-4-5","informationExtracted":0.5}]},"out":null}
+{"in":{"args":[{"image":"AAAAAA==","model":"nai-diffusion-4-5","informationExtracted":[]}]},"out":"Vibe 参考图无法读取，未扣费。请改用 PNG、JPEG 或 WebP 图片。给客户端作者：image 须为不带 data URL 前缀的 base64"}
+{"in":{"args":[{"image":"=","model":"nai-diffusion-4-5-full","informationExtracted":1.0}]},"out":"Vibe 参考图无法读取，未扣费。请改用 PNG、JPEG 或 WebP 图片。给客户端作者：image 须为不带 data URL 前缀的 base64"}
+{"in":{"args":[{"image":"/9j/4AAQSkZJRgABAQAAAQABAAD/2Q==","model":"İ","informationExtracted":0,"extra":1}]},"out":"Vibe 编码只支持 V4 / V4.5 模型，未扣费。请切换到 V4 或 V4.5。"}
+{"in":{"args":[{"image":"data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAIAAACQd1PeAAAADElEQVR4nGNgYGAAAAAEAAH2FzhVAAAAAElFTkSuQmCC","model":"nai-diffusion-4-5-full","informationExtracted":1000000000000000}]},"out":"Vibe 参考图无法读取，未扣费。请改用 PNG、JPEG 或 WebP 图片。给客户端作者：image 须为不带 data URL 前缀的 base64"}
+{"in":{"args":[{"image":"０","model":"nai-diffusion-4-curated-preview","informationExtracted":"1"}]},"out":"Vibe 参考图无法读取，未扣费。请改用 PNG、JPEG 或 WebP 图片。给客户端作者：image 须为不带 data URL 前缀的 base64"}
+{"in":{"args":[{"image":"/9j/4AAQSkZJRgABAQAAAQABAAD/2Q==","model":1216,"informationExtracted":"0.5"}]},"out":"Vibe 编码只支持 V4 / V4.5 模型，未扣费。请切换到 V4 或 V4.5。"}
+{"in":{"args":[{"image":"QQ==","model":"nai-diffusion-4-curated-preview","informationExtracted":1}]},"out":"Vibe 参考图无法读取，未扣费。请改用 PNG、JPEG 或 WebP 图片。给客户端作者：image 须为不带 data URL 前缀的 base64"}
+{"in":{"args":[{"image":"yUo=","model":"nai-diffusion-4-curated-preview","informationExtracted":[]}]},"out":"Vibe 参考图无法读取，未扣费。请改用 PNG、JPEG 或 WebP 图片。给客户端作者：image 须为不带 data URL 前缀的 base64"}
+{"in":{"args":[{"image":"QQ=","model":"nai-diffusion-4-5-full"}]},"out":"Vibe 参考图无法读取，未扣费。请改用 PNG、JPEG 或 WebP 图片。给客户端作者：image 须为不带 data URL 前缀的 base64"}
+{"in":{"args":[{"image":"AAAA","model":"nai-diffusion-4"}]},"out":"Vibe 参考图无法读取，未扣费。请改用 PNG、JPEG 或 WebP 图片。给客户端作者：image 须为不带 data URL 前缀的 base64"}
+{"in":{"args":[{"image":18446744073709551615,"model":"nai-diffusion-5-full-medium","informationExtracted":18446744073709551615}]},"out":"Vibe 编码只支持 V4 / V4.5 模型，未扣费。请切换到 V4 或 V4.5。"}
+{"in":{"args":[{"image":"iVBORw0K==GgoAAAANSUhEUgAAAAEAAAABCAIAAACQd1PeAAAADElEQVR4nGNgYGAAAAAEAAH2FzhVAAAAAElFTkSuQmCC","model":"nai-diffusion-4-full-inpainting"}]},"out":"Vibe 参考图无法读取，未扣费。请改用 PNG、JPEG 或 WebP 图片。给客户端作者：image 须为不带 data URL 前缀的 base64"}
+{"in":{"args":[{"model":1,"informationExtracted":0}]},"out":"Vibe 编码只支持 V4 / V4.5 模型，未扣费。请切换到 V4 或 V4.5。"}
+{"in":{"args":[{"image":"R0lGODlhAQABAAAAADs=","model":2147483648,"informationExtracted":true}]},"out":"Vibe 编码只支持 V4 / V4.5 模型，未扣费。请切换到 V4 或 V4.5。"}
+{"in":{"args":[{"image":"/9j/4AAQSkZJRgABAQAAAQABAAD/2Q==","model":"nai-diffusion-4-5","informationExtracted":0}]},"out":null}
+{"in":{"args":[{"image":"AAAA","model":"-28","informationExtracted":1e+300}]},"out":"Vibe 编码只支持 V4 / V4.5 模型，未扣费。请切换到 V4 或 V4.5。"}
+{"in":{"args":[{"image":"AAAA","model":"kayra-v1"}]},"out":"Vibe 编码只支持 V4 / V4.5 模型，未扣费。请切换到 V4 或 V4.5。"}
+{"in":{"args":[{}]},"out":"Vibe 编码只支持 V4 / V4.5 模型，未扣费。请切换到 V4 或 V4.5。"}
