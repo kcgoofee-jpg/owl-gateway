@@ -20,6 +20,8 @@ jobs:
   web:
     name: web (biome / tsc / vitest / build)
     runs-on: ubuntu-24.04
+    # Hang guard only: normal runs finish in ~1 minute. A timeout fails the job, never passes it.
+    timeout-minutes: 15
     defaults:
       run:
         working-directory: web
@@ -42,6 +44,8 @@ jobs:
   rust:
     name: rust (fmt / clippy / test)
     runs-on: ubuntu-24.04
+    # Hang guard only: ~7 minutes warm, worst-case cold build stays well below this.
+    timeout-minutes: 30
     steps:
       - uses: actions/checkout@v7
       - name: BoringSSL build deps
@@ -56,7 +60,11 @@ jobs:
   e2e:
     name: e2e (playwright, layout rules)
     runs-on: ubuntu-24.04
-    needs: web
+    # No needs: web — the web job uploads nothing e2e consumes (e2e runs its own vite dev
+    # server from source), so serializing on it only lengthened the critical path. The run
+    # still fails if either job fails, and tools/deploy.sh refuses any non-success run.
+    # Hang guard only: ~8 minutes warm including the local stack and the full spec suite.
+    timeout-minutes: 40
     steps:
       - uses: actions/checkout@v7
       - name: Use runner BoringSSL build tools
@@ -71,7 +79,9 @@ jobs:
       - name: Install lightweight CJK font
         # WQY MicroHei covers the simplified-Chinese UI text used by the layout checks;
         # Noto CJK was a 61 MB package and dominated E2E setup downloads.
-        run: sudo apt-get install -y --no-install-recommends fonts-wqy-microhei
+        # Acquire::Retries: the 24-minute failed run (39969197783) was a slow apt mirror,
+        # not a regression — retry the download instead of burning the whole step timeout.
+        run: sudo apt-get install -y -o Acquire::Retries=3 --no-install-recommends fonts-wqy-microhei
         timeout-minutes: 10
       - run: rustup show active-toolchain || rustup toolchain install
       - uses: Swatinem/rust-cache@v2
@@ -113,6 +123,7 @@ jobs:
   deploy-safety:
     name: deploy-safety (shell and cutover guards)
     runs-on: ubuntu-24.04
+    timeout-minutes: 10
     steps:
       - uses: actions/checkout@v7
       - name: Check deployment shell syntax
@@ -123,6 +134,7 @@ jobs:
   secrets:
     name: secrets (gitleaks, synthetic fixtures only)
     runs-on: ubuntu-24.04
+    timeout-minutes: 10
     steps:
       - uses: actions/checkout@v7
         with:
@@ -140,9 +152,11 @@ jobs:
   ops-binary:
     name: nai-ops (static musl binary)
     runs-on: ubuntu-24.04
+    # Hang guard only: ~1 minute warm; a cold musl release build stays well below this.
+    timeout-minutes: 20
     steps:
       - uses: actions/checkout@v7
-      - run: sudo apt-get update && sudo apt-get install -y --no-install-recommends musl-tools
+      - run: sudo apt-get update && sudo apt-get install -y -o Acquire::Retries=3 --no-install-recommends musl-tools
       - run: rustup target add x86_64-unknown-linux-musl
       - uses: Swatinem/rust-cache@v2
         with:
@@ -157,6 +171,8 @@ jobs:
   image:
     name: image (docker tar artifact)
     runs-on: ubuntu-24.04
+    # Hang guard only: ~8.5 minutes warm via the gha build cache; a fully cold build stays well below this.
+    timeout-minutes: 30
     steps:
       - uses: actions/checkout@v7
       - uses: docker/setup-buildx-action@v4
