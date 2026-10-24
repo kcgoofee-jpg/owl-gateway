@@ -51,12 +51,7 @@ const PAGES: Array<{ name: string; path: string; ready: (p: Page) => ReturnType<
     ready: (p) => p.getByRole("button", { name: "全部标记已处理" }),
   },
   {
-    name: "logs-feedback",
-    path: "/admin/inbox/feedback",
-    ready: (p) => p.getByRole("button", { name: /导出 CSV/ }),
-  },
-  {
-    name: "logs-survey",
+    name: "inbox-survey",
     path: "/admin/inbox/survey",
     ready: (p) => p.getByText("已填", { exact: true }).or(p.getByText("还没有成员填过问卷")),
   },
@@ -535,12 +530,16 @@ test.describe("已登录", () => {
     expect(errs).toEqual([]);
   });
 
-  test("日志：成员反馈一条一行（时间 · 成员 · 内容），旧版选择题的记录显示成一行摘要，可搜索", async ({
+  test("来信：文字反馈收进问卷页底部的折叠区，一条一行（时间 · 成员 · 内容），旧版选择题的记录显示成一行摘要，可搜索", async ({
     page,
   }) => {
     const errs = watchConsole(page, "/admin/api/events");
-    await open(page, "/admin/inbox/feedback", PAGES[5]?.ready as never);
-    await expect(page.getByRole("columnheader")).toHaveText(["时间", "成员", "内容"]);
+    await open(page, "/admin/inbox/survey", PAGES[5]?.ready as never);
+    // 反馈默认收起，展开后是原来的表格
+    const fold = page.locator("details.inbox-fb");
+    await expect(fold.getByText(/文字反馈（\d+ 条）/)).toBeVisible();
+    await fold.locator("summary").click();
+    await expect(fold.getByRole("columnheader")).toHaveText(["时间", "成员", "内容"]);
     // 评价筛选和选择题统计已经去掉
     await expect(page.getByLabel("评价")).toHaveCount(0);
     await expect(page.getByText("好评满意率")).toHaveCount(0);
@@ -549,7 +548,7 @@ test.describe("已登录", () => {
     await expect(page.getByText(/^（旧版选择题）整体：满意；困扰：排队太久/)).toBeVisible();
     expect(await seriousViolations(page), "feedback").toEqual([]);
     // 按内容搜；换成找不到的关键字显示空状态
-    const box = page.getByRole("searchbox", { name: "搜索" });
+    const box = fold.getByRole("searchbox", { name: "搜索" });
     await box.fill("ComfyUI");
     await expect(page.getByText("教程写得很清楚")).toBeVisible();
     await expect(page.getByText("晚上八点左右排队有点久")).toHaveCount(0);
