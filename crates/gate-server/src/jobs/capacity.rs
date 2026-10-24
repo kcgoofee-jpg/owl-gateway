@@ -46,7 +46,8 @@ pub fn snapshot_summary(items: &[(i64, AccountLine)], fresh: bool) -> String {
         })
         .collect();
     let mut summary = format!("已记录 {} 个账号：{}", items.len(), parts.join("、"));
-    if !fresh {
+    // 有读数但这次没主动读到（用的是缓存）才值得说；全都没有读数时说了也是噪音
+    if !fresh && items.iter().any(|(_, a)| a.percent.is_some()) {
         summary.push_str("（这次没读到，用的是缓存）");
     }
     summary
@@ -144,6 +145,11 @@ mod tests {
         assert_eq!(
             snapshot_summary(&[(1, line(Some(62.5), None))], false),
             "已记录 1 个账号：#1 剩余 62.5%（这次没读到，用的是缓存）"
+        );
+        // 全都没有读数：不说「用的是缓存」（没有可说的缓存）
+        assert_eq!(
+            snapshot_summary(&[(1, line(None, None))], false),
+            "已记录 1 个账号：#1 没有读数"
         );
         assert_eq!(snapshot_summary(&[], true), "已记录：没有上游账号");
     }
