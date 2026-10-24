@@ -90,7 +90,7 @@ function Ip(props: { l: UsageLog; onFilter: Filter }) {
   const [shown, setShown] = useState(false);
   if (!ip) return <span class="muted">—</span>;
   const masked = maskIp(ip);
-  // 库里本来就是打码值（旧数据是 103.151.*.*）：没有再可展开的完整 IP，只显示打码值
+  // 库里本来就是打码值（旧数据是 203.0.*.*）：没有再可展开的完整 IP，只显示打码值
   if (masked === ip) return <span class="mono lg-ip">{masked}</span>;
   return (
     <span class="lg-ipis">

@@ -30,8 +30,8 @@ describe("后台数字/单位/耗时/IP", () => {
     expect(secondsText(0)).toBe("—");
   });
   it("IP 默认打码：IPv4 留前两段，IPv6 留前两组", () => {
-    expect(maskIp("103.151.22.8")).toBe("103.151.*.*");
-    expect(maskIp("103.151.*.*")).toBe("103.151.*.*");
+    expect(maskIp("203.0.113.8")).toBe("203.0.*.*");
+    expect(maskIp("203.0.*.*")).toBe("203.0.*.*");
     expect(maskIp("2001:db8:1:2::3")).toBe("2001:db8:*");
     expect(maskIp("::1")).toBe("::*");
     expect(maskIp("unknown")).toBe("*");

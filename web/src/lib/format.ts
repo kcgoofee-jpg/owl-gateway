@@ -89,11 +89,11 @@ export function secondsText(ms: number | null | undefined): string {
 }
 
 /**
- * IP 打码（后台默认展示）：IPv4 只留前两段「103.151.*.*」（与文档「来源打码」一致），
+ * IP 打码（后台默认展示）：IPv4 只留前两段「203.0.*.*」（与文档「来源打码」一致），
  * IPv6 只留前两组；认不出的整体打码。要看完整 IP 必须在界面上点「显示」。
  */
 export function maskIp(ip: string): string {
-  // 库里的 src 有两种：完整 IPv4，和旧代码已经打码的「103.151.*.*」——两种都收成同一个样子
+  // 库里的 src 有两种：完整 IPv4，和旧代码已经打码的「203.0.*.*」——两种都收成同一个样子
   const v4 = /^(\d{1,3})\.(\d{1,3})\.([\d*]{1,3})\.([\d*]{1,3})$/.exec(ip);
   if (v4) return `${v4[1]}.${v4[2]}.*.*`;
   const v6 = ip.split(":");
