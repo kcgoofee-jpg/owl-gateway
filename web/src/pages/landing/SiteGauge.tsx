@@ -7,7 +7,9 @@ type Row = {
   kind: "v45" | "v5";
   name: string;
   capped: boolean;
+  unlimited: boolean;
   paused: boolean;
+  remaining: boolean;
   value: number;
   pct: number;
   tone: "warn" | "danger" | undefined;
@@ -25,7 +27,7 @@ export function SiteGauge({ rows, generated }: { rows: Row[]; generated: { total
   return (
     <div class="lp-meters">
       <svg class="lp-site-gauge" viewBox="0 0 1000 32" preserveAspectRatio="none" aria-hidden="true">
-        <title>{`V4.5 在前、V5 在后；今日总量 ${total} 张，V5 ${v5} 张`}</title>
+        <title>{`V4.5 在前、V5 在后；今日已出 ${total} 张，其中 V5 ${v5} 张`}</title>
         <path class="lp-site-gauge__track" d={ARC} />
         {v45Pct > 0 && (
           <path
@@ -61,16 +63,17 @@ export function SiteGauge({ rows, generated }: { rows: Row[]; generated: { total
             ? (r.m.hint ?? "V5 暂时用完")
             : r.capped
               ? `${r.name} ${fmt(r.value)} 张，每日 ${fmt(r.m.cap)} 张${caption ? `；${caption}` : ""}`
-              : `${r.name} ${fmt(r.value)} 张`;
+              : `${r.name} 不限，今日已出 ${fmt(r.kind === "v5" ? generated.v5 : total)} 张`;
           const content = (
             <>
               <span class="lp-meter__name">
                 <i aria-hidden="true" />
                 {r.kind === "v45" ? "V4.5" : "V5"}
+                {r.remaining && " 剩余"}
               </span>
               <b class="lp-meter__num">
-                {r.paused ? caption : fmt(r.value)}
-                {!r.paused && <small>张</small>}
+                {r.paused ? caption : r.unlimited ? "不限" : fmt(r.value)}
+                {!r.paused && !r.unlimited && <small>张</small>}
               </b>
               {!r.paused && caption && <span class="lp-meter__caption">{caption}</span>}
             </>

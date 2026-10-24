@@ -41,18 +41,18 @@ describe("deriveStatus：正常与排队", () => {
     expect(v?.sentence).toBe("马上开始 · 通道空闲");
   });
 
-  it("有人排队：状态 + 前面还有几张在等（站长 10-24），不显示秒数", () => {
+  it("有人排队：全站正在出图 + 队列张数（站长 10-24），不显示秒数", () => {
     const v = deriveStatus(idle({ queue: { waiting: 3, running: 1 } }), { nowMs: 0 });
     expect(v?.tone).toBe("busy");
-    expect(v?.headline).toBe("排队中");
-    expect(v?.detail).toBe("前面还有 3 张在等");
-    expect(v?.announce).toBe("排队中 · 前面还有 3 张在等");
+    expect(v?.headline).toBe("全站正在出图");
+    expect(v?.detail).toBe("队列 3 张");
+    expect(v?.announce).toBe("全站正在出图 · 队列 3 张");
     expect(v?.sentence).not.toMatch(/秒|分钟|后开始/);
   });
 
   it("没有放行间隔时同样带队列数量", () => {
     const v = deriveStatus(idle({ queue: { waiting: 2, running: 0 }, cycle: 0 }));
-    expect(v?.sentence).toBe("排队中 · 前面还有 2 张在等");
+    expect(v?.sentence).toBe("全站正在出图 · 队列 2 张");
   });
 
   it("排队已满", () => {

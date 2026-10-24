@@ -23,6 +23,9 @@ import { SiteFooter, Topbar } from "./Topbar";
 import type { MeMember } from "./types";
 import "./landing.css";
 
+/** 「Key 在头像里」的一次性提示（每个浏览器一次）。 */
+const KEY_HINT_KEY = "owl-key-hint";
+
 /** 登录时核验身份组（后台设了限定身份组）回到首页带的结果；no 的文案要带上身份组名称。 */
 function verifyNotice(v: string, role: string): { text: string; error: boolean } | undefined {
   switch (v) {
@@ -188,6 +191,26 @@ function Page({ store }: { store: Store }) {
     if (member?.has_key && member.survey_done === false && !surveyDismissed) setSurveyOpen(true);
     if (!member?.has_key || member.survey_done) setSurveyOpen(false);
   }, [member?.has_key, member?.survey_done, surveyDismissed]);
+  // 站长 10-24：Key 收在头像菜单里，不再占成员首页；只在第一次使用时提示一次。
+  // 每个浏览器提示一次；清掉 localStorage 会再提示一次。
+  useEffect(() => {
+    if (!member?.has_key || splash) return;
+    const hintKey = member.discord?.id ? `${KEY_HINT_KEY}:${member.discord.id}` : KEY_HINT_KEY;
+    try {
+      if (localStorage.getItem(hintKey) === "1") return;
+    } catch {
+      return;
+    }
+    const t = setTimeout(() => {
+      toast("Key 和接入地址在右上角头像菜单里，点开可复制。", { ms: 7000 });
+      try {
+        localStorage.setItem(hintKey, "1");
+      } catch {
+        /* 隐私模式：下次再提示一次 */
+      }
+    }, 1200);
+    return () => clearTimeout(t);
+  }, [member?.has_key, splash]);
   useLoginNotice(reg?.role_note || "指定身份组", reg !== undefined);
   useReturnToSurvey(!!member);
   return (
@@ -206,7 +229,7 @@ function Page({ store }: { store: Store }) {
             : undefined
         }
         loginOpen={me !== undefined && !member}
-        brandHref="/#gallery"
+        brandHref="/"
       />
       <main class="lp-main">
         {me === undefined ? (

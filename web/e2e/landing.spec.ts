@@ -39,7 +39,7 @@ test.describe("游客", () => {
     await expect(h1).toHaveClass(/sr-only/);
     await expect(page.locator(".lp-lead")).toHaveCount(0);
 
-    // 实时状态：一句话 + 两条用量；V5 不限量时只写已出多少，没有进度条
+    // 实时状态：一句话 + 两条用量；两个数字都是「剩余」，V5 不限量时写「不限」，没有进度条
     const status = page.getByRole("region", { name: "当前状态" });
     await expect(status).toBeVisible();
     await expect(status.locator(".lp-status__text")).not.toBeEmpty();
@@ -142,8 +142,8 @@ test.describe("游客", () => {
     // 圆环里是今天剩余的数（40 − 2 = 38），下面写总量
     await expect(page.locator(".lp-quota")).toContainText("V4.5：今天还剩 38，每天 40");
     // 仪表写剩余张数：500 - 123 = 377，V5 60 - 9 = 51
-    await expect(page.locator(".lp-status")).toContainText("V4.5377张");
-    await expect(page.locator(".lp-status")).toContainText("V551张");
+    await expect(page.locator(".lp-status")).toContainText("V4.5 剩余377张");
+    await expect(page.locator(".lp-status")).toContainText("V5 剩余51张");
     await expect(page.locator(".lp-status__text")).toHaveText("马上开始 · 通道空闲");
     expect(meRequests).toEqual([]);
   });
@@ -401,7 +401,9 @@ test.describe("登录成员", () => {
     await expect(page.locator(".lp-quota")).toHaveCount(0);
   });
 
-  test("重置券：只有标题；范围 + 备注；倒计时 hh:mm:ss 在「使用」按钮里；确认后刷新", async ({ page }) => {
+  test("重置券：只有标题；范围 + 备注；倒计时 hh:mm:ss 在「使用」按钮里；点一下直接刷新", async ({
+    page,
+  }) => {
     const now = Math.floor(Date.now() / 1000);
     let used = false;
     await patch(page, ME, (b) => ({
@@ -432,15 +434,9 @@ test.describe("登录成员", () => {
     // 三天：小时可以超过 24
     await expect(use.locator(".lp-coupon__cd")).toHaveText(/^7[12]:\d\d:\d\d$/);
     await use.click();
-    const dialog = page.getByRole("dialog", { name: "使用重置券" });
-    await expect(dialog).toContainText("现在重置今天的 V4.5、V5、Anlas 额度？");
-    await dialog.getByRole("button", { name: "取消" }).click();
-    await expect(dialog).toBeHidden();
-    expect(used).toBe(false);
-
-    await use.click();
-    await dialog.getByRole("button", { name: "确定使用" }).click();
+    await expect(page.getByRole("dialog", { name: "使用重置券" })).toHaveCount(0);
     await expect(page.getByText("已重置，今天的 V4.5、V5、Anlas 额度已恢复")).toBeVisible();
+    expect(used).toBe(true);
     await expect(page.getByRole("heading", { name: "重置券" })).toHaveCount(0);
   });
 
@@ -516,13 +512,13 @@ test.describe("登录成员", () => {
         { id: 8, kind: "reset", note: "", scope: "v45", created_at: now, expires_at: now + 2 * 86400 },
       ],
     }));
+    await page.route("**/public/me/coupons/8/use", (route) => route.fulfill({ json: { ok: true } }));
     await page.goto("/");
     const card = page.locator("section", { has: page.getByRole("heading", { name: "重置券" }) });
     await expect(card.locator(".lp-coupon__body")).toHaveText("重置 V4.5");
     await card.getByRole("button", { name: /^使用/ }).click();
-    await expect(page.getByRole("dialog", { name: "使用重置券" })).toContainText(
-      "现在重置今天的 V4.5 额度？",
-    );
+    await expect(page.getByRole("dialog", { name: "使用重置券" })).toHaveCount(0);
+    await expect(page.getByText("已重置，今天的 V4.5 额度已恢复")).toBeVisible();
   });
 
   test("手机 375px：无横向滚动；额度圆环在状态卡之前", async ({ page }) => {

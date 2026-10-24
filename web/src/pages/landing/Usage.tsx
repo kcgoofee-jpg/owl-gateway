@@ -28,9 +28,12 @@ export function StatRows(props: {
     const { used, cap, label } = x.m;
     const paused = x.m.paused === true;
     const capped = cap > 0;
+    const unlimited = !capped && !paused;
     // dailyMeters 在用满后换成第二天的额度：名称缩成四个字，完整说法放在悬停提示里
     const special = !paused && !label.includes("已用");
-    const value = capped ? Math.max(0, cap - used) : used;
+    // 站长 10-24：两个数字统一成「剩余」。V5 目前没有全站上限（cap=0），剩余显示「不限」，
+    // 今日已出只进悬停提示，不把「已出」冒充「剩余」。
+    const value = capped ? Math.max(0, cap - used) : 0;
     const name = paused
       ? "V5 剩余"
       : special
@@ -38,12 +41,14 @@ export function StatRows(props: {
         : capped
           ? x.left
           : x.kind === "v5"
-            ? "V5"
-            : "V4.5";
+            ? "V5 剩余"
+            : "V4.5 剩余";
     return {
       ...x,
       capped,
+      unlimited,
       paused,
+      remaining: !special || paused,
       value: paused ? 0 : value,
       name,
       tone: paused ? ("danger" as Tone) : toneFor(used, cap),
