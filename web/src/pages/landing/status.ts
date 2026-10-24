@@ -104,7 +104,7 @@ export function deriveStatus(live: Live | null, opts: DeriveOpts = {}): StatusVi
   ) {
     out = view("warn", "排队已满", `最多 ${queueCap} 张，稍后再试`);
   } else if (waiting + running > 0) {
-    out = view("busy", "排队中");
+    out = view("busy", "排队中", waiting > 0 ? `前面还有 ${waiting} 张在等` : "");
   } else {
     out = view("ok", "马上开始", "通道空闲");
   }

@@ -72,7 +72,7 @@ describe("compact shared allowance arc", () => {
   });
 });
 
-it("shares one scale and origin, with V5 as a prefix of total usage", () => {
+it("draws V4.5 first from the origin, V5 right after it (站长 10-24：黄前蓝后)", () => {
   render(
     <StatRows
       total={{ label: "全站今日已用", used: 100, cap: 500 }}
@@ -82,14 +82,16 @@ it("shares one scale and origin, with V5 as a prefix of total usage", () => {
   );
   const all = host.querySelector("path.stat--v45");
   const subset = host.querySelector("path.stat--v5");
-  expect(all?.getAttribute("stroke-dasharray")).toBe("20 100");
+  // V4.5 自己的长度 = 总量 − V5（100−20)/500 = 16，V5 = 20/500 = 4，接在 V4.5 后面
+  expect(all?.getAttribute("stroke-dasharray")).toBe("16 100");
+  expect(all?.getAttribute("stroke-dashoffset")).toBeNull();
   expect(subset?.getAttribute("stroke-dasharray")).toBe("4 100");
+  expect(subset?.getAttribute("stroke-dashoffset")).toBe("-16");
   expect(subset?.getAttribute("d")).toBe(all?.getAttribute("d"));
-  expect(subset?.getAttribute("stroke-dashoffset")).toBeNull();
   expect(host.textContent).not.toMatch(/已用 \d+%/);
 });
 
-it("puts a first V5 image at the common start without inventing V4.5 usage", () => {
+it("a lone V5 image draws only the blue stretch at the origin, no amber invented", () => {
   render(
     <StatRows
       total={{ label: "全站今日已用", used: 1, cap: 100 }}
@@ -98,7 +100,7 @@ it("puts a first V5 image at the common start without inventing V4.5 usage", () 
     host,
   );
   expect(host.querySelector("path.stat--v5")?.getAttribute("stroke-dasharray")).toBe("1 100");
-  expect(host.querySelector("path.stat--v45")?.getAttribute("stroke-dasharray")).toBe("1 100");
+  expect(host.querySelector("path.stat--v45")).toBeNull();
   expect(host.querySelector("svg title")?.textContent).toContain("今日总量 1 张，V5 1 张");
 });
 

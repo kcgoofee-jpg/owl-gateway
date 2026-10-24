@@ -14,24 +14,25 @@ type Row = {
   m: { label: string; cap: number; hint?: string; short?: string };
 };
 
-/** One shared daily scale. V5 is a subset of all images, painted first from the same origin. */
+/** One shared daily scale. Left to right: the amber V4.5 stretch, then the blue V5 stretch, then the track. */
 export function SiteGauge({ rows, generated }: { rows: Row[]; generated: { total: number; v5: number } }) {
   const cap = rows[0]?.m.cap ?? 0;
   const total = Math.max(0, generated.total);
   const v5 = Math.max(0, Math.min(total, generated.v5));
   const usedPct = cap > 0 ? Math.min(100, (total / cap) * 100) : 0;
   const v5Pct = cap > 0 ? Math.min(usedPct, (v5 / cap) * 100) : 0;
+  const v45Pct = usedPct - v5Pct;
   return (
     <div class="lp-meters">
       <svg class="lp-site-gauge" viewBox="0 0 1000 32" preserveAspectRatio="none" aria-hidden="true">
-        <title>{`V5 在前，V4.5 在后；今日总量 ${total} 张，V5 ${v5} 张`}</title>
+        <title>{`V4.5 在前、V5 在后；今日总量 ${total} 张，V5 ${v5} 张`}</title>
         <path class="lp-site-gauge__track" d={ARC} />
-        {usedPct > 0 && (
+        {v45Pct > 0 && (
           <path
             class="lp-site-gauge__fill stat--v45"
             d={ARC}
             pathLength={100}
-            stroke-dasharray={`${usedPct} 100`}
+            stroke-dasharray={`${v45Pct} 100`}
           />
         )}
         {v5Pct > 0 && (
@@ -40,6 +41,7 @@ export function SiteGauge({ rows, generated }: { rows: Row[]; generated: { total
             d={ARC}
             pathLength={100}
             stroke-dasharray={`${v5Pct} 100`}
+            stroke-dashoffset={`${-v45Pct}`}
           />
         )}
       </svg>
