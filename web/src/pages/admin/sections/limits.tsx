@@ -233,7 +233,16 @@ function RecordsCard() {
               <tr key={a.position}>
                 <td>#{a.position}</td>
                 <td>{dash(a.v5_percent, "%")}</td>
-                <td>{dash(a.v5_recharge_per_day, "%/天")}</td>
+                <td>
+                  {dash(a.v5_recharge_per_day, "%/天")}
+                  {a.quiet_rate ? (
+                    <span class="muted" title="相邻两次主动读之间该账号没出过 V5 图时，余量的上涨就是纯恢复">
+                      （实测 {a.quiet_rate.rate}）
+                    </span>
+                  ) : (
+                    ""
+                  )}
+                </td>
                 <td>{dash(a.anlas)}</td>
                 <td>
                   {a.today.images} / {a.today.v5}
@@ -247,10 +256,6 @@ function RecordsCard() {
         </table>
       </TableWrap>
       <ul class="muted small">
-        <li>
-          安静时段实测恢复：
-          {data.quiet_rate ? `${data.quiet_rate.rate}%/天（${data.quiet_rate.hours} 小时）` : "数据不够"}
-        </li>
         {data.manual.account_caps.map((c) => (
           <li key={`cap-${c.position}`}>
             手动临时：账号 {c.position ?? "?"} 每天 {c.cap} 张，到 {fullTime(c.until)}

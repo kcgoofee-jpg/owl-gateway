@@ -85,6 +85,9 @@ pub const RUST_ADDED_COLUMNS: &[&str] = &[
     "ALTER TABLE usage_log ADD COLUMN hfp TEXT",
     "ALTER TABLE usage_log ADD COLUMN bid TEXT",
     "ALTER TABLE usage_log ADD COLUMN origin TEXT",
+    // 快照分账号记录（站长 10-24）：每个上游账号各写一行。旧行空串 = 早期写的全站聚合值，
+    // 只留作历史，不再参与各账号的恢复速度估算。
+    "ALTER TABLE upstream_snapshots ADD COLUMN token_id TEXT NOT NULL DEFAULT ''",
 ];
 
 /// 3.0 新增的表（只增不减）。同 `RUST_ADDED_COLUMNS`：

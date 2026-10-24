@@ -150,7 +150,9 @@ async fn quota_records_shape() {
     assert_eq!(a["today"], json!({"images": 7, "v5": 0}));
     assert_eq!(a["yesterday"], json!({"images": 0, "v5": 0}));
     assert!(a.get("token_id").is_none());
-    assert_eq!(v["quiet_rate"], Value::Null);
+    // 实测恢复按账号给（快照没积累时为 null）；顶层聚合版已随分账号快照一起删除
+    assert_eq!(a["quiet_rate"], Value::Null);
+    assert!(v.get("quiet_rate").is_none());
     assert_eq!(v["manual"], json!({"account_caps": [], "paid_v5": []}));
 }
 

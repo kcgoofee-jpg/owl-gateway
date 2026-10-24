@@ -142,17 +142,18 @@ export function guardSpecs(g: Guard): Record<string, FieldSpec> {
 }
 
 /** /admin/api/quota-records：只显示 */
+/** quiet_rate：该账号自己的实测恢复（快照分账号估算；null = 数据不够） */
 export type RecordAccount = {
   position: number;
   v5_percent: number | null;
   v5_recharge_per_day: number | null;
   anlas: number | null;
+  quiet_rate: { rate: number; hours: number } | null;
   today: { images: number; v5: number };
   yesterday: { images: number; v5: number };
 };
 export type Records = {
   accounts: RecordAccount[];
-  quiet_rate: { rate: number; hours: number } | null;
   manual: {
     account_caps: Array<{ position: number | null; cap: number; until: number }>;
     paid_v5: Array<{ position: number | null; max_anlas: number; spent: number; until: number }>;

@@ -22,14 +22,18 @@ fn count_i64(
 impl Db {
     // ------------------------------------------------------------------ 额度同步 / V5 电量记录
 
-    /// `quiet_recovery` 的输入：72 小时内「主动读」的快照，以及相邻两条（间隔 ≤ 3 小时）之间的 V5 出图条数。
-    pub async fn quota_quiet_inputs(&self, now: f64) -> Result<QuietInputs> {
+    /// `quiet_recovery` 的输入（按账号）：该账号 72 小时内「主动读」的快照，
+    /// 以及相邻两条（间隔 ≤ 3 小时）之间**这个账号**处理的 V5 出图条数。
+    /// 早期不带 token 的聚合行（token_id=''）不参与。
+    pub async fn quota_quiet_inputs_for(&self, token_id: &str, now: f64) -> Result<QuietInputs> {
+        let token = token_id.to_string();
         self.read(move |c| {
             let snaps: Vec<QuietSnap> = {
                 let mut stmt = c.prepare(
-                    "SELECT ts, v5_percent FROM upstream_snapshots WHERE ts>? AND fresh=1 AND v5_percent IS NOT NULL ORDER BY ts",
+                    "SELECT ts, v5_percent FROM upstream_snapshots \
+                     WHERE ts>? AND fresh=1 AND v5_percent IS NOT NULL AND token_id=? ORDER BY ts",
                 )?;
-                stmt.query_map([quiet_snaps_since(now)], |r| {
+                stmt.query_map(params![quiet_snaps_since(now), token], |r| {
                     Ok(QuietSnap {
                         ts: value::f64_or(r, 0, 0.0)?,
                         percent: value::f64_or(r, 1, 0.0)?,
@@ -41,8 +45,9 @@ impl Db {
             for i in quiet_count_pairs(&snaps) {
                 counts[i] = count_i64(
                     c,
-                    "SELECT COUNT(*) FROM usage_log WHERE ts>? AND ts<=? AND status='ok' AND model LIKE '%diffusion-5%'",
-                    params![snaps[i].ts, snaps[i + 1].ts],
+                    "SELECT COUNT(*) FROM usage_log \
+                     WHERE ts>? AND ts<=? AND status='ok' AND model LIKE '%diffusion-5%' AND token_id=?",
+                    params![snaps[i].ts, snaps[i + 1].ts, token],
                 )?;
             }
             Ok(QuietInputs { snaps, counts })
@@ -158,19 +163,21 @@ impl Db {
         .await
     }
 
-    /// 每小时记一次上游真实状态。
+    /// 每小时记一次上游真实状态（每个上游账号一行，`token_id` 标明归属）。
     pub async fn insert_upstream_snapshot(
         &self,
         ts: f64,
+        token_id: &str,
         v5_percent: Option<f64>,
         v5_rate: Option<f64>,
         anlas: Option<i64>,
         fresh: i64,
     ) -> Result<()> {
+        let token = token_id.to_string();
         self.write(move |tx| {
             tx.execute(
-                "INSERT INTO upstream_snapshots(ts, v5_percent, v5_rate, anlas, fresh) VALUES (?,?,?,?,?)",
-                params![ts, v5_percent, v5_rate, anlas, fresh],
+                "INSERT INTO upstream_snapshots(ts, token_id, v5_percent, v5_rate, anlas, fresh) VALUES (?,?,?,?,?,?)",
+                params![ts, token, v5_percent, v5_rate, anlas, fresh],
             )?;
             Ok(())
         })

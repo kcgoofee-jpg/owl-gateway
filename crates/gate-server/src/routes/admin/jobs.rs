@@ -38,27 +38,32 @@ async fn quota_records(
         .and_then(Value::as_array)
         .cloned()
         .unwrap_or_default();
-    let (today, yday) = (state.day(), state.clock.day(now - 86400.0));
+    let today = state.day();
     let mut accounts = Vec::new();
     for (i, (t, f)) in rows.iter().enumerate() {
         let r = readings.get(i).cloned().unwrap_or(Value::Null);
         let pick = |k: &str| r.get(k).cloned().unwrap_or(Value::Null);
         let c_today = state.db.get_upstream_counter(&t.token_id, &today).await?;
-        let c_yday = state.db.get_upstream_counter(&t.token_id, &yday).await?;
+        let c_yday = state
+            .db
+            .get_upstream_counter(&t.token_id, &state.clock.day(now - 86400.0))
+            .await?;
+        // 实测恢复速度按账号估（该账号自己的快照序列 + 自己的 V5 出图条数）
+        let quiet =
+            quota::quiet_recovery(&state.db.quota_quiet_inputs_for(&t.token_id, now).await?)
+                .map_or(Value::Null, |q| q.to_value());
         accounts.push(json!({
             "position": f.position,
             "v5_percent": pick("percent"),
             "v5_recharge_per_day": pick("recharge_per_day"),
             "anlas": state.allowance.anlas_of(&t.token_id),
+            "quiet_rate": quiet,
             "today": {"images": c_today.images, "v5": c_today.v5},
             "yesterday": {"images": c_yday.images, "v5": c_yday.v5},
         }));
     }
-    let quiet = quota::quiet_recovery(&state.db.quota_quiet_inputs(now).await?)
-        .map_or(Value::Null, |q| q.to_value());
     Ok(ok_json(&json!({
         "accounts": accounts,
-        "quiet_rate": quiet,
         "manual": manual_raises(&state).await?,
     })))
 }
