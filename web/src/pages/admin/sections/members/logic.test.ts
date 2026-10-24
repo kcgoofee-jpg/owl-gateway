@@ -4,7 +4,6 @@ import {
   buildFilters,
   countFilter,
   DAY,
-  defaultFilter,
   findByKeyId,
   hasReason,
   matchesQuery,
@@ -55,7 +54,6 @@ function mk(p: Partial<Member> = {}): Member {
     reset_today: null,
     tags: [],
     auto_tags: [],
-    hours24: [],
     key_count: 1,
     all_key_ids: [id],
     ...p,
@@ -208,10 +206,6 @@ describe("筛选横栏", () => {
     expect(normalizeFilter("role:invite")).toBe("invite");
     expect(normalizeFilter("never")).toBe("never");
     expect(normalizeFilter(undefined)).toBeNull();
-  });
-  it("默认筛选：有要处理的人看「需要处理」，否则「全部成员」", () => {
-    expect(defaultFilter([mk()], NOW)).toBe("all");
-    expect(defaultFilter([mk({ expires_at: NOW - 1 })], NOW)).toBe("attention");
   });
   it("搜索：名称、Discord ID、用户名、标签与备注", () => {
     const m = mk({

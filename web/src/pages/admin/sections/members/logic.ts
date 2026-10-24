@@ -2,7 +2,7 @@
  * 成员判断逻辑（纯函数，无界面依赖，方便单测；总览的「成员要处理」提醒也用这里的 needsAttention）。
  * 时间单位都是 Unix 秒。
  */
-import { fullTime, rel, scopeText } from "../../../../lib/format";
+import { fullTime, rel, scopeText, withUnit } from "../../../../lib/format";
 import type { AutoTag, Member, Role, Tag } from "./types";
 
 export const HOUR = 3600;
@@ -142,8 +142,8 @@ export function memberVerdict(m: Member, now: number): { title: string; sub: str
     title = `有 ${issues.filter((x) => x.need).length} 件事要看一眼`;
   } else if (!m.first_image_at) {
     title = `领了 Key ${m.registered_at ? `${ago(now - m.registered_at)}了` : ""}，还没出过图`;
-  } else if (cap > 0 && used >= cap) title = `今天的额度用完了（${used} 张）`;
-  else if (used > 0) title = `正常使用，今天出了 ${used} 张`;
+  } else if (cap > 0 && used >= cap) title = `今天的额度用完了（${withUnit(used, "张")}）`;
+  else if (used > 0) title = `正常使用，今天出了 ${withUnit(used, "张")}`;
   else title = `今天还没用${m.last_used_at ? `，上次是 ${rel(m.last_used_at, now)}` : ""}`;
   const why = (m.rejected_why || []).map(([r, n]) => `${r} ${n}`).join("、");
   const ack = m.tags.find((t) => t.tag === ACK_TAG);
@@ -254,11 +254,6 @@ export function rejectReasons(rows: Member[]): Array<{ tag: string; count: numbe
     .sort((a, b) => b.count - a.count || compareText(a.tag, b.tag));
 }
 export const hasReason = (m: Member, tag: string): boolean => m.auto_tags.some((x) => x.tag === tag);
-
-/** 默认筛选：有要处理的人就直接看「需要处理」，否则「全部成员」 */
-export function defaultFilter(everyone: Member[], now: number): string {
-  return everyone.some((m) => needsAttention(m, now)) ? "attention" : ALL_FILTER;
-}
 
 export function matchesQuery(m: Member, raw: string): boolean {
   const q = raw.trim().toLowerCase();

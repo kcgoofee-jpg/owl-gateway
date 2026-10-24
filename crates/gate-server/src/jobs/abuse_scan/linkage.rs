@@ -45,6 +45,65 @@ const KNOWN_ORIGINS: [&str; 2] = [
     "https://novelai-draw.minijiu.cfd",
 ];
 
+/// 把 Origin 归一成 `scheme://host`（小写、去端口、去路径）。识别不了返回 None。
+/// 官方桌面端是 `tauri://localhost` / `http://tauri.localhost`，本机反代是 `http://127.0.0.1:8000` /
+/// `http://192.168.x.x:8000`，这些请求根本没出本机，不能算「Key 流经第三方网站」。
+fn normalize_origin(origin: &str) -> Option<String> {
+    let s = origin.trim().to_ascii_lowercase();
+    if s.is_empty() {
+        return None;
+    }
+    if let Some(rest) = s.strip_prefix("tauri://") {
+        return Some(format!("tauri://{}", rest.split('/').next().unwrap_or("")));
+    }
+    if s.starts_with("file://") {
+        return Some("file://".to_string());
+    }
+    let (scheme, rest) = s.split_once("://")?;
+    if !matches!(scheme, "http" | "https") {
+        return Some(s);
+    }
+    let host = rest.split('/').next().unwrap_or("");
+    let host = if host.starts_with('[') {
+        host.split(']')
+            .next()
+            .map(|h| format!("{h}]"))
+            .unwrap_or_default()
+    } else {
+        host.split(':').next().unwrap_or("").to_string()
+    };
+    if host.is_empty() {
+        return None;
+    }
+    Some(format!("{scheme}://{host}"))
+}
+
+/// 本机 / 局域网 / 桌面客户端的来源：不算第三方。
+fn is_local_origin(origin: &str) -> bool {
+    let s = origin.trim().to_ascii_lowercase();
+    if s.starts_with("tauri://") || s.starts_with("file://") {
+        return true;
+    }
+    let host = normalize_origin(&s)
+        .and_then(|n| n.split("://").nth(1).map(str::to_string))
+        .unwrap_or_else(|| s.clone());
+    let host = host.trim_start_matches('[').trim_end_matches(']');
+    if host == "localhost" || host.ends_with(".localhost") {
+        return true;
+    }
+    let Ok(ip) = host.parse::<std::net::IpAddr>() else {
+        return false;
+    };
+    match ip {
+        std::net::IpAddr::V4(v4) => {
+            v4.is_loopback() || v4.is_private() || v4.is_link_local() || v4.is_unspecified()
+        }
+        std::net::IpAddr::V6(v6) => {
+            v6.is_loopback() || v6.is_unspecified() || (v6.segments()[0] & 0xfe00) == 0xfc00
+        }
+    }
+}
+
 /// 网段：IPv4 取前两段（/16），IPv6 取前两组。
 pub fn net_prefix(ip: &str) -> String {
     if ip.contains(':') {
@@ -581,10 +640,19 @@ pub(super) fn scan(
         let mut foreign: BTreeMap<i64, Hits> = BTreeMap::new();
         for row in rows {
             let (k, origin, n, first, last) = row?;
-            if !did_of.contains_key(&k)
-                || official.contains(&origin)
-                || KNOWN_ORIGINS.contains(&origin.as_str())
-            {
+            if !did_of.contains_key(&k) || is_local_origin(&origin) {
+                continue;
+            }
+            let Some(norm) = normalize_origin(&origin) else {
+                continue;
+            };
+            let official_match = official
+                .iter()
+                .any(|o| normalize_origin(o).as_deref() == Some(norm.as_str()))
+                || KNOWN_ORIGINS
+                    .iter()
+                    .any(|o| normalize_origin(o).as_deref() == Some(norm.as_str()));
+            if official_match {
                 continue;
             }
             let h = foreign.entry(k).or_default();
@@ -594,7 +662,7 @@ pub(super) fn scan(
             h.last = h.last.max(last);
             h.n += n as usize;
             if h.samples.len() < 5 {
-                h.samples.insert(format!("{origin} ×{n}"));
+                h.samples.insert(format!("{norm} ×{n}"));
             }
         }
         for (k, h) in &foreign {
@@ -722,6 +790,45 @@ mod tests {
         assert_eq!(
             got.keys().collect::<Vec<_>>(),
             [&("a".to_string(), "b".to_string())]
+        );
+    }
+    #[test]
+    fn origin_normalization_ignores_local_and_official_sources() {
+        // 本机反代 / 局域网 / 官方桌面端 webview：都没出本机，不算第三方
+        for local in [
+            "http://127.0.0.1:8000",
+            "http://localhost:11451",
+            "http://192.168.1.5:8000",
+            "http://10.0.0.2",
+            "http://172.20.0.3",
+            "http://[::1]:8000",
+            "tauri://localhost",
+            "http://tauri.localhost",
+            "file:///C:/app/index.html",
+            "https://foo.localhost",
+        ] {
+            assert!(is_local_origin(local), "{local} should be local");
+        }
+        // 真实第三方不能被放行
+        for foreign in [
+            "https://evil.example",
+            "https://novel.nekoprompt.top",
+            "http://203.0.113.9:8080",
+        ] {
+            assert!(!is_local_origin(foreign), "{foreign} should be foreign");
+        }
+        // 端口 / 大小写 / 路径归一
+        assert_eq!(
+            normalize_origin("HTTPS://NovelAI.net:443/path?q=1").as_deref(),
+            Some("https://novelai.net")
+        );
+        assert_eq!(
+            normalize_origin("http://127.0.0.1:8000").as_deref(),
+            Some("http://127.0.0.1")
+        );
+        assert_eq!(
+            normalize_origin("tauri://localhost").as_deref(),
+            Some("tauri://localhost")
         );
     }
 }

@@ -279,10 +279,45 @@ async fn errors_resolve_all(State(state): State<AppState>, _s: AdminSession) -> 
 
 // ----------------------------------------------------------------------------- 生成记录
 
+/// 列表里 `prompt` / `negative` 每个字段最多返回的字符数（Unicode 字符，不是字节）。
+/// 生成记录单条最大 ~15KB（提示词 + 负面 + extra），默认页 24 条约 78KB；列表页前端一屏只看得到
+/// 前几十个字，完整内容走 `?full=1`（详情）或导出。`extra` 不截断：它是 JSON，前端要解析角色提示词。
+const AUDIT_LIST_PROMPT_CHARS: usize = 200;
+
+/// 把列表里的大字段截断到 [`AUDIT_LIST_PROMPT_CHARS`] 个字符；有截断时在行对象末尾加
+/// `"truncated": true`（没截断的行不加，和旧响应逐字段兼容）。返回是否有截断。
+fn trim_audit_prompt(row: &mut Value) -> bool {
+    let Value::Object(m) = row else {
+        return false;
+    };
+    let mut truncated = false;
+    for field in ["prompt", "negative"] {
+        let Some(text) = m.get(field).and_then(Value::as_str) else {
+            continue;
+        };
+        if text.chars().count() <= AUDIT_LIST_PROMPT_CHARS {
+            continue;
+        }
+        let cut: String = text.chars().take(AUDIT_LIST_PROMPT_CHARS).collect();
+        m.insert(field.into(), Value::String(cut));
+        truncated = true;
+    }
+    if truncated {
+        m.insert("truncated".into(), Value::Bool(true));
+    }
+    truncated
+}
+
 async fn audit_list(State(state): State<AppState>, _s: AdminSession, q: AdminQuery) -> R {
     let key_id = q.get("key_id").map(str::to_string);
     let page = q.int("page", 1)?;
     let per_page = q.int("per_page", 24)?;
+    // 列表默认瘦身（截断提示词）；`?full=1` / `?full=true` 拿完整内容（后台详情/复制完整提示词用）
+    let full = match q.text("full") {
+        "" | "0" | "false" => false,
+        "1" | "true" => true,
+        _ => return Err(http(422, "full 只能是 true 或 false")),
+    };
     let st = state.clone();
     let per_page: i64 = if matches!(per_page, 24 | 48 | 96) {
         per_page
@@ -324,6 +359,12 @@ async fn audit_list(State(state): State<AppState>, _s: AdminSession, q: AdminQue
         // 页码超出（跳页太大、或保留期清掉了记录）：回到最后一页，和用量日志 / 操作日志一致
         page = pages;
         (rows, total) = fetch(page).await?;
+    }
+    // 列表默认只回提示词的前 200 字；完整内容走 `?full=1` / 导出
+    if !full {
+        for row in &mut rows {
+            trim_audit_prompt(row);
+        }
     }
     // 只有站长自己看：查看不记操作日志（站长 10-22），导出 / 清空这类改动照记
     Ok(ok_json(&json!({

@@ -213,6 +213,18 @@ pub async fn authenticate(state: &AppState, parts: &Parts, passive: bool) -> Res
 /// 「每位成员到网页登录一次」的开始时刻；没设或为 0 = 不要求。
 pub const WEB_LOGIN_SINCE_KEY: &str = "web_login_required_since";
 
+/// 这个成员现在是否会被「网页登录一次」闸门拦下。
+/// 首页用它显示提示；没绑 Discord 的 Key 不拦，返回 false。
+pub async fn requires_web_login(state: &AppState, discord_id: &str) -> bool {
+    if discord_id.is_empty() {
+        return false;
+    }
+    let Some(since) = web_login_required_since(state).await else {
+        return false;
+    };
+    !web_logged_in_since(state, discord_id, since).await
+}
+
 /// 开关值缓存多久（每次出图都要查，省掉一次读库；站长改了最多 15 秒生效）。
 const WEB_LOGIN_SETTING_TTL: Duration = Duration::from_secs(15);
 

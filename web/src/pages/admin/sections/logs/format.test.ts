@@ -24,8 +24,8 @@ describe("kindLabel", () => {
 
 describe("timing", () => {
   it("≥10 秒取整，等待不足 100ms 不显示", () => {
-    expect(timing(50, 4200)).toEqual({ gen: "4.2s", wait: "" });
-    expect(timing(12500, 15000)).toEqual({ gen: "15s", wait: "13s" });
+    expect(timing(50, 4200)).toEqual({ gen: "4.2 秒", wait: "" });
+    expect(timing(12500, 15000)).toEqual({ gen: "15 秒", wait: "13 秒" });
     expect(timing(0, 0)).toEqual({ gen: "", wait: "" });
   });
 });

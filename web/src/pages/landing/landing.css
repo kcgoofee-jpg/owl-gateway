@@ -724,3 +724,27 @@
     transform: none;
   }
 }
+
+/* 「网页登录一次」提示（只对会被闸门拦下的成员显示，比主内容窄一档） */
+.lp-gate {
+  max-width: 760px;
+  margin: 16px auto 0;
+  padding: 12px 16px;
+  border: 1px solid var(--warn, #b45309);
+  border-radius: var(--radius);
+  background: var(--warn-soft);
+  display: flex;
+  gap: 12px;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+}
+.lp-gate p {
+  margin: 0;
+  font-size: var(--fs-sm);
+}
+.lp-gate__actions {
+  display: flex;
+  gap: 8px;
+  flex-shrink: 0;
+}

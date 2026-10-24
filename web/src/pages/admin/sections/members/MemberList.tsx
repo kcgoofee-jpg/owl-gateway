@@ -1,7 +1,7 @@
 /** 成员列表：宽屏是粘表头的表格（可按列排序），窄屏变成卡片；点一行展开详情。 */
 import { ArrowDown, ArrowUp, ChevronDown, ChevronsUpDown } from "lucide-preact";
 import { type ComponentChildren, Fragment } from "preact";
-import { rel } from "../../../../lib/format";
+import { rel, withUnit } from "../../../../lib/format";
 import { Badge, Button, cx } from "../../../../ui";
 import { Avatar, TableWrap } from "../_kit";
 import { memberLabel, memberStatus, roleOf, type SortKey, userTags } from "./logic";
@@ -130,7 +130,8 @@ export function MemberList(props: Props) {
               <Status m={m} now={now} />
               <TodayBars m={m} />
               <p class="small muted">
-                近 7 天 {m.week.images} 张 · 累计 {m.total_images} 张 · 最近使用 {rel(m.last_used_at, now)}
+                近 7 天 {withUnit(m.week.images, "张")} · 累计 {withUnit(m.total_images, "张")} · 最近使用{" "}
+                {rel(m.last_used_at, now)}
               </p>
               {open && (
                 <div id={`mb-d-${m.id}`}>

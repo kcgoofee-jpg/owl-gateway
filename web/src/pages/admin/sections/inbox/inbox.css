@@ -1,9 +1,0 @@
-/* 来信页：底部的文字反馈折叠区（<details class="card inbox-fb">，默认收起）。
-   卡片外观来自 ui 的 .card，这里只管折叠头和展开后的内容间距。 */
-.inbox-fb summary {
-  cursor: pointer;
-  font-weight: 600;
-}
-.inbox-fb > .stack {
-  margin-top: var(--sp-3);
-}

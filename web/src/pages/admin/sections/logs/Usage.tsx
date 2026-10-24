@@ -2,7 +2,7 @@
 import { ChevronDown } from "lucide-preact";
 import { Fragment } from "preact";
 import { useEffect, useRef, useState } from "preact/hooks";
-import { fullTime, num } from "../../../../lib/format";
+import { fullTime, maskIp, num, withUnit } from "../../../../lib/format";
 import { Badge, Button, CopyField, cx, SearchSelect, Skeleton } from "../../../../ui";
 import { useAdmin } from "../../Admin";
 import { LoadError, TableWrap } from "../_kit";
@@ -68,7 +68,7 @@ function Timing(props: { l: UsageLog }) {
 function Cost(props: { l: UsageLog }) {
   const { l } = props;
   const parts = [
-    l.images ? <span class="nowrap">{l.images} 张</span> : null,
+    l.images ? <span class="nowrap">{withUnit(l.images, "张")}</span> : null,
     l.anlas ? <span class="nowrap">{+Number(l.anlas).toFixed(2)} Anlas</span> : null,
     l.unconfirmed_anlas > 0 ? (
       <Badge tone="warn" title="失败请求可能产生的费用，实际扣款尚未确认">
@@ -81,18 +81,41 @@ function Cost(props: { l: UsageLog }) {
   return <span class="lg-cost">{parts}</span>;
 }
 
+/**
+ * 来源 IP：默认只展示打码后的前两段（IPv4）/ 前两组（IPv6），点「显示」才展开完整 IP。
+ * 展开时本应记一条审计（谁看了完整 IP），但审计接口还没有，这里先不发请求；等后端加接口再接。
+ */
 function Ip(props: { l: UsageLog; onFilter: Filter }) {
   const ip = props.l.src;
+  const [shown, setShown] = useState(false);
   if (!ip) return <span class="muted">—</span>;
+  const masked = maskIp(ip);
+  // 库里本来就是打码值（旧数据是 103.151.*.*）：没有再可展开的完整 IP，只显示打码值
+  if (masked === ip) return <span class="mono lg-ip">{masked}</span>;
   return (
-    <button
-      type="button"
-      class="lg-link mono lg-ip"
-      title={`只看 ${ip}`}
-      onClick={() => props.onFilter({ ip, page: null })}
-    >
-      {ip}
-    </button>
+    <span class="lg-ipis">
+      {shown ? (
+        <button
+          type="button"
+          class="lg-link mono lg-ip"
+          title={`只看 ${ip}`}
+          onClick={() => props.onFilter({ ip, page: null })}
+        >
+          {ip}
+        </button>
+      ) : (
+        <span class="mono lg-ip">{masked}</span>
+      )}
+      <button
+        type="button"
+        class="lg-link lg-iptoggle"
+        aria-pressed={shown}
+        aria-label={`${shown ? "隐藏" : "显示"}第 ${props.l.id} 条请求的完整 IP`}
+        onClick={() => setShown((v) => !v)}
+      >
+        {shown ? "隐藏" : "显示"}
+      </button>
+    </span>
   );
 }
 

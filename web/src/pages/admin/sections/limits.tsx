@@ -1,6 +1,6 @@
 /** 额度与保护：每个数都是站长手动设的（10-23 起没有自动额度算法）；最后一张「记录」只显示。 */
 import { useMemo, useState } from "preact/hooks";
-import { fullTime } from "../../../lib/format";
+import { fullTime, withUnit } from "../../../lib/format";
 import { Card } from "../../../ui";
 import { act, useAdmin } from "../Admin";
 import { CardPending, SectionHead, TableWrap } from "./_kit";
@@ -188,15 +188,16 @@ function GuardCard() {
                     #{a.position}
                     {!a.usable ? "（不可用）" : a.full ? "（今日已满）" : ""}
                   </td>
-                  <td>{a.today} 张</td>
+                  <td>{withUnit(a.today, "张")}</td>
                   <td>{dash(a.cycle, " 秒")}</td>
                   <td>
                     {agoText(a.last_429, now)}
-                    {a.cooling ? `（冷却还剩 ${a.cooling} 秒）` : ""}
+                    {a.cooling ? `（冷却还剩 ${withUnit(a.cooling, "秒")}）` : ""}
                   </td>
                   <td>{a.locked_today ?? 0} 次</td>
                   <td>
-                    {a.waiting ?? 0} 张在等{typeof a.queue_cap === "number" ? `，最多 ${a.queue_cap}` : ""}
+                    {withUnit(a.waiting ?? 0, "张")}在等
+                    {typeof a.queue_cap === "number" ? `，最多 ${withUnit(a.queue_cap, "张")}` : ""}
                   </td>
                 </tr>
               ))}
@@ -204,7 +205,7 @@ function GuardCard() {
           </table>
         </TableWrap>
         <p class="muted small">
-          全站排队上限：{typeof data.queue_cap === "number" ? `${data.queue_cap} 张` : "不限"}
+          全站排队上限：{typeof data.queue_cap === "number" ? withUnit(data.queue_cap, "张") : "不限"}
         </p>
       </Card>
     </>
@@ -258,7 +259,7 @@ function RecordsCard() {
       <ul class="muted small">
         {data.manual.account_caps.map((c) => (
           <li key={`cap-${c.position}`}>
-            手动临时：账号 {c.position ?? "?"} 每天 {c.cap} 张，到 {fullTime(c.until)}
+            手动临时：账号 {c.position ?? "?"} 每天 {withUnit(c.cap, "张")}，到 {fullTime(c.until)}
           </li>
         ))}
         {data.manual.paid_v5.map((p) => (
@@ -275,7 +276,7 @@ function RecordsCard() {
 export default function Limits() {
   return (
     <Sect>
-      <SectionHead title="额度与保护" desc="这一页的数都是手动设的，没有自动算法；「记录」只显示" />
+      <SectionHead title="额度与保护" desc="这一页的数都是手动设的，没有自动算法。" />
       <QuotaCard />
       <GuardCard />
       <RecordsCard />

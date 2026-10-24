@@ -222,6 +222,9 @@ async fn list_keys(State(state): State<AppState>, _s: AdminSession) -> R {
     let st = &state;
     let rows = st.db.list_keys().await?;
     let today = st.day();
+    // 一次批量取回今日计数（以前逐把 get_counter：370 把 = 370 次串行读库）
+    let counters = st.db.counter_map(&today).await?;
+    let zero = Counter::default();
     let totals: HashMap<i64, i64> = st
         .db
         .generated_image_totals(None)
@@ -233,11 +236,11 @@ async fn list_keys(State(state): State<AppState>, _s: AdminSession) -> R {
     let mut out = Vec::with_capacity(rows.len());
     for r in &rows {
         let id = r.get("id").and_then(Value::as_i64).unwrap_or(0);
-        let c = st.db.get_counter(id, &today).await?;
+        let c = counters.get(&id).unwrap_or(&zero);
         let role = role_of(invite.contains(&id));
         out.push(key_json(
             r,
-            &c,
+            c,
             totals.get(&id).copied().unwrap_or(0),
             Some(role),
         ));
@@ -1040,8 +1043,92 @@ fn fnum(v: &Value) -> f64 {
     pyval::number_like(v).unwrap_or(0.0)
 }
 
+/// 站长点过「没问题」打的标签：24 小时内可确认的提醒不再算「要处理」。
+const ACK_TAG: &str = "已查看";
+const DAY_SECS: f64 = 86400.0;
+
+/// 与 `web/src/pages/admin/sections/members/logic.ts` 的 `acked` 一致。
+fn acked_24h(m: &Obj, now: f64) -> bool {
+    m.get("tags").and_then(Value::as_array).is_some_and(|tags| {
+        tags.iter().any(|t| {
+            t.get("tag").and_then(Value::as_str) == Some(ACK_TAG)
+                && now - t.get("ts").and_then(Value::as_f64).unwrap_or(0.0) < DAY_SECS
+        })
+    })
+}
+
+/// 「需要站长处理」：与 `web/src/pages/admin/sections/members/logic.ts` 的 `needsAttention` 同口径
+/// （两处要一起改）。bad（限流暂停中 / 已过期）点过「没问题」也不豁免；其余（3 天内到期、
+/// 自动标签刷屏、疑似/待查/观察标签、今日被重置 ≥2 次）在「已查看」后 24 小时内不算。
+/// 停用的 Key 前端列表不显示，也不计入。
+fn attention_needed(m: &Obj, now: f64) -> bool {
+    if !m.get("enabled").and_then(Value::as_bool).unwrap_or(false) {
+        return false;
+    }
+    let paused = m
+        .get("share")
+        .and_then(|s| s.get("paused_until"))
+        .and_then(Value::as_f64)
+        .is_some_and(|until| until > now);
+    let expires_at = m.get("expires_at").and_then(Value::as_f64);
+    let expired = expires_at.is_some_and(|at| at < now);
+    if paused || expired {
+        return true;
+    }
+    if acked_24h(m, now) {
+        return false;
+    }
+    // 3 天内到期
+    if expires_at.is_some_and(|at| at - now < 3.0 * DAY_SECS) {
+        return true;
+    }
+    // 自动标签：单纯客户端短时连点「请求过快」不升级；有备注或近 24h ≥ 50 次才要处理
+    let loud_auto_tag = m
+        .get("auto_tags")
+        .and_then(Value::as_array)
+        .is_some_and(|tags| {
+            tags.iter().any(|t| {
+                let tag = t.get("tag").and_then(Value::as_str).unwrap_or("");
+                let count = t.get("count").and_then(Value::as_i64).unwrap_or(0);
+                let noted = t
+                    .get("note")
+                    .and_then(Value::as_str)
+                    .is_some_and(|n| !n.is_empty());
+                tag != "请求过快" && (noted || count >= 50)
+            })
+        });
+    if loud_auto_tag {
+        return true;
+    }
+    // 站长手动打的「疑似 / 待查 / 观察」标签（「已查看」不算）
+    let flagged = m.get("tags").and_then(Value::as_array).is_some_and(|tags| {
+        tags.iter().any(|t| {
+            let tag = t.get("tag").and_then(Value::as_str).unwrap_or("");
+            tag != ACK_TAG && ["疑似", "待查", "观察"].iter().any(|w| tag.contains(w))
+        })
+    });
+    if flagged {
+        return true;
+    }
+    // 今天被手动重置额度 ≥ 2 次
+    m.get("reset_today")
+        .and_then(|r| r.get("count"))
+        .and_then(Value::as_i64)
+        .is_some_and(|n| n >= 2)
+}
+
 /// 每位成员（Key）的今日 / 近 7 天 / 累计用量，以及来源。
-async fn members(State(state): State<AppState>, _s: AdminSession) -> R {
+///
+/// `?filter=all|attention`（缺省 = `all`，完全旧行为）：`attention` 只返回需要站长处理的行，
+/// 同时给出 `total`（裁剪前成员行数）/ `attention`（需要处理的行数）/ `filter`（实际生效值）。
+/// 前端 `web/src/pages/admin/sections/members/logic.ts` 的 `needsAttention` 与本文件的
+/// [`attention_needed`] 是同一条口径，改一边要同时改另一边。
+async fn members(State(state): State<AppState>, _s: AdminSession, q: AdminQuery) -> R {
+    let filter = match q.text("filter") {
+        "" | "all" => "all",
+        "attention" => "attention",
+        _ => return Err(http(422, "filter 只能是 all 或 attention")),
+    };
     let st = state.clone();
     let now = st.now();
     let today = st.day();
@@ -1121,16 +1208,6 @@ async fn members(State(state): State<AppState>, _s: AdminSession) -> R {
         .into_iter()
         .map(|(k, images, v5, anlas, _tokens, requests)| (k, (images, v5, anlas, requests)))
         .collect();
-
-    // 生图速率：每人最近 24 小时逐小时成功生图数（前端画 24 根小时条；跨天的开头几格是昨天同时段）
-    let hour0 = (now / 3600.0).floor() as i64 * 3600 - 23 * 3600;
-    let mut rate_map: HashMap<i64, Vec<i64>> = HashMap::new();
-    for (key_id, bucket, n) in st.db.hourly_image_counts(hour0).await? {
-        let bars = rate_map.entry(key_id).or_insert_with(|| vec![0; 24]);
-        if (0..24).contains(&bucket) {
-            bars[bucket as usize] = n;
-        }
-    }
 
     let mut out: Vec<Obj> = Vec::new();
     for row in st.db.list_keys().await? {
@@ -1220,10 +1297,6 @@ async fn members(State(state): State<AppState>, _s: AdminSession) -> R {
         put(
             "auto_tags",
             Value::Array(auto_tags.get(&id).cloned().unwrap_or_default()),
-        );
-        put(
-            "hours24",
-            json!(rate_map.get(&id).cloned().unwrap_or_default()),
         );
         out.push(m);
     }
@@ -1349,26 +1422,27 @@ async fn members(State(state): State<AppState>, _s: AdminSession) -> R {
                     .cloned(),
             );
             head.insert("tags".into(), Value::Array(tags));
-            if other["hours24"].as_array().is_some_and(|a| !a.is_empty()) {
-                let zeros: Vec<Value> = vec![json!(0); 24];
-                let hv = head["hours24"]
-                    .as_array()
-                    .filter(|a| !a.is_empty())
-                    .cloned()
-                    .unwrap_or(zeros);
-                let merged_bars: Vec<Value> = hv
-                    .iter()
-                    .zip(other["hours24"].as_array().into_iter().flatten())
-                    .map(|(a, b)| num_add(&or0(a), &or0(b)))
-                    .collect();
-                head.insert("hours24".into(), Value::Array(merged_bars));
-            }
         }
         merged.push(head);
     }
     singles.extend(merged);
+    // 需要站长处理的行：口径与后台前端 logic.ts 的 needsAttention 一致（含「已查看」24 小时豁免；
+    // 停用的 Key 前端列表本来就不显示，也不计入）。`total` 是裁剪前的成员行数。
+    let total = singles.len();
+    let attention = singles.iter().filter(|m| attention_needed(m, now)).count();
+    let members: Vec<Obj> = if filter == "attention" {
+        singles
+            .into_iter()
+            .filter(|m| attention_needed(m, now))
+            .collect()
+    } else {
+        singles
+    };
     Ok(ok_json(&json!({
-        "members": singles,
+        "members": members,
         "inactivity_days": st.env.key_inactivity_delete_days,
+        "total": total,
+        "attention": attention,
+        "filter": filter,
     })))
 }

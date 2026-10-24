@@ -1,5 +1,5 @@
 /** 账号对比：每个上游账号最近 1 小时 / 24 小时的请求、上游错误，以及推算的 Anlas 余额与续费倒计时。 */
-import { fullTime } from "../../../../lib/format";
+import { fullTime, withUnit } from "../../../../lib/format";
 import { Badge, Card, Notice } from "../../../../ui";
 import { useAdmin } from "../../Admin";
 import { LoadError, Loading } from "../_kit";
@@ -32,7 +32,7 @@ function Account(props: { a: AccountStats }) {
           ["最近 1 小时", requestsText(a.w1h)],
           ["最近 24 小时", requestsText(a.w24h)],
           ["上游错误（24 小时）", upstreamErrorsText(a.w24h)],
-          ["今日出图", `${a.images_today} 张`],
+          ["今日出图", withUnit(a.images_today, "张")],
         ]}
       />
       {b ? (

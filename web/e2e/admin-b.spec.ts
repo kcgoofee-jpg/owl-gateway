@@ -173,17 +173,22 @@ test("额度与保护：全是手动表单 + 只读记录；没有算法说明",
   await page.getByRole("button", { name: "保存额度" }).click();
 });
 
-test("来信：问卷一页，反馈收进底部折叠区；旧地址换到问卷；没有 Discord 分区", async ({ page }) => {
+test("来信：问卷 / 文字反馈两个 tab；旧地址换到对应子页；没有 Discord 分区", async ({ page }) => {
   await visit(page, "inbox", "来信");
   // 侧栏 / ⌘K 落在分区根路径：换到问卷页
   await expect(page).toHaveURL(/\/admin\/inbox\/survey$/);
-  await expect(page.getByRole("navigation", { name: "来信类型" })).toHaveCount(0);
-  // 反馈不再有独立子页：折叠区标题带着总数，默认收起（收起时看不见导出按钮）
-  await expect(page.getByText(/文字反馈（\d+ 条）/)).toBeVisible();
-  await expect(page.getByRole("button", { name: /导出 CSV/ })).toHaveCount(0);
-  // 旧链接（/admin/inbox/feedback）也换到问卷页
+  const tabs = page.getByRole("navigation", { name: "来信类型" });
+  await expect(tabs.getByRole("link", { name: "问卷" })).toHaveAttribute("aria-current", "page");
+  // 文字反馈不再折在问卷页底部，而是第二个 tab
+  await tabs.getByRole("link", { name: /文字反馈/ }).click();
+  await expect(page).toHaveURL(/\/admin\/inbox\/feedback$/);
+  await expect(page.getByRole("columnheader")).toHaveText(["时间", "成员", "内容"]);
+  await expect(page.getByRole("button", { name: /导出 CSV/ })).toBeVisible();
+  // 旧链接（/admin/inbox/feedback、/admin/logs/feedback）都能落到反馈页
   await page.goto("/admin/inbox/feedback");
-  await expect(page).toHaveURL(/\/admin\/inbox\/survey$/);
+  await expect(page.getByRole("link", { name: /文字反馈/ })).toHaveAttribute("aria-current", "page");
+  await page.goto("/admin/logs/feedback");
+  await expect(page).toHaveURL(/\/admin\/inbox\/feedback$/);
   await expect(page.locator(".admin-nav__item", { hasText: "Discord" })).toHaveCount(0);
 });
 

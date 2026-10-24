@@ -287,7 +287,8 @@ async fn next_live(mut c: LiveConn) -> Option<(Result<Event, Infallible>, LiveCo
 /// 同样的看板数据，SSE 版（3.0 新增）：连上立刻推一条，之后每次内容变化推一条，15 秒无事件发保活注释。
 async fn public_live_stream(State(state): State<AppState>, req: Request) -> Response {
     let (parts, _) = req.into_parts();
-    let Some(slot) = state.live.open_stream(&state, StreamKind::Public) else {
+    let ip = crate::auth::client_ip(&parts, &state.env.forwarded_allow_ips);
+    let Some(slot) = state.live.open_stream(&state, StreamKind::Public, &ip) else {
         return too_many_streams();
     };
     let rx = match state.live.subscribe(&state).await {
@@ -462,7 +463,7 @@ async fn device_fp(State(state): State<AppState>, req: Request) -> Response {
         return no_content();
     }
     let ip = client_ip(&parts, &state.env.forwarded_allow_ips);
-    if !state.live.client_error_slot(&ip, state.now()) {
+    if !state.live.device_fp_slot(&ip, state.now()) {
         return no_content();
     }
     let raw = head_bytes(body, 8192).await;
@@ -740,10 +741,11 @@ async fn user_information(State(state): State<AppState>, req: Request) -> ApiRes
 // ------------------------------------------------------------------ 后台 SSE
 
 /// 后台 SSE 的最短推送间隔与保底心跳。页面把任何一条消息都当作「该刷新了」（admin/Admin.tsx 的 `onmessage = bump`），
-/// 所以：真有变化才推（且至少隔 2 秒，免得队列忙时每秒刷新所有分区）；没变化也每 15 秒推一条，
-/// 相当于一条 15 秒的心跳（日志 / Bug / 成员列表这些不在快照里的数据靠它更新）。
-const ADMIN_MIN_GAP: Duration = Duration::from_secs(2);
-const ADMIN_HEARTBEAT: Duration = Duration::from_secs(15);
+/// 所以：真有变化才推，且至少隔 15 秒——后台每次刷新会重拉成员/Key/角标（几百 KB），
+/// 2 秒一次在队列忙时等于持续打满 DB；15 秒对单人后台足够新。
+/// 没变化也每 30 秒推一条心跳（日志 / Bug / 成员列表这些不在快照里的数据靠它更新）。
+const ADMIN_MIN_GAP: Duration = Duration::from_secs(15);
+const ADMIN_HEARTBEAT: Duration = Duration::from_secs(30);
 const BADGE_TTL: Duration = Duration::from_secs(5);
 
 struct AdminConn {
@@ -810,7 +812,8 @@ async fn next_admin(mut c: AdminConn) -> Option<(Result<Event, Infallible>, Admi
 /// 后台实时事件：快照（与 /public/live 同一份，不含「我的排队」）+ 角标数字。需要后台会话。
 async fn admin_events(State(state): State<AppState>, _s: AdminSession, req: Request) -> Response {
     let (parts, _) = req.into_parts();
-    let Some(slot) = state.live.open_stream(&state, StreamKind::Admin) else {
+    let ip = crate::auth::client_ip(&parts, &state.env.forwarded_allow_ips);
+    let Some(slot) = state.live.open_stream(&state, StreamKind::Admin, &ip) else {
         return too_many_streams();
     };
     let rx = match state.live.subscribe(&state).await {
@@ -851,6 +854,10 @@ pub(super) async fn me_payload(
     let mut out = Map::new();
     out.insert("logged_in".into(), json!(true));
     out.insert("discord".into(), discord);
+    // 站长 10-24：「网页登录一次」闸门生效时，首页要能提示受影响成员，而不是等出图 403。
+    if crate::auth::requires_web_login(state, discord_id).await {
+        out.insert("requires_web_login".into(), json!(true));
+    }
     let Some(key) = key.filter(|k| k.enabled()) else {
         out.insert("has_key".into(), json!(false));
         return Ok(Value::Object(out));

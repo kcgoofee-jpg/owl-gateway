@@ -187,6 +187,14 @@ function Page({ store }: { store: Store }) {
   const [splash, setSplash] = useState(() => splashActive.value);
   const [surveyDismissed, setSurveyDismissed] = useState(false);
   const [surveyOpen, setSurveyOpen] = useState(false);
+  // 「网页登录一次」提示：只对会被拦的成员显示；关掉后本次浏览器会话不再打扰。
+  const [loginGateDismissed, setLoginGateDismissed] = useState(() => {
+    try {
+      return sessionStorage.getItem("owl-login-gate-dismissed") === "1";
+    } catch {
+      return false;
+    }
+  });
   useEffect(() => {
     if (member?.has_key && member.survey_done === false && !surveyDismissed) setSurveyOpen(true);
     if (!member?.has_key || member.survey_done) setSurveyOpen(false);
@@ -231,6 +239,30 @@ function Page({ store }: { store: Store }) {
         loginOpen={me !== undefined && !member}
         brandHref="/"
       />
+      {member?.has_key && member.requires_web_login && !loginGateDismissed && (
+        <div class="lp-gate" role="status">
+          <p>本站已要求每位成员在网页用 Discord 登录一次。你还没登录，现在出图会被 403。</p>
+          <div class="lp-gate__actions">
+            <a class="btn btn--primary btn--sm" href="/login">
+              用 Discord 登录
+            </a>
+            <button
+              type="button"
+              class="btn btn--ghost btn--sm"
+              onClick={() => {
+                setLoginGateDismissed(true);
+                try {
+                  sessionStorage.setItem("owl-login-gate-dismissed", "1");
+                } catch {
+                  /* 隐私模式：本次会话内仍记住 */
+                }
+              }}
+            >
+              知道了
+            </button>
+          </div>
+        </div>
+      )}
       <main class="lp-main">
         {me === undefined ? (
           <Loading />

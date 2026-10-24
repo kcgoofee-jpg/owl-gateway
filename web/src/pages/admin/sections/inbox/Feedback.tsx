@@ -1,5 +1,5 @@
 /** 成员反馈：Discord /反馈 弹窗收集的一段话。一条一行：时间 · 成员 · 内容，可按成员或内容搜索、导出 CSV。
- *  流量低：收在问卷页底部的一个折叠区里，默认收起；标题带上总数（来自 /admin/api/feedback）。 */
+ *  独立子页（/admin/inbox/feedback），不再藏在问卷页底部的折叠区里；tab 标签上带总数。 */
 import { Download } from "lucide-preact";
 import { useState } from "preact/hooks";
 import { fullTime } from "../../../../lib/format";
@@ -48,92 +48,89 @@ export function Feedback() {
   const { shown, more } = useShowMore(rows);
 
   return (
-    <details class="card inbox-fb">
-      <summary>文字反馈{data ? `（${items.length} 条）` : ""}</summary>
-      <div class="stack">
-        {error && !data ? (
-          <LoadError error={error} />
-        ) : !data ? (
-          <Skeleton h="240px" />
-        ) : (
-          <>
-            <div class="xa-toolbar">
-              <label class="field-inline">
-                <span class="field-inline__k">搜索</span>
-                <input
-                  class="input"
-                  type="search"
-                  placeholder="成员或内容"
-                  value={search}
-                  onInput={(e) => setSearch(e.currentTarget.value)}
-                />
-              </label>
-              <span class="spacer" />
-              <Button
-                disabled={exporting}
-                title="下载全部反馈（CSV）"
-                onClick={async () => {
-                  setExporting(true);
-                  await downloadFile("/admin/api/feedback/export", "owl-feedback.csv");
-                  setExporting(false);
-                }}
-              >
-                <Download size={15} aria-hidden="true" />
-                导出 CSV
-              </Button>
-            </div>
+    <div class="stack">
+      {error && !data ? (
+        <LoadError error={error} />
+      ) : !data ? (
+        <Skeleton h="240px" />
+      ) : (
+        <>
+          <div class="xa-toolbar">
+            <label class="field-inline">
+              <span class="field-inline__k">搜索</span>
+              <input
+                class="input"
+                type="search"
+                placeholder="成员或内容"
+                value={search}
+                onInput={(e) => setSearch(e.currentTarget.value)}
+              />
+            </label>
+            <span class="spacer" />
+            <Button
+              disabled={exporting}
+              title="下载全部反馈（CSV）"
+              onClick={async () => {
+                setExporting(true);
+                await downloadFile("/admin/api/feedback/export", "owl-feedback.csv");
+                setExporting(false);
+              }}
+            >
+              <Download size={15} aria-hidden="true" />
+              导出 CSV
+            </Button>
+          </div>
 
-            <div class="card lg-listcard">
-              {rows.length === 0 ? (
-                <Empty title={items.length ? "未找到符合条件的反馈" : "还没有反馈"}>
-                  {items.length ? "换个关键字试试。" : "成员在 Discord 里用 /反馈 写几句话后会出现在这里。"}
-                </Empty>
-              ) : narrow ? (
-                <ul class="lg-cards" aria-label="成员反馈">
-                  {shown.map((it) => (
-                    <li key={it.id} class="lg-card">
-                      <div class="lg-card__top">
-                        <b>
+          <div class="card lg-listcard">
+            {rows.length === 0 ? (
+              <Empty title={items.length ? "未找到符合条件的反馈" : "还没有反馈"}>
+                {items.length ? "换个关键字试试。" : "成员在 Discord 里用 /反馈 写几句话后会出现在这里。"}
+              </Empty>
+            ) : narrow ? (
+              <ul class="lg-cards" aria-label="成员反馈">
+                {shown.map((it) => (
+                  <li key={it.id} class="lg-card">
+                    <div class="lg-card__top">
+                      <b>
+                        <Who it={it} />
+                      </b>
+                      <span class="small muted">{fullTime(it.ts)}</span>
+                    </div>
+                    <Text it={it} />
+                  </li>
+                ))}
+              </ul>
+            ) : (
+              <TableWrap label="成员反馈">
+                <table class="table lg-table">
+                  <caption class="sr-only">成员反馈</caption>
+                  <thead>
+                    <tr>
+                      <th scope="col">时间</th>
+                      <th scope="col">成员</th>
+                      <th scope="col">内容</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {shown.map((it) => (
+                      <tr key={it.id}>
+                        <td class="nowrap">{fullTime(it.ts)}</td>
+                        <td>
                           <Who it={it} />
-                        </b>
-                        <span class="small muted">{fullTime(it.ts)}</span>
-                      </div>
-                      <Text it={it} />
-                    </li>
-                  ))}
-                </ul>
-              ) : (
-                <TableWrap label="成员反馈">
-                  <table class="table lg-table">
-                    <caption class="sr-only">成员反馈</caption>
-                    <thead>
-                      <tr>
-                        <th scope="col">时间</th>
-                        <th scope="col">成员</th>
-                        <th scope="col">内容</th>
+                        </td>
+                        <td class="lg-fbcell">
+                          <Text it={it} />
+                        </td>
                       </tr>
-                    </thead>
-                    <tbody>
-                      {shown.map((it) => (
-                        <tr key={it.id}>
-                          <td class="nowrap">{fullTime(it.ts)}</td>
-                          <td>
-                            <Who it={it} />
-                          </td>
-                          <td class="lg-fbcell">
-                            <Text it={it} />
-                          </td>
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
-                </TableWrap>
-              )}
-              {more}
-            </div>
-          </>
-        )}
-      </div>
-    </details>
+                    ))}
+                  </tbody>
+                </table>
+              </TableWrap>
+            )}
+            {more}
+          </div>
+        </>
+      )}
+    </div>
   );
 }

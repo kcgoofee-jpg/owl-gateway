@@ -5,6 +5,7 @@
 import { ChevronDown, Plus, Search } from "lucide-preact";
 import { useEffect, useMemo, useRef, useState } from "preact/hooks";
 import { useLocation } from "preact-iso";
+import { usedOf, withUnit } from "../../../lib/format";
 import { Button, Menu, toast } from "../../../ui";
 import { useAdmin } from "../Admin";
 import { ConfirmDialog, LoadError, Loading, SectionHead } from "./_kit";
@@ -38,7 +39,6 @@ import {
   ALL_FILTER,
   buildFilters,
   countFilter,
-  defaultFilter,
   findByKeyId,
   hasReason,
   matchesQuery,
@@ -75,7 +75,9 @@ export default function Members() {
   const bans = useAdmin<{ total: number }>("/admin/api/bans");
   const narrow = useMedia(NARROW);
 
-  const [filter, setFilter] = useState<string | null>(normalizeFilter(query.filter));
+  // 默认「全部成员」：不再默认落到「需要处理」把 368 人藏起来；要处理的人数在 chip 上提示。
+  // 老链接的 ?filter= 照旧生效（normalizeFilter 只做旧 id 的改名）。
+  const [filter, setFilter] = useState<string | null>(normalizeFilter(query.filter) ?? ALL_FILTER);
   const [reason, setReason] = useState<string | null>(null);
   const [search, setSearch] = useState("");
   const [sort, setSort] = useState<SortKey>("today");
@@ -98,10 +100,6 @@ export default function Members() {
   const filters = useMemo(() => buildFilters(now, idleDays), [now, idleDays]);
   const all = filters.chips;
 
-  // 第一次有数据：有要处理的人就直接看「需要处理」
-  useEffect(() => {
-    if (filter === null && rows.length) setFilter(defaultFilter(rows, now));
-  }, [filter, rows, now]);
   const activeId = all.some((f) => f.id === filter) ? (filter as string) : ALL_FILTER;
   const active = all.find((f) => f.id === activeId) ?? filters.chips[0];
   // 被拒原因是「24 小时被拒过」之内的第二层；原因随刷新消失（那 24 小时已过）时自动退回
@@ -180,6 +178,11 @@ export default function Members() {
       setSort(k);
       setDir("desc");
     }
+  };
+  const showAll = () => {
+    setFilter(ALL_FILTER);
+    setReason(null);
+    setLimit(PAGE);
   };
 
   /* ---------- 操作（对话框之外的，直接出 toast） ---------- */
@@ -494,6 +497,22 @@ export default function Members() {
               }}
             />
           </div>
+
+          {/* 明确告诉站长「现在是不是筛选态」：默认全部成员，筛选时屏幕上直接写清 2 / 370 */}
+          <p class="mb-scope small">
+            {rows.length === 0 ? (
+              "还没有成员"
+            ) : activeId === ALL_FILTER ? (
+              <>共 {withUnit(rows.length, "位")}成员</>
+            ) : (
+              <>
+                当前只显示「{active?.label ?? ""}」的 {usedOf(frozenList.length, rows.length)} 位
+                <button type="button" class="mb-scope__all" onClick={showAll}>
+                  查看全部
+                </button>
+              </>
+            )}
+          </p>
 
           {frozenList.length === 0 ? (
             <div class="card">

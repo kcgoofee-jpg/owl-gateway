@@ -600,7 +600,7 @@ test.describe("开屏", () => {
 
 /* 独立状态页（网关渲染）：和首页同一套顶栏、令牌、卡片 */
 test.describe("状态页", () => {
-  test("顶栏和首页一样；标题只给读屏；横幅 26px，「订阅更新」在横幅右边；两个组件在同一张卡片里", async ({
+  test("顶栏和首页一样；标题只给读屏；横幅 26px，订阅按钮在横幅右边；两个组件在同一张卡片里", async ({
     page,
   }) => {
     await page.setViewportSize({ width: 1280, height: 900 });
@@ -613,16 +613,16 @@ test.describe("状态页", () => {
     await expect(page.getByRole("heading", { level: 1, name: "服务状态" })).toHaveClass(/sr-only/);
     const strong = page.locator(".sp-banner strong");
     expect(await strong.evaluate((el) => getComputedStyle(el).fontSize)).toBe("26px");
-    const sub = page.locator(".sp-banner").getByRole("link", { name: "订阅更新" });
+    const sub = page.locator(".sp-banner .sp-sub");
     const [sb, tb] = [await sub.boundingBox(), await strong.boundingBox()];
     expect(sb && tb && sb.x > tb.x + tb.width).toBe(true);
     await expect(page.locator(".sp-comps .sp-comp")).toHaveCount(2);
-    await expect(page.locator(".sp-comps rect")).toHaveCount(180);
+    await expect(page.locator(".sp-comps rect")).toHaveCount(32);
     // 页面里没有内联 style（CSP 是 style-src 'self'）
     expect(await page.locator("[style]").count()).toBe(0);
   });
 
-  test("手机 375 / 320px：横幅标题和「订阅更新」同一行不重叠，组件名完整不截断", async ({ page }) => {
+  test("手机 375 / 320px：横幅标题和订阅按钮同一行不重叠，组件名完整不截断", async ({ page }) => {
     for (const width of [375, 320]) {
       await page.setViewportSize({ width, height: 800 });
       await page.goto("/status");
@@ -638,9 +638,9 @@ test.describe("状态页", () => {
         await strong.evaluate((el) => el.scrollWidth <= el.clientWidth + 1),
         `${width}px 标题不溢出`,
       ).toBe(true);
-      // 标题只有一行
+      // 站长 10-24：状态页标题在窄屏允许折成两行（按钮文案变长），但不能超过两行
       const lh = await strong.evaluate((el) => parseFloat(getComputedStyle(el).lineHeight));
-      expect(tb.height, `${width}px 标题一行`).toBeLessThan(lh * 1.5);
+      expect(tb.height, `${width}px 标题最多两行`).toBeLessThan(lh * 2.5);
       // 组件名不被省略号截断
       for (const name of await page.locator(".sp-name").all()) {
         expect(

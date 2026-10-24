@@ -10,6 +10,7 @@ use crate::session::{
 use crate::state::AppState;
 use axum::Router;
 use axum::extract::{Request, State};
+use axum::http::HeaderMap;
 use axum::response::Response;
 use axum::routing::{get, post, put};
 use gate_core::pyval::py_str;
@@ -108,13 +109,22 @@ async fn change_password(
     Ok(resp)
 }
 
-async fn logout(State(state): State<AppState>) -> Response {
+async fn logout(
+    _s: AdminSession,
+    State(state): State<AppState>,
+    headers: HeaderMap,
+) -> Result<Response, HttpError> {
+    // SameSite=Strict 的 Cookie 不会跟着跨站表单走，但浏览器仍会应用响应里的 Set-Cookie；
+    // 和改密码一样校验来源，避免被任意站点强制登出。
+    if !origin_ok(&state, &headers) {
+        return Err(HttpError::new(403, "来源校验失败"));
+    }
     let mut resp = ok_json(&json!({"ok": true}));
     resp.headers_mut().append(
         "set-cookie",
         delete_cookie_header(ADMIN_COOKIE, state.env.admin_cookie_secure, "strict", true),
     );
-    resp
+    Ok(resp)
 }
 
 async fn me(_s: AdminSession) -> Response {

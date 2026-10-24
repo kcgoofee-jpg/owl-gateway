@@ -258,3 +258,41 @@
     top: calc(56px + var(--sp-2));
   }
 }
+
+/* 鉴权探针失败 / 未知分区：仍然在后台壳里，只把内容区换成提示 */
+.admin-fail {
+  max-width: 560px;
+  margin: var(--sp-6) auto;
+  padding: var(--sp-6);
+  display: grid;
+  gap: var(--sp-3);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--surface);
+}
+.admin-fail h1 {
+  font-size: var(--fs-xl);
+}
+.admin-fail p {
+  color: var(--text-2);
+  font-size: var(--fs-sm);
+}
+.admin-fail code {
+  overflow-wrap: anywhere;
+}
+
+/* 长表单弹窗：header / footer 钉住，中间内容自己滚（900px 视口也能看到提交按钮）。
+   只作用于后台（.admin 下），landing 的问卷弹窗不受影响。 */
+.admin .dialog[open] {
+  display: flex;
+  flex-direction: column;
+}
+.admin .dialog__head,
+.admin .dialog__foot {
+  flex: 0 0 auto;
+}
+.admin .dialog__body {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow: auto;
+}

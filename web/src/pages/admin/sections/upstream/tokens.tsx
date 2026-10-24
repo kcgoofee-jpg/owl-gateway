@@ -2,6 +2,7 @@
 import { Ellipsis, Plus } from "lucide-preact";
 import { useId, useState } from "preact/hooks";
 import { ApiError, sendJSON } from "../../../../lib/api";
+import { usedOf, withUnit } from "../../../../lib/format";
 import { Badge, Button, Card, Dialog, Menu, Notice, toast } from "../../../../ui";
 import { act, tick } from "../../Admin";
 import { actOrError, ConfirmDialog, useBusy } from "../_kit";
@@ -183,9 +184,9 @@ function TokenCard(props: {
       </header>
       <Kv
         rows={[
-          ["今日生成", `${p.images_today} 张 · 失败 ${p.fails} 次`],
-          ["免费 V5", `今日已用 ${p.v5_used} / ${p.v5_daily_limit > 0 ? p.v5_daily_limit : "不限"}`],
-          ["在途", `${p.image_active} 张`],
+          ["今日生成", `${withUnit(p.images_today, "张")} · 失败 ${p.fails} 次`],
+          ["免费 V5", `今日已用 ${usedOf(p.v5_used, p.v5_daily_limit)}`],
+          ["在途", withUnit(p.image_active, "张")],
           ["Anlas", p.allow_anlas ? "允许消耗" : "禁止消耗"],
         ]}
       />

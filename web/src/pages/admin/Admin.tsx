@@ -315,6 +315,44 @@ function Login() {
   );
 }
 
+/**
+ * 鉴权探针失败（断网 / 5xx / 超时）：留在后台壳里给重试，**不要**当成「没登录」回登录页。
+ * 只有 401 才是真的掉登录（见 Admin() 的 catch）。
+ */
+function AdminDataError(props: { error: string | null; onRetry: () => void }) {
+  return (
+    <div class="admin-fail" role="alert">
+      <h1>后台数据读取失败</h1>
+      <p>网络或服务端暂时没有响应，登录状态没有变化。恢复后点「重试」即可，不用重新登录。</p>
+      {props.error && <p class="small muted">{props.error}</p>}
+      <div>
+        <Button variant="primary" onClick={props.onRetry}>
+          重试
+        </Button>
+      </div>
+    </div>
+  );
+}
+
+/** 未知的 /admin/* 路径：保留侧栏导航，不再静默渲染成员页。 */
+function NotFound() {
+  const { path, route } = useLocation();
+  return (
+    <div class="admin-fail">
+      <h1>页面不存在</h1>
+      <p>
+        没有 <code>{path}</code> 这个后台分区。
+      </p>
+      <p class="small muted">地址可能写错了，或者这个页面已经被删掉。旧地址会跳到新位置。</p>
+      <div>
+        <Button variant="primary" onClick={() => route("/admin/members")}>
+          回到成员页
+        </Button>
+      </div>
+    </div>
+  );
+}
+
 /* ---------------- 命令面板（⌘K / Ctrl+K） ---------------- */
 function CommandPalette(props: { open: boolean; onClose: () => void }) {
   const { route } = useLocation();
@@ -337,7 +375,7 @@ function CommandPalette(props: { open: boolean; onClose: () => void }) {
     const secs = SECTIONS.filter((s) => !needle || s.label.toLowerCase().includes(needle)).map((s) => ({
       key: `s:${s.id}`,
       label: s.label,
-      hint: "分区",
+      hint: "",
       go: () => route(s.path),
     }));
     const mem = needle
@@ -369,8 +407,9 @@ function CommandPalette(props: { open: boolean; onClose: () => void }) {
           <input
             ref={input}
             class="input"
-            placeholder="分区名、成员名、Discord ID、#Key 编号"
-            aria-label="搜索"
+            // 只承诺搜分区：成员 / Key 搜索还没做（结果里偶然出现成员不算数）
+            placeholder="搜索分区名"
+            aria-label="搜索分区"
             value={q}
             onInput={(e) => {
               setQ((e.target as HTMLInputElement).value);
@@ -402,7 +441,7 @@ function CommandPalette(props: { open: boolean; onClose: () => void }) {
               onClick={() => run(i)}
             >
               <span>{it.label}</span>
-              <span class="muted small">{it.hint}</span>
+              {it.hint && <span class="muted small">{it.hint}</span>}
             </button>
           ))}
           {!items.length && <p class="muted small cmdk__empty">没有匹配的结果</p>}
@@ -449,9 +488,14 @@ function Nav() {
   );
 }
 
-function Shell(props: { children: ComponentChildren }) {
+function Shell(props: { children: ComponentChildren; dataLive?: boolean }) {
+  const dataLive = props.dataLive ?? true;
   const [palette, setPalette] = useState(false);
-  useEffect(() => startTicker(), []);
+  // 鉴权探针还没成功时不要开轮询 / SSE：避免后台壳在错误态里继续打接口
+  useEffect(() => {
+    if (!dataLive) return;
+    return startTicker();
+  }, [dataLive]);
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === "k") {
@@ -521,34 +565,66 @@ function Shell(props: { children: ComponentChildren }) {
           </Button>
         </header>
         <main class="admin-content">
-          <SitepaidBanner />
+          {dataLive && <SitepaidBanner />}
           {props.children}
         </main>
       </div>
       <CommandPalette open={palette} onClose={() => setPalette(false)} />
-      <BadgePoller />
+      {dataLive && <BadgePoller />}
     </div>
   );
 }
 
 export function Admin() {
+  const [attempt, setAttempt] = useState(0);
+  const [authError, setAuthError] = useState<string | null>(null);
+  const [probing, setProbing] = useState(true);
+
   useEffect(() => {
+    let alive = true;
+    setProbing(true);
+    setAuthError(null);
     getJSON("/admin/api/me")
       .then(() => {
-        authed.value = true;
+        if (alive) authed.value = true;
       })
-      .catch(() => {
-        authed.value = false;
+      .catch((e: unknown) => {
+        if (!alive) return;
+        // 只有 401 才是真的没登录；断网 / 5xx 不能清掉已登录态
+        if (e instanceof ApiError && e.status === 401) authed.value = false;
+        else setAuthError(e instanceof Error ? e.message : String(e));
+      })
+      .finally(() => {
+        if (alive) setProbing(false);
       });
-  }, []);
-  if (authed.value === null) {
+    return () => {
+      alive = false;
+    };
+  }, [attempt]);
+
+  const retry = () => {
+    setAuthError(null);
+    setProbing(true);
+    setAttempt((n) => n + 1);
+  };
+
+  if (authed.value === false) return <Login />;
+  if (authed.value !== true) {
     return (
-      <main class="admin-login">
-        <Skeleton w="240px" h="24px" />
-      </main>
+      <LocationProvider>
+        <Shell dataLive={false}>
+          {probing ? (
+            <main class="admin-login">
+              <Skeleton w="240px" h="24px" />
+            </main>
+          ) : (
+            <AdminDataError error={authError} onRetry={retry} />
+          )}
+        </Shell>
+      </LocationProvider>
     );
   }
-  if (!authed.value) return <Login />;
+  const MembersView = SECTIONS[0]?.view as ComponentType;
   return (
     <LocationProvider>
       <Shell>
@@ -559,7 +635,10 @@ export function Admin() {
             <Route key={`${s.id}-sub`} path={`${s.path}/*`} component={s.view} />,
           ])}
           {/* 总览页 10-23 删除：/admin 直接是成员页 */}
-          <Route default component={SECTIONS[0]?.view as ComponentType} />
+          <Route key="root" path="/admin" component={MembersView} />
+          <Route key="root-slash" path="/admin/" component={MembersView} />
+          {/* 不认识的 /admin/*：404 视图，不再静默渲染成员页 */}
+          <Route default component={NotFound} />
         </Router>
       </Shell>
     </LocationProvider>

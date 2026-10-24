@@ -1,7 +1,7 @@
 /** 成员展开后的详情：一句话结论 → 待处理 → 额度与权限 / 资料 → 日常操作。今天的用量只在列表行里显示一次。 */
 import { ExternalLink, Plus } from "lucide-preact";
 import { useState } from "preact/hooks";
-import { dayOf, fullTime, rel } from "../../../../lib/format";
+import { dayOf, fullTime, rel, usedOf } from "../../../../lib/format";
 import { Badge, Button, copyText, Menu, toast } from "../../../../ui";
 import { FEATURES } from "../features";
 import {
@@ -97,7 +97,7 @@ export function MemberDetail(props: { m: MemberRow; now: number; act: DetailActi
   const anlasUsed = Math.round(u.anlas || 0);
   const anlas = !k.allow_anlas
     ? "关闭"
-    : `今天 ${anlasUsed} / ${k.daily_anlas > 0 ? Math.round(k.daily_anlas) : "不限"}`;
+    : `今天 ${usedOf(anlasUsed, k.daily_anlas > 0 ? Math.round(k.daily_anlas) : 0)}`;
   const feats = k.features ?? null;
 
   return (

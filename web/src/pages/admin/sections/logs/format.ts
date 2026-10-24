@@ -1,4 +1,5 @@
 /** 日志相关的显示格式化（纯函数）：模型短名、功能名、耗时。 */
+import { secondsText } from "../../../../lib/format";
 import { FEATURES, RETIRED } from "../features";
 
 /** 后端登记的定时任务 name → 标题（Bug 来源 `job:<name>` 用它翻译） */
@@ -58,10 +59,9 @@ export function shortModel(model: string | null | undefined): string {
   return base + (/curated/.test(m) ? " Curated" : "") + (/inpainting/.test(m) ? " 重绘" : "");
 }
 
-/** 耗时：生成 4.2s、等 12s（等待 < 100ms 不显示） */
+/** 耗时：生成 4.2 秒、等 12 秒（等待 < 100ms 不显示） */
 export function timing(waitMs: number, durMs: number): { gen: string; wait: string } {
-  const sec = (ms: number) => (ms >= 10000 ? `${Math.round(ms / 1000)}s` : `${(ms / 1000).toFixed(1)}s`);
-  return { gen: durMs ? sec(durMs) : "", wait: waitMs >= 100 ? sec(waitMs) : "" };
+  return { gen: durMs ? secondsText(durMs) : "", wait: waitMs >= 100 ? secondsText(waitMs) : "" };
 }
 
 /** Bug 来源 → 中文 */

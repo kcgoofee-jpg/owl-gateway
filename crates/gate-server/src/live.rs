@@ -573,17 +573,33 @@ impl StreamKind {
             StreamKind::Admin => 32,
         }
     }
+    /// 单个 IP 的上限：防止一个脚本把看板名额占满，让其他访客只能轮询。
+    fn per_ip_cap(self) -> usize {
+        match self {
+            StreamKind::Public => 20,
+            StreamKind::Admin => 8,
+        }
+    }
 }
 
 /// 一条 SSE 连接占的名额；连接结束（流被丢弃）时归还。
 pub struct StreamSlot {
     state: AppState,
     kind: StreamKind,
+    ip: String,
 }
 
 impl Drop for StreamSlot {
     fn drop(&mut self) {
         self.state.live.streams[self.kind.idx()].fetch_sub(1, Ordering::SeqCst);
+        if let Ok(mut map) = self.state.live.streams_ip.lock()
+            && let Some(n) = map.get_mut(&self.ip)
+        {
+            *n = n.saturating_sub(1);
+            if *n == 0 {
+                map.remove(&self.ip);
+            }
+        }
     }
 }
 
@@ -605,8 +621,12 @@ pub struct Hub {
     status: Cached<Value>,
     ticker: AtomicBool,
     streams: [AtomicUsize; 2],
+    /// 每个 IP 当前打开的 SSE 连接数（公开/后台共用同一个 IP 计数，上限按 kind 细分）。
+    streams_ip: Mutex<HashMap<String, usize>>,
     keepalive_ms: AtomicU64,
     client_err: Mutex<ClientErr>,
+    /// 设备指纹上报的独立预算：不能和脚本报错抢同一个桶（匿名可先打满让真错误丢失）。
+    device_fp: Mutex<ClientErr>,
 }
 
 impl Default for Hub {
@@ -624,8 +644,10 @@ impl Hub {
             status: tokio::sync::Mutex::new(None),
             ticker: AtomicBool::new(false),
             streams: [AtomicUsize::new(0), AtomicUsize::new(0)],
+            streams_ip: Mutex::new(HashMap::new()),
             keepalive_ms: AtomicU64::new(KEEPALIVE.as_millis() as u64),
             client_err: Mutex::new(ClientErr::default()),
+            device_fp: Mutex::new(ClientErr::default()),
         }
     }
 
@@ -728,16 +750,23 @@ impl Hub {
         });
     }
 
-    /// 占一个 SSE 名额；满了返回 None。
-    pub fn open_stream(&self, state: &AppState, kind: StreamKind) -> Option<StreamSlot> {
+    /// 占一个 SSE 名额；全站或单 IP 满了都返回 None。
+    pub fn open_stream(&self, state: &AppState, kind: StreamKind, ip: &str) -> Option<StreamSlot> {
+        let mut map = self.streams_ip.lock().expect("streams_ip");
+        let per_ip = map.get(ip).copied().unwrap_or(0);
+        if per_ip >= kind.per_ip_cap() {
+            return None;
+        }
         let n = self.streams[kind.idx()].fetch_add(1, Ordering::SeqCst);
         if n >= kind.cap() {
             self.streams[kind.idx()].fetch_sub(1, Ordering::SeqCst);
             return None;
         }
+        *map.entry(ip.to_string()).or_insert(0) += 1;
         Some(StreamSlot {
             state: state.clone(),
             kind,
+            ip: ip.to_string(),
         })
     }
 
@@ -774,6 +803,24 @@ impl Hub {
         true
     }
 
+    /// 设备指纹上报的限流：每 IP 每 10 分钟 10 条，全站每 10 分钟 200 条。
+    /// 和脚本报错分开计数；匿名请求不能通过打满 device-fp 把 /public/client-error 的预算吃掉。
+    pub fn device_fp_slot(&self, ip: &str, now: f64) -> bool {
+        let mut c = self.device_fp.lock().expect("device_fp");
+        if now - c.window > 600.0 {
+            *c = ClientErr {
+                window: now,
+                ..Default::default()
+            };
+        }
+        if c.total >= 200 || c.ip.get(ip).copied().unwrap_or(0) >= 10 {
+            return false;
+        }
+        c.total += 1;
+        *c.ip.entry(ip.to_string()).or_insert(0) += 1;
+        true
+    }
+
     /// 清掉所有缓存与限流计数（测试用：改了设置后马上要看到新值）。
     pub fn invalidate(&self) {
         self.tx.send_replace(None);
@@ -784,6 +831,7 @@ impl Hub {
             *s = None;
         }
         *self.client_err.lock().expect("client_err") = ClientErr::default();
+        *self.device_fp.lock().expect("device_fp") = ClientErr::default();
     }
 }
 
@@ -895,5 +943,25 @@ mod tests {
         }
         assert!(!hub.client_error_slot("198.51.100.99", 5001.0));
         assert!(hub.client_error_slot("198.51.100.99", 5601.1));
+    }
+
+    #[test]
+    fn device_fp_budget_is_independent_from_client_errors() {
+        let hub = Hub::new();
+        for ip in 0..10 {
+            for _ in 0..10 {
+                assert!(hub.client_error_slot(&format!("198.51.100.{ip}"), 1000.0));
+            }
+        }
+        assert!(
+            !hub.client_error_slot("203.0.113.10", 1001.0),
+            "client-error 全站 100 条已满"
+        );
+        // device-fp 有自己的桶，不会被 client-error 打满
+        for _ in 0..10 {
+            assert!(hub.device_fp_slot("203.0.113.9", 1000.0));
+        }
+        assert!(!hub.device_fp_slot("203.0.113.9", 1001.0));
+        assert!(hub.device_fp_slot("203.0.113.10", 1001.0));
     }
 }

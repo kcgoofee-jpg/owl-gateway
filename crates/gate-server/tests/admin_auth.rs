@@ -120,9 +120,23 @@ async fn login_session_and_action_log() {
         .await;
     assert_eq!(
         status,
-        200,
-        "logout 不校验来源（与旧版一致）: {}",
+        403,
+        "跨站 logout 必须拒绝: {}",
         String::from_utf8_lossy(&body)
+    );
+    // 同源 logout 仍然可用
+    let (status, headers, _) = Call::new("POST", "/admin/api/logout")
+        .header("host", "owl.example")
+        .header("origin", "https://owl.example")
+        .header("cookie", cookie.clone())
+        .send(&e.state)
+        .await;
+    assert_eq!(status, 200);
+    assert!(
+        headers["set-cookie"]
+            .to_str()
+            .unwrap()
+            .contains("Max-Age=0")
     );
 
     settle().await;

@@ -1379,19 +1379,19 @@ async fn admin_events_stream_snapshot_and_badges() {
         None => panic!("应该有保活"),
     }
 
-    // 真有变化（队列里多了一张图）才推，隔至少 2 秒
+    // 真有变化（队列里多了一张图）才推，隔至少 15 秒（后台每次刷新会重拉几页数据）
     let t0 = tokio::time::Instant::now();
     let now = e.state.now();
     e.state.guard.with(|g| g.admit_image(9, None, now));
     let second = sse
-        .next_data(Duration::from_secs(6))
+        .next_data(Duration::from_secs(20))
         .await
         .expect("变化后的事件");
     assert_eq!(
         second["live"]["queue"],
         json!({"waiting": 1, "running": 0, "full": false})
     );
-    assert!(t0.elapsed() < Duration::from_secs(6));
+    assert!(t0.elapsed() < Duration::from_secs(20));
 
     // 退出登录 / 改密码使会话失效：流结束，重连会拿到 401
     e.state
@@ -1582,4 +1582,56 @@ async fn landing_boot_escapes_markup() {
         boot["status"]["algo_notice"],
         "</script><script>alert(1)</script> & <b>"
     );
+}
+
+// ------------------------------------------------------------------ 404 分流
+
+/// 浏览器（Accept: text/html）拿到可读的 HTML 404；API / 客户端仍拿到原来的 JSON 文案。
+#[tokio::test]
+async fn browser_gets_html_404_but_clients_still_get_json() {
+    let e = setup(&[]).await;
+    let browser = "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8";
+
+    // 旧链接（/terms 已下线）：浏览器不再看到 JSON
+    let (status, headers, body) = raw(&e.state, "GET", "/terms", &[("accept", browser)], b"").await;
+    assert_eq!(status, 404);
+    assert_eq!(headers["content-type"], "text/html; charset=utf-8");
+    let html = String::from_utf8(body).unwrap();
+    assert!(html.contains("猫头鹰公益站"), "{html}");
+    assert!(html.contains(r#"href="/""#), "{html}");
+    assert!(html.contains(r#"href="/status""#), "{html}");
+    // CSP 与首页一致：不允许内联样式 / 脚本，所以 404 页用系统默认样式
+    assert!(
+        headers["content-security-policy"]
+            .to_str()
+            .unwrap()
+            .contains("style-src 'self'")
+    );
+    assert_eq!(headers["x-content-type-options"], "nosniff");
+    assert!(!html.contains(" style="), "404 页不应有 style 属性");
+    assert!(!html.contains("<style"), "404 页不应有 <style>");
+    assert!(!html.contains("<script"), "404 页不应有脚本");
+
+    // API / 客户端：保持 JSON 契约与中文提示
+    for (path, accept, hint) in [
+        ("/v1/models", "application/json", "不兼容 OpenAI 格式"),
+        ("/v1", "*/*", "不兼容 OpenAI 格式"),
+        (
+            "/ai/generate",
+            "application/json",
+            "文本生成和语音接口已停用",
+        ),
+        ("/nope", "application/json", "Not Found"),
+    ] {
+        let (status, headers, body) = raw(&e.state, "GET", path, &[("accept", accept)], b"").await;
+        assert_eq!(status, 404, "{path}");
+        assert_eq!(headers["content-type"], "application/json", "{path}");
+        let detail = gate_server::routes::not_found_message(path);
+        assert!(detail.contains(hint), "{path}: {detail}");
+        assert_eq!(
+            json_of(&body),
+            json!({"detail": detail}),
+            "{path} 的 JSON 文案不能变"
+        );
+    }
 }

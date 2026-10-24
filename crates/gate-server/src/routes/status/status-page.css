@@ -3,9 +3,12 @@
    文字与底色的对比度一律 >= 4.5:1（web/src/ui/tokens.test.ts 逐对检查）。 */
 
 /* ---------- 基础：沿用 web/src/ui/base.css，这里只写状态页和它不一样的地方 ---------- */
+/* 时间等辅助文字：muted 对 --bg / --surface 的对比度 5.7:1 以上（>= WCAG AA 4.5:1），
+   不用 opacity / 更浅的灰做层级；层级靠字号与字重。 */
 small {
   font-size: var(--fs-xs);
   color: var(--muted);
+  font-variant-numeric: tabular-nums;
 }
 
 /* ---------- 按钮 / 卡片（与 web/src/ui/components.css 一致） ---------- */
@@ -162,16 +165,31 @@ html[data-theme="dark"] .icon-btn .ic-sun {
 .sp-bars rect:hover {
   fill: var(--text-2);
 }
+.sp-bars rect:focus-visible {
+  outline: 2px solid var(--focus);
+  outline-offset: 1px;
+}
 .sp-legend {
   display: flex;
+  flex-wrap: wrap;
   justify-content: space-between;
   align-items: baseline;
   gap: var(--sp-2);
   font-size: var(--fs-sm);
-  color: var(--muted);
+  color: var(--text-2);
+}
+.sp-range {
+  font-variant-numeric: tabular-nums;
 }
 .sp-uptime {
   white-space: nowrap;
+}
+/* 色条图例（触屏没有 hover，色条本身看不懂时靠这一行） */
+.sp-bar-key {
+  margin: 0;
+  padding: var(--sp-3) 0 var(--sp-2);
+  border-top: 1px solid var(--border);
+  color: var(--text-2);
 }
 .sp-uptime b {
   font-size: var(--fs-lg);
@@ -197,6 +215,12 @@ html[data-theme="dark"] .icon-btn .ic-sun {
 .sp-inc {
   scroll-margin-top: 80px;
 }
+/* 合并事件里旧事件的锚点（不占高度，只用于深链接定位） */
+.sp-anchor {
+  display: block;
+  height: 0;
+  scroll-margin-top: 80px;
+}
 .sp-inc-title {
   font-size: var(--fs-lg);
   font-weight: 600;
@@ -204,6 +228,13 @@ html[data-theme="dark"] .icon-btn .ic-sun {
 }
 .sp-inc-title a {
   color: inherit;
+  /* 链接不只靠颜色区分（WCAG 1.4.1）：标题链接加下划线 */
+  text-decoration: underline;
+  text-decoration-thickness: 1px;
+  text-underline-offset: 3px;
+}
+.sp-inc-title a:hover {
+  text-decoration-thickness: 2px;
 }
 .sp-inc-title.warn {
   color: var(--warn);
@@ -218,6 +249,13 @@ html[data-theme="dark"] .icon-btn .ic-sun {
   margin: 0;
   padding: 0;
   list-style: none;
+}
+/* 合并后自动维护事件的一行摘要：共 N 次 · 起止（北京时间） */
+.sp-inc-meta {
+  color: var(--text-2);
+  font-size: var(--fs-sm);
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
 }
 .sp-updates li {
   display: grid;
@@ -237,7 +275,8 @@ html[data-theme="dark"] .icon-btn .ic-sun {
   padding: 2px 8px;
   border-radius: 999px;
   background: var(--surface-3);
-  color: var(--text-2);
+  /* --text 对 --surface-3 是 13:1；徽章是正文级文字，不用浅灰 */
+  color: var(--text);
   font-size: var(--fs-xs);
   font-weight: 600;
   white-space: nowrap;
@@ -245,6 +284,34 @@ html[data-theme="dark"] .icon-btn .ic-sun {
 .pill--ok {
   background: var(--ok-soft);
   color: var(--ok);
+}
+
+/* 最近 7 天之外的历史：原生 <details> 折叠（没有 JS 也能展开），不靠脚本 */
+.sp-older {
+  display: grid;
+  gap: var(--sp-6);
+}
+.sp-older > summary {
+  cursor: pointer;
+  padding: var(--sp-2) 0;
+  border-bottom: 1px solid var(--border);
+  color: var(--text);
+  font-size: var(--fs-md);
+  font-weight: 650;
+}
+
+/* 页脚：站内入口（首页 / 问卷）与事件状态词说明 */
+.sp-foot {
+  display: grid;
+  gap: var(--sp-2);
+  padding-top: var(--sp-6);
+  border-top: 1px solid var(--border);
+}
+.sp-foot-nav {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--sp-4);
+  font-size: var(--fs-sm);
 }
 
 /* 手机（≤ 480px）：横幅标题 20px、「订阅更新」小一号，两者保持一行；组件名里的域名换到第二行（小号灰字） */

@@ -132,13 +132,20 @@ fn respond(
     resp
 }
 
-/// 「订阅更新」= 公告频道（成员点开就是 Discord）；没配服务器和公告频道就退回 /status。
-fn subscribe_url(st: &AppState) -> String {
+/// 「加入 Discord 获取更新」的地址：
+/// 1. 站点邀请链接（`DISCORD_INVITE_URL`）——匿名可加入，是真邀请；
+/// 2. 没配邀请就退回公告频道（老行为）；
+/// 3. 都没有时 `None`（不放一个指回 `/status` 自己的假链接）。
+fn subscribe_url(st: &AppState) -> Option<String> {
+    let invite = st.env.discord_invite_url.trim();
+    if !invite.is_empty() {
+        return Some(invite.to_string());
+    }
     let (guild, chan) = (&st.env.discord_guild_id, &st.env.announce_channel_id);
     if !guild.is_empty() && !chan.is_empty() {
-        format!("https://discord.com/channels/{guild}/{chan}")
+        Some(format!("https://discord.com/channels/{guild}/{chan}"))
     } else {
-        "/status".to_string()
+        None
     }
 }
 
@@ -151,7 +158,8 @@ async fn status_page(
         css: &sh.css_href,
         js: &sh.js_href,
     };
-    let html = page::render(&snap, &st.clock, &subscribe_url(&st), &assets).into_string();
+    let subscribe = subscribe_url(&st);
+    let html = page::render(&snap, &st.clock, subscribe.as_deref(), &assets).into_string();
     Ok(respond(
         "text/html; charset=utf-8",
         html.into_bytes(),
@@ -312,5 +320,85 @@ mod tests {
         let bare = asset("text/css", CSS, &sh.css_v, None);
         assert_eq!(bare.headers()["cache-control"], "no-cache");
         assert_eq!(sh.css_href, format!("/_owl/status-page.css?v={}", sh.css_v));
+    }
+
+    /// 从设计令牌的一段（`:root {` 或 `:root[data-theme="dark"] {`）里取出颜色变量。
+    fn tokens(css: &str, marker: &str) -> std::collections::HashMap<String, String> {
+        let start = css.find(marker).unwrap_or_else(|| panic!("缺少 {marker}")) + marker.len();
+        let body = &css[start..];
+        let end = body.find('}').expect("令牌块没有结束");
+        body[..end]
+            .lines()
+            .filter_map(|line| {
+                let line = line.trim();
+                let (name, value) = line.strip_prefix("--")?.split_once(':')?;
+                let value = value.trim().trim_end_matches(';').trim();
+                value
+                    .starts_with('#')
+                    .then(|| (format!("--{}", name.trim()), value.to_string()))
+            })
+            .collect()
+    }
+
+    fn luminance(hex: &str) -> f64 {
+        let h = hex.trim_start_matches('#');
+        let channel = |i: usize| {
+            let c = u8::from_str_radix(&h[i..i + 2], 16).expect("颜色不是 #rrggbb") as f64 / 255.0;
+            if c <= 0.03928 {
+                c / 12.92
+            } else {
+                ((c + 0.055) / 1.055).powf(2.4)
+            }
+        };
+        0.2126 * channel(0) + 0.7152 * channel(2) + 0.0722 * channel(4)
+    }
+
+    fn contrast(a: &str, b: &str) -> f64 {
+        let (l1, l2) = {
+            let (x, y) = (luminance(a), luminance(b));
+            if x > y { (x, y) } else { (y, x) }
+        };
+        (l1 + 0.05) / (l2 + 0.05)
+    }
+
+    /// 状态页实际用到的「文字色 / 背景色」对，亮色与暗色都要 >= 4.5:1（WCAG AA 正文）。
+    /// axe 的 254 条 color-contrast 主要是 `.reveal` 的 `opacity: .4` + `blur(10px)` 造成的；
+    /// 这里把去掉 reveal 之后的令牌本身也锁住，避免以后换色又掉到 AA 以下。
+    #[test]
+    fn text_colors_meet_wcag_aa() {
+        let pairs = [
+            ("--text", "--bg"),             // 正文（事件标题、进展正文）
+            ("--text", "--surface"),        // 卡片里的正文
+            ("--text-2", "--surface"),      // 日期小标题 / 事件摘要
+            ("--text-2", "--surface-3"),    // 状态徽章（.pill）
+            ("--muted", "--bg"),            // 时间（small）/ 页脚
+            ("--muted", "--surface"),       // 卡片里的时间
+            ("--ok", "--ok-soft"),          // 「已解决」徽章
+            ("--ok", "--surface"),          // 组件状态「运行正常」
+            ("--warn", "--surface"),        // 性能下降 / minor 标题
+            ("--danger", "--surface"),      // 严重中断 / major 标题
+            ("--orange", "--surface"),      // 部分中断（色条第 2 档）
+            ("--accent-text", "--surface"), // 正文里的链接（页脚导航）
+        ];
+        let light = tokens(CSS, ":root {");
+        let dark = tokens(CSS, ":root[data-theme=\"dark\"] {");
+        for (scheme, map) in [("light", &light), ("dark", &dark)] {
+            for (fg, bg) in pairs {
+                let (f, b) = (
+                    map.get(fg).unwrap_or_else(|| panic!("{scheme} 缺少 {fg}")),
+                    map.get(bg).unwrap_or_else(|| panic!("{scheme} 缺少 {bg}")),
+                );
+                let ratio = contrast(f, b);
+                assert!(
+                    ratio >= 4.5,
+                    "{scheme}: {fg} on {bg} = {ratio:.2}:1，低于 WCAG AA 的 4.5:1"
+                );
+            }
+        }
+        // 事件链接要有下划线（不只靠颜色区分；正文里没有别的下划线链接）
+        assert!(CSS.contains(".sp-inc-title a"));
+        assert!(CSS.contains("text-decoration: underline"));
+        // 状态页自己不能再用 `.reveal`（web/src/ui/chrome.css 的 blur + opacity 低对比）
+        assert!(!CSS.contains(".sp-day.reveal"));
     }
 }

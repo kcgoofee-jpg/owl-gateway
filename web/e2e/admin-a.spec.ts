@@ -105,6 +105,44 @@ test.describe("已登录", () => {
     expect(errs).toEqual([]);
   });
 
+  test("未知后台路径：404 视图并保留侧栏导航，不再静默渲染成员页", async ({ page }) => {
+    await page.goto("/admin/nope");
+    await expect(page.getByRole("heading", { level: 1, name: "页面不存在" })).toBeVisible();
+    await expect(page.getByRole("navigation", { name: "后台导航" })).toBeVisible();
+    await expect(page.getByRole("button", { name: /展开.*的详情/ })).toHaveCount(0);
+    await page.getByRole("button", { name: "回到成员页" }).click();
+    await expect(page).toHaveURL(/\/admin\/members$/);
+    await expect(page.getByRole("button", { name: /展开.*的详情/ }).first()).toBeVisible();
+  });
+
+  test("鉴权探针网络失败：留在后台壳显示重试，不回登录页", async ({ page }) => {
+    await page.route("**/admin/api/me", (route) => route.abort());
+    await page.goto("/admin/members");
+    await expect(page.getByRole("heading", { level: 1, name: "后台数据读取失败" })).toBeVisible();
+    await expect(page.getByLabel("后台密码")).toHaveCount(0);
+    await expect(page.getByRole("navigation", { name: "后台导航" })).toBeVisible();
+    // 网络恢复后点「重试」：不用重新登录
+    await page.unroute("**/admin/api/me");
+    await page.getByRole("button", { name: "重试" }).click();
+    await expect(page.getByRole("heading", { level: 1, name: "成员" })).toBeVisible();
+  });
+
+  test("长表单弹窗：900px 视口下 footer 的提交按钮可见，内容区在框内滚动", async ({ page }) => {
+    await page.setViewportSize({ width: 1280, height: 900 });
+    await open(page, "/admin/members", PAGES[0]?.ready as never);
+    await page.getByRole("button", { name: "新建 Key" }).click();
+    const dlg = page.getByRole("dialog", { name: "新建 Key" });
+    await expect(dlg).toBeVisible();
+    await expect(dlg.getByRole("button", { name: "创建" })).toBeInViewport();
+    const layout = await dlg.evaluate((el) => ({
+      display: getComputedStyle(el).display,
+      bodyOverflow: getComputedStyle(el.querySelector(".dialog__body") as HTMLElement).overflowY,
+    }));
+    expect(layout.display).toBe("flex");
+    expect(layout.bodyOverflow).toBe("auto");
+    await page.keyboard.press("Escape");
+  });
+
   test("日志：成员可多选——打字过滤、勾选不关下拉、chips 展示与移除、一键导出", async ({ page }) => {
     await open(page, "/admin/audit/records", PAGES.find((x) => x.name === "logs-audit")?.ready as never);
     const box = page.getByRole("combobox", { name: "成员（可多选）" });
@@ -210,15 +248,23 @@ test.describe("已登录", () => {
     for (const name of [/^还没出过图 \d+$/, /^24 小时新加入 \d+$/, /^邀请 Key \d+$/])
       await expect(menu.getByRole("menuitem", { name })).toBeVisible();
 
-    // 默认：有要处理的人就看「需要处理」，没有就是「全部成员」；点「今日活跃」→ 高亮，再点 → 回到全部
+    // 默认：全部成员（不再默认藏到「需要处理」）；点「今日活跃」→ 高亮，再点 → 回到全部
     await page.keyboard.press("Escape");
     const today = b.getByRole("button", { name: /^今日活跃/ });
     const all = b.getByRole("button", { name: /^全部成员/ });
+    await expect(all).toHaveAttribute("aria-pressed", "true");
+    await expect(page.getByText(/^共 [\d,]+ 位成员$/)).toBeVisible();
     await today.click();
     await expect(today).toHaveAttribute("aria-pressed", "true");
     await expect(all).toHaveAttribute("aria-pressed", "false");
     await today.click();
     await expect(today).toHaveAttribute("aria-pressed", "false");
+    await expect(all).toHaveAttribute("aria-pressed", "true");
+
+    // 选中筛选时屏幕上明确写清「当前只显示 X / Y 位」，一键回全部
+    await b.getByRole("button", { name: /^需要处理/ }).click();
+    await expect(page.getByText(/当前只显示「需要处理」的 [\d,]+ \/ [\d,]+ 位/)).toBeVisible();
+    await page.getByRole("button", { name: "查看全部" }).click();
     await expect(all).toHaveAttribute("aria-pressed", "true");
 
     // 从「更多」里选：行末回显一颗可关闭的选中标签，点它 = 取消
@@ -530,16 +576,21 @@ test.describe("已登录", () => {
     expect(errs).toEqual([]);
   });
 
-  test("来信：文字反馈收进问卷页底部的折叠区，一条一行（时间 · 成员 · 内容），旧版选择题的记录显示成一行摘要，可搜索", async ({
+  test("来信：问卷 / 文字反馈是两个 tab，反馈一条一行、旧版选择题显示成一行摘要，可搜索", async ({
     page,
   }) => {
     const errs = watchConsole(page, "/admin/api/events");
     await open(page, "/admin/inbox/survey", PAGES[5]?.ready as never);
-    // 反馈默认收起，展开后是原来的表格
-    const fold = page.locator("details.inbox-fb");
-    await expect(fold.getByText(/文字反馈（\d+ 条）/)).toBeVisible();
-    await fold.locator("summary").click();
-    await expect(fold.getByRole("columnheader")).toHaveText(["时间", "成员", "内容"]);
+    // 分区根路径换到问卷页；来信有两个子页
+    await page.goto("/admin/inbox");
+    await expect(page).toHaveURL(/\/admin\/inbox\/survey$/);
+    const tabs = page.getByRole("navigation", { name: "来信类型" });
+    await expect(tabs.getByRole("link", { name: "问卷" })).toHaveAttribute("aria-current", "page");
+    // 日志页搬走的旧反馈地址直接落在文字反馈子页（不再折在问卷页底部）
+    await page.goto("/admin/logs/feedback");
+    await expect(page).toHaveURL(/\/admin\/inbox\/feedback$/);
+    await expect(tabs.getByRole("link", { name: /文字反馈/ })).toHaveAttribute("aria-current", "page");
+    await expect(page.getByRole("columnheader")).toHaveText(["时间", "成员", "内容"]);
     // 评价筛选和选择题统计已经去掉
     await expect(page.getByLabel("评价")).toHaveCount(0);
     await expect(page.getByText("好评满意率")).toHaveCount(0);
@@ -548,7 +599,7 @@ test.describe("已登录", () => {
     await expect(page.getByText(/^（旧版选择题）整体：满意；困扰：排队太久/)).toBeVisible();
     expect(await seriousViolations(page), "feedback").toEqual([]);
     // 按内容搜；换成找不到的关键字显示空状态
-    const box = fold.getByRole("searchbox", { name: "搜索" });
+    const box = page.getByRole("searchbox", { name: "搜索" });
     await box.fill("ComfyUI");
     await expect(page.getByText("教程写得很清楚")).toBeVisible();
     await expect(page.getByText("晚上八点左右排队有点久")).toHaveCount(0);
@@ -587,11 +638,18 @@ test.describe("已登录", () => {
     if (await exp.isVisible()) {
       await exp.click();
       await expect(page.locator(".lg-detail-row").first()).toContainText("上游账号");
-      const ipBtn = page.locator(".lg-ip").first();
-      if (await ipBtn.isVisible()) {
-        const ip = (await ipBtn.textContent()) ?? "";
-        await ipBtn.click();
-        await expect(page.getByRole("searchbox", { name: /^IP/ })).toHaveValue(ip);
+      // 来源 IP 默认打码，点「显示」才展开完整 IP；展开后仍能按 IP 筛
+      const ipCell = page
+        .locator(".lg-ipis")
+        .filter({ has: page.locator(".lg-iptoggle") })
+        .first();
+      if (await ipCell.isVisible()) {
+        await expect(ipCell.locator(".lg-ip")).toContainText("*");
+        await ipCell.getByRole("button", { name: /显示.*完整 IP/ }).click();
+        const fullIp = (await ipCell.locator(".lg-ip").textContent()) ?? "";
+        expect(fullIp).not.toContain("*");
+        await ipCell.locator(".lg-ip").click();
+        await expect(page.getByRole("searchbox", { name: /^IP/ })).toHaveValue(fullIp);
       }
     }
     await page.getByRole("link", { name: "Bug 追踪" }).click();

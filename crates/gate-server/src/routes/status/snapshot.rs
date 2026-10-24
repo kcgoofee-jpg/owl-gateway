@@ -21,9 +21,11 @@ pub const COMPONENTS: [(&str, &str); 4] = [
 pub const SHOWN: [&str; 2] = ["upstream", "api"];
 /// 维护循环每 5 分钟从 NovelAI 官方状态页取一次，存在这个设置里。
 pub const OFFICIAL_KEY: &str = "novelai_official_status";
-/// usage_log 第一条记录的日期：更早的日子是灰色「无数据」，不编造。
+/// usage_log 第一条记录的日期：状态页的色条从这天画起（更早没有数据，不画成一排灰条）。
 pub const TRACKING_START: &str = "2026-10-09";
 pub const DAYS: usize = 90;
+/// 状态页默认展开的历史天数；更早的天数折叠在 `<details>` 里（原生折叠，无 JS 也能用）。
+pub const RECENT_DAYS: usize = 7;
 pub const HISTORY_DAYS: usize = 15;
 /// 官方状态超过这么久没取到新的，就不再参考。
 const OFFICIAL_MAX_AGE: f64 = 3600.0;
@@ -254,6 +256,11 @@ pub fn build(clock: &Clock, now: f64, inputs: Inputs) -> Snapshot {
                 titles,
             });
         }
+        // 开始记录之前没有数据，不画成一排「灰色 = 故障」的条：从第一个有数据的日子画起。
+        // 数据起点由 `TRACKING_START` 决定，换起点不用改这里的日期算术。
+        if let Some(first_data) = days.iter().position(|d| d.level.is_some()) {
+            days.drain(..first_data);
+        }
         let mut now_level = incidents
             .iter()
             .filter(|i| i.resolved_at.is_none() && has_component(i, key))
@@ -409,17 +416,22 @@ mod tests {
     }
 
     #[test]
-    fn days_before_tracking_start_have_no_data() {
+    fn bars_begin_at_the_first_tracked_day() {
         let s = build(&clock(), NOW, inputs(vec![], UpstreamRecent::default()));
-        let api = &s.components[1];
-        assert_eq!(api.days.len(), DAYS);
-        assert_eq!(api.days[0].level, None);
-        assert_eq!(api.days[DAYS - 1].day, "2026-10-14");
-        assert_eq!(api.days[DAYS - 1].level, Some(0));
-        // 开始记录当天是第一个有数据的日子：2026-10-09
-        let first = api.days.iter().find(|d| d.level.is_some()).unwrap();
-        assert_eq!(first.day, TRACKING_START);
-        assert!(api.uptime.is_some());
+        // 2026-10-09 … 2026-10-14，共 6 天；开始记录之前的 84 天不画
+        assert_eq!(TRACKING_START, "2026-10-09");
+        assert_eq!(s.components[1].days.len(), 6);
+        assert_eq!(s.components[1].days[0].day, TRACKING_START);
+        assert_eq!(s.components[1].days[0].level, Some(0));
+        assert_eq!(s.components[1].days[5].day, "2026-10-14");
+        assert_eq!(s.components[1].days[5].level, Some(0));
+        // 一根「无数据」灰条都没有
+        assert!(
+            s.components
+                .iter()
+                .all(|c| c.days.iter().all(|d| d.level.is_some()))
+        );
+        assert!(s.components[1].uptime.is_some());
     }
 
     #[test]

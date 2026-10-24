@@ -1,5 +1,6 @@
 /** 告警渠道；生成记录的原图存储（清空原图，在「生成记录」页用）。 */
 import { useState } from "preact/hooks";
+import { withUnit } from "../../../../lib/format";
 import { Badge, Button, Card, Notice } from "../../../../ui";
 import { useAdmin } from "../../Admin";
 import { actOrError, ConfirmDialog } from "../_kit";
@@ -76,7 +77,7 @@ export function StorageCard() {
             "POST",
             "/admin/api/audit/purge-images",
             { confirm: "清空" },
-            (r) => `已清空 ${r.purged} 张原图`,
+            (r) => `已清空 ${withUnit(r.purged, "张原图")}`,
           )
         }
       >

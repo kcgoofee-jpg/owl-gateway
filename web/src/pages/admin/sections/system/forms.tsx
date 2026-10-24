@@ -288,7 +288,10 @@ export function SelectField(props: {
 }
 
 /* ---------------- 保存条 ---------------- */
-/** 卡片底部：一个「保存」，只在有改动且合法时可点；有改动时可「撤销修改」。 */
+/**
+ * 卡片底部：一个「保存」，只在有改动且合法时可点；有改动时可「撤销修改」。
+ * 没改动时不显示灰色说明（避免「暂无修改」与灰色按钮并存，让人以为能点）；按钮禁用本身就是状态。
+ */
 export function SaveBar(props: { form: Form; onSave: () => unknown; saving?: boolean; label?: string }) {
   const f = props.form;
   return (
@@ -305,13 +308,15 @@ export function SaveBar(props: { form: Form; onSave: () => unknown; saving?: boo
         {props.saving ? "保存中…" : (props.label ?? "保存")}
       </Button>
       {f.dirty && (
-        <Button variant="ghost" onClick={f.reset} disabled={props.saving}>
-          撤销修改
-        </Button>
+        <>
+          <Button variant="ghost" onClick={f.reset} disabled={props.saving}>
+            撤销修改
+          </Button>
+          <span class="savebar__state" role="status">
+            {f.valid ? `有 ${f.dirtyCount} 项未保存` : "有输入不合法，请先修改"}
+          </span>
+        </>
       )}
-      <span class="savebar__state" role="status">
-        {f.dirty ? (f.valid ? `有 ${f.dirtyCount} 项未保存` : "有输入不合法，请先修改") : "暂无修改"}
-      </span>
     </div>
   );
 }

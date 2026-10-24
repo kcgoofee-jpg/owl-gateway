@@ -46,7 +46,6 @@ export type Member = {
   reset_today: { count: number; last_ts: number } | null;
   tags: Tag[];
   auto_tags: AutoTag[];
-  hours24: number[];
   key_count: number;
   all_key_ids: number[];
 };
@@ -78,7 +77,18 @@ export type KeyRow = {
 /** 成员 + 对应的 Key 行（编辑与展示需要的字段分在两个接口里） */
 export type MemberRow = Member & { k?: KeyRow | undefined };
 
-export type MembersResp = { members: Member[]; inactivity_days: number };
+/**
+ * 成员列表响应。后端 `?filter=all|attention`（缺省 all = 全量，前端按 chip 在本地筛）：
+ * 传 attention 时 `members` 只剩需要处理的行，`total` / `attention` 是裁剪前的计数。
+ * 前端目前不传 filter（要全量做 chip 计数与搜索），只把这三个字段当可选契约留着。
+ */
+export type MembersResp = {
+  members: Member[];
+  inactivity_days: number;
+  total?: number;
+  attention?: number;
+  filter?: "all" | "attention";
+};
 export type KeysResp = { keys: KeyRow[] };
 
 export type Ban = {

@@ -1200,6 +1200,16 @@ async fn members_view_shape_and_dropped_fields() {
     assert_eq!(r.status, 200, "{}", r.text());
     let v = r.json();
     assert_eq!(v["inactivity_days"], 3);
+    // 裁剪前的成员行数与「需要处理」的行数：默认 all 时 members 本身不改
+    assert_eq!(
+        (
+            v["total"].clone(),
+            v["attention"].clone(),
+            v["filter"].clone()
+        ),
+        (json!(2), json!(1), json!("all")),
+        "乙被限流暂停（bad）要处理；默认 filter=all 保持旧行为"
+    );
     let m = &v["members"];
     // 没有 Discord 的在前，有 Discord 的在后
     assert_eq!(m[0]["name"], "测试成员");
@@ -1241,11 +1251,10 @@ async fn members_view_shape_and_dropped_fields() {
             "reset_today",
             "tags",
             "auto_tags",
-            "hours24",
             "key_count",
             "all_key_ids"
         ],
-        "3.0 已删除的 anlas_auto / anlas_mode / v5_pinned / last_client 不再返回（旧日志里的 client 也不露出来）"
+        "3.0 已删除的 anlas_auto / anlas_mode / v5_pinned / last_client 不再返回（旧日志里的 client 也不露出来）；hours24 前端 0 读取已删"
     );
     assert_eq!(m[1]["discord_id"], "900000000000000002");
     assert_eq!(m[1]["tags"][0]["tag"], "观察");
@@ -1257,23 +1266,158 @@ async fn members_view_shape_and_dropped_fields() {
             .map(|p| p > e.state.now()),
         Some(true)
     );
-    assert_eq!(m[1]["hours24"].as_array().unwrap().len(), 24);
-    assert_eq!(
-        m[1]["hours24"]
-            .as_array()
-            .unwrap()
-            .iter()
-            .map(|n| n.as_i64().unwrap())
-            .sum::<i64>(),
-        1
-    );
     assert_eq!(
         (m[1]["key_count"].clone(), m[1]["all_key_ids"].clone()),
         (json!(1), json!([k2]))
     );
-    // 没有活动的 Key：小时条为空数组，不是 24 个 0
-    assert_eq!(m[0]["hours24"], json!([]));
+    assert!(
+        m[0].get("hours24").is_none(),
+        "hours24 是前端 0 读取的重字段（每轮 13.9KB），已从成员列表删掉"
+    );
     assert_eq!(m[0]["share"], Value::Null);
+}
+
+/// `?filter=attention`：只回需要处理的行，`total`/`attention`/`filter` 三个键给出计数；
+/// 缺省（不带 filter）与 `filter=all` 保持旧行为（全量）。口径与后台前端 `needsAttention` 一致：
+/// 暂停中 / 已过期是 bad（点过「没问题」也豁免不了）；3 天内到期 / 疑似标签 / 今日重置 ≥2 是 need
+/// （「已查看」24 小时内不算）；停用的 Key 不计入；「请求过快」自动标签不升级为要处理。
+#[tokio::test]
+async fn members_filter_attention_trims_rows_and_counts() {
+    let (e, a) = ready().await;
+    let now = e.state.now();
+    let day = e.state.day();
+    let k2 = mk_key(&e.state, "快到期", "nai-t-2").await;
+    let k3 = mk_key(&e.state, "已过期", "nai-t-3").await;
+    let k4 = mk_key(&e.state, "停用", "nai-t-4").await;
+    let k5 = mk_key(&e.state, "疑似小号", "nai-t-5").await;
+    let k6 = mk_key(&e.state, "已查看", "nai-t-6").await;
+    let k7 = mk_key(&e.state, "请求过快", "nai-t-7").await;
+    let k8 = mk_key(&e.state, "角色太多", "nai-t-8").await;
+    let k9 = mk_key(&e.state, "重置两次", "nai-t-9").await;
+    a.sql(&format!(
+        "UPDATE api_keys SET expires_at={} WHERE id IN ({k2}, {k6});\
+         UPDATE api_keys SET expires_at={} WHERE id IN ({k3}, {k4});\
+         UPDATE api_keys SET enabled=0 WHERE id={k4};\
+         INSERT INTO usage_log(ts, key_id, key_name, kind, model, status, images, detail, client)\
+           WITH RECURSIVE n(i) AS (SELECT 1 UNION ALL SELECT i+1 FROM n WHERE i<60)\
+           SELECT {now} - 60.0, {k7}, 'x', 'image', 'm', 'rejected', 0, '请求过于频繁（每把 Key 每分钟最多 10 次）', '' FROM n;\
+         INSERT INTO usage_log(ts, key_id, key_name, kind, model, status, images, detail, client)\
+           WITH RECURSIVE n(i) AS (SELECT 1 UNION ALL SELECT i+1 FROM n WHERE i<60)\
+           SELECT {now} - 60.0, {k8}, 'x', 'image', 'm', 'rejected', 0, '角色太多（最多 6 个）', '' FROM n;\
+         INSERT INTO admin_actions(ts, actor, action, target, detail, ok) VALUES \
+           ({now} - 120.0, '站长', '重置今日额度', 'Key #{k9}', '', 1), \
+           ({now} - 60.0, '站长', '重置今日额度', 'Key #{k9}', '', 1);",
+        now + 2.0 * 86400.0,
+        now - 10.0
+    ))
+    .await;
+    // 「已查看」= 站长点过「没问题」：24 小时内 need 类提醒不算（快到期那条被豁免）
+    a.put(
+        &format!("{A}/keys/{k6}/tags"),
+        json!({"tag": "已查看", "note": ""}),
+    )
+    .await;
+    a.put(
+        &format!("{A}/keys/{k5}/tags"),
+        json!({"tag": "疑似小号", "note": "观察中"}),
+    )
+    .await;
+    // 当日计数：批量取回后每把 Key 的 used 仍然正确
+    a.sql(&format!(
+        "INSERT INTO counters(key_id, day, images, anlas, text_tokens, requests, v5, legacy_free_images) VALUES \
+         (1, '{day}', 2, 1.0, 0, 1, 1, 2);"
+    ))
+    .await;
+
+    let all = a.get(&format!("{A}/members")).await.json();
+    assert_eq!(
+        (
+            all["filter"].clone(),
+            all["total"].clone(),
+            all["attention"].clone()
+        ),
+        (json!("all"), json!(9), json!(5)),
+        "k2 快到期、k3 已过期、k5 疑似、k8 角色太多、k9 重置两次 → 5 个要处理"
+    );
+    assert_eq!(
+        all["members"].as_array().unwrap().len(),
+        9,
+        "缺省 filter 保持全量"
+    );
+    assert_eq!(
+        a.get(&format!("{A}/members?filter=all")).await.json()["members"]
+            .as_array()
+            .unwrap()
+            .len(),
+        9
+    );
+
+    let att = a.get(&format!("{A}/members?filter=attention")).await.json();
+    assert_eq!(
+        (
+            att["filter"].clone(),
+            att["total"].clone(),
+            att["attention"].clone()
+        ),
+        (json!("attention"), json!(9), json!(5)),
+        "attention 模式只裁 members，total/attention 仍是全量口径"
+    );
+    let names: Vec<&str> = att["members"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|m| m["name"].as_str().unwrap())
+        .collect();
+    assert_eq!(
+        names,
+        ["重置两次", "角色太多", "疑似小号", "已过期", "快到期"],
+        "id 倒序；停用的 k4、已查看的 k6、只有「请求过快」的 k7 不在里面"
+    );
+    assert_eq!(att["members"][0]["today"]["images"], 0);
+    assert_eq!(
+        all["members"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|m| m["id"] == 1)
+            .unwrap()["today"]["images"],
+        2,
+        "批量计数没串行/错位"
+    );
+
+    let bad = a.get(&format!("{A}/members?filter=bad")).await;
+    assert_eq!(bad.status, 422, "{}", bad.text());
+    assert_eq!(bad.json()["detail"], "filter 只能是 all 或 attention");
+}
+
+/// `/admin/api/keys` 的今日计数改成一次批量查询后，逐把 Key 的数字（含「重置额度」基线扣减）不变。
+#[tokio::test]
+async fn keys_list_uses_batched_counters_with_offsets() {
+    let (e, a) = ready().await;
+    let k2 = mk_key(&e.state, "乙", "nai-t-2").await;
+    let day = e.state.day();
+    a.sql(&format!(
+        "INSERT INTO counters(key_id, day, images, anlas, text_tokens, requests, v5, legacy_free_images) VALUES \
+         (1, '{day}', 3, 12.5, 7, 4, 2, 5), ({k2}, '{day}', 1, 2.0, 0, 1, 1, 1);\
+         INSERT INTO daily_quota_offsets(key_id, day, anlas, v5, legacy) VALUES (1, '{day}', 10.0, 2, 5);"
+    ))
+    .await;
+    let v = a.get(&format!("{A}/keys")).await.json();
+    let keys = v["keys"].as_array().unwrap();
+    let k1 = keys.iter().find(|k| k["id"] == 1).unwrap();
+    assert_eq!(
+        k1["used"],
+        json!({"images": 3, "generated_images_total": 0, "legacy_free_images": 0,
+               "anlas": 2.5, "v5": 0, "requests": 4}),
+        "重置过额度：Anlas / V5 / V4.5 都扣基线（12.5-10 / 2-2 / 5-5），图片数不扣"
+    );
+    let other = keys.iter().find(|k| k["id"] == k2).unwrap();
+    assert_eq!(
+        other["used"],
+        json!({"images": 1, "generated_images_total": 0, "legacy_free_images": 1,
+               "anlas": 2.0, "v5": 1, "requests": 1}),
+        "没有 offset 的 Key 原样返回"
+    );
 }
 
 #[tokio::test]

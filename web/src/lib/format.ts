@@ -69,6 +69,38 @@ export function duration(seconds: number): string {
 
 export const num = (n: number | null | undefined): string => (n == null ? "—" : n.toLocaleString("zh-CN"));
 
+/** 数量 + 单位：4 →「4 张」，1,500 →「1,500 张」；空值 →「—」。后台统一用它，避免「4张 / 4 张」混写。 */
+export const withUnit = (n: number | null | undefined, unit: string): string =>
+  n == null ? "—" : `${num(n)} ${unit}`;
+
+/** 「已用 / 上限」：4, 300 →「4 / 300」；上限 <= 0 →「4 / 不限」。 */
+export function usedOf(
+  used: number | null | undefined,
+  max: number | null | undefined,
+  unlimited = "不限",
+): string {
+  return `${num(used ?? 0)} / ${max && max > 0 ? num(max) : unlimited}`;
+}
+
+/** 毫秒 → 短耗时：「4.2 秒」「12 秒」；0 / 空 →「—」。 */
+export function secondsText(ms: number | null | undefined): string {
+  if (!ms) return "—";
+  return ms >= 10_000 ? `${Math.round(ms / 1000)} 秒` : `${(ms / 1000).toFixed(1)} 秒`;
+}
+
+/**
+ * IP 打码（后台默认展示）：IPv4 只留前两段「103.151.*.*」（与文档「来源打码」一致），
+ * IPv6 只留前两组；认不出的整体打码。要看完整 IP 必须在界面上点「显示」。
+ */
+export function maskIp(ip: string): string {
+  // 库里的 src 有两种：完整 IPv4，和旧代码已经打码的「103.151.*.*」——两种都收成同一个样子
+  const v4 = /^(\d{1,3})\.(\d{1,3})\.([\d*]{1,3})\.([\d*]{1,3})$/.exec(ip);
+  if (v4) return `${v4[1]}.${v4[2]}.*.*`;
+  const v6 = ip.split(":");
+  if (v6.length >= 2) return `${v6[0]}:${v6[1]}:*`;
+  return "*";
+}
+
 /** 券 / 重置范围的文字：`v45` → 「V4.5」，`v45,v5,anlas` → 「V4.5、V5、Anlas」（没写 = 只有 V4.5）。 */
 export function scopeText(scope?: string): string {
   const has = (k: string) => (scope ?? "v45").split(",").some((p) => p.trim() === k);

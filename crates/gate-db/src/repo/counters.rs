@@ -150,6 +150,50 @@ impl Db {
         .await
     }
 
+    /// 一次取回某个服务日**全部** Key 的计数（一次查询）。口径与 [`Db::get_counter`] 完全一致：
+    /// `anlas` / `v5` / `legacy_free_images` 都扣除当日「重置额度」基线，且不小于 0。
+    ///
+    /// 后台列表用：370 把 Key 逐把 `get_counter` 要 370 次读库（每几秒重拉一次），这里一条 SQL 全取回。
+    pub async fn counter_map(&self, day: &str) -> Result<std::collections::HashMap<i64, Counter>> {
+        let day = day.to_string();
+        self.read(move |c| {
+            let mut stmt = c.prepare(
+                "SELECT c.key_id, c.images, c.legacy_free_images, c.anlas, c.text_tokens, c.requests, c.v5, \
+                        COALESCE(o.anlas, 0) AS _quota_offset_anlas, \
+                        COALESCE(o.v5, 0) AS _quota_offset_v5, \
+                        COALESCE(o.legacy, 0) AS _quota_offset_legacy \
+                 FROM counters AS c \
+                 LEFT JOIN daily_quota_offsets AS o ON o.key_id=c.key_id AND o.day=c.day \
+                 WHERE c.day=?",
+            )?;
+            let rows = stmt.query_map(params![day], |row| {
+                let anlas = value::f64_or(row, "anlas", 0.0)?
+                    - value::f64_or(row, "_quota_offset_anlas", 0.0)?;
+                let v5 = value::i64_or(row, "v5", 0)? - value::i64_or(row, "_quota_offset_v5", 0)?;
+                let legacy = value::i64_or(row, "legacy_free_images", 0)?
+                    - value::i64_or(row, "_quota_offset_legacy", 0)?;
+                Ok((
+                    value::i64_or(row, "key_id", 0)?,
+                    Counter {
+                        images: value::i64_or(row, "images", 0)?,
+                        legacy_free_images: legacy.max(0),
+                        anlas: anlas.max(0.0),
+                        text_tokens: value::i64_or(row, "text_tokens", 0)?,
+                        requests: value::i64_or(row, "requests", 0)?,
+                        v5: v5.max(0),
+                    },
+                ))
+            })?;
+            let mut out = std::collections::HashMap::new();
+            for row in rows {
+                let (key_id, counter) = row?;
+                out.insert(key_id, counter);
+            }
+            Ok(out)
+        })
+        .await
+    }
+
     /// 重置单个 Key 当日的可用额度基线：V4.5 免费图一定重置，V5 / Anlas 按 `scope`；
     /// 保留原始记账用量，以重置时的累计量更新基线，没勾选的项保持原来的基线不动。
     /// 已删除的 Key 被触发器 `prevent_deleted_key_quota_reset` 静默忽略。

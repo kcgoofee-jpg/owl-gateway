@@ -6,6 +6,7 @@ import { ChevronLeft, ChevronRight } from "lucide-preact";
 import type { ComponentChildren } from "preact";
 import { useEffect, useId, useRef, useState } from "preact/hooks";
 import { ApiError } from "../../../../lib/api";
+import { usedOf } from "../../../../lib/format";
 import { Button, cx, toast } from "../../../../ui";
 import { useAdmin } from "../../Admin";
 import "./shared.css";
@@ -213,10 +214,7 @@ export function MiniBar(props: { label: string; used: number; max: number; tone?
           style={{ width: `${pct}%` }}
         />
       </span>
-      <span class="xa-minibar__n tabular">
-        {props.used}
-        <span class="muted"> / {props.max > 0 ? props.max : "不限"}</span>
-      </span>
+      <span class="xa-minibar__n tabular">{usedOf(props.used, props.max)}</span>
     </div>
   );
 }

@@ -549,8 +549,142 @@ async fn published_incident_shows_on_public_pages() {
     let (_, _, b) = get(&e, "/status").await;
     let html = text(&b);
     assert!(html.contains("出图接口请求超时") && html.contains("我们正在调查此问题。"));
-    assert!(html.contains("2026年10月14日 11:58 UTC+8"));
+    assert!(html.contains("2026年10月14日 11:58（北京时间）"));
     assert!(html.contains("部分中断"));
     // 有未解决事件时页首是事件条而不是「所有系统运行正常」
     assert!(!html.contains("所有系统运行正常"));
+}
+
+/// 同一天、同标题、非重大（minor / none）的自动维护事件合成一条，显示次数与起止；
+/// 人工重大事件（major / critical）单独保留。
+#[tokio::test]
+async fn same_day_routine_incidents_are_merged_on_page() {
+    let _g = clock(Some(NOW)).await;
+    let e = setup(&[]).await;
+    for (i, at) in [NOW - 3600.0, NOW - 3000.0, NOW - 2400.0]
+        .iter()
+        .enumerate()
+    {
+        e.state
+            .db
+            .create_incident(
+                "出图接口暂时无法访问",
+                "minor",
+                &["api".to_string()],
+                "resolved",
+                &format!("此事件已解决（第 {i} 次）。"),
+                *at,
+            )
+            .await
+            .unwrap();
+    }
+    e.state
+        .db
+        .create_incident(
+            "上游中断（人工事件）",
+            "major",
+            &["api".to_string()],
+            "resolved",
+            "此事件已解决。",
+            NOW - 1800.0,
+        )
+        .await
+        .unwrap();
+    let (_, _, b) = get(&e, "/status").await;
+    let html = text(&b);
+    // 三次自动维护事件只剩一张卡片（一条 sp-inc-link），人工重大事件单独一张
+    assert_eq!(
+        html.matches("class=\"sp-inc-link\"").count(),
+        2,
+        "同一天同标题应合并；页面高度不应再被重复事件撑开"
+    );
+    assert!(html.contains("共 3 次 · 11:00–11:20（北京时间）"), "{html}");
+    // 合并组只展示最新一条进展，不再重复三遍几乎相同的正文
+    assert!(!html.contains("第 0 次") && !html.contains("第 1 次"));
+    assert!(html.contains("第 2 次"));
+    // 被合并的旧事件保留锚点，旧深链接不会失效
+    assert!(html.contains("id=\"incident-1\"") && html.contains("id=\"incident-2\""));
+    // 人工重大事件保留完整卡片
+    assert!(html.contains("上游中断（人工事件）"));
+    // 状态页不再用 scroll-driven `.reveal`（blur + opacity 会让文字不可读、axe 判低对比）
+    assert!(!html.contains("reveal"), "不应有 .reveal");
+}
+
+/// 过去的事件按天分组；默认只展开最近 7 天，更早的收进原生 `<details>`（无 JS 也能展开）。
+#[tokio::test]
+async fn older_history_is_folded_into_details() {
+    let _g = clock(Some(NOW)).await;
+    let e = setup(&[]).await;
+    let (_, _, b) = get(&e, "/status").await;
+    let html = text(&b);
+    assert!(html.contains("<div class=\"sp-day\">"), "{html}");
+    // 15 天都按天分组，最近 7 天默认可见，另外 8 天在折叠里
+    assert_eq!(html.matches("class=\"sp-day\"").count(), 15);
+    assert!(html.contains("<details class=\"sp-older\">"));
+    assert!(html.contains("<summary>更早的事件（8 天）</summary>"));
+    // 今天的小标题带「（今天）」
+    assert!(html.contains("10月14日（今天）"));
+}
+
+/// 色条从第一个有数据的日子（2026-10-09）画起，不再是一排 75 天灰条；
+/// 图例给出可读的日期范围与颜色含义（触屏没有 hover，title 仍保留）。
+#[tokio::test]
+async fn bars_start_at_first_tracked_day_and_legend_is_readable() {
+    let _g = clock(Some(NOW)).await;
+    let e = setup(&[]).await;
+    let (_, _, b) = get(&e, "/status").await;
+    let html = text(&b);
+    // 2026-10-09 … 2026-10-14 共 6 根
+    assert!(html.contains("10月9日 – 10月14日"), "{html}");
+    let bars = html
+        .split("<div class=\"sp-bars\">")
+        .nth(1)
+        .unwrap()
+        .split("</svg>")
+        .next()
+        .unwrap();
+    assert_eq!(bars.matches("<rect").count(), 6, "只画有数据的 6 天");
+    // 触屏 / 读屏：整条色条有文字范围，每一天仍保留 title
+    assert!(bars.contains("10月9日 – 10月14日 的运行状态色条"));
+    assert!(bars.contains("<title>"));
+    assert!(bars.contains("<title>"));
+    // 颜色图例是可见文字
+    assert!(html.contains("绿色正常"));
+    // 不再出现「无数据」的灰条（开始记录之前的日子不画）
+    assert!(!bars.contains("无数据"));
+}
+
+/// 「加入 Discord 获取更新」优先用邀请链接（匿名可加入），没有邀请再用公告频道；
+/// 两者都没有时不放一个指回 /status 自己的假链接。
+#[tokio::test]
+async fn subscribe_prefers_discord_invite() {
+    let _g = clock(Some(NOW)).await;
+
+    let e = setup(&[
+        ("DISCORD_INVITE_URL", "https://discord.gg/owl"),
+        ("DISCORD_GUILD_ID", "1"),
+        ("ANNOUNCE_CHANNEL_ID", "2"),
+    ])
+    .await;
+    let (_, _, b) = get(&e, "/status").await;
+    let html = text(&b);
+    assert!(html.contains("加入 Discord 获取更新"));
+    assert!(
+        html.contains("href=\"https://discord.gg/owl\""),
+        "应优先用邀请链接"
+    );
+    assert!(!html.contains("discord.com/channels/"), "不要再用频道链接");
+
+    // 没配邀请：退回公告频道（老行为），文案也用新说法
+    let e = setup(&[("DISCORD_GUILD_ID", "1"), ("ANNOUNCE_CHANNEL_ID", "2")]).await;
+    let (_, _, b) = get(&e, "/status").await;
+    let html = text(&b);
+    assert!(html.contains("加入 Discord 获取更新"));
+    assert!(html.contains("href=\"https://discord.com/channels/1/2\""));
+
+    // 两个都没配：不放按钮
+    let e = setup(&[]).await;
+    let (_, _, b) = get(&e, "/status").await;
+    let html = text(&b);
+    assert!(!html.contains("class=\"btn sp-sub\""), "{html}");
 }
