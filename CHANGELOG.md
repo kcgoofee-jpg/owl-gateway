@@ -8,6 +8,8 @@
 
 ### 成员可感知
 
+- **One meter story on the homepage.** The guest status card now speaks a single dialect: both counters read today's output site-wide (the V4.5 row is the site total including V5, the V5 row the V5 share), with remaining amounts, caps and the reset hour moved into hover text. The shared site gauge returns with a slightly deeper bow and twice the stroke, and each row leads with its own small color bar so V5's blue sits right before its label instead of shrinking invisible at the arc's left end. Vertical rhythm tightened: the 104px gap before the guide tabs and the 92px gap before the gallery drop to 48/56px, and the status card's inner spacing is balanced. The gallery's standing tap-to-copy hint is gone (owner 10-24).
+
 - **A calmer type scale.** Interface text now steps through four sizes — 12 for auxiliary, 14 for body, 18 for headings, 26 for the first-screen headline — instead of six close values; nothing else about the layout changes. The 智绘姬 guide drops its error-code paragraph, which repeated the usage-rules tab verbatim.
 
 - **The survey page pins its footer; the gallery explains its tap shortcut.** Short `/survey` pages stretch to fill the viewport so the footer sits at the bottom instead of floating mid-page, and the homepage gallery carries a standing hint (点击图片复制提示词) so touch visitors can find tap-to-copy without hovering.
@@ -62,6 +64,8 @@
 - 登录回调的 state 改成带签名、10 分钟有效，Discord 内置浏览器丢了 Cookie 也能完成登录（此前日志里的 `state_ok=n`）。
 
 ### 站长 / 运维
+
+- **Admin: one role-gate card, one inbox page.** 领 Key 与功能 merges the primary role restriction and the extra-role list into a single 领 Key 门槛 card with one save button (the registration API already accepted both in one PUT); the field specs share one source. 来信 becomes a single survey page with the low-traffic feedback list folded into a collapsed section at the bottom; /admin/inbox and the old /admin/inbox/feedback path redirect to the survey page.
 
 - **Upstream snapshots record per account.** `upstream_snapshots` gains a `token_id` column and the hourly job now writes one row per upstream account (its own V5 percent, recharge rate and Anlas) instead of a single site-wide aggregate. The measured recovery estimate on the 额度记录 page is computed per account from its own snapshot series and its own V5 output, shown as 实测 next to 官方恢复. Old aggregate rows (empty token_id) stay for history and no longer feed the estimate.
 - **The members page slims down.** Sorting now lives only on the column headers (they already switch direction on click): the toolbar sort dropdown and its direction toggle are gone. Low-frequency filter chips（还没出过图 / 快被回收 / 24 小时新加入 / 邀请 Key）fold into a 更多 menu that echoes the selection as a closable chip. The audit section drops the 大图 view (the gallery plus its lightbox already cover it), and member detail keeps buttons for actions while the 生成记录 / 请求 jumps become plain links.

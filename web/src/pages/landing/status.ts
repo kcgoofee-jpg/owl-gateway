@@ -129,45 +129,46 @@ export function dailyUsage(live: Live | null): { total: Usage; v5: Usage } {
   };
 }
 
-export type MeterView = {
-  label: string;
+/** 首页状态卡仪表的一行。 */
+export type MeterRow = {
+  kind: "v45" | "v5";
+  /** 今日已出 */
   used: number;
+  /** 全站每日上限：两行同一个分母，条的长度可比；0 = 不限 */
   cap: number;
   paused?: boolean;
-  /** 暂停时的悬停说明和数字位置的短字（缺省是「V5 免费额度暂时用完」/「暂时用完」） */
+  /** 暂停原因的完整说明（进悬停提示） */
   hint?: string;
-  short?: string;
 };
 
 /** 站长手动暂停 V5 时的说明（首页仪表、成员页圆环共用） */
 export const V5_PAUSED_HINT = "V5 暂停，请使用 V4.5";
 
 /**
- * The two daily meters. A meter that is full switches to the next day's allowance (0 / cap, "明天 N 点起",
- * or "今天 N 点起" between midnight and the reset):
- * nothing more can happen today, so showing what comes next manages expectations better than a red bar.
+ * 首页状态卡的两行仪表，统一口径「今日已出」：V4.5 行是全站今天出的总数（含 V5），V5 行是其中的 V5。
+ * 两行都用全站日上限做分母；上限、剩余、重置时间由状态卡放进悬停提示，屏幕上只报已出数。
  */
 export function dailyMeters(
   live: Live | null,
   nowMs: number = Date.now(),
-): { total: MeterView; v5: MeterView } {
+): { rows: MeterRow[]; reset: string } {
   const u = dailyUsage(live);
   const r = nextReset(live?.guard?.blocked?.text ?? "", nowMs);
-  const pick = (x: Usage, today: string, next: string): MeterView =>
-    x.cap > 0 && x.used >= x.cap
-      ? { label: `${next}${r.word}可用（${r.word} ${r.hour} 点起）`, used: 0, cap: x.cap }
-      : { label: today, used: x.used, cap: x.cap };
-  const v5: MeterView = live?.quota?.v5_paused
-    ? {
-        label: "V5 暂停中",
-        used: u.v5.used,
-        cap: u.v5.cap,
-        paused: true,
-        hint: V5_PAUSED_HINT,
-        short: "暂停中",
-      }
+  const v5Hint = live?.quota?.v5_paused
+    ? V5_PAUSED_HINT
     : live?.quota?.upstream_v5_free === false
-      ? { label: "V5 暂时用完", used: u.v5.used, cap: u.v5.cap, paused: true }
-      : pick(u.v5, "V5 已用", "V5 ");
-  return { total: pick(u.total, "全站今日已用", "全站"), v5 };
+      ? "V5 暂时用完"
+      : undefined;
+  return {
+    rows: [
+      { kind: "v45", used: u.total.used, cap: u.total.cap },
+      {
+        kind: "v5",
+        used: u.v5.used,
+        cap: u.total.cap,
+        ...(v5Hint ? { paused: true as const, hint: v5Hint } : {}),
+      },
+    ],
+    reset: `${r.word} ${r.hour} 点`,
+  };
 }

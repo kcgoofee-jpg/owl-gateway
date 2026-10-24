@@ -25,9 +25,9 @@ it("loads only public official examples lazily without a referrer", () => {
   }
   expect(host.querySelector("#gallery")).not.toBeNull();
   expect(host.querySelector("h1, h2, h3, .lp-gallery__head, .lp-gallery__source-link")).toBeNull();
-  // 悬停 title 触屏上看不到：提示必须是常驻文字（触屏也能发现图片可点），不是只给读屏
-  expect(host.querySelector(".lp-gallery__hint")?.textContent).toBe("点击图片复制提示词");
-  expect(host.querySelectorAll(".lp-gallery > *")).toHaveLength(2);
+  // 常驻提示行已删：可点复制只靠图片自身的 title / aria-label
+  expect(host.querySelector(".lp-gallery__hint")).toBeNull();
+  expect(host.querySelectorAll(".lp-gallery > *")).toHaveLength(1);
 });
 
 it("keeps a usable source link when an external example fails", async () => {

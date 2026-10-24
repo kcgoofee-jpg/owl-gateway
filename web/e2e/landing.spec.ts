@@ -141,9 +141,9 @@ test.describe("游客", () => {
     await expect(page.getByRole("banner").getByRole("button", { name: /注入用户/ })).toBeVisible();
     // 圆环里是今天剩余的数（40 − 2 = 38），下面写总量
     await expect(page.locator(".lp-quota")).toContainText("V4.5：今天还剩 38，每天 40");
-    // 仪表写剩余张数：500 - 123 = 377，V5 60 - 9 = 51
-    await expect(page.locator(".lp-status")).toContainText("V4.5377张");
-    await expect(page.locator(".lp-status")).toContainText("V551张");
+    // 仪表统一口径「今日已出」：全站 123 张（其中 V5 9 张），上限和剩余都在悬停提示里
+    await expect(page.locator(".lp-status")).toContainText("V4.5123张");
+    await expect(page.locator(".lp-status")).toContainText("V59张");
     await expect(page.locator(".lp-status__text")).toHaveText("马上开始 · 通道空闲");
     expect(meRequests).toEqual([]);
   });
