@@ -336,13 +336,13 @@ test.describe("登录成员", () => {
     await expect(quota).not.toContainText("点重置");
     await expect(quota.locator(".ring-item")).toHaveCount(3);
     await expect(quota.locator(".ring-label b")).toHaveText(["V4.5", "V5", "Anlas"]);
-    // 环下面只有类型名（17px / 600），不再显示每天总量；类型名和圆环水平居中对齐
+    // 环下面只有类型名（18px / 600，字号四档制的标题档），不再显示每天总量；类型名和圆环水平居中对齐
     const label = quota.locator(".ring-label").first();
     expect(
       await label
         .locator("b")
         .evaluate((el) => [getComputedStyle(el).fontSize, getComputedStyle(el).fontWeight]),
-    ).toEqual(["17px", "600"]);
+    ).toEqual(["18px", "600"]);
     await expect(quota.locator(".ring-label span")).toHaveCount(0);
     for (const item of await quota.locator(".ring-item").all()) {
       const [ring, name] = await Promise.all([
