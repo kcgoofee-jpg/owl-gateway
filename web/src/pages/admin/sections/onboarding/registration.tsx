@@ -1,10 +1,9 @@
-/** 自助领 Key：开放开关、名额、有效期、新成员默认额度与功能、限定身份组。 */
+/** 自助领 Key：开放开关、名额、有效期、新成员默认额度与功能。谁能领 Key（身份组门槛）在下一张卡。 */
 import { useMemo, useState } from "preact/hooks";
 import { Badge, Button, Card, Meter, Notice, toast } from "../../../../ui";
 import { actOrError, ConfirmDialog } from "../_kit";
-import { NumField, SaveBar, SelectField, SwitchRow, TextField, useForm, withTone } from "../system/forms";
-import { FEATURE_PREFIX, type Ops, regBody, regServer, regSpecs, roleProblem } from "./core";
-import { ExtraRoles } from "./ExtraRoles";
+import { NumField, SaveBar, SelectField, SwitchRow, useForm, withTone } from "../system/forms";
+import { FEATURE_PREFIX, type Ops, regBody, regServer, regSpecs } from "./core";
 
 const URL = "/admin/api/ops/registration";
 
@@ -18,16 +17,11 @@ export default function RegistrationCard(props: { ops: Ops }) {
   const [saving, setSaving] = useState(false);
   const [toggleTo, setToggleTo] = useState<boolean | null>(null);
 
-  const roleErr = roleProblem(String(form.raw("role_guild")), String(form.raw("role_id")));
   const pct = r.max_users > 0 ? Math.min(100, (r.active / r.max_users) * 100) : 0;
   const customFeatures = form.raw("features_mode") === "custom";
 
   /** 保存就是保存（发成员公告 10-23 删除） */
   const save = async () => {
-    if (roleErr) {
-      toast(roleErr, { error: true });
-      return;
-    }
     const body = regBody(form.changes(), form.raw as (n: string) => string | boolean, names);
     setSaving(true);
     const err = await actOrError("PUT", URL, body, "领 Key 设置已保存");
@@ -74,21 +68,6 @@ export default function RegistrationCard(props: { ops: Ops }) {
             <NumField form={form} name="max_users" />
             <NumField form={form} name="expires_days" />
           </div>
-          <fieldset class="checks">
-            <legend class="form-section__title">限定身份组</legend>
-            <p class="muted small">只有在指定服务器里拥有指定身份组的人能领 Key；留空 = 不限定。</p>
-            <div class="form-grid">
-              <TextField form={form} name="role_guild" inputMode="numeric" />
-              <TextField form={form} name="role_id" inputMode="numeric" />
-              <TextField form={form} name="role_note" />
-            </div>
-            {roleErr && (form.isDirty("role_guild") || form.isDirty("role_id")) && (
-              <span class="field__error" role="alert">
-                {roleErr}
-              </span>
-            )}
-            <ExtraRoles server={r.role_extra ?? []} />
-          </fieldset>
 
           <fieldset class="checks">
             <legend class="form-section__title">新成员默认开通的功能</legend>

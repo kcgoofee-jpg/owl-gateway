@@ -3,6 +3,7 @@ import { useAdmin } from "../Admin";
 import { LoadError, Loading, SectionHead } from "./_kit";
 import type { Ops } from "./onboarding/core";
 import { FeaturesCard } from "./onboarding/features";
+import RoleGateCard from "./onboarding/RoleGate";
 import RegistrationCard from "./onboarding/registration";
 import { Sect } from "./system/forms";
 
@@ -16,6 +17,7 @@ export default function Onboarding() {
       {ops.data && (
         <>
           <RegistrationCard ops={ops.data} />
+          <RoleGateCard ops={ops.data} />
           <FeaturesCard ops={ops.data} />
         </>
       )}

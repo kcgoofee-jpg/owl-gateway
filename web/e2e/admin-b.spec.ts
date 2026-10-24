@@ -173,16 +173,17 @@ test("额度与保护：全是手动表单 + 只读记录；没有算法说明",
   await page.getByRole("button", { name: "保存额度" }).click();
 });
 
-test("来信：反馈和问卷两个子页；没有 Discord 分区", async ({ page }) => {
+test("来信：问卷一页，反馈收进底部折叠区；旧地址换到问卷；没有 Discord 分区", async ({ page }) => {
   await visit(page, "inbox", "来信");
-  await expect(page).toHaveURL(/\/admin\/inbox\/feedback$/);
-  for (const t of ["反馈", "问卷"])
-    await expect(
-      page.getByRole("navigation", { name: "来信类型" }).getByRole("link", { name: t, exact: true }),
-    ).toBeVisible();
-  await expect(
-    page.getByRole("navigation", { name: "来信类型" }).getByRole("link", { name: "专项问卷" }),
-  ).toHaveCount(0);
+  // 侧栏 / ⌘K 落在分区根路径：换到问卷页
+  await expect(page).toHaveURL(/\/admin\/inbox\/survey$/);
+  await expect(page.getByRole("navigation", { name: "来信类型" })).toHaveCount(0);
+  // 反馈不再有独立子页：折叠区标题带着总数，默认收起（收起时看不见导出按钮）
+  await expect(page.getByText(/文字反馈（\d+ 条）/)).toBeVisible();
+  await expect(page.getByRole("button", { name: /导出 CSV/ })).toHaveCount(0);
+  // 旧链接（/admin/inbox/feedback）也换到问卷页
+  await page.goto("/admin/inbox/feedback");
+  await expect(page).toHaveURL(/\/admin\/inbox\/survey$/);
   await expect(page.locator(".admin-nav__item", { hasText: "Discord" })).toHaveCount(0);
 });
 
@@ -216,28 +217,33 @@ test("领 Key 与功能：改有效期并保存", async ({ page }) => {
   await expect(page.getByRole("button", { name: "全站重置 Key" })).toHaveCount(0);
 });
 
-test("领 Key 与功能：额外身份组——添加一条、校验 ID、保存、刷新还在、删除后还原", async ({ page }) => {
+test("领 Key 与功能：领 Key 门槛一张卡——添加一条、校验 ID、一次保存、刷新还在、删除后还原", async ({
+  page,
+}) => {
   await visit(page, "onboarding", "领 Key 与功能");
-  await expect(page.getByText(/满足任意一个就能领 Key/)).toBeVisible();
-  await page.getByRole("button", { name: "添加一个身份组" }).click();
-  const guild = page.getByLabel("额外身份组 1 的服务器 ID");
-  const role = page.getByLabel("额外身份组 1 的身份组 ID");
+  // 主身份组和额外身份组合成一张卡、共用一个「保存」
+  const gate = page.getByRole("region", { name: "领 Key 门槛" });
+  await expect(gate.getByText(/满足任意一个即可，可来自不同服务器/)).toBeVisible();
+  await expect(gate.getByRole("button", { name: "保存", exact: true })).toBeDisabled();
+  await gate.getByRole("button", { name: "添加一个身份组" }).click();
+  const guild = gate.getByLabel("额外身份组 1 的服务器 ID");
+  const role = gate.getByLabel("额外身份组 1 的身份组 ID");
   await guild.fill("123");
   await role.fill("900000000000000333");
-  await expect(page.getByRole("alert").filter({ hasText: "第 1 条：服务器 ID" })).toBeVisible();
+  await expect(gate.getByRole("alert").filter({ hasText: "第 1 条：服务器 ID" })).toBeVisible();
   await guild.fill("900000000000000222");
-  await page.getByLabel("额外身份组 1 的显示名").fill("棱镜「创作者」");
-  await page.getByRole("button", { name: "保存额外身份组" }).click();
-  await expect(page.getByText("额外身份组已保存")).toBeVisible();
+  await gate.getByLabel("额外身份组 1 的显示名").fill("棱镜「创作者」");
+  await gate.getByRole("button", { name: "保存", exact: true }).click();
+  await expect(page.getByText("领 Key 门槛已保存")).toBeVisible();
   await page.reload();
-  await expect(page.getByLabel("额外身份组 1 的服务器 ID")).toHaveValue("900000000000000222");
-  await expect(page.getByLabel("额外身份组 1 的显示名")).toHaveValue("棱镜「创作者」");
+  await expect(gate.getByLabel("额外身份组 1 的服务器 ID")).toHaveValue("900000000000000222");
+  await expect(gate.getByLabel("额外身份组 1 的显示名")).toHaveValue("棱镜「创作者」");
   // 删掉并保存：回到没有额外身份组
-  await page.getByRole("button", { name: "删除额外身份组 1" }).click();
-  await page.getByRole("button", { name: "保存额外身份组" }).click();
-  await expect(page.getByText("额外身份组已保存").first()).toBeVisible();
+  await gate.getByRole("button", { name: "删除额外身份组 1" }).click();
+  await gate.getByRole("button", { name: "保存", exact: true }).click();
+  await expect(page.getByText("领 Key 门槛已保存").first()).toBeVisible();
   await page.reload();
-  await expect(page.getByLabel("额外身份组 1 的服务器 ID")).toHaveCount(0);
+  await expect(gate.getByLabel("额外身份组 1 的服务器 ID")).toHaveCount(0);
 });
 
 test("上游：令牌只显示掩码；没有并发设置；添加 Token 校验格式", async ({ page }) => {
@@ -299,14 +305,15 @@ test("领 Key 与功能：改名额直接保存；开放领 Key / 关功能要�
   await openDialog.getByRole("button", { name: "取消" }).click();
   await expect(openDialog).toBeHidden();
 
-  // 功能开关：关一项再保存，要确认；取消后撤销
-  const vibe = page.getByRole("switch", { name: /Vibe 编码/ });
+  // 功能开关：关一项再保存，要确认；取消后撤销（保存按钮按卡作用域取，中间插着「领 Key 门槛」卡）
+  const feats = page.getByRole("region", { name: "功能开关" });
+  const vibe = feats.getByRole("switch", { name: /Vibe 编码/ });
   const wasOn = (await vibe.getAttribute("aria-checked")) === "true";
   await vibe.click();
-  await page.getByRole("button", { name: "保存", exact: true }).nth(1).click();
+  await feats.getByRole("button", { name: "保存", exact: true }).click();
   const featDialog = page.getByRole("dialog", { name: "确认修改功能开关？" });
   await expect(featDialog).toBeVisible();
   await featDialog.getByRole("button", { name: "取消" }).click();
-  await page.getByRole("button", { name: "撤销修改" }).first().click();
+  await feats.getByRole("button", { name: "撤销修改" }).click();
   await expect(vibe).toHaveAttribute("aria-checked", String(wasOn));
 });

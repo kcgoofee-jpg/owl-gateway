@@ -48,9 +48,8 @@ export const ANLAS_FEATURES: Record<string, string> = {
 
 const DISCORD_ID = /^\d{15,21}$/;
 
-export const REG_BASE_SPECS: Record<string, FieldSpec> = {
-  max_users: { kind: "int", label: "名额上限", min: 0, max: 1000, unit: "人", hint: "0 = 不限" },
-  expires_days: { kind: "int", label: "Key 有效期", min: 0, max: 3650, unit: "天", hint: "0 = 永久" },
+/** 主身份组一行的规格：领 Key 门槛卡（RoleGate.tsx）单独摆这三个字段，注册表单也从这里展开 */
+export const ROLE_GATE_SPECS = {
   role_guild: {
     kind: "text",
     label: "服务器 ID",
@@ -71,6 +70,12 @@ export const REG_BASE_SPECS: Record<string, FieldSpec> = {
     max: 60,
     hint: "领取失败时告诉成员需要什么身份，例如「创作者」",
   },
+} satisfies Record<string, FieldSpec>;
+
+export const REG_BASE_SPECS: Record<string, FieldSpec> = {
+  max_users: { kind: "int", label: "名额上限", min: 0, max: 1000, unit: "人", hint: "0 = 不限" },
+  expires_days: { kind: "int", label: "Key 有效期", min: 0, max: 3650, unit: "天", hint: "0 = 永久" },
+  ...ROLE_GATE_SPECS,
   features_mode: {
     kind: "select",
     label: "新成员默认开通的功能",

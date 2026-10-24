@@ -3,7 +3,9 @@ import {
   extraChanged,
   extraRoleProblem,
   normalizeExtra,
+  REG_BASE_SPECS,
   type RegistrationInfo,
+  ROLE_GATE_SPECS,
   regBody,
   regServer,
   roleProblem,
@@ -60,6 +62,10 @@ describe("注册设置表单", () => {
     expect(roleProblem("123", "")).not.toBeNull();
     expect(roleProblem("", "")).toBeNull();
     expect(roleProblem("1", "2")).toBeNull();
+  });
+  it("门槛卡只摆主身份组一行，规格与注册表单同源", () => {
+    expect(Object.keys(ROLE_GATE_SPECS)).toEqual(["role_guild", "role_id", "role_note"]);
+    for (const [name, spec] of Object.entries(ROLE_GATE_SPECS)) expect(spec).toBe(REG_BASE_SPECS[name]);
   });
 });
 
