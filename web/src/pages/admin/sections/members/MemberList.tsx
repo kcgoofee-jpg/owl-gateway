@@ -150,7 +150,7 @@ export function MemberList(props: Props) {
         <caption class="sr-only">成员列表，点一行展开详情</caption>
         <thead>
           <tr>
-            {sortHead("name", "成员")}
+            <th scope="col">成员</th>
             {sortHead("today", "今日用量")}
             {sortHead("week", "近 7 天", "num")}
             {sortHead("total", "累计", "num")}

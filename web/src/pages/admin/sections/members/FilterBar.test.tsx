@@ -1,4 +1,5 @@
 import { render } from "preact";
+import { act } from "preact/test-utils";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { type Chip, FilterBar } from "./FilterBar";
 
@@ -7,6 +8,8 @@ const CHIPS: Chip[] = [
   { id: "today", label: "今日活跃", count: 87 },
   { id: "rejected", label: "24 小时被拒过", count: 48 },
   { id: "attention", label: "需要处理", count: 2, hot: true },
+  { id: "never", label: "还没出过图", count: 12 },
+  { id: "invite", label: "邀请 Key", count: 3 },
 ];
 const REASONS = [
   { tag: "请求过快", count: 8 },
@@ -42,24 +45,32 @@ const btn = (h: HTMLElement, text: string) => {
   if (!b) throw new Error(`没有「${text}」`);
   return b;
 };
+const bar = (h: HTMLElement) => h.querySelector("[aria-label='筛选成员']") as HTMLElement;
+const openMore = async (h: HTMLElement) => {
+  await act(async () => {
+    btn(h, "更多").click();
+  });
+  return h.querySelector("[role=menu]") as HTMLElement;
+};
 
 describe("FilterBar", () => {
-  it("每个标签 = 名称 + 人数，都是按钮，选中的 aria-pressed", () => {
+  it("一级只留四颗常用标签 + 「更多」，低频筛选不直接摆在横栏里", () => {
     const { host: h } = mount({ active: "today" });
-    expect(buttons(h).map((b) => b.textContent)).toEqual([
+    expect(buttons(bar(h)).map((b) => b.textContent)).toEqual([
       "全部成员238",
       "今日活跃87",
       "24 小时被拒过48",
       "需要处理2",
+      "更多",
     ]);
-    expect(buttons(h).map((b) => b.getAttribute("aria-pressed"))).toEqual([
-      "false",
-      "true",
-      "false",
-      "false",
-    ]);
+    expect(
+      buttons(bar(h))
+        .slice(0, 4)
+        .map((b) => b.getAttribute("aria-pressed")),
+    ).toEqual(["false", "true", "false", "false"]);
     expect(h.querySelector("select")).toBeNull();
-    expect(h.querySelector("[role=group]")?.getAttribute("aria-label")).toBe("筛选成员");
+    expect(bar(h).getAttribute("aria-label")).toBe("筛选成员");
+    expect(buttons(h).some((b) => /还没出过图|邀请 Key/.test(b.textContent ?? ""))).toBe(false);
   });
   it("点标签 = 把它的 id 交给上层（再点取消由上层处理）", () => {
     const { props, host: h } = mount({ active: "today" });
@@ -67,6 +78,28 @@ describe("FilterBar", () => {
     expect(props.onToggle).toHaveBeenCalledWith("today");
     btn(h, "24 小时被拒过").click();
     expect(props.onToggle).toHaveBeenLastCalledWith("rejected");
+  });
+  it("「更多」菜单里是低频筛选，带人数，点选 = 交给上层并收起菜单", async () => {
+    const { props, host: h } = mount();
+    const menu = await openMore(h);
+    expect([...menu.querySelectorAll("[role=menuitem]")].map((b) => b.textContent)).toEqual([
+      "还没出过图12",
+      "邀请 Key3",
+    ]);
+    await act(async () => {
+      (menu.querySelector("[role=menuitem]") as HTMLElement).click();
+    });
+    expect(props.onToggle).toHaveBeenCalledWith("never");
+    expect(h.querySelector("[role=menu]")).toBeNull();
+  });
+  it("选中的「更多」筛选在行末回显成可关闭的选中标签，点它 = 取消", () => {
+    const { props, host: h } = mount({ active: "never" });
+    const pick = btn(h, "还没出过图");
+    expect(pick.getAttribute("aria-pressed")).toBe("true");
+    expect(pick.textContent).toContain("×");
+    expect(buttons(bar(h)).indexOf(pick)).toBe(buttons(bar(h)).length - 1);
+    pick.click();
+    expect(props.onToggle).toHaveBeenCalledWith("never");
   });
   it("需要处理有人时人数标成醒目色，0 时不标", () => {
     const { host: h } = mount();
@@ -93,17 +126,18 @@ describe("FilterBar", () => {
     off.host.remove();
 
     const { host: h } = mount({ active: "rejected" });
-    const bar = h.querySelector("[aria-label='筛选成员']") as HTMLElement;
-    expect(buttons(bar).map((b) => b.textContent)).toEqual([
+    const b = bar(h);
+    expect(buttons(b).map((x) => x.textContent)).toEqual([
       "全部成员238",
       "今日活跃87",
       "24 小时被拒过48",
       "需要处理2",
+      "更多",
     ]);
     const row = h.querySelector("[aria-label='被拒原因']") as HTMLElement;
     expect(row.classList.contains("mb-reasons")).toBe(true);
-    expect(bar.contains(row)).toBe(false);
-    expect(buttons(row).map((b) => b.textContent)).toEqual(["请求过快8", "角色超 6 个4"]);
+    expect(b.contains(row)).toBe(false);
+    expect(buttons(row).map((x) => x.textContent)).toEqual(["请求过快8", "角色超 6 个4"]);
   });
   it("原因是第二层：点选 / 再点取消", () => {
     const { props, host: h } = mount({ active: "rejected" });
@@ -130,8 +164,10 @@ describe("FilterBar", () => {
     Element.prototype.scrollIntoView = orig;
     expect(spy).not.toHaveBeenCalled();
   });
-  it("没有「快被回收」标签（回收关闭）时横栏里就没有它", () => {
+  it("没有「快被回收」标签（回收关闭）时「更多」里也没有它", async () => {
     const { host: h } = mount();
     expect(buttons(h).some((b) => b.textContent?.includes("快被回收"))).toBe(false);
+    const menu = await openMore(h);
+    expect(menu.textContent).not.toContain("快被回收");
   });
 });

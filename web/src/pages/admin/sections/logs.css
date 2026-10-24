@@ -305,9 +305,6 @@
   gap: var(--sp-3);
   grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
 }
-.lg-gallery.is-large {
-  grid-template-columns: repeat(auto-fill, minmax(260px, 1fr));
-}
 .lg-tile {
   position: relative;
   display: grid;
@@ -503,9 +500,6 @@
   }
   .lg-gallery {
     grid-template-columns: repeat(auto-fill, minmax(120px, 1fr));
-  }
-  .lg-gallery.is-large {
-    grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
   }
 }
 

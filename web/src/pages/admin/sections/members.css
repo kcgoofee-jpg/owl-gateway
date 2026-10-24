@@ -42,10 +42,17 @@
   align-items: center;
   gap: var(--sp-2);
 }
-/* 筛选横栏：永远单行，放不下就横向滚动（不换行、不再分页签和下拉两处） */
+/* 筛选横栏：永远单行。滚的是左边标签那一段（放不下就横向滚动，不换行），「更多」和选中的回显标签钉在行尾 */
 .mb-bar {
   display: flex;
   flex-wrap: nowrap;
+  align-items: center;
+  gap: var(--sp-2);
+}
+.mb-bar__scroll {
+  display: flex;
+  flex: 0 1 auto;
+  min-width: 0;
   align-items: center;
   gap: var(--sp-2);
   overflow-x: auto;
@@ -108,6 +115,12 @@
 .mb-chip[aria-pressed="true"] .mb-n {
   background: var(--accent-soft);
   color: var(--accent-text);
+}
+/* 「更多」里选中的筛选回显成选中标签，行尾的 × 表示可关闭（再点整颗标签也取消） */
+.mb-chip .mb-x {
+  margin-right: -3px;
+  font-size: var(--fs-md);
+  line-height: 1;
 }
 .mb-n.is-hot {
   background: var(--warn-soft);

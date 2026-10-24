@@ -2,7 +2,7 @@
  * 成员：列表（今日 / 近 7 天 / 累计用量）、筛选搜索排序、展开详情与全部 Key 操作。
  * 支持 ?focus=<Key 编号>（⌘K 面板跳转到这里，滚动并高亮该成员）和 ?filter=<筛选 id>（总览的「成员要处理」）。
  */
-import { ArrowDown, ArrowUp, ChevronDown, Plus, Search } from "lucide-preact";
+import { ChevronDown, Plus, Search } from "lucide-preact";
 import { useEffect, useMemo, useRef, useState } from "preact/hooks";
 import { useLocation } from "preact-iso";
 import { Button, Menu, toast } from "../../../ui";
@@ -38,7 +38,6 @@ import {
   ALL_FILTER,
   buildFilters,
   countFilter,
-  defaultDir,
   defaultFilter,
   findByKeyId,
   hasReason,
@@ -48,7 +47,6 @@ import {
   normalizeFilter,
   REJECTED_FILTER,
   rejectReasons,
-  SORT_LABEL,
   type SortKey,
   sortMembers,
 } from "./members/logic";
@@ -180,7 +178,7 @@ export default function Members() {
     if (k === sort) setDir(dir === "asc" ? "desc" : "asc");
     else {
       setSort(k);
-      setDir(defaultDir(k));
+      setDir("desc");
     }
   };
 
@@ -214,8 +212,6 @@ export default function Members() {
     addTag: (m) => setDlg({ t: "tag", id: m.id }),
     removeTag: (m, tag) => quick(removeTag(m.id, tag), `已移除：${tag}`),
     coupon: (m) => setDlg({ t: "coupon", id: m.id }),
-    audit: (m) => loc.route(`/admin/audit/records?key=${m.all_key_ids.join(",")}`),
-    requests: (m) => loc.route(`/admin/logs/usage?key=${m.all_key_ids.join(",")}`),
     resetQuota: (m) => setDlg({ t: "reset", id: m.id }),
     disable: (m) => setDlg({ t: "disable", id: m.id }),
     regenerate: (m) => setDlg({ t: "regen", id: m.id }),
@@ -479,35 +475,6 @@ export default function Members() {
                   onInput={(e) => setSearch(e.currentTarget.value)}
                 />
               </label>
-              <div class="joined mb-sort">
-                <select
-                  class="select"
-                  aria-label="排序方式"
-                  value={sort}
-                  onChange={(e) => {
-                    setSort(e.currentTarget.value as SortKey);
-                    setDir(defaultDir(e.currentTarget.value as SortKey));
-                  }}
-                >
-                  {(Object.keys(SORT_LABEL) as SortKey[]).map((k) => (
-                    <option key={k} value={k}>
-                      按{SORT_LABEL[k]}
-                    </option>
-                  ))}
-                </select>
-                <Button
-                  icon
-                  aria-label={dir === "asc" ? "当前升序，点击改为降序" : "当前降序，点击改为升序"}
-                  title={dir === "asc" ? "升序" : "降序"}
-                  onClick={() => setDir(dir === "asc" ? "desc" : "asc")}
-                >
-                  {dir === "asc" ? (
-                    <ArrowUp size={16} aria-hidden="true" />
-                  ) : (
-                    <ArrowDown size={16} aria-hidden="true" />
-                  )}
-                </Button>
-              </div>
             </div>
             <FilterBar
               chips={chips}

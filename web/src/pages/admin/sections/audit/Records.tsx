@@ -1,4 +1,4 @@
-/** 生成记录：成员生成过的图（缩略图画廊 / 大图 / 列表）+ 提示词与参数，点开大图查看，可导出某成员的全部原图。 */
+/** 生成记录：成员生成过的图（缩略图画廊 / 列表）+ 提示词与参数，点开大图查看，可导出某成员的全部原图。 */
 import { ChevronLeft, ChevronRight, Download, ImageOff, X } from "lucide-preact";
 import { useEffect, useRef, useState } from "preact/hooks";
 import { fullTime, rel } from "../../../../lib/format";
@@ -26,10 +26,9 @@ import {
 } from "./auditData";
 
 const SIZES = [24, 48, 96];
-type View = "grid" | "large" | "list";
+type View = "grid" | "list";
 const VIEWS: Array<{ id: View; label: string }> = [
   { id: "grid", label: "画廊" },
-  { id: "large", label: "大图" },
   { id: "list", label: "列表" },
 ];
 
@@ -172,7 +171,7 @@ export function Audit() {
   const { query, set } = useQueryState();
   const page = intParam(query.page, 1);
   const per = intParam(query.per, 24, SIZES);
-  const view: View = query.view === "large" || query.view === "list" ? query.view : "grid";
+  const view: View = query.view === "list" ? "list" : "grid";
   // key 存的是「分号分隔的多个成员」，每个成员本身可能是「逗号分隔的多把 Key」：如 "1,2;5"
   const sel = /^\d+(,\d+)*(;\d+(,\d+)*)*$/.test(query.key ?? "") ? (query.key as string) : "";
   const selValues = sel ? sel.split(";") : []; // 每项是一个成员的 key_ids 串
@@ -384,7 +383,7 @@ export function Audit() {
               })}
             </ul>
           ) : (
-            <ul class={cx("lg-gallery", view === "large" && "is-large")} aria-label="生成记录">
+            <ul class="lg-gallery" aria-label="生成记录">
               {items.map((it, i) => {
                 const pic = hasPicture(it);
                 return (

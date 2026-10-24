@@ -196,7 +196,7 @@ test.describe("已登录", () => {
   }
   const bar = (page: Page) => page.getByRole("group", { name: "筛选成员" });
 
-  test("成员：筛选是一条横栏——标签带人数、点选高亮、再点取消，没有下拉", async ({ page }) => {
+  test("成员：筛选是一条横栏——一级四颗常用标签，低频的收进「更多」菜单", async ({ page }) => {
     const errs = watchConsole(page, "/admin/api/events");
     await open(page, "/admin/members", PAGES[0]?.ready as never);
     const b = bar(page);
@@ -205,18 +205,18 @@ test.describe("已登录", () => {
     // 已下线的筛选不在
     for (const gone of [/身份组/, /后台手动建/, /站长 \/ 测试/])
       await expect(b.getByRole("button", { name: gone })).toHaveCount(0);
-    for (const name of [
-      /^全部成员 \d+$/,
-      /^今日活跃 \d+$/,
-      /^还没出过图 \d+$/,
-      /^24 小时新加入 \d+$/,
-      /^24 小时被拒过 \d+$/,
-      /^邀请 Key \d+$/,
-      /^需要处理 \d+$/,
-    ])
+    for (const name of [/^全部成员 \d+$/, /^今日活跃 \d+$/, /^24 小时被拒过 \d+$/, /^需要处理 \d+$/])
       await expect(b.getByRole("button", { name })).toBeVisible();
+    // 低频筛选不直接摆在横栏里，收在「更多」菜单（带人数）
+    for (const gone of [/还没出过图/, /24 小时新加入/, /邀请 Key/])
+      await expect(b.getByRole("button", { name: gone })).toHaveCount(0);
+    await b.getByRole("button", { name: "更多" }).click();
+    const menu = page.getByRole("menu");
+    for (const name of [/^还没出过图 \d+$/, /^24 小时新加入 \d+$/, /^邀请 Key \d+$/])
+      await expect(menu.getByRole("menuitem", { name })).toBeVisible();
 
     // 默认：有要处理的人就看「需要处理」，没有就是「全部成员」；点「今日活跃」→ 高亮，再点 → 回到全部
+    await page.keyboard.press("Escape");
     const today = b.getByRole("button", { name: /^今日活跃/ });
     const all = b.getByRole("button", { name: /^全部成员/ });
     await today.click();
@@ -226,10 +226,19 @@ test.describe("已登录", () => {
     await expect(today).toHaveAttribute("aria-pressed", "false");
     await expect(all).toHaveAttribute("aria-pressed", "true");
 
+    // 从「更多」里选：行末回显一颗可关闭的选中标签，点它 = 取消
+    await b.getByRole("button", { name: "更多" }).click();
+    await menu.getByRole("menuitem", { name: /^还没出过图/ }).click();
+    const pick = b.getByRole("button", { name: /^还没出过图/ });
+    await expect(pick).toBeVisible();
+    await expect(pick).toHaveAttribute("aria-pressed", "true");
+    await pick.click();
+    await expect(pick).toHaveCount(0);
+
     // 键盘：Tab 到标签、空格 / 回车切换
-    await b.getByRole("button", { name: /^还没出过图/ }).focus();
+    await today.focus();
     await page.keyboard.press("Enter");
-    await expect(b.getByRole("button", { name: /^还没出过图/ })).toHaveAttribute("aria-pressed", "true");
+    await expect(today).toHaveAttribute("aria-pressed", "true");
     expect(errs).toEqual([]);
   });
 
@@ -271,19 +280,24 @@ test.describe("已登录", () => {
     await expect(reasons).toHaveCount(0);
   });
 
-  test("成员：回收关闭时没有「快被回收」，开启时标签用设置的天数", async ({ page }) => {
+  test("成员：回收关闭时「更多」里没有「快被回收」，开启时菜单项用设置的天数", async ({ page }) => {
     await mockMembers(page, (body) => {
       body.inactivity_days = 0;
     });
     await open(page, "/admin/members", PAGES[0]?.ready as never);
     await expect(bar(page).getByRole("button", { name: /^全部成员/ })).toBeVisible();
-    await expect(bar(page).getByRole("button", { name: /快被回收/ })).toHaveCount(0);
+    await bar(page).getByRole("button", { name: "更多" }).click();
+    await expect(page.getByRole("menu").getByRole("menuitem", { name: /快被回收/ })).toHaveCount(0);
+    await page.keyboard.press("Escape");
     await page.unroute("**/admin/api/members");
     await mockMembers(page, (body) => {
       body.inactivity_days = 5;
     });
     await open(page, "/admin/members", PAGES[0]?.ready as never);
-    await expect(bar(page).getByRole("button", { name: /^快被回收（满 5 天） \d+$/ })).toBeVisible();
+    await bar(page).getByRole("button", { name: "更多" }).click();
+    await expect(
+      page.getByRole("menu").getByRole("menuitem", { name: /^快被回收（满 5 天） \d+$/ }),
+    ).toBeVisible();
   });
 
   for (const size of [DESKTOP, MOBILE]) {
@@ -310,24 +324,31 @@ test.describe("已登录", () => {
       ).toBeVisible();
       const geo = await b.evaluate((el) => {
         const chips = [...el.querySelectorAll<HTMLElement>("button")].map((x) => x.getBoundingClientRect());
+        const scroll = el.querySelector<HTMLElement>(".mb-bar__scroll");
         return {
           tops: [...new Set(chips.map((r) => Math.round(r.top)))],
           heights: [...new Set(chips.map((r) => Math.round(r.height)))],
           n: chips.length,
-          fits: el.scrollWidth <= el.clientWidth + 1,
+          fits: !scroll || scroll.scrollWidth <= scroll.clientWidth + 1,
           noWrap: [...el.querySelectorAll<HTMLElement>("button")].every(
             (x) => getComputedStyle(x).whiteSpace === "nowrap",
           ),
           pageScroll: document.documentElement.scrollWidth <= window.innerWidth + 1,
         };
       });
-      expect(geo.n).toBeGreaterThanOrEqual(8);
+      expect(geo.n).toBeGreaterThanOrEqual(5);
       expect(geo.tops, "所有标签同一行").toHaveLength(1);
       expect(geo.heights, "标签等高").toHaveLength(1);
       expect(geo.noWrap).toBe(true);
       expect(geo.pageScroll, "页面不横向滚动").toBe(true);
-      // 放不下（手机）横栏自己横向滚，而不是换行
-      if (!geo.fits) expect(await b.evaluate((el) => getComputedStyle(el).overflowX)).toBe("auto");
+      // 放不下（手机）标签那一段自己横向滚（「更多」钉在行尾），而不是换行
+      if (!geo.fits)
+        expect(
+          await b.evaluate((el) => {
+            const s = el.querySelector<HTMLElement>(".mb-bar__scroll");
+            return s ? getComputedStyle(s).overflowX : "visible";
+          }),
+        ).toBe("auto");
       expect(await orphans(page)).toEqual([]);
       expect(await seriousViolations(page), `members-bar@${size.width}`).toEqual([]);
     });
@@ -432,9 +453,10 @@ test.describe("已登录", () => {
     await edit.getByRole("button", { name: "保存" }).click();
     await expect(edit).toBeHidden();
 
-    // 「请求」= 这位成员（全部 Key）的请求日志；成员详情里不再有「最近来源」
+    // 「请求」= 这位成员（全部 Key）的请求日志；详情里降成了文字链接（站内链接样式）
     await expect(row.getByText("最近来源")).toHaveCount(0);
-    await expect(row.getByRole("button", { name: "请求", exact: true })).toBeVisible();
+    await expect(row.getByRole("link", { name: "请求", exact: true })).toBeVisible();
+    await expect(row.getByRole("link", { name: "生成记录", exact: true })).toBeVisible();
 
     // 发重置券：天数 1～30
     await row.getByRole("button", { name: "发重置券" }).click();
@@ -578,7 +600,7 @@ test.describe("已登录", () => {
     await expect(page.getByRole("link", { name: "Bug 追踪" })).toHaveAttribute("aria-current", "page");
   });
 
-  test("日志：Bug 全部标记已处理有确认框；生成记录能打开大图", async ({ page }) => {
+  test("日志：Bug 全部标记已处理有确认框；生成记录能放大查看（点画廊砖）", async ({ page }) => {
     await open(page, "/admin/logs/bugs", PAGES[4]?.ready as never);
     const all = page.getByRole("button", { name: "全部标记已处理" });
     if (await all.isEnabled()) {

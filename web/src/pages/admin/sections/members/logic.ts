@@ -275,35 +275,24 @@ export function matchesQuery(m: Member, raw: string): boolean {
   );
 }
 
-export type SortKey = "today" | "week" | "total" | "recent" | "created" | "name";
-export const SORT_LABEL: Record<SortKey, string> = {
-  today: "今日用量",
-  week: "近 7 天",
-  total: "累计",
-  recent: "最近使用",
-  created: "加入时间",
-  name: "名称",
-};
+/** 排序只留表头点击这一处（换向也在表头）；数字列大的在前，同值按名称正序 */
+export type SortKey = "today" | "week" | "total" | "recent";
 
-const sortValue: Record<Exclude<SortKey, "name">, (m: Member) => number> = {
+const sortValue: Record<SortKey, (m: Member) => number> = {
   today: (m) => m.today.images,
   week: (m) => m.week.images,
   total: (m) => m.total_images,
   recent: (m) => m.last_used_at || 0,
-  created: (m) => m.registered_at || 0,
 };
 
 const titleOf = (m: Member): string => memberLabel(m) || "";
 export function sortMembers<T extends Member>(list: T[], key: SortKey, dir: "asc" | "desc"): T[] {
   const sign = dir === "asc" ? 1 : -1;
   return list.slice().sort((a, b) => {
-    if (key === "name") return sign * compareText(titleOf(a), titleOf(b));
     const f = sortValue[key];
     return sign * (f(a) - f(b)) || compareText(titleOf(a), titleOf(b));
   });
 }
-/** 数字 / 时间列默认大的在前，文字列默认正序 */
-export const defaultDir = (key: SortKey): "asc" | "desc" => (key === "name" ? "asc" : "desc");
 
 /** 在成员列表里找到某个 Key（或合并后的任一把 Key）对应的成员 */
 export const findByKeyId = <T extends Member>(list: T[], id: number): T | undefined =>

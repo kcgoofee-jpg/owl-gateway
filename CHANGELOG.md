@@ -8,6 +8,8 @@
 
 ### 成员可感知
 
+- **A calmer type scale.** Interface text now steps through four sizes — 12 for auxiliary, 14 for body, 18 for headings, 26 for the first-screen headline — instead of six close values; nothing else about the layout changes. The 智绘姬 guide drops its error-code paragraph, which repeated the usage-rules tab verbatim.
+
 - **The survey page pins its footer; the gallery explains its tap shortcut.** Short `/survey` pages stretch to fill the viewport so the footer sits at the bottom instead of floating mid-page, and the homepage gallery carries a standing hint (点击图片复制提示词) so touch visitors can find tap-to-copy without hovering.
 
 - **Mobile usage legend stays on one line.** V4.5 counts and V5 pause status no longer wrap into tall stacked labels on narrow screens; long secondary hints are ellipsized while their full accessible text remains available.
@@ -61,6 +63,7 @@
 
 ### 站长 / 运维
 
+- **The members page slims down.** Sorting now lives only on the column headers (they already switch direction on click): the toolbar sort dropdown and its direction toggle are gone. Low-frequency filter chips（还没出过图 / 快被回收 / 24 小时新加入 / 邀请 Key）fold into a 更多 menu that echoes the selection as a closable chip. The audit section drops the 大图 view (the gallery plus its lightbox already cover it), and member detail keeps buttons for actions while the 生成记录 / 请求 jumps become plain links.
 - **CI: hang guards, no web→e2e serialization, apt retries.** Every job now carries an explicit timeout ceiling, so a hung step can no longer burn hours of runner time. e2e no longer waits for the web job (it consumes none of its artifacts — e2e runs its own dev server from source; a failure still fails the run, and deploy still refuses non-green runs), shortening the critical path by about a minute. apt installs retry on slow mirrors: the 24-minute failed run on 10-23 was a slow apt mirror, not a regression.
 - **Status bars self-explain; the 2.x-parity comment sweep is done.** When the 90-day availability bars have no data back to the start, the left label now shows the first tracked date instead of a blanket "90 天前", so the gray prefix reads as missing history rather than an outage. The remaining comments that justified behaviour by the deleted Python 2.x are rewritten in present tense across gate-core / gate-server (behaviour unchanged; NovelAI legacy-model terms and the old-survey wording stay where they are domain terms or live data).
 - **Web-login gate and third-party origins become distinct signals.** Keys whose owner has not done the web Discord login are now refused with reason `web_login`（请先网页登录） instead of sharing `key_paused`, so admin logs separate the gate from punitive pauses, and the code never feeds the per-key retry guard. The 6-hourly abuse scan adds `foreign_origin` (score 30, evidence-only, never auto-bans): a key whose requests carry a non-allowlisted Origin header — novelai.net and the community mirror site the owner confirmed are allowlisted — so keys pasted into unknown third-party web UIs surface in the review queue.

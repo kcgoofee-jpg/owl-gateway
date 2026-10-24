@@ -232,12 +232,12 @@ describe("筛选横栏", () => {
 });
 
 describe("排序 / 身份 / 查找", () => {
-  it("数字列默认倒序，同值按名称", () => {
+  it("数字列倒序，同值按名称正序兜底", () => {
     const a = mk({ name: "b", today: { images: 5, v5: 0, anlas: 0, requests: 1 } });
     const b = mk({ name: "a", today: { images: 5, v5: 0, anlas: 0, requests: 1 } });
     const c = mk({ name: "c", today: { images: 9, v5: 0, anlas: 0, requests: 1 } });
     expect(sortMembers([a, b, c], "today", "desc").map((m) => m.name)).toEqual(["c", "a", "b"]);
-    expect(sortMembers([a, b, c], "name", "asc").map((m) => m.name)).toEqual(["a", "b", "c"]);
+    expect(sortMembers([a, b, c], "today", "asc").map((m) => m.name)).toEqual(["a", "b", "c"]);
   });
   it("身份组：优先用接口给的 role，缺失时按标签推断", () => {
     expect(roleOf(mk({ role: "invite" }))).toBe("invite");

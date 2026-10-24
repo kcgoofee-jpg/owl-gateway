@@ -25,8 +25,6 @@ export type DetailActions = {
   addTag: (m: MemberRow) => void;
   removeTag: (m: MemberRow, tag: string) => void;
   coupon: (m: MemberRow) => void;
-  audit: (m: MemberRow) => void;
-  requests: (m: MemberRow) => void;
   resetQuota: (m: MemberRow) => void;
   disable: (m: MemberRow) => void;
   regenerate: (m: MemberRow) => void;
@@ -187,11 +185,6 @@ export function MemberDetail(props: { m: MemberRow; now: number; act: DetailActi
               </>
             )}
           </dl>
-          <div>
-            <Button size="sm" onClick={() => act.edit(m)}>
-              全部设置…
-            </Button>
-          </div>
         </section>
 
         <section class="mb-sec" aria-label="资料">
@@ -293,16 +286,16 @@ export function MemberDetail(props: { m: MemberRow; now: number; act: DetailActi
         <Button size="sm" onClick={() => act.resetQuota(m)}>
           重置今日额度{m.reset_today?.count ? `（${m.reset_today.count}）` : ""}
         </Button>
-        <Button size="sm" onClick={() => act.audit(m)}>
-          生成记录
-        </Button>
-        <Button size="sm" onClick={() => act.requests(m)}>
-          请求
-        </Button>
+        {/* 生成记录 / 请求只是跳转，降成文字链接（站内链接样式），按钮留给要点的操作 */}
+        <a href={`/admin/audit/records?key=${m.all_key_ids.join(",")}`}>生成记录</a>
+        <a href={`/admin/logs/usage?key=${m.all_key_ids.join(",")}`}>请求</a>
         <Button size="sm" onClick={() => act.coupon(m)}>
           发重置券
         </Button>
         <span class="spacer" />
+        <Button size="sm" onClick={() => act.edit(m)}>
+          全部设置…
+        </Button>
         <Menu
           button={(p) => (
             <Button size="sm" variant="ghost" {...p}>
