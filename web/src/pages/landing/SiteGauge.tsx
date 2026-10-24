@@ -1,6 +1,6 @@
 import { cx } from "../../ui";
 
-const ARC = "M 3 27 Q 500 1 997 27";
+const ARC = "M 3 27 Q 500 -5 997 27";
 const fmt = (n: number) => n.toLocaleString("en-US");
 
 type Row = {

@@ -58,8 +58,6 @@ function Example({ id, prompt, index }: { id: string; prompt: string; index: num
 export function Gallery() {
   return (
     <section id="gallery" class="lp-gallery" aria-label="图片瀑布流" tabIndex={-1}>
-      {/* 悬停 title 在触屏上不存在：常驻一行说明，让手机访客也知道图片可点 */}
-      <p class="lp-gallery__hint">点击图片复制提示词</p>
       <div class="lp-gallery__images">
         {data.images.map((image, i) => (
           <Example key={image.id} {...image} index={i} />

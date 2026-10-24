@@ -8,6 +8,8 @@
 
 ### 成员可感知
 
+- **Homepage meters keep their shape; three owner asks land (10-24).** The trial restyle of the guest meters is reverted whole — the numbers, layout and wording everyone knows are back. What stays: the shared gauge draws at twice the stroke with a slightly deeper bow, the standing gallery hint line is gone, and the gaps around the guide tabs and the gallery tighten to an even rhythm.
+
 - **A calmer type scale.** Interface text now steps through four sizes — 12 for auxiliary, 14 for body, 18 for headings, 26 for the first-screen headline — instead of six close values; nothing else about the layout changes. The 智绘姬 guide drops its error-code paragraph, which repeated the usage-rules tab verbatim.
 
 - **The survey page pins its footer; the gallery explains its tap shortcut.** Short `/survey` pages stretch to fill the viewport so the footer sits at the bottom instead of floating mid-page, and the homepage gallery carries a standing hint (点击图片复制提示词) so touch visitors can find tap-to-copy without hovering.
