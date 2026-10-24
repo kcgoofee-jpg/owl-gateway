@@ -176,55 +176,59 @@ describe("dailyUsage", () => {
   });
 });
 
-// 北京时间 10-19 14:00 与 10-20 01:00：没有 429 原文时，「今天 / 明天」按北京时间算
+// 北京时间 10-19 14:00 与 10-20 01:00：只有 V5 满了时没有 429 原文，「今天 / 明天」按北京时间算
 const AFTERNOON = Date.parse("2026-10-19T14:00:00+08:00");
 const AFTER_MIDNIGHT = Date.parse("2026-10-20T01:00:00+08:00");
 
-describe("dailyMeters: 统一口径「今日已出」", () => {
-  it("两行都报已出，分母都是全站日上限（V5 自己的上限不再进这张卡）", () => {
-    const m = dailyMeters(idle({ quota: { images_today: 123, images_cap: 500, v5_today: 9, v5_cap: 60 } }));
-    expect(m.rows).toEqual([
-      { kind: "v45", used: 123, cap: 500 },
-      { kind: "v5", used: 9, cap: 500 },
-    ]);
-  });
-  it("上限 0 = 不限：照样只报已出，行里没有条", () => {
-    const m = dailyMeters(idle({ quota: { images_today: 5, images_cap: 0, v5_today: 2, v5_cap: 63 } }));
-    expect(m.rows).toEqual([
-      { kind: "v45", used: 5, cap: 0 },
-      { kind: "v5", used: 2, cap: 0 },
-    ]);
-  });
-  it("重置时间取 429 原文的「今天 / 明天 N 点」；没有原文时按北京时间算（7 点）", () => {
-    const withText = idle({
-      quota: { images_today: 2803, images_cap: 2800, v5_today: 0, v5_cap: 0 },
-      guard: { blocked: { code: "daily_cap", text: "本站今天的出图总量用完了，没有扣费。明天 5 点恢复" } },
+describe("dailyMeters: a full meter shows tomorrow", () => {
+  it("full total and full V5 switch to tomorrow's allowance; the reset hour comes from the 429 text", () => {
+    const live = idle({
+      quota: { images_today: 2803, images_cap: 2800, v5_today: 224, v5_cap: 224 },
+      guard: { blocked: { code: "daily_cap", text: "本站今天的出图总量用完了，没有扣费。明天 7 点恢复" } },
     });
-    expect(dailyMeters(withText).reset).toBe("明天 5 点");
-    expect(dailyMeters(idle(), AFTERNOON).reset).toBe("明天 7 点");
-    expect(dailyMeters(idle(), AFTER_MIDNIGHT).reset).toBe("今天 7 点");
+    const m = dailyMeters(live);
+    expect(m.total).toEqual({ label: "全站明天可用（明天 7 点起）", used: 0, cap: 2800 });
+    expect(m.v5).toEqual({ label: "V5 明天可用（明天 7 点起）", used: 0, cap: 224 });
   });
-  it("V5 暂停（站长手动 / 上游免费额度用完）：数字仍是已出，说明进 hint；没暂停不带 paused", () => {
+  it("only the full meter switches; unlimited and partly used stay as today", () => {
+    const m = dailyMeters(
+      idle({ quota: { images_today: 900, images_cap: 2800, v5_today: 224, v5_cap: 224 } }),
+      AFTERNOON,
+    );
+    expect(m.total).toEqual({ label: "全站今日已用", used: 900, cap: 2800 });
+    expect(m.v5.label).toBe("V5 明天可用（明天 7 点起）");
+    expect(dailyMeters(idle({ quota: { images_today: 5, images_cap: 0 } })).total.label).toBe("全站今日已用");
+  });
+  it("after midnight and before the 7:00 reset, a full meter says today", () => {
+    const v5Full = idle({ quota: { images_today: 900, images_cap: 2800, v5_today: 224, v5_cap: 224 } });
+    expect(dailyMeters(v5Full, AFTER_MIDNIGHT).v5.label).toBe("V5 今天可用（今天 7 点起）");
+    const allFull = idle({
+      quota: { images_today: 2800, images_cap: 2800, v5_today: 224, v5_cap: 224 },
+      guard: { blocked: { code: "daily_cap", text: "本站今天的出图总量用完了，没有扣费。今天 7 点恢复" } },
+    });
+    expect(dailyMeters(allFull, AFTERNOON).total.label).toBe("全站今天可用（今天 7 点起）");
+  });
+});
+
+describe("dailyMeters: upstream V5 exhausted", () => {
+  it("false pauses the V5 meter; missing or true leaves it alone", () => {
     const q = { images_today: 5, images_cap: 2800, v5_today: 10, v5_cap: 224 };
-    expect(dailyMeters(idle({ quota: { ...q, v5_paused: true } })).rows[1]).toEqual({
-      kind: "v5",
+    expect(dailyMeters(idle({ quota: { ...q, upstream_v5_free: false } })).v5).toEqual({
+      label: "V5 暂时用完",
       used: 10,
-      cap: 2800,
+      cap: 224,
+      paused: true,
+    });
+    expect(dailyMeters(idle({ quota: q })).v5.paused).toBeUndefined();
+    // 站长手动暂停：同样是暂停的仪表，换成「暂停中」的说明
+    expect(dailyMeters(idle({ quota: { ...q, upstream_v5_free: false, v5_paused: true } })).v5).toEqual({
+      label: "V5 暂停中",
+      used: 10,
+      cap: 224,
       paused: true,
       hint: "V5 暂停，请使用 V4.5",
+      short: "暂停中",
     });
-    expect(dailyMeters(idle({ quota: { ...q, upstream_v5_free: false } })).rows[1]).toEqual({
-      kind: "v5",
-      used: 10,
-      cap: 2800,
-      paused: true,
-      hint: "V5 暂时用完",
-    });
-    expect(dailyMeters(idle({ quota: q })).rows[1]).toEqual({ kind: "v5", used: 10, cap: 2800 });
-    expect(dailyMeters(idle({ quota: { ...q, upstream_v5_free: true } })).rows[1]).toEqual({
-      kind: "v5",
-      used: 10,
-      cap: 2800,
-    });
+    expect(dailyMeters(idle({ quota: { ...q, upstream_v5_free: true } })).v5.paused).toBeUndefined();
   });
 });

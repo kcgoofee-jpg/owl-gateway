@@ -48,10 +48,6 @@
   isolation: isolate;
   padding: var(--sp-10) 0 var(--sp-8);
 }
-/* 游客首屏（状态卡）下面就是使用指南：底部空档收紧，圆环首屏（成员）不动 */
-.lp-hero:not(.lp-hero--rings) {
-  padding-bottom: var(--sp-4);
-}
 .grain {
   position: absolute;
   inset: 0;
@@ -76,12 +72,9 @@
 .lp-body--top {
   padding-top: var(--sp-8);
 }
-/* 首屏下面的卡片和首屏隔开 24，不贴着首屏的下沿；游客首屏收得更紧（状态卡 → 使用指南共 48） */
+/* 首屏下面的卡片和首屏隔开 24，不贴着首屏的下沿 */
 .lp-hero + .lp-body {
   padding-top: var(--sp-6);
-}
-.lp-hero:not(.lp-hero--rings) + .lp-body {
-  padding-top: var(--sp-2);
 }
 
 /* 客户端标签：窄屏折行，不出现需要横向滑动才看得到的标签 */
@@ -525,25 +518,26 @@
   flex-basis: 100%;
 }
 .lp-meters {
-  display: flex;
-  flex-direction: column;
-  gap: var(--sp-2);
   margin-top: auto;
-  padding-top: var(--sp-3);
+  padding-top: var(--sp-2);
 }
-/* 全站共享弧线：管整体压力；两行 lp-meter 管各行身份。描边是旧版的 2 倍。
-   与两行的间隔 = 容器 gap 8 + 这里 4 = 12（行与行之间仍是 gap 8）。 */
 .lp-site-gauge {
   display: block;
   width: 100%;
-  height: 25px;
-  margin: 0 0 var(--sp-1);
+  height: 20px;
+  margin: var(--sp-2) 0;
   fill: none;
   overflow: visible;
 }
+.stat--v45 {
+  --stat-c: var(--c-site);
+}
+.stat--v5 {
+  --stat-c: var(--c-site-v5);
+}
 .lp-site-gauge__track,
 .lp-site-gauge__fill {
-  stroke-width: 6;
+  stroke-width: 3;
   stroke-linecap: round;
 }
 .lp-site-gauge__track {
@@ -552,11 +546,10 @@
 .lp-site-gauge__fill {
   stroke: var(--stat-c);
 }
-.stat--v45 {
-  --stat-c: var(--c-site);
-}
-.stat--v5 {
-  --stat-c: var(--c-site-v5);
+.lp-meter__legend {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: var(--sp-4);
 }
 .lp-meter {
   display: flex;
@@ -564,35 +557,19 @@
   flex-wrap: wrap;
   column-gap: var(--sp-2);
 }
-.lp-meter__lead {
-  display: flex;
-  align-items: center;
-  gap: var(--sp-1);
-  align-self: center;
-}
-.lp-meter__lead i {
-  display: inline-block;
-  width: 5px;
-  height: 5px;
-  border-radius: 50%;
-  background: var(--stat-c);
-}
-/* 行内小进度条：两行同一个分母，长度可比；fill 的宽度是 SVG 属性（CSP 禁内联 style） */
-.lp-meter__bar {
-  display: block;
-  width: 48px;
-  height: 6px;
-}
-.lp-meter__bar-track {
-  fill: var(--surface-3);
-}
-.lp-meter__bar-fill {
-  fill: var(--stat-c);
-}
 .lp-meter__name {
   color: var(--muted);
   font-size: var(--fs-sm);
   white-space: nowrap;
+}
+.lp-meter__name i {
+  display: inline-block;
+  width: 5px;
+  height: 5px;
+  margin-right: var(--sp-1);
+  border-radius: 50%;
+  background: var(--stat-c);
+  vertical-align: middle;
 }
 .lp-meter__num {
   color: var(--text);
@@ -614,14 +591,8 @@
 .lp-meter.stat--warn .lp-meter__num {
   color: var(--warn);
 }
-.lp-meter.stat--warn .lp-meter__bar-fill {
-  fill: var(--warn);
-}
 .lp-meter.stat--danger .lp-meter__num {
   color: var(--danger);
-}
-.lp-meter.stat--danger .lp-meter__bar-fill {
-  fill: var(--danger);
 }
 .lp-meter.lp-meter--paused .lp-meter__num {
   color: var(--muted);
@@ -629,15 +600,21 @@
 
 /* Status and allowance sit directly on the page, without a card surface. */
 .lp-status {
-  padding: var(--sp-4) 0 var(--sp-2);
+  padding: var(--sp-4) 0;
 }
 .lp-gallery {
   width: min(1440px, calc(100% - 32px));
-  margin: var(--sp-4) auto 0;
+  margin: var(--sp-8) auto 0;
   scroll-margin-top: 80px;
 }
 .lp-gallery:focus {
   outline: none;
+}
+/* 常驻的复制提示：悬停 title 触屏上看不到，手机也要能发现图片可点 */
+.lp-gallery__hint {
+  margin: 0 0 var(--sp-3);
+  color: var(--muted);
+  font-size: var(--fs-sm);
 }
 .lp-gallery__images {
   columns: 4;
@@ -685,6 +662,10 @@
 }
 
 @media (max-width: 760px) {
+  .lp-meter__legend {
+    column-gap: var(--sp-2);
+  }
+
   .lp-meter {
     flex-wrap: nowrap;
     column-gap: var(--sp-1);

@@ -1,7 +1,7 @@
 import { useEffect, useState } from "preact/hooks";
 import { cx, Skeleton } from "../../ui";
 import { useStore } from "./ctx";
-import { dailyMeters, deriveStatus } from "./status";
+import { dailyMeters, dailyUsage, deriveStatus } from "./status";
 import { StatRows } from "./Usage";
 
 /**
@@ -15,6 +15,7 @@ export function StatusCard(props: { class?: string }) {
     nowMs: Date.now(),
   });
   const meters = dailyMeters(data);
+  const usage = dailyUsage(data);
 
   // 读屏只在实时状态变化时播报。
   const announce = view?.announce ?? "";
@@ -54,7 +55,15 @@ export function StatusCard(props: { class?: string }) {
         )}
       </div>
       {/* 还没读到数据时不画仪表（否则会先闪一下「0」） */}
-      {data ? <StatRows rows={meters.rows} reset={meters.reset} /> : <Skeleton h="56px" />}
+      {data ? (
+        <StatRows
+          total={meters.total}
+          v5={meters.v5}
+          generated={{ total: usage.total.used, v5: usage.v5.used }}
+        />
+      ) : (
+        <Skeleton h="56px" />
+      )}
     </section>
   );
 }
