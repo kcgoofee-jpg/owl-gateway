@@ -6,7 +6,7 @@ import { LoadError, Loading } from "../_kit";
 import { withTone } from "../system/forms";
 import type { Allowance, AllowanceAccount } from "./core";
 
-function Account(props: { a: AllowanceAccount; threshold: number }) {
+export function AllowanceAccountView(props: { a: AllowanceAccount; threshold: number }) {
   const a = props.a;
   const exhausted = a.is_negative === true;
   const tone = exhausted ? "danger" : a.low ? "warn" : undefined;
@@ -16,7 +16,7 @@ function Account(props: { a: AllowanceAccount; threshold: number }) {
         <b>账号 {a.account}</b>
         {exhausted && <Badge tone="danger">已耗尽</Badge>}
         {!exhausted && a.low && <Badge tone="warn">低于 {props.threshold}%</Badge>}
-        {a.uncertain && a.percent != null && <Badge>上次记录，待下次生成确认</Badge>}
+        {a.uncertain && <Badge>{a.stale ? "状态陈旧" : "状态不确定"}</Badge>}
         {a.checked_at && <span class="muted small">更新于 {fullTime(a.checked_at)}</span>}
       </div>
       <p class="muted small">
@@ -40,7 +40,7 @@ function Account(props: { a: AllowanceAccount; threshold: number }) {
         {a.fixed_anlas ?? "未知"} · 购买 Anlas {a.purchased_anlas ?? "未知"}
       </p>
       <p class="muted small">
-        官方原始读数：到下一个 1% 点{" "}
+        官方原始读数：再恢复 1% 需{" "}
         {a.time_until_next_percent_seconds == null ? "未知" : `${a.time_until_next_percent_seconds} 秒`}
         {a.time_until_next_percent_seconds === 0 ? "（当前暂停恢复）" : ""}。当前响应外推估算：
         {a.current_response_recharge_per_day_estimate == null
@@ -73,7 +73,7 @@ export default function AllowanceCard() {
       {data && !data.accounts.length && <p class="muted small">未配置上游账号。</p>}
       <div class="stack">
         {data?.accounts.map((a) => (
-          <Account key={a.account} a={a} threshold={data.threshold} />
+          <AllowanceAccountView key={a.account} a={a} threshold={data.threshold} />
         ))}
       </div>
     </Card>

@@ -162,9 +162,9 @@ pub enum Fetched<'a> {
 /// 订阅响应里有用的几个字段。
 #[derive(Debug, Clone, PartialEq)]
 pub struct Subscription {
-    pub percent: i64,
-    pub is_negative: bool,
-    /// `timeUntilNextPercent`：必须是 1 ≤ x < 10^7 的整数，否则 None
+    pub percent: Option<i64>,
+    pub is_negative: Option<bool>,
+    /// `timeUntilNextPercent`：0 表示暂停；缺失或非法时为 None。
     pub next_percent_seconds: Option<i64>,
     /// `trainingStepsLeft` 的 fixed + purchased（Anlas 余额）：两项都是 0～10^12 的有限数才算，否则 None。
     /// 只是附带的读数，读不懂不影响订阅解析。
@@ -183,7 +183,7 @@ pub struct Subscription {
 pub fn parse_subscription(body: &[u8]) -> Option<Subscription> {
     let body = body.strip_prefix(&[0xef, 0xbb, 0xbf]).unwrap_or(body);
     let data: Value = serde_json::from_slice(body).ok()?;
-    let usage = data.get("usage").filter(|u| u.is_object())?;
+    let usage = data.get("usage").filter(|u| u.is_object());
     // type(x) is int：bool 和 float 都不算
     let int_of = |v: Option<&Value>| match v {
         Some(Value::Number(n)) if !n.is_f64() => n
@@ -193,12 +193,15 @@ pub fn parse_subscription(body: &[u8]) -> Option<Subscription> {
     };
     let active = data.get("active").and_then(Value::as_bool)?;
     let tier = int_of(data.get("tier"))?;
-    let percent = int_of(usage.get("percent")).filter(|p| *p >= 0)?;
-    let Some(Value::Bool(is_negative)) = usage.get("isNegative") else {
-        return None;
-    };
-    let next_percent_seconds =
-        int_of(usage.get("timeUntilNextPercent")).filter(|n| 0 < *n && *n < 10_000_000);
+    let percent = usage
+        .and_then(|u| int_of(u.get("percent")))
+        .filter(|p| *p >= 0);
+    let is_negative = usage
+        .and_then(|u| u.get("isNegative"))
+        .and_then(Value::as_bool);
+    let next_percent_seconds = usage
+        .and_then(|u| int_of(u.get("timeUntilNextPercent")))
+        .filter(|n| (0..10_000_000).contains(n));
     let step = |k: &str| {
         data.get("trainingStepsLeft")?
             .get(k)?
@@ -214,7 +217,7 @@ pub fn parse_subscription(body: &[u8]) -> Option<Subscription> {
     let optional_bool = |key: &str| data.get(key).and_then(Value::as_bool);
     Some(Subscription {
         percent,
-        is_negative: *is_negative,
+        is_negative,
         next_percent_seconds,
         anlas,
         fixed_anlas,
@@ -224,7 +227,9 @@ pub fn parse_subscription(body: &[u8]) -> Option<Subscription> {
         expires_at: int_of(data.get("expiresAt")),
         is_grace_period: optional_bool("isGracePeriod"),
         account_type: int_of(data.get("accountType")),
-        purchased_percent: int_of(usage.get("purchasedPercent")).filter(|p| *p >= 0),
+        purchased_percent: usage
+            .and_then(|u| int_of(u.get("purchasedPercent")))
+            .filter(|p| *p >= 0),
     })
 }
 
@@ -398,30 +403,47 @@ impl AllowanceCore {
                 low: false,
             };
         };
-        let eligible = sub.active && sub.tier == 3;
+        let eligible =
+            sub.active && sub.tier == 3 && sub.percent.is_some() && sub.is_negative.is_some();
+        let denial = if !sub.active {
+            Some("上游订阅 inactive")
+        } else if sub.tier != 3 {
+            Some("上游订阅非 Opus tier")
+        } else if sub.percent.is_none() || sub.is_negative.is_none() {
+            Some("上游 V5 额度字段未知")
+        } else {
+            None
+        };
         self.rows.insert(
             token_id.to_string(),
             Row {
-                percent: Some(sub.percent),
-                is_negative: Some(sub.is_negative),
+                percent: sub.percent,
+                is_negative: sub.is_negative,
                 checked_at: Some(wall),
                 at: Some(mono_after),
-                error: if eligible { None } else { Some(if !sub.active { "上游订阅 inactive".into() } else { "上游订阅非 Opus tier".into() }) },
-                retry_at: 0.0,
+                error: denial.map(str::to_string),
+                retry_at: if eligible { 0.0 } else { mono_after + 300.0 },
                 // Raw API reading: relative time to the next 1% point.
                 next_percent_seconds: sub.next_percent_seconds,
                 anlas: sub.anlas,
                 fixed_anlas: sub.fixed_anlas,
                 purchased_anlas: sub.purchased_anlas,
-                active: Some(sub.active), tier: Some(sub.tier), expires_at: sub.expires_at,
-                is_grace_period: sub.is_grace_period, account_type: sub.account_type,
+                active: Some(sub.active),
+                tier: Some(sub.tier),
+                expires_at: sub.expires_at,
+                is_grace_period: sub.is_grace_period,
+                account_type: sub.account_type,
                 purchased_percent: sub.purchased_percent,
             },
         );
         Resolved {
-            result: if eligible { Ok(sub.is_negative) } else { Err(()) },
+            result: if eligible {
+                Ok(sub.is_negative.expect("eligibility requires usage state"))
+            } else {
+                Err(())
+            },
             note_period: sub.next_percent_seconds,
-            low: sub.is_negative || sub.percent < threshold,
+            low: sub.is_negative == Some(true) || sub.percent.is_some_and(|p| p < threshold),
         }
     }
 
@@ -438,7 +460,7 @@ impl AllowanceCore {
         let row = self.rows.get(token_id).unwrap_or(&default);
         let stale = now_mono - row.at.unwrap_or(-1e9) >= 300.0;
         let low = row.is_negative == Some(true) || row.percent.is_some_and(|p| p < threshold);
-        // period(...) or row.get("next_percent_seconds")：0 也算「没有」
+        // Historical samples are separate from the raw current API value (including zero).
         let nps = self
             .period(token_id, now_wall)
             .filter(|n| *n != 0)
@@ -450,19 +472,57 @@ impl AllowanceCore {
             "percent".into(),
             row.percent.map_or(Value::Null, Value::from),
         );
-        out.insert("time_until_next_percent_seconds".into(), row.next_percent_seconds.map_or(Value::Null, Value::from));
-        out.insert("current_response_recharge_per_day_estimate".into(), row.next_percent_seconds.filter(|n| *n > 0).map_or(Value::Null, |n| crate::pyval::float(pyc::round(86400.0 / n as f64, 1))));
-        out.insert("historical_sample_based_recharge_per_day_estimate".into(), nps.map_or(Value::Null, |n| crate::pyval::float(pyc::round(86400.0 / n as f64, 1))));
+        out.insert(
+            "time_until_next_percent_seconds".into(),
+            row.next_percent_seconds.map_or(Value::Null, Value::from),
+        );
+        out.insert(
+            "current_response_recharge_per_day_estimate".into(),
+            row.next_percent_seconds
+                .filter(|n| *n > 0)
+                .map_or(Value::Null, |n| {
+                    crate::pyval::float(pyc::round(86400.0 / n as f64, 1))
+                }),
+        );
+        out.insert(
+            "historical_sample_based_recharge_per_day_estimate".into(),
+            nps.map_or(Value::Null, |n| {
+                crate::pyval::float(pyc::round(86400.0 / n as f64, 1))
+            }),
+        );
         // Backward-compatible capacity/job consumer; explicitly an estimate derived from observed timings.
-        out.insert("recharge_per_day".into(), nps.map_or(Value::Null, |n| crate::pyval::float(pyc::round(86400.0 / n as f64, 1))));
+        out.insert(
+            "recharge_per_day".into(),
+            nps.map_or(Value::Null, |n| {
+                crate::pyval::float(pyc::round(86400.0 / n as f64, 1))
+            }),
+        );
         out.insert("active".into(), row.active.map_or(Value::Null, Value::Bool));
         out.insert("tier".into(), row.tier.map_or(Value::Null, Value::from));
-        out.insert("expires_at".into(), row.expires_at.map_or(Value::Null, Value::from));
-        out.insert("is_grace_period".into(), row.is_grace_period.map_or(Value::Null, Value::Bool));
-        out.insert("account_type".into(), row.account_type.map_or(Value::Null, Value::from));
-        out.insert("purchased_percent".into(), row.purchased_percent.map_or(Value::Null, Value::from));
-        out.insert("fixed_anlas".into(), row.fixed_anlas.map_or(Value::Null, Value::from));
-        out.insert("purchased_anlas".into(), row.purchased_anlas.map_or(Value::Null, Value::from));
+        out.insert(
+            "expires_at".into(),
+            row.expires_at.map_or(Value::Null, Value::from),
+        );
+        out.insert(
+            "is_grace_period".into(),
+            row.is_grace_period.map_or(Value::Null, Value::Bool),
+        );
+        out.insert(
+            "account_type".into(),
+            row.account_type.map_or(Value::Null, Value::from),
+        );
+        out.insert(
+            "purchased_percent".into(),
+            row.purchased_percent.map_or(Value::Null, Value::from),
+        );
+        out.insert(
+            "fixed_anlas".into(),
+            row.fixed_anlas.map_or(Value::Null, Value::from),
+        );
+        out.insert(
+            "purchased_anlas".into(),
+            row.purchased_anlas.map_or(Value::Null, Value::from),
+        );
         out.insert(
             "is_negative".into(),
             row.is_negative.map_or(Value::Null, Value::Bool),
@@ -524,7 +584,7 @@ mod tests {
             json!({"fixedTrainingStepsLeft": 9000, "purchasedTrainingSteps": 512}),
         ))
         .unwrap();
-        assert_eq!((sub.percent, sub.anlas), (40, Some(9512)));
+        assert_eq!((sub.percent, sub.anlas), (Some(40), Some(9512)));
         // 读不懂余额不影响订阅本身
         let sub = parse_subscription(&body(json!({"fixedTrainingStepsLeft": "x"}))).unwrap();
         assert_eq!(sub.anlas, None);
@@ -552,13 +612,24 @@ mod tests {
         let sub = parse_subscription(&body).unwrap();
         assert!(sub.active);
         assert_eq!(sub.tier, 3);
-        assert_eq!(sub.percent, 0);
-        assert!(!sub.is_negative);
+        assert_eq!(sub.percent, Some(0));
+        assert_eq!(sub.is_negative, Some(false));
         assert_eq!(sub.purchased_percent, Some(0));
-        assert_eq!((sub.fixed_anlas, sub.purchased_anlas, sub.anlas), (Some(1), Some(0), Some(1)));
+        assert_eq!(
+            (sub.fixed_anlas, sub.purchased_anlas, sub.anlas),
+            (Some(1), Some(0), Some(1))
+        );
         let mut core = AllowanceCore::new();
-        let fetched = Fetched::Response { status: 200, retry_after: "", body: Some(&body) };
-        assert_eq!(core.finish_resolve("synthetic", &fetched, 10.0, 10.0, 20).result, Ok(false));
+        let fetched = Fetched::Response {
+            status: 200,
+            retry_after: "",
+            body: Some(&body),
+        };
+        assert_eq!(
+            core.finish_resolve("synthetic", &fetched, 10.0, 10.0, 20)
+                .result,
+            Ok(false)
+        );
         let snap = core.account_snapshot(0, "synthetic", 20, 10.0, 10.0);
         assert_eq!(snap["active"], true);
         assert_eq!(snap["percent"], 0);
@@ -569,14 +640,93 @@ mod tests {
     fn inactive_and_non_opus_statuses_are_visible_but_not_generation_eligible() {
         for (active, tier) in [(false, 3), (true, 2)] {
             let body = serde_json::to_vec(&json!({"active": active, "tier": tier,
-                "usage": {"percent": 0, "isNegative": false}})).unwrap();
+                "usage": {"percent": 0, "isNegative": false}}))
+            .unwrap();
             let mut core = AllowanceCore::new();
-            let fetched = Fetched::Response { status: 200, retry_after: "", body: Some(&body) };
-            assert_eq!(core.finish_resolve("synthetic", &fetched, 10.0, 10.0, 20).result, Err(()));
+            let fetched = Fetched::Response {
+                status: 200,
+                retry_after: "",
+                body: Some(&body),
+            };
+            assert_eq!(
+                core.finish_resolve("synthetic", &fetched, 10.0, 10.0, 20)
+                    .result,
+                Err(())
+            );
             let snap = core.account_snapshot(0, "synthetic", 20, 10.0, 10.0);
             assert_eq!(snap["active"], active);
             assert!(snap["error"].is_string());
         }
+    }
+
+    #[test]
+    fn metadata_survives_missing_usage_and_blocks_generation_as_unknown() {
+        let body =
+            br#"{"active":false,"tier":1,"expiresAt":123,"isGracePeriod":true,"accountType":0}"#;
+        let sub = parse_subscription(body).unwrap();
+        assert!(!sub.active);
+        assert_eq!(sub.tier, 1);
+        assert_eq!(sub.percent, None);
+        let mut core = AllowanceCore::new();
+        let fetched = Fetched::Response {
+            status: 200,
+            retry_after: "",
+            body: Some(body),
+        };
+        assert_eq!(
+            core.finish_resolve("synthetic", &fetched, 10.0, 20.0, 20)
+                .result,
+            Err(())
+        );
+        let snapshot = core.account_snapshot(0, "synthetic", 20, 10.0, 20.0);
+        assert_eq!(snapshot["active"], false);
+        assert_eq!(snapshot["tier"], 1);
+        assert_eq!(snapshot["percent"], Value::Null);
+        assert_eq!(core.check_cache("synthetic", 21.0, 20), Begin::Unavailable);
+    }
+
+    #[test]
+    fn raw_zero_is_preserved_and_invalid_or_unknown_times_do_not_create_estimates() {
+        for (raw, expected) in [("0", Some(0)), ("-1", None), ("null", None)] {
+            let body = format!(
+                r#"{{"active":true,"tier":3,"usage":{{"percent":10,"isNegative":false,"timeUntilNextPercent":{raw}}}}}"#
+            );
+            let mut core = AllowanceCore::new();
+            let fetched = Fetched::Response {
+                status: 200,
+                retry_after: "",
+                body: Some(body.as_bytes()),
+            };
+            core.finish_resolve("synthetic", &fetched, 10.0, 20.0, 20);
+            let snapshot = core.account_snapshot(0, "synthetic", 20, 10.0, 20.0);
+            assert_eq!(
+                snapshot["time_until_next_percent_seconds"].as_i64(),
+                expected
+            );
+            assert_eq!(
+                snapshot["current_response_recharge_per_day_estimate"],
+                Value::Null
+            );
+        }
+    }
+
+    #[test]
+    fn ineligible_and_failed_queries_back_off_instead_of_fetching_on_every_image() {
+        let inactive = br#"{"active":false,"tier":3,"usage":{"percent":50,"isNegative":false}}"#;
+        let mut core = AllowanceCore::new();
+        let fetched = Fetched::Response {
+            status: 200,
+            retry_after: "",
+            body: Some(inactive),
+        };
+        core.finish_resolve("inactive", &fetched, 10.0, 20.0, 20);
+        assert_eq!(core.check_cache("inactive", 21.0, 20), Begin::Unavailable);
+        assert_eq!(core.check_cache("inactive", 321.0, 20), Begin::Fetch);
+
+        let failed = Fetched::Failed;
+        core.finish_resolve("failed", &failed, 10.0, 50.0, 20);
+        assert_eq!(core.check_cache("failed", 51.0, 20), Begin::Unavailable);
+        assert_eq!(core.check_cache("failed", 110.0, 20), Begin::Fetch);
     }
 
     #[test]
