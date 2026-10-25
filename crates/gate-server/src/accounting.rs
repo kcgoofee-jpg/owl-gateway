@@ -199,14 +199,15 @@ impl AppState {
                     )
                     .await
             };
-            if res.is_ok() && settlement_reserved && !successful {
-                if let Err(err) = state
+            if res.is_ok()
+                && settlement_reserved
+                && !successful
+                && let Err(err) = state
                     .db
                     .resolve_request_failure(&ctx.internal_id(), settlement_uncertain, now)
                     .await
-                {
-                    tracing::error!(error = %err, "request settlement failure transition failed");
-                }
+            {
+                tracing::error!(error = %err, "request settlement failure transition failed");
             }
             if let Err(err) = res {
                 tracing::error!("request accounting failed");

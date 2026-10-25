@@ -3,7 +3,7 @@
 
 use super::params::Prepared;
 use super::settle::{Billing, resolve_v5};
-use super::{before_dispatch, detail160, on_429, on_dispatch};
+use super::{before_dispatch, detail160, on_429, on_dispatch, track_delivery};
 use crate::accounting::Entry;
 use crate::admission::{Est, acquire_slots, image_admission, reserve_image_budget};
 use crate::auth::check_image_cooldown;
@@ -143,7 +143,7 @@ pub(super) async fn stream(
             h.insert("content-type", HeaderValue::from_static(wire.media_type()));
             h.insert("cache-control", HeaderValue::from_static("no-store"));
             h.insert("x-accel-buffering", HeaderValue::from_static("no"));
-            Ok(r)
+            Ok(track_delivery(r, &state, &ctx))
         }
         Ok(Head::Error(status, message)) => {
             // Head errors here are upstream failures: never show a member a 402 (see member_status)

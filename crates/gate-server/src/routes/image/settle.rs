@@ -2,7 +2,8 @@
 
 use super::params::Prepared;
 use super::{
-    before_dispatch, binary, detail160, local, on_429, on_dispatch, size_text, up_to_gate,
+    before_dispatch, binary, detail160, local, on_429, on_dispatch, size_text, track_delivery,
+    up_to_gate,
 };
 use crate::accounting::Entry;
 use crate::admission::Est;
@@ -325,7 +326,7 @@ pub(super) async fn perform_generation(
         .and_then(|v| v.to_str().ok())
         .unwrap_or("application/octet-stream")
         .to_string();
-    Ok(binary(resp.body, &media, false))
+    Ok(track_delivery(binary(resp.body, &media, false), state, ctx))
 }
 
 /// 这次请求的形态摘要（只用我们自己发出的数据，绝不碰上游响应体）。上游 5xx 时记下，

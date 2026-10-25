@@ -61,7 +61,7 @@ async fn recovery_commits_saved_success_once_and_retains_unknown_budget() {
     };
     let payload = serde_json::to_string(&success).unwrap();
     assert!(
-        db.save_request_result("known", &payload, 3.0)
+        db.save_request_result("known", &payload, 2.5, 3.0)
             .await
             .unwrap()
     );
@@ -97,7 +97,7 @@ async fn recovery_commits_saved_success_once_and_retains_unknown_budget() {
     )
     .await
     .unwrap();
-    db.save_request_result("fault", &fault_payload, 3.3)
+    db.save_request_result("fault", &fault_payload, 3.1, 3.3)
         .await
         .unwrap();
     db.run_script(vec!["CREATE TRIGGER reject_success BEFORE INSERT ON usage_log BEGIN SELECT RAISE(ABORT, 'injected write failure'); END".into()]).await.unwrap();
@@ -192,6 +192,25 @@ async fn recovery_commits_saved_success_once_and_retains_unknown_budget() {
     db.commit_saved_request_result("fault", &fault_payload, 9.1)
         .await
         .unwrap();
+    let log_link: (String, f64) = db
+        .read(|c| {
+            c.query_row(
+                "SELECT request_id,ts FROM usage_log JOIN usage_request_links ON usage_log.id=usage_log_id WHERE rid='rid-known'",
+                [],
+                |r| Ok((r.get(0)?, r.get(1)?)),
+            )
+        })
+        .await
+        .unwrap();
+    assert_eq!(log_link, ("known".into(), 2.5));
+    db.set_request_delivery("known", "transport_complete", 9.2)
+        .await
+        .unwrap();
+    let member_log = db.member_logs(key_id, 0.0, 0, "", 10).await.unwrap();
+    assert_eq!(
+        member_log.iter().find(|r| r["rid"] == "rid-known").unwrap()["delivery_state"],
+        "transport_complete"
+    );
     let counter = db.get_counter(key_id, "2026-10-26").await.unwrap();
     assert_eq!((counter.images, counter.legacy_free_images), (2, 2));
 

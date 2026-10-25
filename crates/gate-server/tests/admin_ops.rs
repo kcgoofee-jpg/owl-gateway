@@ -2213,8 +2213,12 @@ async fn reconciliation_waits_for_inflight_reservations_and_blocks_admission() {
     e.state.budget.lock().await.reservations.insert(
         1,
         Reservation {
+            request_id: "test-reservation".into(),
             key_id: 1,
+            day: "2026-10-25".into(),
+            month: "2026-10".into(),
             exclude_global_v5: false,
+            is_vibe: false,
             anlas: 0.0,
             v5: 0,
             legacy: 0,

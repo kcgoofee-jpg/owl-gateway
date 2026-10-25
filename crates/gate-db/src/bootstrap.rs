@@ -121,6 +121,7 @@ pub const RUST_ADDED_TABLES: &[&str] = &[
     "CREATE INDEX IF NOT EXISTS idx_device_logins_dev ON device_logins (device_id)",
     // 「每位成员到网页登录一次」开关按 (discord_id, ts) 查：每个出图请求都会查一次
     "CREATE INDEX IF NOT EXISTS idx_device_logins_who ON device_logins (discord_id, ts)",
+    "CREATE TABLE IF NOT EXISTS usage_request_links (request_id TEXT PRIMARY KEY, usage_log_id INTEGER NOT NULL UNIQUE)",
     // 设备指纹的可读分项（显卡 / 屏幕 / 时区 / 硬件 …）：device_id = 各项合成的短哈希，data 是 JSON 明细，
     // 站长查小号时能看清「哪几项一样」而不是只有一个哈希。同样只留 30 天。
     "CREATE TABLE IF NOT EXISTS device_fingerprints (\
@@ -200,6 +201,8 @@ pub const RUST_ADDED_TABLE_COLUMNS: &[&str] = &[
     "ALTER TABLE request_settlements ADD COLUMN exclude_global_v5 INTEGER NOT NULL DEFAULT 0",
     "ALTER TABLE request_settlements ADD COLUMN is_vibe INTEGER NOT NULL DEFAULT 0",
     "ALTER TABLE request_settlements ADD COLUMN resolution_note TEXT NOT NULL DEFAULT ''",
+    "ALTER TABLE request_settlements ADD COLUMN result_at REAL",
+    "ALTER TABLE request_settlements ADD COLUMN delivery_state TEXT NOT NULL DEFAULT 'pending'",
     // 这个账号第一次在这台设备 / 这个浏览器上网页登录的时刻（ts 是最近一次）。待审卡片显示「首次 / 最近登录」用；
     // 加列之前的老行为 NULL，读的时候退回 ts。
     "ALTER TABLE device_logins ADD COLUMN first_ts REAL",

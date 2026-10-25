@@ -230,6 +230,68 @@ pub(super) fn binary(content: Bytes, media: &str, no_store: bool) -> Response {
     r
 }
 
+pub(super) fn track_delivery(mut response: Response, state: &AppState, ctx: &ReqCtx) -> Response {
+    use futures::Stream;
+    use std::{
+        pin::Pin,
+        task::{Context, Poll},
+    };
+    struct Delivery {
+        inner: Pin<Box<dyn Stream<Item = Result<Bytes, axum::Error>> + Send>>,
+        state: AppState,
+        request_id: String,
+        complete: bool,
+    }
+    impl Delivery {
+        fn mark(&self, value: &'static str) {
+            let (s, id, value) = (
+                self.state.clone(),
+                self.request_id.clone(),
+                value.to_string(),
+            );
+            let tasks = s.tasks.clone();
+            tasks.spawn(async move {
+                if let Err(e) = s.db.set_request_delivery(&id, &value, s.now()).await {
+                    tracing::error!(error = %e, request_id = %id, "delivery state update failed");
+                }
+            });
+        }
+    }
+    impl Stream for Delivery {
+        type Item = Result<Bytes, axum::Error>;
+        fn poll_next(
+            mut self: Pin<&mut Self>,
+            cx: &mut Context<'_>,
+        ) -> Poll<Option<Result<Bytes, axum::Error>>> {
+            match self.inner.as_mut().poll_next(cx) {
+                Poll::Ready(None) => {
+                    if !self.complete {
+                        self.complete = true;
+                        self.mark("transport_complete");
+                    }
+                    Poll::Ready(None)
+                }
+                other => other,
+            }
+        }
+    }
+    impl Drop for Delivery {
+        fn drop(&mut self) {
+            if !self.complete {
+                self.mark("transport_interrupted");
+            }
+        }
+    }
+    let body = std::mem::replace(response.body_mut(), Body::empty());
+    *response.body_mut() = Body::from_stream(Delivery {
+        inner: Box::pin(body.into_data_stream()),
+        state: state.clone(),
+        request_id: ctx.internal_id(),
+        complete: false,
+    });
+    response
+}
+
 // ------------------------------------------------------------------ 出图
 
 async fn generate_image(State(state): State<AppState>, req: Request) -> ApiResult {

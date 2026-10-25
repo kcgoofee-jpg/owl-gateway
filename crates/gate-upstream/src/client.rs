@@ -126,6 +126,8 @@ pub type ResolveV5<'a> = Box<
         + Sync
         + 'a,
 >;
+pub type OnDispatch<'a> =
+    Box<dyn Fn() -> BoxFuture<'static, Result<(), UpstreamError>> + Send + Sync + 'a>;
 
 pub type BeforeDispatch<'a> =
     Box<dyn Fn() -> BoxFuture<'static, Result<(), UpstreamError>> + Send + Sync + 'a>;
@@ -141,8 +143,7 @@ pub struct Callbacks<'a> {
     /// 真正发出前的最后检查（全站冷却）；返回 Err 则不发。
     pub before_dispatch: Option<BeforeDispatch<'a>>,
     /// 发出非幂等请求前持久化派发状态；失败时禁止发送。
-    pub on_dispatch:
-        Option<Box<dyn Fn() -> BoxFuture<'static, Result<(), UpstreamError>> + Send + Sync + 'a>>,
+    pub on_dispatch: Option<OnDispatch<'a>>,
 }
 
 impl<H: Hooks> NaiClient<H> {

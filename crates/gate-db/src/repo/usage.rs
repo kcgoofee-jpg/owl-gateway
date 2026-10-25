@@ -242,6 +242,7 @@ fn log_filter(f: &LogFilter) -> (String, Vec<SqlValue>) {
 
 impl Db {
     /// Create a durable reservation before a generation is allowed to leave the gateway.
+    #[allow(clippy::too_many_arguments)]
     pub async fn reserve_request_settlement(
         &self,
         request_id: &str,
@@ -270,6 +271,7 @@ impl Db {
     }
 
     /// Must commit before the upstream POST is sent. A failed write is a hard dispatch failure.
+    #[allow(clippy::too_many_arguments)]
     pub async fn dispatch_request_settlement(
         &self,
         request_id: &str,
@@ -283,10 +285,11 @@ impl Db {
         now: f64,
     ) -> Result<bool> {
         let (request_id, day, month) = (request_id.to_owned(), day.to_owned(), month.to_owned());
-        self.write(move |tx| Ok(tx.execute("UPDATE request_settlements SET status='dispatched',day=?,month=?,exclude_global_v5=?,anlas=?,v5=?,legacy=?,is_vibe=?,dispatched_at=?,updated_at=? WHERE request_id=? AND status='reserved'",
+        self.write(move |tx| Ok(tx.execute("UPDATE request_settlements SET status='dispatched',day=?,month=?,exclude_global_v5=?,anlas=?,v5=?,legacy=?,is_vibe=?,dispatched_at=CASE WHEN dispatched_at IS NULL THEN ? ELSE dispatched_at END,updated_at=? WHERE request_id=? AND status IN ('reserved','dispatched')",
             params![day, month, exclude_global_v5, anlas, v5, legacy, is_vibe, now, now, request_id])? == 1)).await
     }
 
+    #[allow(clippy::too_many_arguments)]
     pub async fn update_request_reservation(
         &self,
         request_id: &str,
@@ -300,7 +303,7 @@ impl Db {
     ) -> Result<bool> {
         let request_id = request_id.to_owned();
         let (day, month) = (day.to_owned(), month.to_owned());
-        self.write(move |tx| Ok(tx.execute("UPDATE request_settlements SET day=?,month=?,exclude_global_v5=?,anlas=?,v5=?,legacy=?,is_vibe=? WHERE request_id=? AND status='reserved'",
+        self.write(move |tx| Ok(tx.execute("UPDATE request_settlements SET day=?,month=?,exclude_global_v5=?,anlas=?,v5=?,legacy=?,is_vibe=? WHERE request_id=? AND status IN ('reserved','dispatched')",
             params![day, month, exclude_global_v5, anlas, v5, legacy, is_vibe, request_id])? == 1)).await
     }
 
@@ -309,11 +312,12 @@ impl Db {
         &self,
         request_id: &str,
         payload: &str,
+        result_at: f64,
         now: f64,
     ) -> Result<bool> {
         let (request_id, payload) = (request_id.to_owned(), payload.to_owned());
-        self.write(move |tx| Ok(tx.execute("UPDATE request_settlements SET status='result_saved',result_json=?,updated_at=? WHERE request_id=? AND status='dispatched'",
-            params![payload, now, request_id])? == 1)).await
+        self.write(move |tx| Ok(tx.execute("UPDATE request_settlements SET status='result_saved',result_json=?,result_at=?,updated_at=? WHERE request_id=? AND status='dispatched'",
+            params![payload, result_at, now, request_id])? == 1)).await
     }
 
     pub async fn mark_request_uncertain(&self, request_id: &str, now: f64) -> Result<bool> {
@@ -360,7 +364,7 @@ impl Db {
     /// 成功日志、额度与使用时间一起提交；写入失败时整笔回退（一个事务）。
     /// 写线程独占写连接，锁冲突由 `Db::write` 的 BUSY 重试兜住。
     pub async fn record_success(&self, s: &Success, now: f64) -> Result<()> {
-        self.commit_success(s, None, now).await
+        self.commit_success(s, None, now, now).await
     }
 
     /// Save a durable result payload, then apply usage/counters and mark committed in one transaction.
@@ -372,7 +376,10 @@ impl Db {
     ) -> Result<()> {
         let payload =
             serde_json::to_string(s).map_err(|e| crate::DbError::Invalid(e.to_string()))?;
-        if !self.save_request_result(request_id, &payload, now).await? {
+        if !self
+            .save_request_result(request_id, &payload, now, now)
+            .await?
+        {
             // A prior commit is idempotent; all other states are an invalid transition.
             let id = request_id.to_owned();
             let status: Option<String> = self
@@ -392,10 +399,16 @@ impl Db {
                 "request result is not dispatchable".into(),
             ));
         }
-        self.commit_success(s, Some(request_id), now).await
+        self.commit_success(s, Some(request_id), now, now).await
     }
 
-    async fn commit_success(&self, s: &Success, request_id: Option<&str>, now: f64) -> Result<()> {
+    async fn commit_success(
+        &self,
+        s: &Success,
+        request_id: Option<&str>,
+        now: f64,
+        result_at: f64,
+    ) -> Result<()> {
         let s = s.clone();
         let request_id = request_id.map(str::to_owned);
         self.write(move |tx| {
@@ -409,7 +422,7 @@ impl Db {
             tx.execute(
                 INSERT_LOG,
                 params![
-                    now,
+                    result_at,
                     s.key_id,
                     s.key_name,
                     s.kind,
@@ -436,6 +449,9 @@ impl Db {
                     h[5],
                 ],
             )?;
+            if let Some(id) = request_id.as_deref() {
+                tx.execute("INSERT INTO usage_request_links(request_id,usage_log_id) VALUES(?,last_insert_rowid())", [id])?;
+            }
             tx.execute(
                 UPSERT_COUNTERS,
                 params![
@@ -452,7 +468,7 @@ impl Db {
             tx.execute(
                 "UPDATE api_keys SET last_used_at=?, \
                  last_image_at=CASE WHEN ? THEN ? ELSE last_image_at END WHERE id=?",
-                params![now, i64::from(is_image_kind(&s.kind)), now, s.key_id],
+                params![now, i64::from(is_image_kind(&s.kind)), result_at, s.key_id],
             )?;
             if let Some(id) = request_id.as_deref() {
                 tx.execute("UPDATE request_settlements SET status=?,anlas=?,v5=?,legacy=?,updated_at=? WHERE request_id=? AND status='result_saved'",
@@ -471,7 +487,19 @@ impl Db {
     ) -> Result<()> {
         let success: Success =
             serde_json::from_str(payload).map_err(|e| crate::DbError::Invalid(e.to_string()))?;
-        self.commit_success(&success, Some(request_id), now).await
+        let id = request_id.to_owned();
+        let result_at = self
+            .read(move |c| {
+                c.query_row(
+                    "SELECT result_at FROM request_settlements WHERE request_id=?",
+                    [id],
+                    |r| r.get::<_, Option<f64>>(0),
+                )
+                .map(|v| v.unwrap_or(now))
+            })
+            .await?;
+        self.commit_success(&success, Some(request_id), now, result_at)
+            .await
     }
 
     /// Normalize crash states without replaying upstream: reserved was never dispatched; dispatched is unknown.
@@ -491,6 +519,19 @@ impl Db {
         self.read(|c| {
             let mut stmt=c.prepare("SELECT request_id,rid,key_id,status,day,month,exclude_global_v5,anlas,v5,legacy,is_vibe,result_json FROM request_settlements WHERE status='uncertain' ORDER BY updated_at")?;
             stmt.query_map([], |r| Ok(RequestSettlement { request_id:r.get(0)?, rid:r.get(1)?, key_id:r.get(2)?, status:r.get(3)?, day:r.get(4)?, month:r.get(5)?, exclude_global_v5:r.get::<_,i64>(6)? != 0, anlas:r.get(7)?, v5:r.get(8)?, legacy:r.get(9)?, is_vibe:r.get::<_,i64>(10)? != 0, result_json:r.get(11)? }))?.collect()
+        }).await
+    }
+
+    pub async fn set_request_delivery(
+        &self,
+        request_id: &str,
+        state: &str,
+        now: f64,
+    ) -> Result<()> {
+        let (id, state) = (request_id.to_owned(), state.to_owned());
+        self.write(move |tx| {
+            tx.execute("UPDATE request_settlements SET delivery_state=?,updated_at=? WHERE request_id=? AND status IN ('committed','uncertain')", params![state, now, id])?;
+            Ok(())
         }).await
     }
 
@@ -616,9 +657,10 @@ impl Db {
         let limit = limit.clamp(1, 200);
         self.read(move |c| {
             let mut stmt = c.prepare(
-                "SELECT id, rid, ts, kind, model, status, images, anlas, wait_ms, dur_ms, reason, detail \
-                 FROM usage_log WHERE key_id=?1 AND ts>=?2 AND (?3=0 OR id<?3) \
-                 AND (?4='' OR status=?4) ORDER BY id DESC LIMIT ?5",
+                "SELECT l.id, l.rid, l.ts, l.kind, l.model, l.status, l.images, l.anlas, l.wait_ms, l.dur_ms, l.reason, l.detail, \
+                 COALESCE(s.delivery_state,'unknown') AS delivery_state FROM usage_log l LEFT JOIN usage_request_links u ON u.usage_log_id=l.id LEFT JOIN request_settlements s ON s.request_id=u.request_id \
+                 WHERE l.key_id=?1 AND l.ts>=?2 AND (?3=0 OR l.id<?3) \
+                 AND (?4='' OR l.status=?4) ORDER BY l.id DESC LIMIT ?5",
             )?;
             stmt.query_map(params![key_id, since, before, status, limit], value::row_json)?
                 .collect()

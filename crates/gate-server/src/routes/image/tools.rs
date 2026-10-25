@@ -1,6 +1,8 @@
 //! 图片工具（放大 / 导演工具）与 Vibe 编码：只有成功返回结果才记费。
 
-use super::{before_dispatch, binary, on_429, on_dispatch, shielded, tool_status, up_to_gate};
+use super::{
+    before_dispatch, binary, on_429, on_dispatch, shielded, tool_status, track_delivery, up_to_gate,
+};
 use crate::accounting::Entry;
 use crate::admission::{self, Est, acquire_slots, image_admission, reserve_image_budget};
 use crate::auth::{authenticate, check_image_cooldown, check_rpm, ctx_of, require_feature};
@@ -127,7 +129,7 @@ pub(super) async fn tool(
                     },
                 )
                 .await;
-            Ok(binary(resp.body, &media, true))
+            Ok(track_delivery(binary(resp.body, &media, true), &state, &ctx))
         }
         .await;
         match failed {
@@ -305,7 +307,7 @@ pub(super) async fn vibe(state: AppState, req: Request) -> Result<Response, ApiE
                 },
             )
             .await;
-        Ok(binary(resp.body, "application/octet-stream", true))
+        Ok(track_delivery(binary(resp.body, "application/octet-stream", true), &state, &ctx))
     })
     .await
 }
