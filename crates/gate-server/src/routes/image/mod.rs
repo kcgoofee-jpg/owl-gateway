@@ -240,7 +240,7 @@ pub(super) fn track_delivery(mut response: Response, state: &AppState, ctx: &Req
         inner: Pin<Box<dyn Stream<Item = Result<Bytes, axum::Error>> + Send>>,
         state: AppState,
         request_id: String,
-        complete: bool,
+        terminal: bool,
     }
     impl Delivery {
         fn mark(&self, value: &'static str) {
@@ -265,11 +265,18 @@ pub(super) fn track_delivery(mut response: Response, state: &AppState, ctx: &Req
         ) -> Poll<Option<Result<Bytes, axum::Error>>> {
             match self.inner.as_mut().poll_next(cx) {
                 Poll::Ready(None) => {
-                    if !self.complete {
-                        self.complete = true;
+                    if !self.terminal {
+                        self.terminal = true;
                         self.mark("transport_complete");
                     }
                     Poll::Ready(None)
+                }
+                Poll::Ready(Some(Err(error))) => {
+                    if !self.terminal {
+                        self.terminal = true;
+                        self.mark("transport_interrupted");
+                    }
+                    Poll::Ready(Some(Err(error)))
                 }
                 other => other,
             }
@@ -277,7 +284,7 @@ pub(super) fn track_delivery(mut response: Response, state: &AppState, ctx: &Req
     }
     impl Drop for Delivery {
         fn drop(&mut self) {
-            if !self.complete {
+            if !self.terminal {
                 self.mark("transport_interrupted");
             }
         }
@@ -287,7 +294,7 @@ pub(super) fn track_delivery(mut response: Response, state: &AppState, ctx: &Req
         inner: Box::pin(body.into_data_stream()),
         state: state.clone(),
         request_id: ctx.internal_id(),
-        complete: false,
+        terminal: false,
     });
     response
 }

@@ -32,13 +32,22 @@ export function okLine(r: Pick<MyRequest, "message" | "anlas" | "site_paid">): s
 }
 
 const STATUS: Record<string, { text: string; tone: "ok" | "warn" | "danger" }> = {
-  ok: { text: "成功", tone: "ok" },
+  ok: { text: "已生成", tone: "ok" },
   rejected: { text: "被拒", tone: "warn" },
   error: { text: "失败", tone: "danger" },
   cancelled: { text: "已取消", tone: "warn" },
 };
 
-function Row({ r }: { r: MyRequest }) {
+export function deliveryLabel(state: MyRequest["delivery_state"]): { text: string; tone: "warn" | "danger" } {
+  switch (state) {
+    case "transport_complete": return { text: "服务端传输完成（未确认客户端收到）", tone: "warn" };
+    case "transport_interrupted": return { text: "传输中断", tone: "danger" };
+    case "pending": return { text: "传输中", tone: "warn" };
+    default: return { text: "传输状态未知", tone: "warn" };
+  }
+}
+
+export function RequestRow({ r }: { r: MyRequest }) {
   const s = STATUS[r.status] ?? { text: r.status, tone: "warn" as const };
   const timing = [
     r.wait_s != null && r.wait_s >= 1 ? `排队 ${Math.round(r.wait_s)} 秒` : "",
@@ -54,6 +63,7 @@ function Row({ r }: { r: MyRequest }) {
         <span class="spacer" />
         {r.rid && <span class="lp-req__id">编号 {r.rid}</span>}
         <Badge tone={s.tone}>{s.text}</Badge>
+        {r.status === "ok" && <Badge tone={deliveryLabel(r.delivery_state).tone}>{deliveryLabel(r.delivery_state).text}</Badge>}
       </div>
       {r.status === "ok" ? (
         <p class="lp-req__line">{okLine(r)}</p>
@@ -106,7 +116,7 @@ function List({ status, onSummary }: { status: Status; onSummary: (s: MyRequests
       {items && items.length > 0 && (
         <ul class="lp-reqs">
           {items.map((r) => (
-            <Row key={r.id} r={r} />
+            <RequestRow key={r.id} r={r} />
           ))}
         </ul>
       )}

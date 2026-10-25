@@ -4,6 +4,70 @@ use gate_db::repo::usage::Success;
 use serde_json::json;
 
 #[tokio::test]
+async fn identical_short_rid_links_only_to_its_internal_request_and_owner() {
+    let dir = tempfile::tempdir().unwrap();
+    let db = Db::open(dir.path().join("gate.db")).unwrap();
+    let create = |name: &str, token: &str| -> NewKey {
+        serde_json::from_value(
+            json!({"name":name,"token":token,"daily_images":10,"monthly_anlas":0.0,"daily_text_tokens":1000,"rpm":60}),
+        )
+        .unwrap()
+    };
+    let key1 = db
+        .create_key(&create("one", "nai-owner-one-000000000000000000"), 1.0)
+        .await
+        .unwrap()["id"]
+        .as_i64()
+        .unwrap();
+    let key2 = db
+        .create_key(&create("two", "nai-owner-two-000000000000000000"), 1.0)
+        .await
+        .unwrap()["id"]
+        .as_i64()
+        .unwrap();
+    for (id, key_id) in [("internal-one", key1), ("internal-two", key2)] {
+        db.reserve_request_settlement(
+            id,
+            "same-rid",
+            key_id,
+            "2026-10-25",
+            "2026-10",
+            false,
+            false,
+            1.0,
+            0,
+            1,
+            1.0,
+        )
+        .await
+        .unwrap();
+        db.dispatch_request_settlement(id, "2026-10-25", "2026-10", false, false, 1.0, 0, 1, 2.0)
+            .await
+            .unwrap();
+        let success = Success {
+            key_id,
+            key_name: format!("owner-{key_id}"),
+            kind: "image".into(),
+            model: "model".into(),
+            day: "2026-10-25".into(),
+            images: 1,
+            anlas: 1.0,
+            rid: "same-rid".into(),
+            ..Default::default()
+        };
+        db.record_success_settled(&success, id, 3.0).await.unwrap();
+    }
+    let first = db.member_logs(key1, 0.0, 0, "", 10).await.unwrap();
+    let second = db.member_logs(key2, 0.0, 0, "", 10).await.unwrap();
+    assert_eq!(first.len(), 1);
+    assert_eq!(second.len(), 1);
+    assert_eq!(first[0]["rid"], "same-rid");
+    assert_eq!(second[0]["rid"], "same-rid");
+    assert_eq!(first[0]["id"], 1);
+    assert_eq!(second[0]["id"], 2);
+}
+
+#[tokio::test]
 async fn recovery_commits_saved_success_once_and_retains_unknown_budget() {
     let dir = tempfile::tempdir().unwrap();
     let path = dir.path().join("gate.db");

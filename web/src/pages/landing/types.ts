@@ -105,6 +105,8 @@ export interface MyRequest {
   kind: string;
   model: string;
   status: string;
+  /** Server-side response body delivery; absence in legacy rows means unknown. */
+  delivery_state?: "transport_complete" | "transport_interrupted" | "pending" | "unknown";
   images: number;
   /** 成员自己花的 Anlas（本站账号代付的记 0） */
   anlas: number;

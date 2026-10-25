@@ -530,7 +530,7 @@ impl Db {
     ) -> Result<()> {
         let (id, state) = (request_id.to_owned(), state.to_owned());
         self.write(move |tx| {
-            tx.execute("UPDATE request_settlements SET delivery_state=?,updated_at=? WHERE request_id=? AND status IN ('committed','uncertain')", params![state, now, id])?;
+            tx.execute("UPDATE request_settlements SET delivery_state=?,updated_at=? WHERE request_id=? AND status NOT IN ('released','released_manual') AND delivery_state='pending'", params![state, now, id])?;
             Ok(())
         }).await
     }

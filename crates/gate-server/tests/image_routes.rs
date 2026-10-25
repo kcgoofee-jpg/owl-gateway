@@ -4,6 +4,7 @@ mod common;
 use axum::body::Body;
 use axum::http::{Request, StatusCode};
 use common::{Call, TOKEN, settle, setup};
+use futures::StreamExt;
 use gate_db::repo::usage::{LogFilter, Success};
 use gate_server::AppState;
 use gate_testkit::Reply;
@@ -105,6 +106,102 @@ async fn generate_image_ok_records_usage() {
     assert!(detail.starts_with("832x1216/28step 免费"), "{detail}");
     let c = e.state.db.get_counter(1, &e.state.day()).await.unwrap();
     assert_eq!((c.images, c.legacy_free_images), (1, 1));
+}
+
+#[tokio::test]
+async fn nonstream_body_drop_keeps_success_charge_and_marks_interrupted() {
+    let e = setup(&[]).await;
+    let req = Request::builder()
+        .method("POST")
+        .uri("/ai/generate-image")
+        .header("authorization", format!("Bearer {TOKEN}"))
+        .header("content-type", "application/json")
+        .body(Body::from(
+            serde_json::to_vec(&image_body("nai-diffusion-4-5-full", 1)).unwrap(),
+        ))
+        .unwrap();
+    let response = gate_server::app(e.state.clone())
+        .oneshot(req)
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::OK);
+    let rid = response.headers()["x-request-id"]
+        .to_str()
+        .unwrap()
+        .to_string();
+    drop(response.into_body()); // Body is never polled by the caller.
+    let rows = logs(&e.state).await;
+    assert_eq!(e.mock.requests_to("/ai/generate-image").len(), 1);
+    assert_eq!(rows.iter().filter(|r| r["status"] == "ok").count(), 1);
+    let delivery: String = e.state.db.read(move |c| c.query_row(
+        "SELECT s.delivery_state FROM usage_log l JOIN usage_request_links u ON u.usage_log_id=l.id JOIN request_settlements s ON s.request_id=u.request_id WHERE l.rid=?",
+        [rid], |r| r.get(0),
+    )).await.unwrap();
+    assert_eq!(delivery, "transport_interrupted");
+    assert_eq!(
+        e.state
+            .db
+            .get_counter(1, &e.state.day())
+            .await
+            .unwrap()
+            .images,
+        1
+    );
+}
+
+#[tokio::test]
+async fn stream_disconnect_after_final_keeps_single_image_charge_and_marks_interrupted() {
+    let e = setup(&[]).await;
+    let req = Request::builder()
+        .method("POST")
+        .uri("/ai/generate-image-stream")
+        .header("authorization", format!("Bearer {TOKEN}"))
+        .header("content-type", "application/json")
+        .body(Body::from(
+            serde_json::to_vec(&image_body("nai-diffusion-4-5-full", 1)).unwrap(),
+        ))
+        .unwrap();
+    let response = gate_server::app(e.state.clone())
+        .oneshot(req)
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::OK);
+    let rid = response.headers()["x-request-id"]
+        .to_str()
+        .unwrap()
+        .to_string();
+    let mut body = response.into_body().into_data_stream();
+    let mut saw_final = false;
+    while let Some(frame) = body.next().await {
+        let frame = frame.unwrap();
+        if String::from_utf8_lossy(&frame).contains("final") {
+            saw_final = true;
+            break;
+        }
+    }
+    assert!(
+        saw_final,
+        "the client observed the final image event before disconnecting"
+    );
+    drop(body);
+    let rows = logs(&e.state).await;
+    assert_eq!(e.mock.requests_to("/ai/generate-image-stream").len(), 1);
+    assert_eq!(rows.iter().filter(|r| r["status"] == "ok").count(), 1);
+    assert_eq!(rows.iter().find(|r| r["rid"] == rid).unwrap()["images"], 1);
+    let delivery: String = e.state.db.read(move |c| c.query_row(
+        "SELECT s.delivery_state FROM usage_log l JOIN usage_request_links u ON u.usage_log_id=l.id JOIN request_settlements s ON s.request_id=u.request_id WHERE l.rid=?",
+        [rid], |r| r.get(0),
+    )).await.unwrap();
+    assert_eq!(delivery, "transport_interrupted");
+    assert_eq!(
+        e.state
+            .db
+            .get_counter(1, &e.state.day())
+            .await
+            .unwrap()
+            .images,
+        1
+    );
 }
 
 /// 每人只有每日上限：2.x 的每人注水（底仓 30 张、每小时补 4 张，一天最多约 126 张）已删除。

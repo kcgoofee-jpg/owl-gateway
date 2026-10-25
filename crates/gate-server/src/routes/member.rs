@@ -382,13 +382,7 @@ fn my_request_item(r: &serde_json::Value) -> serde_json::Value {
         "reason": r["reason"],
         "code": code,
         "message": message,
-        "delivery": match r["delivery_state"].as_str().unwrap_or("unknown") {
-            "transport_complete" => "服务端传输完成（客户端未确认）",
-            "transport_interrupted" => "传输中断",
-            "pending" => "已生成，传输中",
-            _ if r["status"] == "ok" => "已生成，传输状态未知",
-            _ => "无图片传输",
-        },
+        "delivery_state": r["delivery_state"].as_str().unwrap_or("unknown"),
     })
 }
 
