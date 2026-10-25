@@ -164,6 +164,11 @@ async fn add_token(State(state): State<AppState>, _s: AdminSession, req: Request
         .add_token(token, allow_anlas, saved_v5, saved_enabled)
         .await
         .map_err(|msg| HttpError::new(409, msg))?;
+    state
+        .nai
+        .clear_unauthorized(&id)
+        .await
+        .map_err(|e| InternalError(format!("验证后的上游凭据隔离状态清除失败：{e}")))?;
     persist_pool(&state).await?;
     alert_owner(
         &state,
@@ -192,6 +197,11 @@ async fn replace_token(
                 .db
                 .move_upstream_token(&previous, &new.token_id)
                 .await?;
+            state
+                .nai
+                .clear_unauthorized(&previous)
+                .await
+                .map_err(|e| InternalError(format!("验证后的上游凭据隔离状态清除失败：{e}")))?;
             persist_pool(&state).await?;
         }
         Err(msg) if exists(&state, &old_id).await => return Err(HttpError::new(409, msg).into()),

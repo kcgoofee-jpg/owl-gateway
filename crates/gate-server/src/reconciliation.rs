@@ -225,6 +225,9 @@ async fn query(state: &AppState, token: &Token) -> Result<Value, RunError> {
     let Ok(Ok((status, headers, body))) = fetched else {
         return Err(ReconError::unreadable().into());
     };
+    if status == 401 {
+        state.nai.isolate_unauthorized(token).await;
+    }
     if status == 429 {
         let header = headers
             .get("retry-after")

@@ -222,6 +222,11 @@ impl Token {
         });
     }
 
+    /// 启动时恢复明确由上游 401 标记的凭据隔离；这与后台人工启停分开保存。
+    pub fn restore_unauthorized(&self) {
+        self.with(|f| f.disabled = true);
+    }
+
     /// 直接设定实测出图耗时（秒；平时由每次出图的滑动平均更新）。测试和估算演示用。
     pub fn set_gen_secs(&self, secs: f64) {
         self.with(|f| f.gen_secs = secs.max(0.0));
@@ -379,6 +384,15 @@ impl Token {
     }
 }
 
+/// 统一处理已使用凭据收到的 401：立即隔离运行态，并等待实现层持久化指纹。
+pub(crate) async fn isolate_unauthorized(hooks: &dyn Hooks, token: &Token) {
+    token.mark_unauthorized();
+    if let Err(e) = hooks.unauthorized(&token.token_id).await {
+        tracing::error!(token_id = %token.token_id, error = %e, "上游 401 凭据隔离存库失败；本次运行仍已隔离该账号");
+    }
+    event_401(hooks, &token.token_id);
+}
+
 /// 402 / 403：提醒站长检查上游账号。
 pub(crate) fn warn_account(hooks: &dyn Hooks, status: u16) {
     if status == 402 || status == 403 {
@@ -395,10 +409,10 @@ pub(crate) fn warn_account(hooks: &dyn Hooks, status: u16) {
     }
 }
 
-pub(crate) fn event_401(hooks: &dyn Hooks) {
+pub(crate) fn event_401(hooks: &dyn Hooks, token_id: &str) {
     hooks.event(
         "upstream_401",
-        "NovelAI 返回 401：上游 Token 已失效，生图全部不可用，请尽快更换 Token。",
+        &format!("NovelAI 对上游账号 {token_id} 返回 401，该账号凭据已隔离，请验证并更换该账号的 Token。其他账号状态未作判断。"),
         1800.0,
     );
 }
@@ -553,6 +567,15 @@ impl Pool {
                     f.admin_enabled = *e;
                 }
             });
+        }
+    }
+
+    pub(crate) async fn restore_unauthorized(&self, token_ids: &std::collections::HashSet<String>) {
+        let pool = self.state.lock().await;
+        for token in &pool.tokens {
+            if token_ids.contains(&token.token_id) {
+                token.restore_unauthorized();
+            }
         }
     }
 

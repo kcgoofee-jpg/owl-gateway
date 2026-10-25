@@ -18,6 +18,14 @@ pub trait Hooks: Send + Sync + 'static {
     fn event(&self, kind: &str, message: &str, cooldown: f64);
     /// 某个账号的冷却状态变了（429 / 403）：实现方存起来，重启后用 [`Token::restore_cooldown`] 恢复。
     fn cooldown_changed(&self, _token_id: &str, _cooldown: crate::pool::Cooldown) {}
+    /// 上游明确返回 401 时持久化该凭据指纹的隔离状态。调用方等待完成后才结束请求。
+    fn unauthorized<'a>(&'a self, _token_id: &'a str) -> BoxFuture<'a, HookResult<()>> {
+        Box::pin(async { Ok(()) })
+    }
+    /// 已验证凭据替换后清除原指纹隔离，和 401 持久化使用同一序列化边界。
+    fn clear_unauthorized<'a>(&'a self, _token_id: &'a str) -> BoxFuture<'a, HookResult<()>> {
+        Box::pin(async { Ok(()) })
+    }
 
     /// 是否接了账号保护（旧版 `self.guard is not None`）。
     fn has_guard(&self) -> bool;

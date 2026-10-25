@@ -317,11 +317,10 @@ async fn on_402(
 }
 
 /// 其余状态码：账号告警；401 停用这把 Token 并报警。
-fn on_other_status(hooks: &dyn Hooks, token: &Token, status: u16) -> Option<UpstreamError> {
+async fn on_other_status(hooks: &dyn Hooks, token: &Token, status: u16) -> Option<UpstreamError> {
     pool::warn_account(hooks, status);
     if status == 401 {
-        token.mark_unauthorized();
-        pool::event_401(hooks);
+        pool::isolate_unauthorized(hooks, token).await;
         return Some(UpstreamError::new(502, TOKEN_401));
     }
     None
@@ -609,7 +608,7 @@ impl<H: Hooks> NaiClient<H> {
             // 402 没出图、没扣费，换号重试是安全的；按最初的费用策略重新选号
             return Attempt::SwitchV5;
         }
-        if let Some(e) = on_other_status(hooks, token, resp.status) {
+        if let Some(e) = on_other_status(hooks, token, resp.status).await {
             return Attempt::Done(Err(e));
         }
         if succeeded && o.wait_for_image_slot {
@@ -972,7 +971,7 @@ impl<H: Hooks> NaiClient<H> {
                 let e = on_403(hooks, &token, &peek);
                 fl.finish().await;
                 return Err(e);
-            } else if let Some(e) = on_other_status(hooks, &token, status) {
+            } else if let Some(e) = on_other_status(hooks, &token, status).await {
                 Some(e)
             } else if status != 200 && status != 201 {
                 let s = if (400..=599).contains(&status) {

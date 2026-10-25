@@ -244,6 +244,14 @@ impl AppState {
                 &enabled.into_iter().collect(),
             )
             .await;
+        let invalid_tokens = crate::hooks::decode_invalid_tokens(
+            self.db
+                .get_setting(crate::hooks::INVALID_TOKENS_KEY)
+                .await?
+                .as_deref(),
+        )
+        .map_err(anyhow::Error::msg)?;
+        self.nai.restore_unauthorized(&invalid_tokens).await;
         self.guard
             .load()
             .await

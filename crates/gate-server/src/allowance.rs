@@ -138,6 +138,9 @@ impl ServerAllowance {
             // 响应体超过 65536 字节时拿不到状态码：按「没拿到响应」处理，退避同样是 60 秒
             _ => (None, String::new(), None),
         };
+        if status == Some(401) {
+            nai.isolate_unauthorized(token).await;
+        }
         let f = match status {
             None => Fetched::Failed,
             Some(s) => Fetched::Response {

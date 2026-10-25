@@ -7,10 +7,13 @@ use gate_core::clock::Clock;
 use gate_db::Db;
 use gate_upstream::client::{BoxFuture, HookResult, Hooks};
 use gate_upstream::pool::{Cooldown, decode_cooldowns, encode_cooldowns};
+use std::collections::HashSet;
 use std::sync::Arc;
 
 /// 各上游账号的冷却状态（审查 2026-10-17 M-4），格式见 `gate_upstream::pool::encode_cooldowns`。
 pub const COOLDOWNS_KEY: &str = "upstream_token_cooldowns";
+/// 明确收到上游 401 的凭据指纹；不随重启清除，不存储原始凭据。
+pub const INVALID_TOKENS_KEY: &str = "upstream_invalid_token_fingerprints";
 
 pub struct GateHooks {
     db: Db,
@@ -19,6 +22,7 @@ pub struct GateHooks {
     alerter: Arc<Alerter>,
     /// 冷却存库串行化：读出 → 合并 → 写回 必须一次做完，不然两次 403 挨得近时后一次会被覆盖。
     cooldown_save: Arc<tokio::sync::Mutex<()>>,
+    invalid_token_save: Arc<tokio::sync::Mutex<()>>,
 }
 
 impl GateHooks {
@@ -29,8 +33,47 @@ impl GateHooks {
             guard,
             alerter,
             cooldown_save: Arc::default(),
+            invalid_token_save: Arc::default(),
         }
     }
+}
+
+/// 解析隔离指纹。损坏或非预期格式按错误处理，避免静默恢复可能已失效的凭据。
+pub fn decode_invalid_tokens(raw: Option<&str>) -> Result<HashSet<String>, String> {
+    let Some(raw) = raw else {
+        return Ok(HashSet::new());
+    };
+    let values: Vec<String> =
+        serde_json::from_str(raw).map_err(|_| "上游凭据隔离记录格式损坏".to_string())?;
+    if values.iter().any(|id| {
+        id.len() != 22
+            || !id.starts_with("token-")
+            || !id[6..].bytes().all(|b| b.is_ascii_hexdigit())
+    }) {
+        return Err("上游凭据隔离记录包含无效指纹".to_string());
+    }
+    Ok(values.into_iter().collect())
+}
+
+async fn save_invalid_tokens(db: &Db, ids: &HashSet<String>) -> gate_db::Result<()> {
+    let mut sorted: Vec<_> = ids.iter().cloned().collect();
+    sorted.sort();
+    db.set_setting(INVALID_TOKENS_KEY, &serde_json::to_string(&sorted).unwrap())
+        .await
+}
+
+async fn remove_invalid_token(db: &Db, token_id: &str) -> Result<(), String> {
+    let raw = db
+        .get_setting(INVALID_TOKENS_KEY)
+        .await
+        .map_err(|e| e.to_string())?;
+    let mut ids = decode_invalid_tokens(raw.as_deref())?;
+    if ids.remove(token_id) {
+        save_invalid_tokens(db, &ids)
+            .await
+            .map_err(|e| e.to_string())?;
+    }
+    Ok(())
 }
 
 async fn save_cooldown(db: &Db, token_id: &str, c: Cooldown, now: f64) -> gate_db::Result<()> {
@@ -80,6 +123,27 @@ impl Hooks for GateHooks {
                 tracing::warn!(error = %e, "上游账号冷却存库失败（重启后会提前恢复试探）");
             }
         });
+    }
+
+    fn unauthorized<'a>(&'a self, token_id: &'a str) -> BoxFuture<'a, HookResult<()>> {
+        Box::pin(async move {
+            let _serial = self.invalid_token_save.lock().await;
+            let raw = self.db.get_setting(INVALID_TOKENS_KEY).await?;
+            let mut ids = decode_invalid_tokens(raw.as_deref()).map_err(std::io::Error::other)?;
+            ids.insert(token_id.to_string());
+            save_invalid_tokens(&self.db, &ids).await?;
+            Ok(())
+        })
+    }
+
+    fn clear_unauthorized<'a>(&'a self, token_id: &'a str) -> BoxFuture<'a, HookResult<()>> {
+        Box::pin(async move {
+            let _serial = self.invalid_token_save.lock().await;
+            remove_invalid_token(&self.db, token_id)
+                .await
+                .map_err(std::io::Error::other)?;
+            Ok(())
+        })
     }
 
     fn has_guard(&self) -> bool {

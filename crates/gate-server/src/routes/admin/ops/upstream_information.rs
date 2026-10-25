@@ -248,6 +248,16 @@ async fn refresh(State(state): State<AppState>, _session: AdminSession, req: Req
         )
         .await;
         let parsed = match response {
+            Ok(Ok((401, _, _))) => {
+                state.nai.isolate_unauthorized(token).await;
+                let error = information_error(Some(401), false);
+                let row = account_map
+                    .entry(token.token_id.clone())
+                    .or_insert_with(|| json!({}));
+                row["last_error"] = json!(error);
+                row["last_error_at"] = json!(now);
+                continue;
+            }
             Ok(Ok((200, _, body))) => project_upstream(&body),
             Ok(Ok((status, _, _))) => {
                 let error = information_error(Some(status), false);

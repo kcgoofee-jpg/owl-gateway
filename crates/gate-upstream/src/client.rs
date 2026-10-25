@@ -194,6 +194,11 @@ impl<H: Hooks> NaiClient<H> {
         self.inner.pool.apply_saved(v5_limits, enabled).await;
     }
 
+    /// 启动时按凭据指纹恢复已确认的 401 隔离。
+    pub async fn restore_unauthorized(&self, token_ids: &std::collections::HashSet<String>) {
+        self.inner.pool.restore_unauthorized(token_ids).await;
+    }
+
     /// 新增一把 Token（重复返回 Err）。调用方负责持久化 token_store 与写库。
     pub async fn add_token(
         &self,
@@ -290,6 +295,20 @@ impl<H: Hooks> NaiClient<H> {
 
     pub fn mark_unauthorized(&self, token: &Token) {
         token.mark_unauthorized();
+    }
+
+    /// 对订阅、账号信息等读接口返回的 401 执行与生图相同的凭据隔离和持久化。
+    pub async fn isolate_unauthorized(&self, token: &Token) {
+        crate::pool::isolate_unauthorized(&self.inner.hooks, token).await;
+    }
+
+    /// 成功验证的新凭据已接管槽位后，清除旧凭据的隔离标记。
+    pub async fn clear_unauthorized(&self, token_id: &str) -> Result<(), String> {
+        self.inner
+            .hooks
+            .clear_unauthorized(token_id)
+            .await
+            .map_err(|e| e.to_string())
     }
 
     // ---------------- 账号查询（见 account.rs） ----------------
