@@ -23,15 +23,19 @@ pub(super) fn router() -> Router<AppState> {
     Router::new().route("/admin/api/upstream-information", get(status).post(refresh))
 }
 
-fn csrf(state: &AppState, session: &str) -> String {
+pub(in crate::routes::admin) fn scoped_csrf(
+    state: &AppState,
+    scope: &str,
+    session: &str,
+) -> String {
     let key = crate::session::admin_key_from(
         &state.secret_key,
         &crate::session::admin_pw_material(state),
     );
-    crate::session::hmac_hex(&key, &format!("upstream-information:{session}"))
+    crate::session::hmac_hex(&key, &format!("{scope}:{session}"))
 }
 
-fn origin_ok(headers: &HeaderMap) -> bool {
+pub(in crate::routes::admin) fn origin_ok(headers: &HeaderMap) -> bool {
     let Some(origin) = headers.get(header::ORIGIN).and_then(|v| v.to_str().ok()) else {
         return false;
     };
@@ -118,8 +122,9 @@ async fn status(State(state): State<AppState>, _session: AdminSession, req: Requ
     let cache = read_cache(&state).await?;
     let tokens = state.nai.tokens().await;
     let mut out = project(&cache, &tokens, state.now());
-    out["csrf_token"] = json!(csrf(
+    out["csrf_token"] = json!(scoped_csrf(
         &state,
+        "upstream-information",
         &cookie(&parts.headers, ADMIN_COOKIE).unwrap_or_default()
     ));
     Ok(ok_json(&out))
@@ -192,7 +197,7 @@ async fn refresh(State(state): State<AppState>, _session: AdminSession, req: Req
         return Err(HttpError::new(403, "请求来源校验失败").into());
     }
     let session_cookie = cookie(&parts.headers, ADMIN_COOKIE).unwrap_or_default();
-    let expected = csrf(&state, &session_cookie);
+    let expected = scoped_csrf(&state, "upstream-information", &session_cookie);
     let given = crate::auth::header_str(&parts.headers, "x-nai-admin-csrf");
     if !crate::session::ct_eq(given.as_bytes(), expected.as_bytes()) {
         return Err(HttpError::new(403, "会话校验失败，请刷新后台后重试").into());
