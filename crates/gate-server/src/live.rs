@@ -20,16 +20,10 @@ use gate_core::site_flags::ALGO_NOTICE;
 use serde_json::{Map, Value, json};
 
 fn public_algo_notice(custom: &str, mode: gate_core::v5_access::Mode) -> String {
-    let note = match mode {
-        gate_core::v5_access::Mode::Restricted => "V5 当前仅授权成员可用。",
-        gate_core::v5_access::Mode::Closed => "V5 当前已关闭。",
-        _ => return pyc::take_chars(custom, 300).to_string(),
-    };
-    let prefix = pyc::take_chars(custom, 220);
-    if prefix.trim().is_empty() {
-        note.to_string()
-    } else {
-        format!("{prefix} {note}")
+    match mode {
+        gate_core::v5_access::Mode::Restricted => "V5 当前仅授权成员可用。".to_string(),
+        gate_core::v5_access::Mode::Closed => "V5 当前已关闭。".to_string(),
+        _ => pyc::take_chars(custom, 300).to_string(),
     }
 }
 use std::collections::HashMap;

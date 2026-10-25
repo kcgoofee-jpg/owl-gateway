@@ -1,9 +1,9 @@
 /** 额度与保护：每个数都是站长手动设的（10-23 起没有自动额度算法）；最后一张「记录」只显示。 */
-import { useEffect, useMemo, useState } from "preact/hooks";
+import { useEffect, useMemo, useRef, useState } from "preact/hooks";
 import { fullTime, withUnit } from "../../../lib/format";
 import { Card } from "../../../ui";
 import { act, useAdmin } from "../Admin";
-import { CardPending, SectionHead, TableWrap } from "./_kit";
+import { CardPending, SectionHead, TableWrap, useBusy } from "./_kit";
 import {
   agoText,
   dash,
@@ -170,19 +170,46 @@ function MemberPicker(props: {
   );
 }
 
-function AccessPolicyCard() {
+export function AccessPolicyCard() {
   const settings = useAdmin<Settings>("/admin/api/settings");
   const members = useAdmin<{ members: SubjectMember[] }>("/admin/api/members");
-  const [mode, setMode] = useState<Settings["v5_access_mode"]>("legacy");
-  const [allowed, setAllowed] = useState<string[]>([]);
-  const [owners, setOwners] = useState<string[]>([]);
-  const [admins, setAdmins] = useState<string[]>([]);
+  type PolicyDraft = {
+    mode: Settings["v5_access_mode"];
+    allowed: string[];
+    owners: string[];
+    admins: string[];
+  };
+  const fromSettings = (data: Settings): PolicyDraft => ({
+    mode: data.v5_access_mode ?? "legacy",
+    allowed: data.v5_authorized_discord_ids ?? [],
+    owners: data.gateway_owner_discord_ids ?? [],
+    admins: data.gateway_admin_discord_ids ?? [],
+  });
+  const signature = (value: PolicyDraft) => JSON.stringify(value);
+  const [draft, setDraft] = useState<PolicyDraft>({ mode: "legacy", allowed: [], owners: [], admins: [] });
+  const [baseline, setBaseline] = useState<string | null>(null);
+  const baselineRef = useRef<string | null>(null);
+  const [externalUpdate, setExternalUpdate] = useState(false);
+  const [saving, setSaving] = useState(false);
+  const dirty = baseline !== null && signature(draft) !== baseline;
+  const dirtyRef = useRef(dirty);
+  dirtyRef.current = dirty;
+  const savedSignature = useRef<string | null>(null);
+  useBusy(dirty || saving);
   useEffect(() => {
     if (!settings.data) return;
-    setMode(settings.data.v5_access_mode ?? "legacy");
-    setAllowed(settings.data.v5_authorized_discord_ids ?? []);
-    setOwners(settings.data.gateway_owner_discord_ids ?? []);
-    setAdmins(settings.data.gateway_admin_discord_ids ?? []);
+    const current = fromSettings(settings.data);
+    const currentSignature = signature(current);
+    const currentBaseline = baselineRef.current;
+    if (currentBaseline === null || currentSignature === savedSignature.current || !dirtyRef.current) {
+      setDraft(current);
+      setBaseline(currentSignature);
+      baselineRef.current = currentSignature;
+      setExternalUpdate(false);
+      if (currentSignature === savedSignature.current) savedSignature.current = null;
+    } else if (currentSignature !== currentBaseline) {
+      setExternalUpdate(true);
+    }
   }, [settings.data]);
   if (!settings.data || !members.data) {
     return (
@@ -193,18 +220,40 @@ function AccessPolicyCard() {
       />
     );
   }
-  const save = () =>
-    act(
+  const save = async () => {
+    setSaving(true);
+    const ok = await act(
       "PUT",
       "/admin/api/settings",
       {
-        v5_access_mode: mode,
-        v5_authorized_discord_ids: allowed,
-        gateway_owner_discord_ids: owners,
-        gateway_admin_discord_ids: admins,
+        v5_access_mode: draft.mode,
+        v5_authorized_discord_ids: draft.allowed,
+        gateway_owner_discord_ids: draft.owners,
+        gateway_admin_discord_ids: draft.admins,
       },
       "V5 访问策略已保存",
     );
+    setSaving(false);
+    if (ok) {
+      const saved = signature(draft);
+      savedSignature.current = saved;
+      setBaseline(saved);
+      baselineRef.current = saved;
+      setExternalUpdate(false);
+    }
+  };
+  const loadLatest = () => {
+    if (!settings.data) return;
+    const current = fromSettings(settings.data);
+    setDraft(current);
+    setBaseline(signature(current));
+    baselineRef.current = signature(current);
+    setExternalUpdate(false);
+  };
+  const mode = draft.mode;
+  const allowed = draft.allowed;
+  const owners = draft.owners;
+  const admins = draft.admins;
   const allowedByPolicy = (ids: string[]) =>
     mode === "everyone" ||
     mode === "legacy" ||
@@ -225,7 +274,10 @@ function AccessPolicyCard() {
           <select
             value={mode}
             onChange={(e) =>
-              setMode((e.currentTarget as HTMLSelectElement).value as Settings["v5_access_mode"])
+              setDraft((d) => ({
+                ...d,
+                mode: (e.currentTarget as HTMLSelectElement).value as Settings["v5_access_mode"],
+              }))
             }
           >
             <option value="legacy">兼容旧设置</option>
@@ -238,26 +290,34 @@ function AccessPolicyCard() {
           title="V5 授权主体"
           members={members.data.members}
           selected={allowed}
-          onChange={setAllowed}
+          onChange={(allowed) => setDraft((d) => ({ ...d, allowed }))}
         />
         <MemberPicker
           title="号主身份"
           members={members.data.members}
           selected={owners}
-          onChange={setOwners}
+          onChange={(owners) => setDraft((d) => ({ ...d, owners }))}
         />
         <MemberPicker
           title="站长身份"
           members={members.data.members}
           selected={admins}
-          onChange={setAdmins}
+          onChange={(admins) => setDraft((d) => ({ ...d, admins }))}
         />
       </div>
       <p class="muted">
         最终效果预览：{preview}。只有 V5 授权列表决定模型访问；身份角色不会隐式获得 V5。派发前会重新检查策略。
       </p>
-      <button class="button" type="button" onClick={() => void save()}>
-        保存访问策略
+      {externalUpdate && (
+        <p class="notice" role="status">
+          服务端策略已变化，你的未保存选择仍保留。需要放弃草稿并查看最新值时，点击“加载最新策略”。
+          <button class="button button--secondary" type="button" onClick={loadLatest}>
+            加载最新策略
+          </button>
+        </p>
+      )}
+      <button class="button" type="button" disabled={!dirty || saving} onClick={() => void save()}>
+        {saving ? "正在保存…" : "保存访问策略"}
       </button>
     </Card>
   );

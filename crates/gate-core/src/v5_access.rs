@@ -47,8 +47,8 @@ pub fn decide(mode: Mode, subject: Option<&str>, authorized: &[String]) -> Decis
         reason: match (mode, allowed) {
             (Mode::Legacy, _) => "legacy policy",
             (_, true) => "authorized by V5 policy",
-            (Mode::Closed, false) => "V5 access is closed",
-            (Mode::Restricted, false) => "subject is not authorized for V5",
+            (Mode::Closed, false) => "V5 已关闭，未扣额度，请改用 V4.5",
+            (Mode::Restricted, false) => "仅授权账号可使用 V5，未扣额度，请改用 V4.5",
             (Mode::Everyone, false) => unreachable!(),
         },
     }

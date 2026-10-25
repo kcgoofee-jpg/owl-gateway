@@ -185,7 +185,7 @@ async fn put_settings(State(state): State<AppState>, _s: AdminSession, req: Requ
     let v45 = field(&state, &body, &REGISTER_DAILY_IMAGES, Kind::Int, 100_000.0).await?;
     let v5_each = field(&state, &body, &REGISTER_DAILY_V5, Kind::Int, 100_000.0).await?;
     let paused = match body.get(V5_PAUSED.key) {
-        None => crate::v5_access::evaluate(&state, None).await?.paused,
+        None => site_flag(&state, &V5_PAUSED).await? == Value::Bool(true),
         Some(Value::Bool(b)) => *b,
         Some(_) => return Err(HttpError::new(422, "v5_paused 必须是 true / false").into()),
     };
@@ -199,14 +199,19 @@ async fn put_settings(State(state): State<AppState>, _s: AdminSession, req: Requ
     ]
     .iter()
     .any(|k| body.contains_key(*k));
-    let mut v5_settings = vec![(
-        V5_PAUSED.key.to_string(),
-        if paused { "1" } else { "0" }.to_string(),
-    )];
+    let mut v5_settings = Vec::new();
+    if body.contains_key(V5_PAUSED.key) {
+        v5_settings.push((
+            V5_PAUSED.key.to_string(),
+            if paused { "1" } else { "0" }.to_string(),
+        ));
+    }
     if let Some(policy) = policy_values {
         v5_settings.extend(policy);
     }
-    state.db.set_settings_bulk(&v5_settings).await?;
+    if !v5_settings.is_empty() {
+        state.db.set_settings_bulk(&v5_settings).await?;
+    }
     for (spec, v) in [
         (&GLOBAL_MONTHLY_ANLAS, &monthly),
         (&GLOBAL_DAILY_V5, &daily_v5),
@@ -215,13 +220,17 @@ async fn put_settings(State(state): State<AppState>, _s: AdminSession, req: Requ
         (&REGISTER_DAILY_IMAGES, &v45),
         (&REGISTER_DAILY_V5, &v5_each),
     ] {
-        let text = site_flags::encode(spec, v).map_err(|e| InternalError(e.0))?;
-        state.db.set_setting(spec.key, &text).await?;
+        if body.contains_key(spec.key) {
+            let text = site_flags::encode(spec, v).map_err(|e| InternalError(e.0))?;
+            state.db.set_setting(spec.key, &text).await?;
+        }
     }
-    state
-        .db
-        .set_setting(V5_MEDIUM_MODE.key, &medium_text)
-        .await?;
+    if body.contains_key(V5_MEDIUM_MODE.key) {
+        state
+            .db
+            .set_setting(V5_MEDIUM_MODE.key, &medium_text)
+            .await?;
+    }
     let policy_mode_out = policy_mode.unwrap_or(
         crate::v5_access::configuration(&state)
             .await?

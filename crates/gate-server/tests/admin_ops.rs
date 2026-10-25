@@ -83,7 +83,7 @@ async fn settings_get_put_and_stored_strings() {
         (200, SETTINGS_DEFAULT.to_string())
     );
 
-    // 空请求体：缺省字段保持原值，并且把现值（带类型的字符串）写回库
+    // 空请求体：缺省字段保持原值，且不写回任何设置。
     let before = settings(&e).await;
     let (s, t) = api.text("PUT", "/settings", Some(json!({}))).await;
     assert_eq!(s, 200);
@@ -91,19 +91,7 @@ async fn settings_get_put_and_stored_strings() {
         t,
         r#"{"ok":true,"global_monthly_anlas":10000.0,"global_daily_v5":150,"global_daily_anlas":200,"member_daily_anlas":50,"register_daily_images":150,"register_daily_v5":0,"v5_paused":false,"v5_access_mode":"legacy","v5_medium_mode":"off"}"#
     );
-    assert_eq!(
-        changed(&before, &settings(&e).await),
-        map(&[
-            ("global_daily_anlas", "200"),
-            ("global_daily_v5", "150"),
-            ("global_monthly_anlas", "10000.0"),
-            ("member_daily_anlas", "50"),
-            ("register_daily_images", "150"),
-            ("register_daily_v5", "0"),
-            ("v5_paused", "0"),
-            ("v5_medium_mode", "off"),
-        ])
-    );
+    assert!(changed(&before, &settings(&e).await).is_empty());
 
     // (请求体, 响应原文, 库里的 global_monthly_anlas / global_daily_v5 / member_daily_anlas；v5_alert_threshold 已删除、忽略)
     #[allow(clippy::type_complexity)]
@@ -288,6 +276,31 @@ async fn v5_policy_and_subject_roles_are_explicit_settings() {
     );
     let (status, body) = api.json("PUT", "/settings", Some(json!({ "v5_access_mode": "restricted", "v5_authorized_discord_ids": ["not-a-discord-id"] }))).await;
     assert_eq!(status, 422, "{body}");
+}
+
+#[tokio::test]
+async fn settings_patch_never_rewrites_an_omitted_emergency_pause() {
+    let e = setup(&[]).await;
+    let api = Admin::login_bare(&e.state).await;
+    common::set_setting(&e, "v5_paused", "1").await;
+    e.state
+        .db
+        .write(|tx| {
+            tx.execute_batch(
+                "CREATE TRIGGER reject_pause_rewrite BEFORE UPDATE OF value ON site_settings \
+             WHEN OLD.key = 'v5_paused' BEGIN SELECT RAISE(ABORT, 'pause rewrite'); END;",
+            )?;
+            Ok(())
+        })
+        .await
+        .unwrap();
+
+    let (status, body) = api
+        .json("PUT", "/settings", Some(json!({"member_daily_anlas": 63})))
+        .await;
+    assert_eq!(status, 200, "{body}");
+    assert_eq!(settings(&e).await["v5_paused"], "1");
+    assert_eq!(settings(&e).await["member_daily_anlas"], "63");
 }
 
 #[tokio::test]
