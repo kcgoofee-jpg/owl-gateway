@@ -12,6 +12,8 @@ use serde_json::json;
 
 pub fn router() -> Router<AppState> {
     Router::new()
+        .route("/livez", get(livez))
+        .route("/readyz", get(readyz))
         .route("/healthz", get(healthz))
         .route("/", get(landing))
         .route("/survey", get(survey))
@@ -27,14 +29,31 @@ pub fn router() -> Router<AppState> {
         .route("/favicon.ico", get(favicon))
 }
 
-/// 读、写库各在时限内跑通一次才算健康；Docker、cutover.sh、外部探测和巡检都看它。
-/// 不返回版本号：匿名接口给出精确版本等于给攻击者指纹定位。
-async fn healthz(State(st): State<AppState>) -> Response {
+/// 进程存活探针不依赖数据库或上游。
+async fn livez() -> Response {
+    ok_json(&json!({"ok": true}))
+}
+
+/// 就绪要求数据库读写都成功；不触发任何上游探测。
+async fn readyz(State(st): State<AppState>) -> Response {
     match st.db.health(HEALTH_DB_LIMIT).await {
-        Ok(()) => ok_json(&json!({"ok": true, "upstream": true})),
+        Ok(()) => ok_json(&json!({"ok": true})),
         Err(e) => (
             axum::http::StatusCode::SERVICE_UNAVAILABLE,
             axum::Json(json!({"ok": false, "reason": e.code()})),
+        )
+            .into_response(),
+    }
+}
+
+/// `/healthz` 保持原有数据库读写检查，供现有部署脚本与容器探针继续使用。
+/// 上游未被探测，故明确回报 unknown；token 已配置不能证明上游可用。
+async fn healthz(State(st): State<AppState>) -> Response {
+    match st.db.health(HEALTH_DB_LIMIT).await {
+        Ok(()) => ok_json(&json!({"ok": true, "upstream": "unknown"})),
+        Err(e) => (
+            axum::http::StatusCode::SERVICE_UNAVAILABLE,
+            axum::Json(json!({"ok": false, "reason": e.code(), "upstream": "unknown"})),
         )
             .into_response(),
     }

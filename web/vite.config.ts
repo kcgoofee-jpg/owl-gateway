@@ -47,7 +47,7 @@ export default defineConfig({
     port: 5173,
     proxy: {
       // 状态页由网关渲染，它的样式 / 脚本（/_owl/status-page.*）也编在网关里
-      "^/(public|admin/api|self-register|login|logout|member|v1|status|healthz|announcement|_owl/status-page)":
+      "^/(public|admin/api|self-register|login|logout|member|v1|status|livez|readyz|healthz|announcement|_owl/status-page)":
         process.env.VITE_GATE ?? "http://127.0.0.1:18000",
     },
   },
