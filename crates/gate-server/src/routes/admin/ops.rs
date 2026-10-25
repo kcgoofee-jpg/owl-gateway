@@ -18,6 +18,7 @@ mod monitor;
 mod onboarding;
 mod system;
 mod upstream;
+mod upstream_information;
 
 use crate::state::AppState;
 use axum::Router;
@@ -27,6 +28,7 @@ pub fn router() -> Router<AppState> {
     Router::new()
         .merge(monitor::router())
         .merge(upstream::router())
+        .merge(upstream_information::router())
         .merge(account_stats::router())
         .merge(limits::router())
         .merge(manual::router())

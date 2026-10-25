@@ -57,6 +57,8 @@ pub struct Shared {
     pub runtime_limits: tokio::sync::Mutex<()>,
     /// Anlas 核对的互斥锁：同一时刻只允许一次。
     pub reconcile: tokio::sync::Mutex<()>,
+    /// 手动账号信息查询：全局冷却与串行化。
+    pub account_information: tokio::sync::Mutex<()>,
 }
 
 // ------------------------------------------------------------------ 手动额度

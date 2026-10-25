@@ -5,6 +5,7 @@ import { Sect } from "./system/forms";
 import AccountsCard from "./upstream/accounts";
 import AllowanceCard from "./upstream/allowance";
 import type { PoolData } from "./upstream/core";
+import InformationCard from "./upstream/information";
 import ReconcileCard from "./upstream/reconcile";
 import TokensCard from "./upstream/tokens";
 import "./upstream.css";
@@ -19,6 +20,7 @@ export default function Upstream() {
       {data && <TokensCard pool={data.pool} configured={data.pool_configured} />}
       <AccountsCard />
       <AllowanceCard />
+      <InformationCard />
       <ReconcileCard />
     </Sect>
   );
