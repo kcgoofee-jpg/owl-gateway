@@ -82,7 +82,7 @@ pub(super) async fn tool(
             opts.queue_timeout = state.limits().queue_timeout;
             let cb = Callbacks {
                 on_rate_limited: Some(on_429(&state)),
-                before_dispatch: Some(before_dispatch(&state)),
+                before_dispatch: Some(before_dispatch(&state, None)),
                 ..Default::default()
             };
             let resp = match state.nai.request(opts, &cb, None, &ctx).await {
@@ -222,7 +222,7 @@ pub(super) async fn vibe(state: AppState, req: Request) -> Result<Response, ApiE
         opts.queue_timeout = state.limits().queue_timeout;
         let cb = Callbacks {
             on_rate_limited: Some(on_429(&state)),
-            before_dispatch: Some(before_dispatch(&state)),
+            before_dispatch: Some(before_dispatch(&state, None)),
             ..Default::default()
         };
         let err_entry = |detail: String, unconfirmed: f64| {

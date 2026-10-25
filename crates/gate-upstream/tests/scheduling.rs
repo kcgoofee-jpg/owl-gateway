@@ -238,7 +238,9 @@ async fn refused_after_acquiring_does_not_burn_the_interval() {
     .unwrap();
     let body = image_body();
     let refuse = Callbacks {
-        before_dispatch: Some(Box::new(|| Err(UpstreamError::new(503, "全站冷却中")))),
+        before_dispatch: Some(Box::new(|| {
+            Box::pin(async { Err(UpstreamError::new(503, "全站冷却中")) })
+        })),
         ..Default::default()
     };
     let e = c

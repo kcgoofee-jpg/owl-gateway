@@ -45,6 +45,10 @@ async fn get_settings(State(state): State<AppState>, _s: AdminSession) -> ApiRes
         "register_daily_images": site_flag(&state, &REGISTER_DAILY_IMAGES).await?,
         "register_daily_v5": site_flag(&state, &REGISTER_DAILY_V5).await?,
         "v5_paused": crate::ops::v5_paused(&state.db).await?,
+        "v5_access_mode": state.db.get_setting(crate::v5_access::MODE_KEY).await?.unwrap_or_else(|| "legacy".into()),
+        "v5_authorized_discord_ids": state.db.get_setting(crate::v5_access::SUBJECTS_KEY).await?.and_then(|v| serde_json::from_str::<Value>(&v).ok()).unwrap_or(json!([])),
+        "gateway_owner_discord_ids": state.db.get_setting(crate::v5_access::OWNERS_KEY).await?.and_then(|v| serde_json::from_str::<Value>(&v).ok()).unwrap_or(json!([])),
+        "gateway_admin_discord_ids": state.db.get_setting(crate::v5_access::ADMINS_KEY).await?.and_then(|v| serde_json::from_str::<Value>(&v).ok()).unwrap_or(json!([])),
         "v5_medium_mode": site_flag(&state, &V5_MEDIUM_MODE).await?,
         "v5_medium_state": medium_view(&state).await,
     })))
@@ -53,6 +57,71 @@ async fn get_settings(State(state): State<AppState>, _s: AdminSession) -> ApiRes
 async fn put_settings(State(state): State<AppState>, _s: AdminSession, req: Request) -> ApiResult {
     let (parts, body) = req.into_parts();
     let body = read_json_body(&parts.headers, body, BODY_LIMIT).await?;
+    let policy_mode = match body.get(crate::v5_access::MODE_KEY) {
+        None => state
+            .db
+            .get_setting(crate::v5_access::MODE_KEY)
+            .await?
+            .unwrap_or_else(|| "legacy".into()),
+        Some(Value::String(s))
+            if ["legacy", "closed", "restricted", "everyone"].contains(&s.as_str()) =>
+        {
+            s.clone()
+        }
+        Some(_) => {
+            return Err(HttpError::new(
+                422,
+                "v5_access_mode 必须是 legacy / closed / restricted / everyone",
+            )
+            .into());
+        }
+    };
+    fn subjects(v: Option<&Value>, name: &str) -> Result<Option<String>, ApiError> {
+        let Some(Value::Array(values)) = v else {
+            if v.is_none() {
+                return Ok(None);
+            }
+            return Err(HttpError::new(422, format!("{name} 必须是 Discord ID 数组")).into());
+        };
+        let mut ids = Vec::new();
+        for value in values {
+            let Some(id) = value.as_str() else {
+                return Err(HttpError::new(422, format!("{name} 中的 ID 必须是字符串")).into());
+            };
+            if id.is_empty() || !id.bytes().all(|b| b.is_ascii_digit()) {
+                return Err(HttpError::new(422, format!("{name} 中包含无效 Discord ID")).into());
+            }
+            if !ids.iter().any(|seen| seen == id) {
+                ids.push(id.to_string());
+            }
+        }
+        Ok(Some(
+            serde_json::to_string(&ids).map_err(|e| InternalError(e.to_string()))?,
+        ))
+    }
+    let subject_settings = [
+        (
+            crate::v5_access::SUBJECTS_KEY,
+            subjects(
+                body.get(crate::v5_access::SUBJECTS_KEY),
+                crate::v5_access::SUBJECTS_KEY,
+            )?,
+        ),
+        (
+            crate::v5_access::OWNERS_KEY,
+            subjects(
+                body.get(crate::v5_access::OWNERS_KEY),
+                crate::v5_access::OWNERS_KEY,
+            )?,
+        ),
+        (
+            crate::v5_access::ADMINS_KEY,
+            subjects(
+                body.get(crate::v5_access::ADMINS_KEY),
+                crate::v5_access::ADMINS_KEY,
+            )?,
+        ),
+    ];
     // 降档模式：只认 off / on 两个小写字符串，其他（含已删除的 auto）一律 422；缺省保持原值
     let medium_mode = match body.get(V5_MEDIUM_MODE.key) {
         Some(v) => v.clone(),
@@ -107,6 +176,15 @@ async fn put_settings(State(state): State<AppState>, _s: AdminSession, req: Requ
         .db
         .set_setting(V5_PAUSED.key, if paused { "1" } else { "0" })
         .await?;
+    state
+        .db
+        .set_setting(crate::v5_access::MODE_KEY, &policy_mode)
+        .await?;
+    for (name, value) in subject_settings {
+        if let Some(value) = value {
+            state.db.set_setting(name, &value).await?;
+        }
+    }
     for (spec, v) in [
         (&GLOBAL_MONTHLY_ANLAS, &monthly),
         (&GLOBAL_DAILY_V5, &daily_v5),
@@ -131,6 +209,7 @@ async fn put_settings(State(state): State<AppState>, _s: AdminSession, req: Requ
         "register_daily_images": v45,
         "register_daily_v5": v5_each,
         "v5_paused": paused,
+        "v5_access_mode": policy_mode,
         "v5_medium_mode": medium_text,
     });
     if sync {

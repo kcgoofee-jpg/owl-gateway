@@ -110,7 +110,9 @@ async fn only_produced_images_count_toward_the_account_today() {
     // 发出前被网关拒绝
     let refuse = Callbacks {
         before_dispatch: Some(Box::new(|| {
-            Err(gate_upstream::client::UpstreamError::new(503, "全站冷却中"))
+            Box::pin(async {
+                Err(gate_upstream::client::UpstreamError::new(503, "全站冷却中"))
+            })
         })),
         ..Default::default()
     };

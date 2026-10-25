@@ -305,6 +305,41 @@ async fn no_v5_refill_with_anlas() {
     assert!(e.mock.requests_to("/ai/generate-image").is_empty());
 }
 
+#[tokio::test]
+async fn restricted_v5_denial_does_not_dispatch_or_consume_quota() {
+    let e = setup(&[]).await;
+    e.state.db.run_script(vec![
+        "UPDATE api_keys SET image_model_scope='all', discord_id='900000000000000041' WHERE id=1".into(),
+    ]).await.unwrap();
+    e.state
+        .db
+        .set_setting(gate_server::v5_access::MODE_KEY, "restricted")
+        .await
+        .unwrap();
+    e.state
+        .db
+        .set_setting(
+            gate_server::v5_access::SUBJECTS_KEY,
+            r#"["900000000000000042"]"#,
+        )
+        .await
+        .unwrap();
+    let (status, _, body) = call(
+        &e.state,
+        "POST",
+        "/ai/generate-image",
+        Some(TOKEN),
+        Some(image_body("nai-diffusion-5-full", 1)),
+    )
+    .await;
+    assert_eq!(status, 403, "{}", String::from_utf8_lossy(&body));
+    assert!(e.mock.requests_to("/ai/generate-image").is_empty());
+    assert_eq!(
+        e.state.db.get_counter(1, &e.state.day()).await.unwrap().v5,
+        0
+    );
+}
+
 /// V5 也在入口预检：同一把 Key 的前一张 V5 已经拿到预留、正在出图，而今天只剩这 1 张时，
 /// 后一张立即 403，不排队等前一张出完（10-21 线上：第二张排了 47 秒才被告知额度用完）。
 #[tokio::test]

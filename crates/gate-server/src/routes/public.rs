@@ -664,6 +664,7 @@ async fn subscription(state: &AppState, key: &Key) -> Result<Value, InternalErro
         global_v5_limit: crate::ops::global_daily_v5(&state.db).await?,
         global_v5_total: state.db.day_v5_total(&day).await?,
         v5_paused: crate::ops::v5_paused(&state.db).await?,
+        v5_access_allowed: crate::v5_access::v5_allowed(state, key).await?,
     };
     gate_core::client_views::subscription_payload(&key.0, state.now(), &data)
         .map_err(|e| InternalError(e.to_string()))
@@ -883,7 +884,9 @@ pub(super) async fn me_payload(
     // null = 不受全站限制：全站不设限（global_daily_v5=0），或这把 Key 不计入全站 V5
     let g = crate::ops::global_daily_v5(&state.db).await?;
     let v5_paused = crate::ops::v5_paused(&state.db).await?;
-    let (site_v5_left, site_v5_cap) = if v5_paused {
+    let v5_access = crate::v5_access::decide(state, Some(key.str("discord_id"))).await?;
+    let (is_owner, is_admin) = crate::v5_access::roles(state, key.str("discord_id")).await?;
+    let (site_v5_left, site_v5_cap) = if v5_paused || !v5_access.allowed {
         // 暂停：全站今天没有 V5（不能按「不限」显示）
         (json!(0), Value::Null)
     } else if g > 0 && !key.exclude_global_v5() {
@@ -899,6 +902,10 @@ pub(super) async fn me_payload(
     out.insert("expires_at".into(), key.get("expires_at").clone());
     out.insert("image_scope".into(), key.get("image_model_scope").clone());
     out.insert(
+        "subject_roles".into(),
+        json!({"owner": is_owner, "admin": is_admin}),
+    );
+    out.insert(
         "today".into(),
         json!({
             "images": c.images, "v5": c.v5, "legacy": c.legacy_free_images,
@@ -906,6 +913,8 @@ pub(super) async fn me_payload(
             "site_v5_left": site_v5_left, "site_v5_cap": site_v5_cap,
             "upstream_v5_free": live::upstream_v5_free(state).await && !v5_paused,
             "v5_paused": v5_paused,
+            "v5_access_allowed": v5_access.allowed,
+            "v5_access_reason": v5_access.reason,
             "anlas": gate_core::pyc::round0(c.anlas),
             "daily_anlas": live::member_anlas_cap(state, key).await?,
             "reset_hour": state.guard.with(|g| g.reset_hour),

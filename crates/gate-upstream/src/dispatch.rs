@@ -466,14 +466,14 @@ impl<H: Hooks> NaiClient<H> {
             if !token.with(|f| f.admin_enabled) {
                 return Attempt::Retry;
             }
-            if let Some(check) = cb.before_dispatch.as_ref()
-                && let Err(e) = check()
-            {
-                return Attempt::Done(Err(e));
-            }
             if o.image_lane
                 && o.wait_for_image_slot
                 && let Err(e) = dispatch_block(hooks, token).await
+            {
+                return Attempt::Done(Err(e));
+            }
+            if let Some(check) = cb.before_dispatch.as_ref()
+                && let Err(e) = check().await
             {
                 return Attempt::Done(Err(e));
             }
@@ -905,13 +905,13 @@ impl<H: Hooks> NaiClient<H> {
                     fl.finish().await;
                     return Err(UpstreamError::new(503, ADJUSTING));
                 }
-                if let Some(check) = cb.before_dispatch.as_ref()
-                    && let Err(e) = check()
-                {
+                if let Err(e) = dispatch_block(hooks, &token).await {
                     fl.finish().await;
                     return Err(e);
                 }
-                if let Err(e) = dispatch_block(hooks, &token).await {
+                if let Some(check) = cb.before_dispatch.as_ref()
+                    && let Err(e) = check().await
+                {
                     fl.finish().await;
                     return Err(e);
                 }

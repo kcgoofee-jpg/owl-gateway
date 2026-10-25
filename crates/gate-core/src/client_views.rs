@@ -23,6 +23,7 @@ pub struct SubscriptionData {
     pub global_v5_limit: i64,
     pub global_v5_total: i64,
     pub v5_paused: bool,
+    pub v5_access_allowed: bool,
 }
 
 /// Key 行缺字段或类型不对（线上 Key 行总是完整的，这只在数据损坏时出现）。
@@ -90,12 +91,13 @@ pub fn subscription_payload(
     }
     // V5 暂停：网关会在本地拒掉 V5，客户端不能看到「不限」
     let paused = data.v5_paused;
-    let v5_limit = if paused {
+    let access_closed = !data.v5_access_allowed;
+    let v5_limit = if paused || access_closed {
         0
     } else {
         limits.iter().copied().min().unwrap_or(0)
     };
-    let v5_left = if paused {
+    let v5_left = if paused || access_closed {
         0
     } else {
         remaining.iter().copied().min().unwrap_or(0)
@@ -137,8 +139,9 @@ pub fn subscription_payload(
             "anlasMonthlyLimit": monthly_limit.trunc() as i64,
             "v5LeftToday": v5_left,
             "v5DailyLimit": v5_limit,
-            "v5Unlimited": limits.is_empty() && !paused,
+            "v5Unlimited": limits.is_empty() && !paused && !access_closed,
             "v5Paused": paused,
+            "v5Allowed": data.v5_access_allowed,
             // `account` 恒为 null：客户端面板接受 null 并隐藏共享账号信息。
             "account": Value::Null,
         },
@@ -162,6 +165,7 @@ mod tests {
             global_v5_limit: 150,
             global_v5_total: 147,
             v5_paused: false,
+            v5_access_allowed: true,
         };
         let v = subscription_payload(&key(), 1.0e9, &data).unwrap();
         assert_eq!(v["naiGate"]["anlasLeft"], 80);
@@ -181,6 +185,7 @@ mod tests {
             global_v5_limit: 0,
             global_v5_total: 0,
             v5_paused: false,
+            v5_access_allowed: true,
         };
         let open = subscription_payload(&k, 0.0, &data).unwrap();
         assert_eq!(open["naiGate"]["v5Unlimited"], true);
@@ -210,5 +215,23 @@ mod tests {
             ),
             (json!(0), json!(0))
         );
+    }
+
+    #[test]
+    fn denied_v5_is_zero_not_unlimited() {
+        let mut k = key();
+        k["daily_v5"] = json!(0);
+        let d = SubscriptionData {
+            month_anlas_used: 0.0,
+            daily_v5_used: 0,
+            global_v5_limit: 0,
+            global_v5_total: 0,
+            v5_paused: false,
+            v5_access_allowed: false,
+        };
+        let result = subscription_payload(&k, 0.0, &d).unwrap();
+        assert_eq!(result["naiGate"]["v5Unlimited"], false);
+        assert_eq!(result["naiGate"]["v5LeftToday"], 0);
+        assert_eq!(result["naiGate"]["v5DailyLimit"], 0);
     }
 }

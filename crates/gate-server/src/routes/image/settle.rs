@@ -170,7 +170,10 @@ pub(super) async fn perform_generation(
         on_rate_limited: Some(on_429(state)),
         resolve_v5_cost: (est0.v5 > 0)
             .then(|| resolve_v5(state, &prep, billing.clone(), reserved.clone())),
-        before_dispatch: Some(before_dispatch(state)),
+        before_dispatch: Some(before_dispatch(
+            state,
+            Some((key.str("discord_id").to_string(), est0.v5 > 0)),
+        )),
         on_dispatch: None,
     };
     let url = format!("{}/ai/generate-image", state.nai.image_host());

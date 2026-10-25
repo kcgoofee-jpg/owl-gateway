@@ -13,6 +13,10 @@ export type Settings = {
   global_monthly_anlas: number;
   v5_medium_mode: string;
   v5_medium_state?: { active: boolean };
+  v5_access_mode: "legacy" | "closed" | "restricted" | "everyone";
+  v5_authorized_discord_ids: string[];
+  gateway_owner_discord_ids: string[];
+  gateway_admin_discord_ids: string[];
 };
 
 /** /admin/api/settings 的数字字段（范围与后端 put_settings 一致），全部手动 */

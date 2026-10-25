@@ -136,7 +136,8 @@ pub struct Callbacks<'a> {
     /// 拒绝原样返回给调用方（`UpstreamError::local`）。
     pub resolve_v5_cost: Option<ResolveV5<'a>>,
     /// 真正发出前的最后检查（全站冷却）；返回 Err 则不发。
-    pub before_dispatch: Option<Box<dyn Fn() -> Result<(), UpstreamError> + Send + Sync + 'a>>,
+    pub before_dispatch:
+        Option<Box<dyn Fn() -> BoxFuture<'static, Result<(), UpstreamError>> + Send + Sync + 'a>>,
     /// 已决定发出（图片流用来标记「已占用上游」）。
     pub on_dispatch: Option<Box<dyn Fn() + Send + Sync + 'a>>,
 }

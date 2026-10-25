@@ -53,7 +53,9 @@ export function quotaRows(me: MeMember): QuotaRow[] {
     // 全站也有 V5 日上限时，能用的是「个人剩余」和「全站剩余」的较小值；全站不设限（null）只看个人
     const site = t.site_v5_left;
     const siteCap = t.site_v5_cap ?? 0;
-    if (t.v5_paused) {
+    if (t.v5_access_allowed === false) {
+      Object.assign(row, { paused: true, left: 0, hint: "当前访问策略未授权 V5" });
+    } else if (t.v5_paused) {
       Object.assign(row, { paused: true, left: 0, hint: V5_PAUSED_HINT });
     } else if (t.upstream_v5_free === false) {
       Object.assign(row, { paused: true, left: 0, hint: V5_EXHAUSTED_HINT });

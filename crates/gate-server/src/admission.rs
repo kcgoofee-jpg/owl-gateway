@@ -245,6 +245,14 @@ pub async fn quota_image_check(
         )
         .into());
     }
+    if est.v5 > 0 && !crate::v5_access::v5_allowed(state, key).await? {
+        return Err(GateError::with_code(
+            403,
+            "V5 当前未授权此成员使用，未扣费。".to_string(),
+            reasons::V5_EXHAUSTED,
+        )
+        .into());
+    }
     let day = state.day();
     let reset = state.clock.next_reset_phrase(state.now());
     let c = state.db.get_counter(key.id(), &day).await?;

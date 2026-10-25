@@ -267,7 +267,10 @@ async fn perform_stream(
         on_rate_limited: Some(on_429(state)),
         resolve_v5_cost: (est0.v5 > 0)
             .then(|| resolve_v5(state, &prep, billing.clone(), reserved.clone())),
-        before_dispatch: Some(before_dispatch(state)),
+        before_dispatch: Some(before_dispatch(
+            state,
+            Some((prep.key.str("discord_id").to_string(), est0.v5 > 0)),
+        )),
         on_dispatch: Some(Box::new(move || d.store(true, Ordering::SeqCst))),
     };
     let allowance = state

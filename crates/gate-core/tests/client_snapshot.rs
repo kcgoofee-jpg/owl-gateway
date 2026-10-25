@@ -20,6 +20,7 @@ fn subscription_payload_snapshot() {
             global_v5_limit: d["global_v5_limit"].as_i64()?,
             global_v5_total: d["global_v5_total"].as_i64()?,
             v5_paused: false,
+            v5_access_allowed: true,
         };
         let got = subscription_payload(c.get("key")?, as_f64(c.get("now")?)?, &data);
         tally.add("all");

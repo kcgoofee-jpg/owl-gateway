@@ -72,7 +72,7 @@ fn last_action(rows: &[(String, String, String, String, bool)]) -> (&str, &str, 
 
 // ------------------------------------------------------------------ 预算
 
-const SETTINGS_DEFAULT: &str = r#"{"global_monthly_anlas":10000.0,"global_daily_v5":150,"global_daily_anlas":200,"member_daily_anlas":50,"register_daily_images":150,"register_daily_v5":0,"v5_paused":false,"v5_medium_mode":"off","v5_medium_state":{"active":false}}"#;
+const SETTINGS_DEFAULT: &str = r#"{"global_monthly_anlas":10000.0,"global_daily_v5":150,"global_daily_anlas":200,"member_daily_anlas":50,"register_daily_images":150,"register_daily_v5":0,"v5_paused":false,"v5_access_mode":"legacy","v5_authorized_discord_ids":[],"gateway_owner_discord_ids":[],"gateway_admin_discord_ids":[],"v5_medium_mode":"off","v5_medium_state":{"active":false}}"#;
 
 #[tokio::test]
 async fn settings_get_put_and_stored_strings() {
@@ -89,7 +89,7 @@ async fn settings_get_put_and_stored_strings() {
     assert_eq!(s, 200);
     assert_eq!(
         t,
-        r#"{"ok":true,"global_monthly_anlas":10000.0,"global_daily_v5":150,"global_daily_anlas":200,"member_daily_anlas":50,"register_daily_images":150,"register_daily_v5":0,"v5_paused":false,"v5_medium_mode":"off"}"#
+        r#"{"ok":true,"global_monthly_anlas":10000.0,"global_daily_v5":150,"global_daily_anlas":200,"member_daily_anlas":50,"register_daily_images":150,"register_daily_v5":0,"v5_paused":false,"v5_access_mode":"legacy","v5_medium_mode":"off"}"#
     );
     assert_eq!(
         changed(&before, &settings(&e).await),
@@ -101,6 +101,7 @@ async fn settings_get_put_and_stored_strings() {
             ("register_daily_images", "150"),
             ("register_daily_v5", "0"),
             ("v5_paused", "0"),
+            ("v5_access_mode", "legacy"),
             ("v5_medium_mode", "off"),
         ])
     );
@@ -110,40 +111,40 @@ async fn settings_get_put_and_stored_strings() {
     let ok_cases: Vec<(Value, &str, [&str; 4])> = vec![
         (
             json!({"global_monthly_anlas": 5000, "global_daily_v5": 200, "member_daily_anlas": 40, "v5_alert_threshold": 30}),
-            r#"{"ok":true,"global_monthly_anlas":5000.0,"global_daily_v5":200,"global_daily_anlas":200,"member_daily_anlas":40,"register_daily_images":150,"register_daily_v5":0,"v5_paused":false,"v5_medium_mode":"off"}"#,
+            r#"{"ok":true,"global_monthly_anlas":5000.0,"global_daily_v5":200,"global_daily_anlas":200,"member_daily_anlas":40,"register_daily_images":150,"register_daily_v5":0,"v5_paused":false,"v5_access_mode":"legacy","v5_medium_mode":"off"}"#,
             ["5000.0", "200", "40", "30"],
         ),
         // 字符串数字也收（与旧版 float("1e3") 一致）
         (
             json!({"global_monthly_anlas": "1e3"}),
-            r#"{"ok":true,"global_monthly_anlas":1000.0,"global_daily_v5":200,"global_daily_anlas":200,"member_daily_anlas":40,"register_daily_images":150,"register_daily_v5":0,"v5_paused":false,"v5_medium_mode":"off"}"#,
+            r#"{"ok":true,"global_monthly_anlas":1000.0,"global_daily_v5":200,"global_daily_anlas":200,"member_daily_anlas":40,"register_daily_images":150,"register_daily_v5":0,"v5_paused":false,"v5_access_mode":"legacy","v5_medium_mode":"off"}"#,
             ["1000.0", "200", "40", "30"],
         ),
         // 0 被夹到下限：库里是整数 "0"，响应仍是请求值的浮点写法（旧版怪癖）
         (
             json!({"global_monthly_anlas": 0}),
-            r#"{"ok":true,"global_monthly_anlas":0.0,"global_daily_v5":200,"global_daily_anlas":200,"member_daily_anlas":40,"register_daily_images":150,"register_daily_v5":0,"v5_paused":false,"v5_medium_mode":"off"}"#,
+            r#"{"ok":true,"global_monthly_anlas":0.0,"global_daily_v5":200,"global_daily_anlas":200,"member_daily_anlas":40,"register_daily_images":150,"register_daily_v5":0,"v5_paused":false,"v5_access_mode":"legacy","v5_medium_mode":"off"}"#,
             ["0", "200", "40", "30"],
         ),
         (
             json!({"global_monthly_anlas": 1000000}),
-            r#"{"ok":true,"global_monthly_anlas":1000000.0,"global_daily_v5":200,"global_daily_anlas":200,"member_daily_anlas":40,"register_daily_images":150,"register_daily_v5":0,"v5_paused":false,"v5_medium_mode":"off"}"#,
+            r#"{"ok":true,"global_monthly_anlas":1000000.0,"global_daily_v5":200,"global_daily_anlas":200,"member_daily_anlas":40,"register_daily_images":150,"register_daily_v5":0,"v5_paused":false,"v5_access_mode":"legacy","v5_medium_mode":"off"}"#,
             ["1000000", "200", "40", "30"],
         ),
         (
             json!({"global_monthly_anlas": 12.5}),
-            r#"{"ok":true,"global_monthly_anlas":12.5,"global_daily_v5":200,"global_daily_anlas":200,"member_daily_anlas":40,"register_daily_images":150,"register_daily_v5":0,"v5_paused":false,"v5_medium_mode":"off"}"#,
+            r#"{"ok":true,"global_monthly_anlas":12.5,"global_daily_v5":200,"global_daily_anlas":200,"member_daily_anlas":40,"register_daily_images":150,"register_daily_v5":0,"v5_paused":false,"v5_access_mode":"legacy","v5_medium_mode":"off"}"#,
             ["12.5", "200", "40", "30"],
         ),
         (
             json!({"global_daily_v5": "150"}),
-            r#"{"ok":true,"global_monthly_anlas":12.5,"global_daily_v5":150,"global_daily_anlas":200,"member_daily_anlas":40,"register_daily_images":150,"register_daily_v5":0,"v5_paused":false,"v5_medium_mode":"off"}"#,
+            r#"{"ok":true,"global_monthly_anlas":12.5,"global_daily_v5":150,"global_daily_anlas":200,"member_daily_anlas":40,"register_daily_images":150,"register_daily_v5":0,"v5_paused":false,"v5_access_mode":"legacy","v5_medium_mode":"off"}"#,
             ["12.5", "150", "40", "30"],
         ),
         // 12.0 作为整数字段：存 "12"
         (
             json!({"global_monthly_anlas": 7.0, "global_daily_v5": 12.0}),
-            r#"{"ok":true,"global_monthly_anlas":7.0,"global_daily_v5":12,"global_daily_anlas":200,"member_daily_anlas":40,"register_daily_images":150,"register_daily_v5":0,"v5_paused":false,"v5_medium_mode":"off"}"#,
+            r#"{"ok":true,"global_monthly_anlas":7.0,"global_daily_v5":12,"global_daily_anlas":200,"member_daily_anlas":40,"register_daily_images":150,"register_daily_v5":0,"v5_paused":false,"v5_access_mode":"legacy","v5_medium_mode":"off"}"#,
             ["7.0", "12", "40", "30"],
         ),
     ];
@@ -231,6 +232,63 @@ async fn settings_get_put_and_stored_strings() {
     assert!(rows.iter().any(|r| r.1 == "修改预算"
         && r.3 == r#"{"global_monthly_anlas":5000,"global_daily_v5":200,"member_daily_anlas":40,"v5_alert_threshold":30}"#
         && r.4));
+}
+
+#[tokio::test]
+async fn v5_policy_and_subject_roles_are_explicit_settings() {
+    let e = setup(&[]).await;
+    let api = Admin::login_bare(&e.state).await;
+    let (status, _) = api
+        .json(
+            "PUT",
+            "/settings",
+            Some(json!({
+                "v5_access_mode": "restricted",
+                "v5_authorized_discord_ids": ["900000000000000051"],
+                "gateway_owner_discord_ids": ["900000000000000052"],
+                "gateway_admin_discord_ids": ["900000000000000053"]
+            })),
+        )
+        .await;
+    assert_eq!(status, 200);
+    assert_eq!(
+        e.state
+            .db
+            .get_setting(gate_server::v5_access::MODE_KEY)
+            .await
+            .unwrap()
+            .as_deref(),
+        Some("restricted")
+    );
+    assert_eq!(
+        e.state
+            .db
+            .get_setting(gate_server::v5_access::SUBJECTS_KEY)
+            .await
+            .unwrap()
+            .as_deref(),
+        Some(r#"["900000000000000051"]"#)
+    );
+    assert_eq!(
+        e.state
+            .db
+            .get_setting(gate_server::v5_access::OWNERS_KEY)
+            .await
+            .unwrap()
+            .as_deref(),
+        Some(r#"["900000000000000052"]"#)
+    );
+    assert_eq!(
+        e.state
+            .db
+            .get_setting(gate_server::v5_access::ADMINS_KEY)
+            .await
+            .unwrap()
+            .as_deref(),
+        Some(r#"["900000000000000053"]"#)
+    );
+    let (status, body) = api.json("PUT", "/settings", Some(json!({ "v5_access_mode": "restricted", "v5_authorized_discord_ids": ["not-a-discord-id"] }))).await;
+    assert_eq!(status, 422, "{body}");
 }
 
 #[tokio::test]

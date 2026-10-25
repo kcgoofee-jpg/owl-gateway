@@ -157,17 +157,27 @@ export function dailyMeters(
     x.cap > 0 && x.used >= x.cap
       ? { label: `${next}${r.word}可用（${r.word} ${r.hour} 点起）`, used: 0, cap: x.cap }
       : { label: today, used: x.used, cap: x.cap };
-  const v5: MeterView = live?.quota?.v5_paused
-    ? {
-        label: "V5 暂停中",
-        used: u.v5.used,
-        cap: u.v5.cap,
-        paused: true,
-        hint: V5_PAUSED_HINT,
-        short: "暂停中",
-      }
-    : live?.quota?.upstream_v5_free === false
-      ? { label: "V5 暂时用完", used: u.v5.used, cap: u.v5.cap, paused: true }
-      : pick(u.v5, "V5 已用", "V5 ");
+  const v5: MeterView =
+    live?.quota?.v5_access_allowed === false
+      ? {
+          label: "V5 未授权",
+          used: u.v5.used,
+          cap: u.v5.cap,
+          paused: true,
+          hint: "当前访问策略未授权 V5",
+          short: "未授权",
+        }
+      : live?.quota?.v5_paused
+        ? {
+            label: "V5 暂停中",
+            used: u.v5.used,
+            cap: u.v5.cap,
+            paused: true,
+            hint: V5_PAUSED_HINT,
+            short: "暂停中",
+          }
+        : live?.quota?.upstream_v5_free === false
+          ? { label: "V5 暂时用完", used: u.v5.used, cap: u.v5.cap, paused: true }
+          : pick(u.v5, "V5 已用", "V5 ");
   return { total: pick(u.total, "全站今日已用", "全站"), v5 };
 }

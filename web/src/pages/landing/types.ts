@@ -19,6 +19,8 @@ export type Live = {
     upstream_v5_free?: boolean;
     /** true = 站长手动暂停了 V5（网关会拒绝 V5；upstream_v5_free 同时为 false） */
     v5_paused?: boolean;
+    v5_access_allowed?: boolean;
+    v5_access_reason?: string;
   };
   /** full：网关此刻会不会以「排队满」拒绝新图 */
   queue?: { waiting?: number; running?: number; full?: boolean };
@@ -83,6 +85,8 @@ export type MeMember = {
     upstream_v5_free?: boolean;
     /** true = 站长手动暂停了 V5 */
     v5_paused?: boolean;
+    v5_access_allowed?: boolean;
+    v5_access_reason?: string;
     anlas?: number;
     daily_anlas?: number;
     reset_hour?: number | null;

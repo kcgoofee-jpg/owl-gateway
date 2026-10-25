@@ -27,6 +27,7 @@ pub mod site_flags;
 pub mod snowflake;
 pub mod upstream_errors;
 pub mod upstream_policy;
+pub mod v5_access;
 pub mod v5_medium;
 
 pub mod client_views;

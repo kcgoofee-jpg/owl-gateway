@@ -135,9 +135,41 @@ pub(super) fn on_429(state: &AppState) -> Box<dyn Fn(f64) -> BoxFuture<'static, 
 
 pub(super) fn before_dispatch(
     state: &AppState,
-) -> Box<dyn Fn() -> Result<(), UpstreamError> + Send + Sync> {
+    key: Option<(String, bool)>,
+) -> Box<dyn Fn() -> BoxFuture<'static, Result<(), UpstreamError>> + Send + Sync> {
     let s = state.clone();
-    Box::new(move || check_image_cooldown(&s).map_err(|g| local(g.into())))
+    Box::new(move || {
+        let s = s.clone();
+        let key = key.clone();
+        Box::pin(async move {
+            check_image_cooldown(&s).map_err(|g| local(g.into()))?;
+            if let Some((discord_id, is_v5)) = key
+                && is_v5
+            {
+                let paused = crate::ops::v5_paused(&s.db).await.map_err(|_| {
+                    UpstreamError::local(500, "读取 V5 紧急暂停状态失败，请求未发出。", "")
+                })?;
+                if paused {
+                    return Err(UpstreamError::local(
+                        403,
+                        gate_core::quota::V5_PAUSED_TEXT,
+                        gate_core::reasons::V5_EXHAUSTED,
+                    ));
+                }
+                let decision = crate::v5_access::decide(&s, Some(&discord_id))
+                    .await
+                    .map_err(|_| UpstreamError::local(500, "读取 V5 权限失败，请求未发出。", ""))?;
+                if !decision.allowed {
+                    return Err(UpstreamError::local(
+                        403,
+                        decision.reason,
+                        gate_core::reasons::V5_EXHAUSTED,
+                    ));
+                }
+            }
+            Ok(())
+        })
+    })
 }
 
 /// 已经开始的上游操作：放进后台任务跑完（含记账），调用方断开也不中断。

@@ -71,6 +71,29 @@ function QuotaCard() {
   if (!data) return <CardPending title="额度" loading={loading} error={error} />;
   const setPaused = (on: boolean) =>
     act("PUT", "/admin/api/settings", { v5_paused: on }, on ? "V5 已暂停" : "V5 已恢复");
+  const [mode, setMode] = useState(data.v5_access_mode ?? "legacy");
+  const [allowed, setAllowed] = useState((data.v5_authorized_discord_ids ?? []).join("\n"));
+  const [owners, setOwners] = useState((data.gateway_owner_discord_ids ?? []).join("\n"));
+  const [admins, setAdmins] = useState((data.gateway_admin_discord_ids ?? []).join("\n"));
+  const saveAccess = async () => {
+    const parse = (s: string) =>
+      s
+        .split(/[\n,，\s]+/)
+        .map((x) => x.trim())
+        .filter(Boolean);
+    const lists = [parse(allowed), parse(owners), parse(admins)];
+    await act(
+      "PUT",
+      "/admin/api/settings",
+      {
+        v5_access_mode: mode,
+        v5_authorized_discord_ids: lists[0],
+        gateway_owner_discord_ids: lists[1],
+        gateway_admin_discord_ids: lists[2],
+      },
+      "V5 访问策略已保存",
+    );
+  };
   return (
     <>
       <Card title="V5 暂停（手动）">
@@ -84,6 +107,60 @@ function QuotaCard() {
           checked={data.v5_paused}
           onChange={(v) => void setPaused(v)}
         />
+      </Card>
+      <Card title="V5 访问策略" sub="身份与模型授权分开配置；站长身份不绕过紧急暂停。">
+        <div class="form-grid">
+          <label class="field">
+            <span>谁可以使用 V5</span>
+            <select
+              value={mode}
+              onChange={(e) => setMode((e.currentTarget as HTMLSelectElement).value as typeof mode)}
+            >
+              <option value="legacy">兼容旧设置</option>
+              <option value="closed">关闭</option>
+              <option value="restricted">仅授权 Discord ID</option>
+              <option value="everyone">全体成员</option>
+            </select>
+          </label>
+          <label class="field">
+            <span>V5 授权主体（每行一个 Discord ID）</span>
+            <textarea
+              rows={4}
+              value={allowed}
+              onInput={(e) => setAllowed((e.currentTarget as HTMLTextAreaElement).value)}
+            />
+          </label>
+          <label class="field">
+            <span>号主身份（每行一个 Discord ID）</span>
+            <textarea
+              rows={3}
+              value={owners}
+              onInput={(e) => setOwners((e.currentTarget as HTMLTextAreaElement).value)}
+            />
+          </label>
+          <label class="field">
+            <span>站长身份（每行一个 Discord ID）</span>
+            <textarea
+              rows={3}
+              value={admins}
+              onInput={(e) => setAdmins((e.currentTarget as HTMLTextAreaElement).value)}
+            />
+          </label>
+        </div>
+        <p class="muted">
+          当前预览：
+          {mode === "closed"
+            ? "所有成员拒绝"
+            : mode === "restricted"
+              ? `仅 ${[...new Set(allowed.split(/[\n,，\s]+/).filter(Boolean))].length} 个明确授权主体允许`
+              : mode === "everyone"
+                ? "全体成员允许"
+                : "按旧模型权限与额度规则"}
+          。限制模式只认明确授权主体；号主和站长身份本身不隐式授予 V5。所有请求在派发前会重新读取策略。
+        </p>
+        <button class="button" type="button" onClick={() => void saveAccess()}>
+          保存访问策略
+        </button>
       </Card>
       <FormCard
         title="成员统一额度"
