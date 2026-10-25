@@ -7,6 +7,7 @@ use common::{Call, TOKEN, settle, setup};
 use gate_db::repo::usage::{LogFilter, Success};
 use gate_server::AppState;
 use gate_testkit::Reply;
+use rusqlite::OptionalExtension;
 use serde_json::{Value, json};
 use tower::ServiceExt;
 
@@ -922,6 +923,19 @@ async fn stream_sse_ok() {
     assert_eq!(rows[0]["kind"], "image_stream");
     assert_eq!(rows[0]["status"], "ok");
     assert_eq!(rows[0]["images"], 1);
+    let rid = rows[0]["rid"].as_str().unwrap().to_string();
+    let delivery = tokio::time::timeout(std::time::Duration::from_secs(1), async {
+        loop {
+            let rid = rid.clone();
+            let state: Option<String> = e.state.db.read(move |c| c.query_row(
+                "SELECT s.delivery_state FROM usage_log l JOIN usage_request_links u ON u.usage_log_id=l.id JOIN request_settlements s ON s.request_id=u.request_id WHERE l.rid=?",
+                [rid], |r| r.get(0),
+            ).optional()).await.unwrap();
+            if state.as_deref() == Some("transport_complete") { break state.unwrap(); }
+            tokio::time::sleep(std::time::Duration::from_millis(5)).await;
+        }
+    }).await.unwrap();
+    assert_eq!(delivery, "transport_complete");
 }
 
 #[tokio::test]
