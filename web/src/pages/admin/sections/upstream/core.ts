@@ -56,7 +56,17 @@ export function tokenFormatProblem(t: string): string | null {
 export type AllowanceAccount = {
   account: number;
   percent: number | null;
-  recharge_per_day: number | null;
+  time_until_next_percent_seconds: number | null;
+  current_response_recharge_per_day_estimate: number | null;
+  historical_sample_based_recharge_per_day_estimate: number | null;
+  active: boolean | null;
+  tier: number | null;
+  expires_at: number | null;
+  is_grace_period: boolean | null;
+  account_type: number | null;
+  purchased_percent: number | null;
+  fixed_anlas: number | null;
+  purchased_anlas: number | null;
   is_negative: boolean | null;
   checked_at: number | null;
   low: boolean;
