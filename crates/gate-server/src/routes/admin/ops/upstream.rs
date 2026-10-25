@@ -202,6 +202,11 @@ async fn replace_token(
                 .clear_unauthorized(&previous)
                 .await
                 .map_err(|e| InternalError(format!("验证后的上游凭据隔离状态清除失败：{e}")))?;
+            state
+                .nai
+                .clear_unauthorized(&new.token_id)
+                .await
+                .map_err(|e| InternalError(format!("验证后的新上游凭据隔离状态清除失败：{e}")))?;
             persist_pool(&state).await?;
         }
         Err(msg) if exists(&state, &old_id).await => return Err(HttpError::new(409, msg).into()),

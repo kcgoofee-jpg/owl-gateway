@@ -2166,7 +2166,7 @@ async fn reconciliation_refuses_when_account_is_unusable() {
     let h = [("x-nai-admin-csrf", token.as_str())];
     // 账号被上游 401 判了失效 → 不查
     let t = e.state.nai.tokens().await[0].clone();
-    e.state.nai.mark_unauthorized(&t);
+    e.state.nai.isolate_unauthorized(&t).await;
     let (s, _, body) = api
         .raw("POST", "/reconciliation", Some(json!({})), &h)
         .await

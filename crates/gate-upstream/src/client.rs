@@ -293,10 +293,6 @@ impl<H: Hooks> NaiClient<H> {
 
     // ---------------- 健康标记（见 pool.rs） ----------------
 
-    pub fn mark_unauthorized(&self, token: &Token) {
-        token.mark_unauthorized();
-    }
-
     /// 对订阅、账号信息等读接口返回的 401 执行与生图相同的凭据隔离和持久化。
     pub async fn isolate_unauthorized(&self, token: &Token) {
         crate::pool::isolate_unauthorized(&self.inner.hooks, token).await;

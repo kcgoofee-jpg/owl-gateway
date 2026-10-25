@@ -122,6 +122,15 @@ async fn successfully_verified_replacement_clears_only_the_replaced_fingerprint(
         .1
         .trim_start_matches("Bearer ");
     let old_id = gate_upstream::headers::token_id(failed_token);
+    let replacement_id = gate_upstream::headers::token_id("pst-synthetic-valid-replacement");
+    e.state
+        .db
+        .set_setting(
+            gate_server::hooks::INVALID_TOKENS_KEY,
+            &json!([old_id.clone(), replacement_id.clone()]).to_string(),
+        )
+        .await
+        .unwrap();
 
     let admin = Admin::login(&e.state).await;
     let replaced = admin
@@ -131,7 +140,7 @@ async fn successfully_verified_replacement_clears_only_the_replaced_fingerprint(
         )
         .await;
     assert_eq!(replaced.status, 200, "{}", replaced.text());
-    let new_id = gate_upstream::headers::token_id("pst-synthetic-valid-replacement");
+    let new_id = replacement_id;
     let new = e
         .state
         .nai
@@ -151,7 +160,7 @@ async fn successfully_verified_replacement_clears_only_the_replaced_fingerprint(
         .await
         .unwrap()
         .unwrap();
-    assert!(!stored.contains(&old_id));
+    assert_eq!(stored, "[]");
     let restarted = e.restart().await;
     assert!(!disabled(&restarted, &new.token_id).await);
 }
