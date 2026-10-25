@@ -236,7 +236,12 @@ pub async fn quota_image_check(
     legacy_free_images: i64,
     exclude: Option<u64>,
 ) -> Result<(), ApiError> {
-    if est.v5 > 0 && crate::ops::v5_paused(&state.db).await? {
+    let access = if est.v5 > 0 {
+        Some(crate::v5_access::evaluate(state, Some(key.str("discord_id"))).await?)
+    } else {
+        None
+    };
+    if access.is_some_and(|snapshot| snapshot.paused) {
         // 站长手动暂停了 V5：本地直接拒，不扣 Anlas、不发上游（暂停是为了保护账号的 V5 余量）
         return Err(GateError::with_code(
             403,
@@ -245,7 +250,7 @@ pub async fn quota_image_check(
         )
         .into());
     }
-    if est.v5 > 0 && !crate::v5_access::v5_allowed(state, key).await? {
+    if access.is_some_and(|snapshot| !snapshot.decision.allowed) {
         return Err(GateError::with_code(
             403,
             "V5 当前未授权此成员使用，未扣费。".to_string(),

@@ -157,24 +157,32 @@ export function dailyMeters(
     x.cap > 0 && x.used >= x.cap
       ? { label: `${next}${r.word}可用（${r.word} ${r.hour} 点起）`, used: 0, cap: x.cap }
       : { label: today, used: x.used, cap: x.cap };
-  const v5: MeterView =
-    live?.quota?.v5_access_allowed === false
+  const v5: MeterView = live?.quota?.v5_paused
+    ? {
+        label: "V5 暂停中",
+        used: u.v5.used,
+        cap: u.v5.cap,
+        paused: true,
+        hint: V5_PAUSED_HINT,
+        short: "暂停中",
+      }
+    : live?.quota?.v5_access_mode === "closed"
       ? {
-          label: "V5 未授权",
+          label: "V5 已关闭",
           used: u.v5.used,
           cap: u.v5.cap,
           paused: true,
-          hint: "当前访问策略未授权 V5",
-          short: "未授权",
+          hint: "当前策略已关闭 V5",
+          short: "已关闭",
         }
-      : live?.quota?.v5_paused
+      : live?.quota?.v5_access_mode === "restricted"
         ? {
-            label: "V5 暂停中",
+            label: "V5 仅授权成员可用",
             used: u.v5.used,
             cap: u.v5.cap,
             paused: true,
-            hint: V5_PAUSED_HINT,
-            short: "暂停中",
+            hint: "V5 当前按授权主体开放",
+            short: "仅授权",
           }
         : live?.quota?.upstream_v5_free === false
           ? { label: "V5 暂时用完", used: u.v5.used, cap: u.v5.cap, paused: true }

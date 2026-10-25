@@ -340,6 +340,148 @@ async fn restricted_v5_denial_does_not_dispatch_or_consume_quota() {
     );
 }
 
+#[tokio::test]
+async fn queued_v5_is_rechecked_after_subject_revocation() {
+    let e = setup(&[]).await;
+    e.state.db.run_script(vec![
+        "UPDATE api_keys SET image_model_scope='all', discord_id='900000000000000061' WHERE id=1".into(),
+    ]).await.unwrap();
+    e.state
+        .db
+        .set_setting(gate_server::v5_access::MODE_KEY, "restricted")
+        .await
+        .unwrap();
+    e.state
+        .db
+        .set_setting(
+            gate_server::v5_access::SUBJECTS_KEY,
+            r#"["900000000000000061"]"#,
+        )
+        .await
+        .unwrap();
+    e.mock.push(
+        "/ai/generate-image",
+        Reply::Chunks {
+            status: 200,
+            content_type: "binary/octet-stream".into(),
+            chunks: vec![(
+                std::time::Duration::from_millis(500),
+                bytes::Bytes::from(gate_testkit::zip_of_pngs(1)),
+            )],
+        },
+    );
+    let state = e.state.clone();
+    let first = tokio::spawn(async move {
+        call(
+            &state,
+            "POST",
+            "/ai/generate-image",
+            Some(TOKEN),
+            Some(image_body("nai-diffusion-5-full", 1)),
+        )
+        .await
+    });
+    for _ in 0..200 {
+        if e.mock.requests_to("/ai/generate-image").len() == 1 {
+            break;
+        }
+        tokio::time::sleep(std::time::Duration::from_millis(5)).await;
+    }
+    assert_eq!(
+        e.mock.requests_to("/ai/generate-image").len(),
+        1,
+        "first request should be in flight"
+    );
+    let state = e.state.clone();
+    let second = tokio::spawn(async move {
+        call(
+            &state,
+            "POST",
+            "/ai/generate-image",
+            Some(TOKEN),
+            Some(image_body("nai-diffusion-5-full", 1)),
+        )
+        .await
+    });
+    let mut queued = false;
+    for _ in 0..200 {
+        let view = e.state.guard.with(|g| g.queue_view(Some(1)));
+        if view["mine"]
+            .as_array()
+            .is_some_and(|items| items.iter().any(|item| item["state"] == "waiting"))
+        {
+            queued = true;
+            break;
+        }
+        tokio::time::sleep(std::time::Duration::from_millis(5)).await;
+    }
+    assert!(queued, "second image must be waiting before revocation");
+    e.state
+        .db
+        .set_setting(gate_server::v5_access::SUBJECTS_KEY, "[]")
+        .await
+        .unwrap();
+    assert_eq!(first.await.unwrap().0, StatusCode::OK);
+    let (status, _, body) = second.await.unwrap();
+    assert_eq!(
+        status,
+        StatusCode::FORBIDDEN,
+        "{}",
+        String::from_utf8_lossy(&body)
+    );
+    assert_eq!(e.mock.requests_to("/ai/generate-image").len(), 1);
+    assert_eq!(
+        e.state.db.get_counter(1, &e.state.day()).await.unwrap().v5,
+        1
+    );
+}
+
+#[tokio::test]
+async fn owner_identity_survives_member_key_rotation() {
+    let e = setup(&[]).await;
+    e.state
+        .db
+        .run_script(vec![
+            "UPDATE api_keys SET discord_id='900000000000000071' WHERE id=1".into(),
+        ])
+        .await
+        .unwrap();
+    e.state
+        .db
+        .set_setting(gate_server::v5_access::MODE_KEY, "restricted")
+        .await
+        .unwrap();
+    e.state
+        .db
+        .set_setting(
+            gate_server::v5_access::SUBJECTS_KEY,
+            r#"["900000000000000071"]"#,
+        )
+        .await
+        .unwrap();
+    e.state
+        .db
+        .set_setting(
+            gate_server::v5_access::OWNERS_KEY,
+            r#"["900000000000000071"]"#,
+        )
+        .await
+        .unwrap();
+    assert!(
+        e.state
+            .db
+            .rotate_key_token(1, "synthetic-rotated-member-key")
+            .await
+            .unwrap()
+    );
+    let key = gate_server::key::Key(e.state.db.get_key(1).await.unwrap().unwrap());
+    let access = gate_server::v5_access::evaluate(&e.state, Some(key.str("discord_id")))
+        .await
+        .unwrap();
+    assert!(access.decision.allowed);
+    assert!(access.owner);
+}
+
 /// V5 也在入口预检：同一把 Key 的前一张 V5 已经拿到预留、正在出图，而今天只剩这 1 张时，
 /// 后一张立即 403，不排队等前一张出完（10-21 线上：第二张排了 47 秒才被告知额度用完）。
 #[tokio::test]

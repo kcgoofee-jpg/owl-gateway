@@ -146,23 +146,26 @@ pub(super) fn before_dispatch(
             if let Some((discord_id, is_v5)) = key
                 && is_v5
             {
-                let paused = crate::ops::v5_paused(&s.db).await.map_err(|_| {
-                    UpstreamError::local(500, "读取 V5 紧急暂停状态失败，请求未发出。", "")
-                })?;
-                if paused {
+                let snapshot = crate::v5_access::evaluate(&s, Some(&discord_id))
+                    .await
+                    .map_err(|_| {
+                        UpstreamError::local(
+                            500,
+                            "读取 V5 权限与紧急暂停状态失败，请求未发出。",
+                            "",
+                        )
+                    })?;
+                if snapshot.paused {
                     return Err(UpstreamError::local(
                         403,
                         gate_core::quota::V5_PAUSED_TEXT,
                         gate_core::reasons::V5_EXHAUSTED,
                     ));
                 }
-                let decision = crate::v5_access::decide(&s, Some(&discord_id))
-                    .await
-                    .map_err(|_| UpstreamError::local(500, "读取 V5 权限失败，请求未发出。", ""))?;
-                if !decision.allowed {
+                if !snapshot.decision.allowed {
                     return Err(UpstreamError::local(
                         403,
-                        decision.reason,
+                        snapshot.decision.reason,
                         gate_core::reasons::V5_EXHAUSTED,
                     ));
                 }

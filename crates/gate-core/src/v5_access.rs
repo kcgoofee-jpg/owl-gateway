@@ -9,6 +9,17 @@ pub enum Mode {
     Everyone,
 }
 
+impl Mode {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Legacy => "legacy",
+            Self::Closed => "closed",
+            Self::Restricted => "restricted",
+            Self::Everyone => "everyone",
+        }
+    }
+}
+
 pub fn mode_from_raw(raw: Option<&str>) -> Mode {
     match raw {
         None | Some("legacy") => Mode::Legacy,

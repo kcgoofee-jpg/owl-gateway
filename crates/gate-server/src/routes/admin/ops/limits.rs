@@ -37,6 +37,8 @@ async fn medium_view(state: &AppState) -> Value {
 }
 
 async fn get_settings(State(state): State<AppState>, _s: AdminSession) -> ApiResult {
+    let policy = crate::v5_access::configuration(&state).await?;
+    let policy_mode = policy.mode.as_str();
     Ok(ok_json(&json!({
         "global_monthly_anlas": pyval::float(site_flag_f64(&state, &GLOBAL_MONTHLY_ANLAS).await?),
         "global_daily_v5": crate::ops::global_daily_v5(&state.db).await?,
@@ -44,11 +46,11 @@ async fn get_settings(State(state): State<AppState>, _s: AdminSession) -> ApiRes
         "member_daily_anlas": site_flag(&state, &MEMBER_DAILY_ANLAS).await?,
         "register_daily_images": site_flag(&state, &REGISTER_DAILY_IMAGES).await?,
         "register_daily_v5": site_flag(&state, &REGISTER_DAILY_V5).await?,
-        "v5_paused": crate::ops::v5_paused(&state.db).await?,
-        "v5_access_mode": state.db.get_setting(crate::v5_access::MODE_KEY).await?.unwrap_or_else(|| "legacy".into()),
-        "v5_authorized_discord_ids": state.db.get_setting(crate::v5_access::SUBJECTS_KEY).await?.and_then(|v| serde_json::from_str::<Value>(&v).ok()).unwrap_or(json!([])),
-        "gateway_owner_discord_ids": state.db.get_setting(crate::v5_access::OWNERS_KEY).await?.and_then(|v| serde_json::from_str::<Value>(&v).ok()).unwrap_or(json!([])),
-        "gateway_admin_discord_ids": state.db.get_setting(crate::v5_access::ADMINS_KEY).await?.and_then(|v| serde_json::from_str::<Value>(&v).ok()).unwrap_or(json!([])),
+        "v5_paused": policy.paused,
+        "v5_access_mode": policy_mode,
+        "v5_authorized_discord_ids": policy.authorized,
+        "gateway_owner_discord_ids": policy.owners,
+        "gateway_admin_discord_ids": policy.admins,
         "v5_medium_mode": site_flag(&state, &V5_MEDIUM_MODE).await?,
         "v5_medium_state": medium_view(&state).await,
     })))
@@ -57,16 +59,22 @@ async fn get_settings(State(state): State<AppState>, _s: AdminSession) -> ApiRes
 async fn put_settings(State(state): State<AppState>, _s: AdminSession, req: Request) -> ApiResult {
     let (parts, body) = req.into_parts();
     let body = read_json_body(&parts.headers, body, BODY_LIMIT).await?;
+    let policy_keys = [
+        crate::v5_access::MODE_KEY,
+        crate::v5_access::SUBJECTS_KEY,
+        crate::v5_access::OWNERS_KEY,
+        crate::v5_access::ADMINS_KEY,
+    ];
+    let has_policy = policy_keys.iter().any(|key| body.contains_key(*key));
+    if has_policy && policy_keys.iter().any(|key| !body.contains_key(*key)) {
+        return Err(HttpError::new(422, "V5 策略需同时提交模式、授权主体与身份角色列表").into());
+    }
     let policy_mode = match body.get(crate::v5_access::MODE_KEY) {
-        None => state
-            .db
-            .get_setting(crate::v5_access::MODE_KEY)
-            .await?
-            .unwrap_or_else(|| "legacy".into()),
+        None => None,
         Some(Value::String(s))
             if ["legacy", "closed", "restricted", "everyone"].contains(&s.as_str()) =>
         {
-            s.clone()
+            Some(s.clone())
         }
         Some(_) => {
             return Err(HttpError::new(
@@ -122,6 +130,25 @@ async fn put_settings(State(state): State<AppState>, _s: AdminSession, req: Requ
             )?,
         ),
     ];
+    let policy_values = if let Some(mode) = &policy_mode {
+        Some(vec![
+            (crate::v5_access::MODE_KEY.to_string(), mode.clone()),
+            (
+                crate::v5_access::SUBJECTS_KEY.to_string(),
+                subject_settings[0].1.clone().unwrap(),
+            ),
+            (
+                crate::v5_access::OWNERS_KEY.to_string(),
+                subject_settings[1].1.clone().unwrap(),
+            ),
+            (
+                crate::v5_access::ADMINS_KEY.to_string(),
+                subject_settings[2].1.clone().unwrap(),
+            ),
+        ])
+    } else {
+        None
+    };
     // 降档模式：只认 off / on 两个小写字符串，其他（含已删除的 auto）一律 422；缺省保持原值
     let medium_mode = match body.get(V5_MEDIUM_MODE.key) {
         Some(v) => v.clone(),
@@ -158,7 +185,7 @@ async fn put_settings(State(state): State<AppState>, _s: AdminSession, req: Requ
     let v45 = field(&state, &body, &REGISTER_DAILY_IMAGES, Kind::Int, 100_000.0).await?;
     let v5_each = field(&state, &body, &REGISTER_DAILY_V5, Kind::Int, 100_000.0).await?;
     let paused = match body.get(V5_PAUSED.key) {
-        None => crate::ops::v5_paused(&state.db).await?,
+        None => crate::v5_access::evaluate(&state, None).await?.paused,
         Some(Value::Bool(b)) => *b,
         Some(_) => return Err(HttpError::new(422, "v5_paused 必须是 true / false").into()),
     };
@@ -172,19 +199,14 @@ async fn put_settings(State(state): State<AppState>, _s: AdminSession, req: Requ
     ]
     .iter()
     .any(|k| body.contains_key(*k));
-    state
-        .db
-        .set_setting(V5_PAUSED.key, if paused { "1" } else { "0" })
-        .await?;
-    state
-        .db
-        .set_setting(crate::v5_access::MODE_KEY, &policy_mode)
-        .await?;
-    for (name, value) in subject_settings {
-        if let Some(value) = value {
-            state.db.set_setting(name, &value).await?;
-        }
+    let mut v5_settings = vec![(
+        V5_PAUSED.key.to_string(),
+        if paused { "1" } else { "0" }.to_string(),
+    )];
+    if let Some(policy) = policy_values {
+        v5_settings.extend(policy);
     }
+    state.db.set_settings_bulk(&v5_settings).await?;
     for (spec, v) in [
         (&GLOBAL_MONTHLY_ANLAS, &monthly),
         (&GLOBAL_DAILY_V5, &daily_v5),
@@ -200,6 +222,13 @@ async fn put_settings(State(state): State<AppState>, _s: AdminSession, req: Requ
         .db
         .set_setting(V5_MEDIUM_MODE.key, &medium_text)
         .await?;
+    let policy_mode_out = policy_mode.unwrap_or(
+        crate::v5_access::configuration(&state)
+            .await?
+            .mode
+            .as_str()
+            .to_string(),
+    );
     let out = json!({
         "ok": true,
         "global_monthly_anlas": monthly,
@@ -209,7 +238,7 @@ async fn put_settings(State(state): State<AppState>, _s: AdminSession, req: Requ
         "register_daily_images": v45,
         "register_daily_v5": v5_each,
         "v5_paused": paused,
-        "v5_access_mode": policy_mode,
+        "v5_access_mode": policy_mode_out,
         "v5_medium_mode": medium_text,
     });
     if sync {

@@ -1,5 +1,5 @@
 /** 额度与保护：每个数都是站长手动设的（10-23 起没有自动额度算法）；最后一张「记录」只显示。 */
-import { useMemo, useState } from "preact/hooks";
+import { useEffect, useMemo, useState } from "preact/hooks";
 import { fullTime, withUnit } from "../../../lib/format";
 import { Card } from "../../../ui";
 import { act, useAdmin } from "../Admin";
@@ -71,29 +71,6 @@ function QuotaCard() {
   if (!data) return <CardPending title="额度" loading={loading} error={error} />;
   const setPaused = (on: boolean) =>
     act("PUT", "/admin/api/settings", { v5_paused: on }, on ? "V5 已暂停" : "V5 已恢复");
-  const [mode, setMode] = useState(data.v5_access_mode ?? "legacy");
-  const [allowed, setAllowed] = useState((data.v5_authorized_discord_ids ?? []).join("\n"));
-  const [owners, setOwners] = useState((data.gateway_owner_discord_ids ?? []).join("\n"));
-  const [admins, setAdmins] = useState((data.gateway_admin_discord_ids ?? []).join("\n"));
-  const saveAccess = async () => {
-    const parse = (s: string) =>
-      s
-        .split(/[\n,，\s]+/)
-        .map((x) => x.trim())
-        .filter(Boolean);
-    const lists = [parse(allowed), parse(owners), parse(admins)];
-    await act(
-      "PUT",
-      "/admin/api/settings",
-      {
-        v5_access_mode: mode,
-        v5_authorized_discord_ids: lists[0],
-        gateway_owner_discord_ids: lists[1],
-        gateway_admin_discord_ids: lists[2],
-      },
-      "V5 访问策略已保存",
-    );
-  };
   return (
     <>
       <Card title="V5 暂停（手动）">
@@ -108,60 +85,7 @@ function QuotaCard() {
           onChange={(v) => void setPaused(v)}
         />
       </Card>
-      <Card title="V5 访问策略" sub="身份与模型授权分开配置；站长身份不绕过紧急暂停。">
-        <div class="form-grid">
-          <label class="field">
-            <span>谁可以使用 V5</span>
-            <select
-              value={mode}
-              onChange={(e) => setMode((e.currentTarget as HTMLSelectElement).value as typeof mode)}
-            >
-              <option value="legacy">兼容旧设置</option>
-              <option value="closed">关闭</option>
-              <option value="restricted">仅授权 Discord ID</option>
-              <option value="everyone">全体成员</option>
-            </select>
-          </label>
-          <label class="field">
-            <span>V5 授权主体（每行一个 Discord ID）</span>
-            <textarea
-              rows={4}
-              value={allowed}
-              onInput={(e) => setAllowed((e.currentTarget as HTMLTextAreaElement).value)}
-            />
-          </label>
-          <label class="field">
-            <span>号主身份（每行一个 Discord ID）</span>
-            <textarea
-              rows={3}
-              value={owners}
-              onInput={(e) => setOwners((e.currentTarget as HTMLTextAreaElement).value)}
-            />
-          </label>
-          <label class="field">
-            <span>站长身份（每行一个 Discord ID）</span>
-            <textarea
-              rows={3}
-              value={admins}
-              onInput={(e) => setAdmins((e.currentTarget as HTMLTextAreaElement).value)}
-            />
-          </label>
-        </div>
-        <p class="muted">
-          当前预览：
-          {mode === "closed"
-            ? "所有成员拒绝"
-            : mode === "restricted"
-              ? `仅 ${[...new Set(allowed.split(/[\n,，\s]+/).filter(Boolean))].length} 个明确授权主体允许`
-              : mode === "everyone"
-                ? "全体成员允许"
-                : "按旧模型权限与额度规则"}
-          。限制模式只认明确授权主体；号主和站长身份本身不隐式授予 V5。所有请求在派发前会重新读取策略。
-        </p>
-        <button class="button" type="button" onClick={() => void saveAccess()}>
-          保存访问策略
-        </button>
-      </Card>
+      <AccessPolicyCard />
       <FormCard
         title="成员统一额度"
         sub="保存后生效。图片额度同步至采用统一额度的 Key；独立额度保留。"
@@ -192,6 +116,150 @@ function QuotaCard() {
         saveLabel="保存模型转换"
       />
     </>
+  );
+}
+
+type SubjectMember = {
+  discord_id: string | null;
+  name: string;
+  discord: { username: string | null; display_name: string | null } | null;
+};
+
+function MemberPicker(props: {
+  title: string;
+  members: SubjectMember[];
+  selected: string[];
+  onChange: (ids: string[]) => void;
+}) {
+  const selectedSet = new Set(props.selected);
+  const mapped = props.members.filter((m) => m.discord_id).map((m) => m.discord_id as string);
+  const ids = [...new Set([...mapped, ...props.selected])];
+  const label = (id: string) => {
+    const member = props.members.find((m) => m.discord_id === id);
+    if (!member) return `${id}（未关联成员）`;
+    const who = member.discord?.display_name || member.discord?.username || "Discord 成员";
+    return `${who} · ${member.name} · ${id}`;
+  };
+  return (
+    <label class="field">
+      <span>{props.title}</span>
+      <select
+        multiple
+        size={Math.min(Math.max(ids.length, 4), 10)}
+        ref={(el) => {
+          if (!el) return;
+          for (const option of el.options) option.selected = selectedSet.has(option.value);
+        }}
+        onChange={(e) => {
+          const select = e.currentTarget as HTMLSelectElement;
+          props.onChange(Array.from(select.selectedOptions, (option) => option.value));
+        }}
+      >
+        {ids.map((id) => (
+          <option key={id} value={id}>
+            {label(id)}
+            {selectedSet.has(id) ? " ✓" : ""}
+          </option>
+        ))}
+      </select>
+      <small>
+        按住 Shift 或 Command 可多选；已选：
+        {props.selected.length ? props.selected.map(label).join("、") : "无"}
+      </small>
+    </label>
+  );
+}
+
+function AccessPolicyCard() {
+  const settings = useAdmin<Settings>("/admin/api/settings");
+  const members = useAdmin<{ members: SubjectMember[] }>("/admin/api/members");
+  const [mode, setMode] = useState<Settings["v5_access_mode"]>("legacy");
+  const [allowed, setAllowed] = useState<string[]>([]);
+  const [owners, setOwners] = useState<string[]>([]);
+  const [admins, setAdmins] = useState<string[]>([]);
+  useEffect(() => {
+    if (!settings.data) return;
+    setMode(settings.data.v5_access_mode ?? "legacy");
+    setAllowed(settings.data.v5_authorized_discord_ids ?? []);
+    setOwners(settings.data.gateway_owner_discord_ids ?? []);
+    setAdmins(settings.data.gateway_admin_discord_ids ?? []);
+  }, [settings.data]);
+  if (!settings.data || !members.data) {
+    return (
+      <CardPending
+        title="V5 访问策略"
+        loading={settings.loading || members.loading}
+        error={settings.error ?? members.error}
+      />
+    );
+  }
+  const save = () =>
+    act(
+      "PUT",
+      "/admin/api/settings",
+      {
+        v5_access_mode: mode,
+        v5_authorized_discord_ids: allowed,
+        gateway_owner_discord_ids: owners,
+        gateway_admin_discord_ids: admins,
+      },
+      "V5 访问策略已保存",
+    );
+  const allowedByPolicy = (ids: string[]) =>
+    mode === "everyone" ||
+    mode === "legacy" ||
+    (mode === "restricted" && ids.some((id) => allowed.includes(id)));
+  const preview =
+    mode === "closed"
+      ? "所有成员均拒绝"
+      : mode === "restricted"
+        ? `普通成员：未列入授权集合则拒绝；号主：${allowedByPolicy(owners) ? "有号主同时列入授权集合，可使用" : "拒绝（身份本身不授权）"}；站长：${allowedByPolicy(admins) ? "有站长同时列入授权集合，可使用" : "拒绝（身份本身不授权）"}`
+        : mode === "everyone"
+          ? "普通成员、号主、站长均允许（仍受配额、上游状态和紧急暂停约束）"
+          : "按旧模型权限与额度规则";
+  return (
+    <Card title="V5 访问策略" sub="主体身份独立于成员 Key；站长会话仍需后台认证，身份本身也不绕过紧急暂停。">
+      <div class="form-grid">
+        <label class="field">
+          <span>谁可以使用 V5</span>
+          <select
+            value={mode}
+            onChange={(e) =>
+              setMode((e.currentTarget as HTMLSelectElement).value as Settings["v5_access_mode"])
+            }
+          >
+            <option value="legacy">兼容旧设置</option>
+            <option value="closed">关闭</option>
+            <option value="restricted">仅授权主体</option>
+            <option value="everyone">全体成员</option>
+          </select>
+        </label>
+        <MemberPicker
+          title="V5 授权主体"
+          members={members.data.members}
+          selected={allowed}
+          onChange={setAllowed}
+        />
+        <MemberPicker
+          title="号主身份"
+          members={members.data.members}
+          selected={owners}
+          onChange={setOwners}
+        />
+        <MemberPicker
+          title="站长身份"
+          members={members.data.members}
+          selected={admins}
+          onChange={setAdmins}
+        />
+      </div>
+      <p class="muted">
+        最终效果预览：{preview}。只有 V5 授权列表决定模型访问；身份角色不会隐式获得 V5。派发前会重新检查策略。
+      </p>
+      <button class="button" type="button" onClick={() => void save()}>
+        保存访问策略
+      </button>
+    </Card>
   );
 }
 

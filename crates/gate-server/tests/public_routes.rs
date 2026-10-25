@@ -98,6 +98,18 @@ async fn get_json(
     (s, h, json_of(&b))
 }
 
+async fn get_with_auth(state: &AppState, path: &str, token: &str) -> (StatusCode, Vec<u8>) {
+    let (status, _, body) = raw(
+        state,
+        "GET",
+        path,
+        &[("authorization", &format!("Bearer {token}"))],
+        b"",
+    )
+    .await;
+    (status, body)
+}
+
 /// SSE 读取器：按空行切事件块。
 struct Sse {
     stream: BodyDataStream,
@@ -240,7 +252,8 @@ async fn public_live_shape_and_key_order() {
             "v5_today",
             "v5_cap",
             "upstream_v5_free",
-            "v5_paused"
+            "v5_paused",
+            "v5_access_mode"
         ]
     );
     assert_eq!(v["quota"]["images_today"], 0);
@@ -280,7 +293,7 @@ async fn public_live_shape_and_key_order() {
     // 手动额度（没设过用默认值）
     assert_eq!(
         rules["quota"],
-        json!({"ceiling": 150, "v5_each": 0, "v5_global": 150, "v5_paused": false})
+        json!({"ceiling": 150, "v5_each": 0, "v5_global": 150, "v5_paused": false, "v5_access_mode": "legacy"})
     );
     assert_eq!(v["site"], "https://gate.example.top");
     assert_eq!(v["discord_invite"], "https://discord.gg/abc");
@@ -359,6 +372,39 @@ async fn public_live_reflects_site_settings_after_meta_cache() {
     e.state.live.invalidate();
     let (_, _, fresh) = get_json(&e.state, "/public/live", &[]).await;
     assert_eq!(fresh["web_login"], true);
+}
+
+#[tokio::test]
+async fn public_rules_announce_restricted_v5_without_exposing_subjects() {
+    let e = setup(&reg_env()).await;
+    e.state
+        .db
+        .set_setting(gate_server::v5_access::MODE_KEY, "restricted")
+        .await
+        .unwrap();
+    e.state
+        .db
+        .set_setting(
+            gate_server::v5_access::SUBJECTS_KEY,
+            r#"["900000000000000081"]"#,
+        )
+        .await
+        .unwrap();
+    e.state.live.invalidate();
+    let (_, _, live) = get_json(&e.state, "/public/live", &[]).await;
+    assert_eq!(live["quota"]["v5_access_mode"], "restricted");
+    assert_eq!(live["rules"]["quota"]["v5_access_mode"], "restricted");
+    assert!(
+        live["algo_notice"]
+            .as_str()
+            .unwrap()
+            .contains("V5 当前仅授权成员可用")
+    );
+    assert!(!live.to_string().contains("900000000000000081"));
+    assert!(
+        live["quota"].get("v5_access_allowed").is_none(),
+        "shared live must not expose individual authorization"
+    );
 }
 
 /// 今天出满的账号（单号每日上限）虽然「可用」，但不再接图：首页估算不算它，网关也不给它的开始时间。
@@ -646,12 +692,22 @@ async fn user_compat_routes_require_key_and_keep_panel_schema() {
         let v = json_of(&body);
         assert_eq!(
             keys(&v),
-            ["subscription", "priority", "trainingStepsLeft", "anlas"]
+            [
+                "subscription",
+                "priority",
+                "trainingStepsLeft",
+                "anlas",
+                "v5Access"
+            ]
         );
         assert_eq!(
             keys(&v["subscription"]),
             ["tier", "active", "expiresAt", "trainingStepsLeft", "perks"],
             "naiGate 不暴露在 data 里"
+        );
+        assert_eq!(
+            v["v5Access"],
+            json!({"mode": "legacy", "allowed": true, "paused": false})
         );
         assert_eq!(
             keys(&v["priority"]),
@@ -714,6 +770,41 @@ async fn user_compat_routes_require_key_and_keep_panel_schema() {
         rows.iter()
             .any(|r| r["status"] == "rejected" && r["kind"] == "account"),
         "{rows:?}"
+    );
+}
+
+#[tokio::test]
+async fn user_data_and_subscription_report_restricted_v5_permission() {
+    let e = setup(&reg_env()).await;
+    e.state
+        .db
+        .run_script(vec![
+            "UPDATE api_keys SET discord_id='900000000000000091' WHERE id=1".into(),
+        ])
+        .await
+        .unwrap();
+    e.state
+        .db
+        .set_setting(gate_server::v5_access::MODE_KEY, "restricted")
+        .await
+        .unwrap();
+    e.state
+        .db
+        .set_setting(
+            gate_server::v5_access::SUBJECTS_KEY,
+            r#"["900000000000000092"]"#,
+        )
+        .await
+        .unwrap();
+    let (_, subscription) = get_with_auth(&e.state, "/user/subscription", TOKEN).await;
+    let subscription = json_of(&subscription);
+    assert_eq!(subscription["naiGate"]["v5Allowed"], false);
+    assert_eq!(subscription["naiGate"]["v5Unlimited"], false);
+    assert_eq!(subscription["naiGate"]["v5LeftToday"], 0);
+    let (_, data) = get_with_auth(&e.state, "/user/data", TOKEN).await;
+    assert_eq!(
+        json_of(&data)["v5Access"],
+        json!({"mode":"restricted", "allowed":false, "paused":false})
     );
 }
 

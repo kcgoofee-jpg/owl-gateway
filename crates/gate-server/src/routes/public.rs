@@ -658,13 +658,14 @@ async fn client_error(State(state): State<AppState>, req: Request) -> Response {
 /// 虚拟订阅视图：数字由 gate_core 算（纯函数），这里只负责把库里的数查好。
 async fn subscription(state: &AppState, key: &Key) -> Result<Value, InternalError> {
     let (day, month) = (state.day(), state.month());
+    let access = crate::v5_access::evaluate(state, Some(key.str("discord_id"))).await?;
     let data = gate_core::client_views::SubscriptionData {
         month_anlas_used: state.db.month_anlas(key.id(), &month).await?,
         daily_v5_used: state.db.get_counter(key.id(), &day).await?.v5,
         global_v5_limit: crate::ops::global_daily_v5(&state.db).await?,
         global_v5_total: state.db.day_v5_total(&day).await?,
-        v5_paused: crate::ops::v5_paused(&state.db).await?,
-        v5_access_allowed: crate::v5_access::v5_allowed(state, key).await?,
+        v5_paused: access.paused,
+        v5_access_allowed: access.decision.allowed,
     };
     gate_core::client_views::subscription_payload(&key.0, state.now(), &data)
         .map_err(|e| InternalError(e.to_string()))
@@ -689,6 +690,7 @@ async fn user_data(State(state): State<AppState>, req: Request) -> ApiResult {
     let (parts, _) = req.into_parts();
     let key = authenticate(&state, &parts, false).await?;
     let sub = subscription(&state, &key).await?;
+    let access = crate::v5_access::evaluate(&state, Some(key.str("discord_id"))).await?;
     let public_sub: Map<String, Value> = sub
         .as_object()
         .map(|m| {
@@ -704,6 +706,7 @@ async fn user_data(State(state): State<AppState>, req: Request) -> ApiResult {
         "priority": virtual_priority(state.now()),
         "trainingStepsLeft": steps,
         "anlas": steps["fixedTrainingStepsLeft"],
+        "v5Access": {"mode": access.mode.as_str(), "allowed": access.decision.allowed, "paused": access.paused},
     })))
 }
 
@@ -883,10 +886,8 @@ pub(super) async fn me_payload(
     // 全站今天还剩多少张 V5（首页 V5 圆环取「个人剩余」和它的较小值）。
     // null = 不受全站限制：全站不设限（global_daily_v5=0），或这把 Key 不计入全站 V5
     let g = crate::ops::global_daily_v5(&state.db).await?;
-    let v5_paused = crate::ops::v5_paused(&state.db).await?;
-    let v5_access = crate::v5_access::decide(state, Some(key.str("discord_id"))).await?;
-    let (is_owner, is_admin) = crate::v5_access::roles(state, key.str("discord_id")).await?;
-    let (site_v5_left, site_v5_cap) = if v5_paused || !v5_access.allowed {
+    let v5_access = crate::v5_access::evaluate(state, Some(key.str("discord_id"))).await?;
+    let (site_v5_left, site_v5_cap) = if v5_access.paused || !v5_access.decision.allowed {
         // 暂停：全站今天没有 V5（不能按「不限」显示）
         (json!(0), Value::Null)
     } else if g > 0 && !key.exclude_global_v5() {
@@ -903,7 +904,7 @@ pub(super) async fn me_payload(
     out.insert("image_scope".into(), key.get("image_model_scope").clone());
     out.insert(
         "subject_roles".into(),
-        json!({"owner": is_owner, "admin": is_admin}),
+        json!({"owner": v5_access.owner, "admin": v5_access.admin}),
     );
     out.insert(
         "today".into(),
@@ -911,10 +912,10 @@ pub(super) async fn me_payload(
             "images": c.images, "v5": c.v5, "legacy": c.legacy_free_images,
             "daily_images": key.get("daily_images"), "daily_v5": key.get("daily_v5"),
             "site_v5_left": site_v5_left, "site_v5_cap": site_v5_cap,
-            "upstream_v5_free": live::upstream_v5_free(state).await && !v5_paused,
-            "v5_paused": v5_paused,
-            "v5_access_allowed": v5_access.allowed,
-            "v5_access_reason": v5_access.reason,
+            "upstream_v5_free": live::upstream_v5_free(state).await && !v5_access.paused,
+            "v5_paused": v5_access.paused,
+            "v5_access_allowed": v5_access.decision.allowed,
+            "v5_access_reason": v5_access.decision.reason,
             "anlas": gate_core::pyc::round0(c.anlas),
             "daily_anlas": live::member_anlas_cap(state, key).await?,
             "reset_hour": state.guard.with(|g| g.reset_hour),

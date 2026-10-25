@@ -18,6 +18,20 @@ use gate_core::pyval;
 use gate_core::reasons::Reason;
 use gate_core::site_flags::ALGO_NOTICE;
 use serde_json::{Map, Value, json};
+
+fn public_algo_notice(custom: &str, mode: gate_core::v5_access::Mode) -> String {
+    let note = match mode {
+        gate_core::v5_access::Mode::Restricted => "V5 当前仅授权成员可用。",
+        gate_core::v5_access::Mode::Closed => "V5 当前已关闭。",
+        _ => return pyc::take_chars(custom, 300).to_string(),
+    };
+    let prefix = pyc::take_chars(custom, 220);
+    if prefix.trim().is_empty() {
+        note.to_string()
+    } else {
+        format!("{prefix} {note}")
+    }
+}
 use std::collections::HashMap;
 use std::hash::{Hash, Hasher};
 use std::sync::atomic::{AtomicBool, AtomicU64, AtomicUsize, Ordering};
@@ -152,7 +166,9 @@ pub async fn build(state: &AppState, now: f64) -> Result<Map<String, Value>, Int
     let gv = |name: &str| values.get(name).copied().unwrap_or(0);
     let usable = (accounts.iter().filter(|a| a.usable).count() as i64).max(1);
     let v5_cap = crate::ops::global_daily_v5(&state.db).await?;
-    let v5_paused = crate::ops::v5_paused(&state.db).await?;
+    let v5_access = crate::v5_access::evaluate(state, None).await?;
+    let v5_paused = v5_access.paused;
+    let v5_access_mode = v5_access.mode.as_str();
     // 10 分钟突发窗口已删除：`guard` 段不再有 `burst_cap` / `burst_wait`。
     // 出图间隔与间隔抖动 10-23 删除：每个账号的节奏 = 出图耗时 + 出完后歇 N～M 秒
     let (rest_min, rest_max) = (
@@ -188,7 +204,7 @@ pub async fn build(state: &AppState, now: f64) -> Result<Map<String, Value>, Int
     let quota = {
         let m = crate::jobs::quota::manual(state).await?;
         json!({"ceiling": m.daily_images, "v5_each": m.daily_v5, "v5_global": m.global_v5,
-               "v5_paused": m.v5_paused})
+               "v5_paused": m.v5_paused, "v5_access_mode": v5_access_mode})
     };
     let token_ids: Vec<String> = pool
         .iter()
@@ -259,6 +275,7 @@ pub async fn build(state: &AppState, now: f64) -> Result<Map<String, Value>, Int
             // 动态额度把今天的 V5 暂停了：和「账号免费 V5 用完」同样显示暂停
             "upstream_v5_free": upstream_v5_free(state).await && !v5_paused,
             "v5_paused": v5_paused,
+            "v5_access_mode": v5_access_mode,
         }),
     );
     // queue.full：网关此刻是否会以「排队满」拒绝新图（与 guard.admit_image 同一判断），首页直接用它，不在前端重算
@@ -359,6 +376,8 @@ async fn build_meta(state: &AppState) -> Result<Map<String, Value>, InternalErro
         }
     }
     let algo = pyval::py_str(&site_flag(state, &ALGO_NOTICE).await?);
+    let policy = crate::v5_access::evaluate(state, None).await?;
+    let algo = public_algo_notice(&algo, policy.mode);
     let mut m = Map::new();
     m.insert("site".into(), json!(env.site_url.trim_end_matches('/')));
     m.insert("discord_invite".into(), json!(env.discord_invite_url));
@@ -417,6 +436,8 @@ pub async fn build_status(state: &AppState) -> Result<Value, InternalError> {
     let image_jobs = state.budget.lock().await.reservations.len();
     let env = &state.env;
     let algo = pyval::py_str(&site_flag(state, &ALGO_NOTICE).await?);
+    let policy = crate::v5_access::evaluate(state, None).await?;
+    let algo = public_algo_notice(&algo, policy.mode);
     Ok(json!({
         "site": env.site_url.trim_end_matches('/'),
         "upstream": {"status": status, "image_cooldown_seconds": state.cooldown.remaining(now)},

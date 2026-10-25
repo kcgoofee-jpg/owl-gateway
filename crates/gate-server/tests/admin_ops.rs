@@ -101,7 +101,6 @@ async fn settings_get_put_and_stored_strings() {
             ("register_daily_images", "150"),
             ("register_daily_v5", "0"),
             ("v5_paused", "0"),
-            ("v5_access_mode", "legacy"),
             ("v5_medium_mode", "off"),
         ])
     );
