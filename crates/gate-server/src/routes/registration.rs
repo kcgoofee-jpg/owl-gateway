@@ -311,16 +311,24 @@ async fn feedback_submit(State(state): State<AppState>, req: Request) -> ApiResu
     let who = Who::read(&mut m);
     let username = m.string("username", Some(""));
     let text = m.string("text", Some(""));
+    let client = m.string("client", Some(""));
+    let version = m.string("version", Some(""));
+    let request_id = m.string("request_id", Some(""));
     m.finish()?;
     let svc = authorize(&state, &parts, true)?;
     let discord_id = checked(svc, &who)?;
     let key = svc.key_row_for(discord_id).await?;
-    let message = feedback::submit(
+    let message = feedback::submit_with_metadata(
         &state.db,
         discord_id,
         &username,
         key.as_ref().map(Key::id),
         &text,
+        feedback::Metadata {
+            client: &client,
+            version: &version,
+            request_id: &request_id,
+        },
         state.now(),
     )
     .await

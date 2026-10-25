@@ -459,6 +459,70 @@ impl Db {
         })
         .await
     }
+
+    /// 请求编号只在日志所属 Key 当前归属或已删除 Key 墓碑归属一致时才视为本人请求。
+    pub async fn feedback_request_belongs_to(&self, discord_id: &str, rid: &str) -> Result<bool> {
+        let (discord_id, rid) = (discord_id.to_string(), rid.to_string());
+        self.read(move |c| {
+            c.query_row(
+                "SELECT EXISTS(\
+                    SELECT 1 FROM usage_log u JOIN api_keys k ON k.id=u.key_id \
+                    WHERE u.rid=?1 AND k.discord_id=?2 \
+                    UNION ALL \
+                    SELECT 1 FROM usage_log u JOIN deleted_key_owners d ON d.key_id=u.key_id \
+                    WHERE u.rid=?1 AND d.discord_id=?2\
+                )",
+                params![rid, discord_id],
+                |r| r.get::<_, bool>(0),
+            )
+        })
+        .await
+    }
+
+    /// 反馈审核标记与 answers JSON 一起更新，避免额外 schema 迁移。
+    pub async fn set_feedback_reviewed(
+        &self,
+        id: i64,
+        reviewed_at: Option<f64>,
+        reviewed_by: &str,
+    ) -> Result<bool> {
+        let reviewed_by = reviewed_by.to_string();
+        self.write(move |tx| {
+            let Some(raw) = tx
+                .query_row("SELECT answers FROM feedback WHERE id=?", [id], |r| {
+                    r.get::<_, String>(0)
+                })
+                .optional()?
+            else {
+                return Ok(false);
+            };
+            let mut answers = serde_json::from_str::<Value>(&raw)
+                .ok()
+                .and_then(|v| v.as_object().cloned())
+                .unwrap_or_default();
+            answers.insert(
+                "reviewed_at".into(),
+                reviewed_at.map(Value::from).unwrap_or(Value::Null),
+            );
+            answers.insert(
+                "reviewed_by".into(),
+                if reviewed_at.is_some() {
+                    Value::String(reviewed_by.clone())
+                } else {
+                    Value::Null
+                },
+            );
+            tx.execute(
+                "UPDATE feedback SET answers=? WHERE id=?",
+                params![
+                    serde_json::to_string(&Value::Object(answers)).unwrap_or_else(|_| "{}".into()),
+                    id
+                ],
+            )?;
+            Ok(true)
+        })
+        .await
+    }
 }
 
 /// 配了身份组：清掉旧的待摘除，标记 `role_granted=1`。

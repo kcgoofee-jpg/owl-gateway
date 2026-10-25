@@ -36,6 +36,7 @@ use tokio::time::{Duration, Instant};
 pub fn router() -> Router<AppState> {
     let mut r = Router::new()
         .route("/member/survey", post(member_survey))
+        .route("/member/feedback", post(member_feedback))
         .route("/public/live", get(public_live))
         .route("/public/live/stream", get(public_live_stream))
         .route("/public/client-error", post(client_error))
@@ -188,6 +189,50 @@ async fn member_survey(State(state): State<AppState>, req: Request) -> ApiResult
     };
     state.db.save_survey(key.id(), &survey, state.now()).await?;
     Ok(ok_json(&json!({"ok": true})))
+}
+
+/// Optional web feedback metadata accompanies the legacy Discord plain-text flow.
+async fn member_feedback(State(state): State<AppState>, req: Request) -> ApiResult {
+    let (parts, body) = req.into_parts();
+    let Some((discord_id, key)) = session::member_state(&state, &parts.headers).await? else {
+        return Err(HttpError::new(401, "未登录或登录已过期，请刷新页面后重新登录。").into());
+    };
+    let raw = head_bytes(body, 8192).await;
+    let Some(data) = loads_object(&raw) else {
+        return Err(HttpError::new(400, "反馈内容无法读取，请刷新页面后重新提交。").into());
+    };
+    let optional_text = |key: &str| -> Result<String, HttpError> {
+        match data.get(key) {
+            Some(Value::String(value)) => Ok(value.clone()),
+            None | Some(Value::Null) => Ok(String::new()),
+            Some(_) => Err(HttpError::new(422, "反馈元数据格式不正确。")),
+        }
+    };
+    let text = optional_text("text")?;
+    let client = optional_text("client")?;
+    let version = optional_text("version")?;
+    let request_id = optional_text("request_id")?;
+    let message = crate::feedback::submit_with_metadata(
+        &state.db,
+        &discord_id,
+        "",
+        key.as_ref().map(Key::id),
+        &text,
+        crate::feedback::Metadata {
+            client: &client,
+            version: &version,
+            request_id: &request_id,
+        },
+        state.now(),
+    )
+    .await
+    .map_err(|e| match e {
+        crate::feedback::SubmitError::Rejected(message) => {
+            ApiError::from(HttpError::new(400, message))
+        }
+        crate::feedback::SubmitError::Db(e) => e.into(),
+    })?;
+    Ok(ok_json(&json!({"message": message})))
 }
 
 // ------------------------------------------------------------------ 实时看板

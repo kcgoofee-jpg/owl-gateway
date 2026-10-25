@@ -18,6 +18,14 @@ pub const MAX_CHARS: usize = 1000;
 pub const RECEIPT: &str = "收到啦，谢谢你的反馈～奶妹会转给站长 ✨";
 pub const TOO_SHORT: &str = "写点什么再提交吧～";
 pub const TOO_FREQUENT: &str = "刚刚已经收到你的反馈啦，过 10 分钟再提交新的吧。";
+pub const INVALID_REQUEST_ID: &str = "请求编号无效，或不属于你的账号。";
+
+#[derive(Debug, Clone, Default)]
+pub struct Metadata<'a> {
+    pub client: &'a str,
+    pub version: &'a str,
+    pub request_id: &'a str,
+}
 
 /// 提交失败：2.x 会以 `ValueError` 上抛（中文原因，机器人原样转述给成员），这里保持同样的转述方式。
 #[derive(Debug)]
@@ -42,23 +50,74 @@ pub async fn submit(
     text: &str,
     now: f64,
 ) -> Result<String, SubmitError> {
+    submit_with_metadata(
+        db,
+        discord_id,
+        username,
+        key_id,
+        text,
+        Metadata::default(),
+        now,
+    )
+    .await
+}
+
+pub async fn submit_with_metadata(
+    db: &Db,
+    discord_id: &str,
+    username: &str,
+    key_id: Option<i64>,
+    text: &str,
+    metadata: Metadata<'_>,
+    now: f64,
+) -> Result<String, SubmitError> {
     let text = strip(text);
     if text.chars().count() < MIN_CHARS {
         return Err(SubmitError::Rejected(TOO_SHORT.into()));
     }
     let text = take_chars(text, MAX_CHARS);
+    let client = strip(metadata.client);
+    let version = strip(metadata.version);
+    let request_id = strip(metadata.request_id).to_ascii_lowercase();
+    if client.chars().count() > 80 || version.chars().count() > 40 {
+        return Err(SubmitError::Rejected(
+            "客户端名称最多 80 字，版本最多 40 字。".into(),
+        ));
+    }
+    if !request_id.is_empty() {
+        if request_id.len() != 8 || !request_id.bytes().all(|b| b.is_ascii_hexdigit()) {
+            return Err(SubmitError::Rejected(INVALID_REQUEST_ID.into()));
+        }
+        if !db
+            .feedback_request_belongs_to(discord_id, &request_id)
+            .await?
+        {
+            return Err(SubmitError::Rejected(INVALID_REQUEST_ID.into()));
+        }
+    }
     if let Some(last) = db.last_feedback_ts(discord_id).await?
         && last != 0.0
         && now - last < COOLDOWN
     {
         return Err(SubmitError::Rejected(TOO_FREQUENT.into()));
     }
+    let mut answers = serde_json::Map::new();
+    answers.insert("text".into(), json!(text));
+    if !client.is_empty() {
+        answers.insert("client".into(), json!(take_chars(client, 80)));
+    }
+    if !version.is_empty() {
+        answers.insert("version".into(), json!(take_chars(version, 40)));
+    }
+    if !request_id.is_empty() {
+        answers.insert("request_id".into(), json!(request_id));
+    }
     db.insert_feedback(
         now,
         discord_id,
         take_chars(username, 80),
         key_id,
-        &gate_core::pyjson::dumps(&json!({"text": text})),
+        &gate_core::pyjson::dumps(&Value::Object(answers)),
     )
     .await?;
     Ok(RECEIPT.into())
@@ -123,6 +182,11 @@ pub async fn listing(db: &Db, limit: i64) -> Result<Vec<Value>, DbError> {
                 "id": r["id"], "ts": r["ts"], "discord_id": r["discord_id"], "username": r["username"],
                 "key_id": r["key_id"], "key_name": r.get("name").and_then(Value::as_str).unwrap_or(""),
                 "text": text, "legacy": legacy,
+                "client": answers.get("client").and_then(Value::as_str).unwrap_or(""),
+                "version": answers.get("version").and_then(Value::as_str).unwrap_or(""),
+                "request_id": answers.get("request_id").and_then(Value::as_str).unwrap_or(""),
+                "reviewed_at": answers.get("reviewed_at").cloned().unwrap_or(Value::Null),
+                "reviewed_by": answers.get("reviewed_by").cloned().unwrap_or(Value::Null),
             })
         })
         .collect())

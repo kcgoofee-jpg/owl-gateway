@@ -2,9 +2,10 @@
  *  独立子页（/admin/inbox/feedback），不再藏在问卷页底部的折叠区里；tab 标签上带总数。 */
 import { Download } from "lucide-preact";
 import { useState } from "preact/hooks";
+import { sendJSON } from "../../../../lib/api";
 import { fullTime } from "../../../../lib/format";
-import { Button, Skeleton } from "../../../../ui";
-import { useAdmin } from "../../Admin";
+import { Button, Skeleton, toast } from "../../../../ui";
+import { tick, useAdmin } from "../../Admin";
 import { LoadError, TableWrap, useShowMore } from "../_kit";
 import type { FeedbackItem, FeedbackResp } from "../logs/types";
 import { downloadFile, Empty, NARROW, useDebounced, useMedia } from "../members/shared";
@@ -42,10 +43,30 @@ export function Feedback() {
   const [search, setSearch] = useState("");
   const dq = useDebounced(search, 200);
   const [exporting, setExporting] = useState(false);
+  const [reviewing, setReviewing] = useState<number | null>(null);
 
   const items = data?.items ?? [];
   const rows = filterFeedback(items, dq);
   const { shown, more } = useShowMore(rows);
+  const setReviewed = async (it: FeedbackItem) => {
+    if (!data?.csrf_token) return;
+    setReviewing(it.id);
+    try {
+      await sendJSON(
+        "PUT",
+        `/admin/api/feedback/${it.id}/review`,
+        {
+          reviewed: it.reviewed_at == null,
+        },
+        { "X-NAI-Admin-CSRF": data.csrf_token },
+      );
+    } catch (e) {
+      toast(e instanceof Error ? e.message : String(e), { error: true });
+    } finally {
+      setReviewing(null);
+      tick.value++;
+    }
+  };
 
   return (
     <div class="stack">
@@ -97,6 +118,21 @@ export function Feedback() {
                       <span class="small muted">{fullTime(it.ts)}</span>
                     </div>
                     <Text it={it} />
+                    <p class="muted small">
+                      {it.client || "客户端未知"}
+                      {it.version ? ` · ${it.version}` : ""}
+                      {it.request_id && (
+                        <>
+                          {" "}
+                          · 请求 <code>{it.request_id}</code>
+                        </>
+                      )}
+                    </p>
+                    <Button disabled={reviewing === it.id} onClick={() => void setReviewed(it)}>
+                      {it.reviewed_at == null
+                        ? "标记已查看"
+                        : `已查看 · ${fullTime(it.reviewed_at)}（重新打开）`}
+                    </Button>
                   </li>
                 ))}
               </ul>
@@ -109,6 +145,8 @@ export function Feedback() {
                       <th scope="col">时间</th>
                       <th scope="col">成员</th>
                       <th scope="col">内容</th>
+                      <th scope="col">客户端 / 请求</th>
+                      <th scope="col">处理状态</th>
                     </tr>
                   </thead>
                   <tbody>
@@ -120,6 +158,23 @@ export function Feedback() {
                         </td>
                         <td class="lg-fbcell">
                           <Text it={it} />
+                        </td>
+                        <td class="small">
+                          {it.client || "客户端未知"}
+                          {it.version ? ` · ${it.version}` : ""}
+                          {it.request_id && (
+                            <div>
+                              请求 <code>{it.request_id}</code>
+                            </div>
+                          )}
+                        </td>
+                        <td>
+                          <Button disabled={reviewing === it.id} onClick={() => void setReviewed(it)}>
+                            {it.reviewed_at == null
+                              ? "待处理 · 标记已查看"
+                              : `已查看 ${fullTime(it.reviewed_at)}`}
+                          </Button>
+                          {it.reviewed_by && <div class="muted small">{it.reviewed_by}</div>}
                         </td>
                       </tr>
                     ))}

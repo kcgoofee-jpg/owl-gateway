@@ -11,6 +11,7 @@ import { SiteFooter, Topbar } from "../landing/Topbar";
 import type { Me } from "../landing/types";
 import "../landing/landing.css";
 import "./survey.css";
+import { FeedbackForm } from "./FeedbackForm";
 import { SurveyForm } from "./SurveyForm";
 
 export function Survey() {
@@ -69,10 +70,15 @@ export function Survey() {
               </div>
             </div>
           </Card>
-        ) : !member.has_key ? (
-          <Notice>你还没有 Key，所以暂时不能填写问卷。在 Discord 任意频道输入 /register 领取后再来。</Notice>
         ) : (
-          <SurveyForm me={member} />
+          <div class="stack">
+            {member.has_key ? (
+              <SurveyForm me={member} />
+            ) : (
+              <Notice>你还没有 Key，所以暂时不能填写使用体验问卷；仍可以在下面提交反馈。</Notice>
+            )}
+            <FeedbackForm />
+          </div>
         )}
       </main>
       <SiteFooter note="问卷结果只有站长可见" />

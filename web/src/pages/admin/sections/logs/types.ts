@@ -120,8 +120,13 @@ export type FeedbackItem = {
   text: string;
   /** 是不是旧版选择题的记录（text 是服务端拼的摘要） */
   legacy: boolean;
+  client?: string;
+  version?: string;
+  request_id?: string;
+  reviewed_at?: number | null;
+  reviewed_by?: string | null;
 };
-export type FeedbackResp = { items: FeedbackItem[] };
+export type FeedbackResp = { items: FeedbackItem[]; csrf_token: string };
 
 export type SurveyRow = {
   ts: number;
