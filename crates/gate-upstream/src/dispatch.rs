@@ -476,6 +476,11 @@ impl<H: Hooks> NaiClient<H> {
             {
                 return Attempt::Done(Err(e));
             }
+            if let Some(on) = cb.on_dispatch.as_ref()
+                && let Err(e) = on().await
+            {
+                return Attempt::Done(Err(e));
+            }
             fl.mark_sent();
             obs.sent();
             let mut req = inner.http.build(
@@ -914,8 +919,11 @@ impl<H: Hooks> NaiClient<H> {
                     fl.finish().await;
                     return Err(e);
                 }
-                if let Some(on) = cb.on_dispatch.as_ref() {
-                    on();
+                if let Some(on) = cb.on_dispatch.as_ref()
+                    && let Err(e) = on().await
+                {
+                    fl.finish().await;
+                    return Err(e);
                 }
                 fl.mark_sent();
                 obs.sent();

@@ -70,6 +70,40 @@ async fn image_success_counts_and_body_is_python_json() {
     assert_eq!(hooks.0.images.lock().unwrap().get(&tid), Some(&2));
 }
 
+#[tokio::test]
+async fn failed_durable_dispatch_callback_prevents_upstream_post() {
+    let up = MockUpstream::start().await;
+    let c = NaiClient::new(
+        config(&up.url(), false),
+        TestHooks::default(),
+        vec![(T1.into(), 0, false)],
+    )
+    .unwrap();
+    let cb = Callbacks {
+        on_dispatch: Some(Box::new(|| {
+            Box::pin(async {
+                Err(gate_upstream::client::UpstreamError::local(
+                    500,
+                    "persistence failed",
+                    "",
+                ))
+            })
+        })),
+        ..Default::default()
+    };
+    let err = c
+        .request(
+            image_opts(&up.url(), &image_body(1), 1),
+            &cb,
+            None,
+            &NoObserver,
+        )
+        .await
+        .unwrap_err();
+    assert_eq!(err.message, "persistence failed");
+    assert!(up.requests_to("/ai/generate-image").is_empty());
+}
+
 /// 账号的「今天出了几张」（单号每日上限按它算）只记上游真的出成的图：上游 5xx、429、并发锁、
 /// 发出前被拒、返回的图不完整都不算；并发锁后重试出成的那张只算一次。
 #[tokio::test]

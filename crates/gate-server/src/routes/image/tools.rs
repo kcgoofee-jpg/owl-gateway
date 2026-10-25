@@ -1,6 +1,6 @@
 //! 图片工具（放大 / 导演工具）与 Vibe 编码：只有成功返回结果才记费。
 
-use super::{before_dispatch, binary, on_429, shielded, tool_status, up_to_gate};
+use super::{before_dispatch, binary, on_429, on_dispatch, shielded, tool_status, up_to_gate};
 use crate::accounting::Entry;
 use crate::admission::{self, Est, acquire_slots, image_admission, reserve_image_budget};
 use crate::auth::{authenticate, check_image_cooldown, check_rpm, ctx_of, require_feature};
@@ -64,7 +64,7 @@ pub(super) async fn tool(
         v5: 0,
         is_vibe: false,
     };
-    let reserved = reserve_image_budget(&state, &key, &est, 0).await?;
+    let reserved = reserve_image_budget(&state, &ctx, &key, &est, 0).await?;
     let (s, c) = (state.clone(), ctx.clone());
     shielded(&state, &ctx, async move {
         let _held = (admission, slots, reserved);
@@ -83,6 +83,7 @@ pub(super) async fn tool(
             let cb = Callbacks {
                 on_rate_limited: Some(on_429(&state)),
                 before_dispatch: Some(before_dispatch(&state, None)),
+                on_dispatch: Some(on_dispatch(&state, &ctx)),
                 ..Default::default()
             };
             let resp = match state.nai.request(opts, &cb, None, &ctx).await {
@@ -206,7 +207,7 @@ pub(super) async fn vibe(state: AppState, req: Request) -> Result<Response, ApiE
     let admission = image_admission(&state, &ctx, &key).await?;
     let slots = acquire_slots(&state);
     check_image_cooldown(&state)?;
-    let reserved = reserve_image_budget(&state, &key, &est, 0).await?;
+    let reserved = reserve_image_budget(&state, &ctx, &key, &est, 0).await?;
     let (s, c) = (state.clone(), ctx.clone());
     shielded(&state, &ctx, async move {
         let _held = (admission, slots, reserved);
@@ -223,6 +224,7 @@ pub(super) async fn vibe(state: AppState, req: Request) -> Result<Response, ApiE
         let cb = Callbacks {
             on_rate_limited: Some(on_429(&state)),
             before_dispatch: Some(before_dispatch(&state, None)),
+            on_dispatch: Some(on_dispatch(&state, &ctx)),
             ..Default::default()
         };
         let err_entry = |detail: String, unconfirmed: f64| {

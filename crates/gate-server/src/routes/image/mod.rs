@@ -175,6 +175,37 @@ pub(super) fn before_dispatch(
     })
 }
 
+/// Persist the dispatch boundary before any non-idempotent upstream POST is sent.
+pub(super) fn on_dispatch(
+    state: &AppState,
+    ctx: &ReqCtx,
+) -> Box<dyn Fn() -> BoxFuture<'static, Result<(), UpstreamError>> + Send + Sync> {
+    let (s, id, c) = (state.clone(), ctx.internal_id(), ctx.clone());
+    Box::new(move || {
+        let (s, c) = (s.clone(), c.clone());
+        let id = id.clone();
+        Box::pin(async move {
+            let day = s.day();
+            match s.db.dispatch_request_settlement(&id, &day, s.now()).await {
+                Ok(true) => {
+                    c.set_settlement_day(day);
+                    Ok(())
+                }
+                Ok(false) => Err(UpstreamError::local(
+                    500,
+                    "请求派发状态无效，未发送上游请求。",
+                    "",
+                )),
+                Err(e) => Err(UpstreamError::local(
+                    500,
+                    format!("保存请求派发状态失败，未发送上游请求：{e}"),
+                    "",
+                )),
+            }
+        })
+    })
+}
+
 /// 已经开始的上游操作：放进后台任务跑完（含记账），调用方断开也不中断。
 /// `delivered`：结果已经完整交给客户端（之后断开不算「没拿到图」）。
 pub(super) async fn shielded<T: Send + 'static>(
@@ -246,7 +277,7 @@ async fn generate(state: AppState, req: Request, streaming: bool) -> ApiResult {
         // 排队 / 预算等待之后再查一次冷却和额度
         check_image_cooldown(&state)?;
         let reserved =
-            reserve_image_budget(&state, &key, &prep.est, prep.legacy_free_images).await?;
+            reserve_image_budget(&state, &ctx, &key, &prep.est, prep.legacy_free_images).await?;
         let (s, c) = (state.clone(), ctx.clone());
         shielded(&state, &ctx, async move {
             let _held = (admission, slots);

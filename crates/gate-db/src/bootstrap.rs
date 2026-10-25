@@ -93,6 +93,12 @@ pub const RUST_ADDED_COLUMNS: &[&str] = &[
 /// 3.0 新增的表（只增不减）。同 `RUST_ADDED_COLUMNS`：
 /// 不写进 `schema.sql`，`tests/schema_parity.rs` 的「Python 建的表」一侧也按这份清单补出来。
 pub const RUST_ADDED_TABLES: &[&str] = &[
+    // Durable image request lifecycle. Unknown dispatched outcomes remain held for reconciliation;
+    // upstream POSTs are never replayed from this table.
+    "CREATE TABLE IF NOT EXISTS request_settlements (\
+     request_id TEXT PRIMARY KEY, rid TEXT NOT NULL, key_id INTEGER NOT NULL, status TEXT NOT NULL, \
+     day TEXT NOT NULL, anlas REAL NOT NULL DEFAULT 0, v5 INTEGER NOT NULL DEFAULT 0, legacy INTEGER NOT NULL DEFAULT 0, \
+     dispatched_at REAL, result_json TEXT, updated_at REAL NOT NULL)",
     // 成员用 Discord OAuth 授权后核验到的身份组（领 Key 的门槛只认这张表，不再用机器人 Token 查）。
     "CREATE TABLE IF NOT EXISTS role_verifications (\
      discord_id TEXT NOT NULL, guild_id TEXT NOT NULL, role_id TEXT NOT NULL, verified_at REAL NOT NULL, \

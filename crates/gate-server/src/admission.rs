@@ -401,6 +401,7 @@ pub struct Reserved {
     state: AppState,
     id: u64,
     key: Key,
+    request_id: String,
 }
 
 impl Reserved {
@@ -412,6 +413,15 @@ impl Reserved {
     pub async fn update(&self, est: &Est, legacy: i64) -> Result<(), ApiError> {
         let mut b = self.state.budget.lock().await;
         quota_image_check(&self.state, &b, &self.key, est, legacy, Some(self.id)).await?;
+        if !self
+            .state
+            .db
+            .update_request_reservation(&self.request_id, est.anlas, est.v5, legacy)
+            .await
+            .map_err(|e| InternalError(e.to_string()))?
+        {
+            return Err(InternalError("持久化额度预留已不在待派发状态".into()).into());
+        }
         if let Some(r) = b.reservations.get_mut(&self.id) {
             r.anlas = est.anlas;
             r.v5 = est.v5;
@@ -430,7 +440,17 @@ fn remove_reservation(b: &mut crate::state::Budget, id: u64, state: &AppState) {
 
 impl Drop for Reserved {
     fn drop(&mut self) {
-        let (state, id) = (self.state.clone(), self.id);
+        let (state, id, request_id) = (self.state.clone(), self.id, self.request_id.clone());
+        let db_state = state.clone();
+        state.tasks.spawn(async move {
+            if let Err(e) = db_state
+                .db
+                .close_request_reservation(&request_id, db_state.now())
+                .await
+            {
+                tracing::error!(error = %e, "request settlement finalization failed");
+            }
+        });
         match state.budget.try_lock() {
             Ok(mut b) => remove_reservation(&mut b, id, &state),
             Err(_) => {
@@ -448,6 +468,7 @@ impl Drop for Reserved {
 /// 核对额度并登记预留（排队等待期间就占住，防止并发请求一起超额）。
 pub async fn reserve_image_budget(
     state: &AppState,
+    ctx: &ReqCtx,
     key: &Key,
     est: &Est,
     legacy_free_images: i64,
@@ -456,6 +477,21 @@ pub async fn reserve_image_budget(
     let res = tokio::time::timeout(Duration::from_secs_f64(t.max(0.0)), async {
         let mut b = state.budget.lock().await;
         quota_image_check(state, &b, key, est, legacy_free_images, None).await?;
+        state
+            .db
+            .reserve_request_settlement(
+                &ctx.internal_id(),
+                &ctx.rid(),
+                key.id(),
+                &state.day(),
+                est.anlas,
+                est.v5,
+                legacy_free_images,
+                state.now(),
+            )
+            .await
+            .map_err(|e| InternalError(e.to_string()))?;
+        ctx.mark_settlement_reserved();
         b.next_id += 1;
         let id = b.next_id;
         b.reservations.insert(
@@ -476,6 +512,7 @@ pub async fn reserve_image_budget(
             state: state.clone(),
             id,
             key: key.clone(),
+            request_id: ctx.internal_id(),
         }),
         Ok(Err(e)) => Err(e),
         Err(_) => Err(GateError::with_code(

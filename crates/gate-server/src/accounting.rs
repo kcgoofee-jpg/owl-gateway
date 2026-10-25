@@ -115,36 +115,44 @@ impl AppState {
         let ctx = ctx.clone();
         self.tasks.spawn(async move {
             let now = state.now();
+            let settlement_reserved = ctx.has_settlement_reservation();
+            // Free requests can still have an unknown execution result after dispatch; do not infer
+            // certainty from an Anlas estimate of zero.
+            let settlement_uncertain =
+                e.unconfirmed_anlas > 0.0 || (ctx.was_sent() && e.status == "error");
+            let successful = e.status == "ok";
             let res = if e.status == "ok" {
-                state
-                    .db
-                    .record_success(
-                        &Success {
-                            key_id,
-                            key_name,
-                            kind: e.kind.clone(),
-                            model: e.model,
-                            day: state.day(),
-                            images: e.images,
-                            anlas: e.anlas,
-                            tokens: e.tokens,
-                            v5: e.v5,
-                            legacy_free_images: e.legacy_free_images,
-                            detail: e.detail,
-                            unconfirmed_anlas: e.unconfirmed_anlas,
-                            wait_ms: t.wait_ms,
-                            dur_ms: t.dur_ms,
-                            up_status: i64::from(t.up_status),
-                            rid: t.rid,
-                            token_id: t.token_id,
-                            client,
-                            ip,
-                            hints,
-                            site_paid_anlas: e.site_paid_anlas,
-                        },
-                        now,
-                    )
-                    .await
+                let success = Success {
+                    key_id,
+                    key_name,
+                    kind: e.kind.clone(),
+                    model: e.model,
+                    day: ctx.settlement_day().unwrap_or_else(|| state.day()),
+                    images: e.images,
+                    anlas: e.anlas,
+                    tokens: e.tokens,
+                    v5: e.v5,
+                    legacy_free_images: e.legacy_free_images,
+                    detail: e.detail,
+                    unconfirmed_anlas: e.unconfirmed_anlas,
+                    wait_ms: t.wait_ms,
+                    dur_ms: t.dur_ms,
+                    up_status: i64::from(t.up_status),
+                    rid: t.rid,
+                    token_id: t.token_id,
+                    client,
+                    ip,
+                    hints,
+                    site_paid_anlas: e.site_paid_anlas,
+                };
+                if ctx.has_settlement_reservation() {
+                    state
+                        .db
+                        .record_success_settled(&success, &ctx.internal_id(), now)
+                        .await
+                } else {
+                    state.db.record_success(&success, now).await
+                }
             } else {
                 state
                     .db
@@ -174,6 +182,15 @@ impl AppState {
                     )
                     .await
             };
+            if res.is_ok() && settlement_reserved && !successful {
+                if let Err(err) = state
+                    .db
+                    .resolve_request_failure(&ctx.internal_id(), settlement_uncertain, now)
+                    .await
+                {
+                    tracing::error!(error = %err, "request settlement failure transition failed");
+                }
+            }
             if let Err(err) = res {
                 tracing::error!("request accounting failed");
                 // 「成员拿到了图但账没落库」的唯一线索：带上定位信息

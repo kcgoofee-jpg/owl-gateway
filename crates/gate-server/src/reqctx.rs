@@ -20,6 +20,9 @@ impl std::fmt::Debug for ReqCtx {
 }
 
 struct Inner {
+    internal_id: String,
+    settlement_reserved: bool,
+    settlement_day: Option<String>,
     rid: String,
     t0: Instant,
     sent: Option<Instant>,
@@ -67,6 +70,9 @@ impl Default for ReqCtx {
 impl ReqCtx {
     pub fn new() -> Self {
         Self(Arc::new(Mutex::new(Inner {
+            internal_id: hex::encode(rand::random::<[u8; 16]>()),
+            settlement_reserved: false,
+            settlement_day: None,
             rid: new_rid(),
             t0: Instant::now(),
             sent: None,
@@ -94,6 +100,25 @@ impl ReqCtx {
 
     pub fn rid(&self) -> String {
         self.with(|i| i.rid.clone())
+    }
+
+    /// Cryptographically unique internal ID for durable accounting; unlike the short public rid,
+    /// this value is never exposed as the user's request number.
+    pub fn internal_id(&self) -> String {
+        self.with(|i| i.internal_id.clone())
+    }
+
+    pub fn mark_settlement_reserved(&self) {
+        self.with(|i| i.settlement_reserved = true);
+    }
+    pub fn has_settlement_reservation(&self) -> bool {
+        self.with(|i| i.settlement_reserved)
+    }
+    pub fn set_settlement_day(&self, day: String) {
+        self.with(|i| i.settlement_day = Some(day));
+    }
+    pub fn settlement_day(&self) -> Option<String> {
+        self.with(|i| i.settlement_day.clone())
     }
 
     /// 第一次真正发往上游时调用；重试不覆盖。

@@ -3,7 +3,7 @@
 use super::{INSERT_LOG, LOG_COLUMNS, PyMap, SqlValue, UPSERT_COUNTERS, marks};
 use crate::{Db, Result, value};
 use gate_core::pyc;
-use rusqlite::params;
+use rusqlite::{OptionalExtension, params};
 use serde::Serialize;
 use serde_json::Value;
 
@@ -222,11 +222,156 @@ fn log_filter(f: &LogFilter) -> (String, Vec<SqlValue>) {
 }
 
 impl Db {
+    /// Create a durable reservation before a generation is allowed to leave the gateway.
+    pub async fn reserve_request_settlement(
+        &self,
+        request_id: &str,
+        rid: &str,
+        key_id: i64,
+        day: &str,
+        anlas: f64,
+        v5: i64,
+        legacy: i64,
+        now: f64,
+    ) -> Result<()> {
+        let (request_id, rid, day) = (request_id.to_owned(), rid.to_owned(), day.to_owned());
+        self.write(move |tx| {
+            tx.execute("INSERT INTO request_settlements(request_id,rid,key_id,status,day,anlas,v5,legacy,updated_at) VALUES(?,?,?,'reserved',?,?,?,?,?)",
+                params![request_id, rid, key_id, day, anlas, v5, legacy, now])?;
+            Ok(())
+        }).await
+    }
+
+    /// Must commit before the upstream POST is sent. A failed write is a hard dispatch failure.
+    pub async fn dispatch_request_settlement(
+        &self,
+        request_id: &str,
+        day: &str,
+        now: f64,
+    ) -> Result<bool> {
+        let (request_id, day) = (request_id.to_owned(), day.to_owned());
+        self.write(move |tx| Ok(tx.execute("UPDATE request_settlements SET status='dispatched',day=?,dispatched_at=?,updated_at=? WHERE request_id=? AND status='reserved'",
+            params![day, now, now, request_id])? == 1)).await
+    }
+
+    pub async fn update_request_reservation(
+        &self,
+        request_id: &str,
+        anlas: f64,
+        v5: i64,
+        legacy: i64,
+    ) -> Result<bool> {
+        let request_id = request_id.to_owned();
+        self.write(move |tx| Ok(tx.execute("UPDATE request_settlements SET anlas=?,v5=?,legacy=? WHERE request_id=? AND status='reserved'",
+            params![anlas, v5, legacy, request_id])? == 1)).await
+    }
+
+    /// Persist the complete success payload before applying counters. Repeated identical calls are safe.
+    pub async fn save_request_result(
+        &self,
+        request_id: &str,
+        payload: &str,
+        now: f64,
+    ) -> Result<bool> {
+        let (request_id, payload) = (request_id.to_owned(), payload.to_owned());
+        self.write(move |tx| Ok(tx.execute("UPDATE request_settlements SET status='result_saved',result_json=?,updated_at=? WHERE request_id=? AND status='dispatched'",
+            params![payload, now, request_id])? == 1)).await
+    }
+
+    pub async fn mark_request_uncertain(&self, request_id: &str, now: f64) -> Result<bool> {
+        let request_id = request_id.to_owned();
+        self.write(move |tx| Ok(tx.execute("UPDATE request_settlements SET status='uncertain',updated_at=? WHERE request_id=? AND status='dispatched'",
+            params![now, request_id])? == 1)).await
+    }
+
+    /// Release only requests proven not to have been dispatched.
+    pub async fn release_request_reservation(&self, request_id: &str, now: f64) -> Result<bool> {
+        let request_id = request_id.to_owned();
+        self.write(move |tx| Ok(tx.execute("UPDATE request_settlements SET status='released',updated_at=? WHERE request_id=? AND status='reserved'",
+            params![now, request_id])? == 1)).await
+    }
+
+    /// Conservative drop handling: an undispatched request is released; a dispatched request with
+    /// no durable outcome is held as uncertain. Committed/released rows are untouched.
+    pub async fn close_request_reservation(&self, request_id: &str, now: f64) -> Result<()> {
+        let request_id = request_id.to_owned();
+        self.write(move |tx| {
+            tx.execute("UPDATE request_settlements SET status=CASE status WHEN 'reserved' THEN 'released' WHEN 'dispatched' THEN 'uncertain' ELSE status END,updated_at=? WHERE request_id=?",
+                params![now, request_id])?;
+            Ok(())
+        }).await
+    }
+
+    pub async fn resolve_request_failure(
+        &self,
+        request_id: &str,
+        uncertain: bool,
+        now: f64,
+    ) -> Result<()> {
+        let (request_id, status) = (
+            request_id.to_owned(),
+            if uncertain { "uncertain" } else { "released" },
+        );
+        self.write(move |tx| {
+            tx.execute("UPDATE request_settlements SET status=?,updated_at=? WHERE request_id=? AND status='dispatched'",
+                params![status, now, request_id])?;
+            Ok(())
+        }).await
+    }
+
     /// 成功日志、额度与使用时间一起提交；写入失败时整笔回退（一个事务）。
     /// 写线程独占写连接，锁冲突由 `Db::write` 的 BUSY 重试兜住。
     pub async fn record_success(&self, s: &Success, now: f64) -> Result<()> {
+        self.commit_success(s, None, now).await
+    }
+
+    /// Save a durable result payload, then apply usage/counters and mark committed in one transaction.
+    pub async fn record_success_settled(
+        &self,
+        s: &Success,
+        request_id: &str,
+        now: f64,
+    ) -> Result<()> {
+        let payload = serde_json::json!({
+            "key_id": s.key_id, "key_name": s.key_name, "kind": s.kind, "model": s.model,
+            "day": s.day, "images": s.images, "anlas": s.anlas, "tokens": s.tokens,
+            "v5": s.v5, "legacy_free_images": s.legacy_free_images, "detail": s.detail,
+            "unconfirmed_anlas": s.unconfirmed_anlas, "rid": s.rid, "token_id": s.token_id,
+            "site_paid_anlas": s.site_paid_anlas
+        })
+        .to_string();
+        if !self.save_request_result(request_id, &payload, now).await? {
+            // A prior commit is idempotent; all other states are an invalid transition.
+            let id = request_id.to_owned();
+            let status: Option<String> = self
+                .read(move |c| {
+                    c.query_row(
+                        "SELECT status FROM request_settlements WHERE request_id=?",
+                        [id],
+                        |r| r.get(0),
+                    )
+                    .optional()
+                })
+                .await?;
+            if status.as_deref() == Some("committed") {
+                return Ok(());
+            }
+            return Err(crate::DbError::Invalid(
+                "request result is not dispatchable".into(),
+            ));
+        }
+        self.commit_success(s, Some(request_id), now).await
+    }
+
+    async fn commit_success(&self, s: &Success, request_id: Option<&str>, now: f64) -> Result<()> {
         let s = s.clone();
+        let request_id = request_id.map(str::to_owned);
         self.write(move |tx| {
+            if let Some(id) = request_id.as_deref() {
+                let status: String = tx.query_row("SELECT status FROM request_settlements WHERE request_id=?", [id], |r| r.get(0))?;
+                if status == "committed" { return Ok(()); }
+                if status != "result_saved" { return Err(rusqlite::Error::InvalidQuery); }
+            }
             let h = s.hints.columns();
             tx.execute(
                 INSERT_LOG,
@@ -276,6 +421,9 @@ impl Db {
                  last_image_at=CASE WHEN ? THEN ? ELSE last_image_at END WHERE id=?",
                 params![now, i64::from(is_image_kind(&s.kind)), now, s.key_id],
             )?;
+            if let Some(id) = request_id.as_deref() {
+                tx.execute("UPDATE request_settlements SET status='committed',updated_at=? WHERE request_id=? AND status='result_saved'", params![now, id])?;
+            }
             Ok(())
         })
         .await

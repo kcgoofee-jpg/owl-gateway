@@ -3,7 +3,7 @@
 
 use super::params::Prepared;
 use super::settle::{Billing, resolve_v5};
-use super::{before_dispatch, detail160, on_429};
+use super::{before_dispatch, detail160, on_429, on_dispatch};
 use crate::accounting::Entry;
 use crate::admission::{Est, acquire_slots, image_admission, reserve_image_budget};
 use crate::auth::check_image_cooldown;
@@ -187,7 +187,7 @@ async fn run_stream(
         let slots = acquire_slots(&state);
         check_image_cooldown(&state)?;
         let reserved =
-            reserve_image_budget(&state, &key, &prep.est, prep.legacy_free_images).await?;
+            reserve_image_budget(&state, &ctx, &key, &prep.est, prep.legacy_free_images).await?;
         Ok::<_, ApiError>((admission, slots, reserved))
     };
     let held = tokio::select! {
@@ -263,6 +263,7 @@ async fn perform_stream(
     let mut cancelled = false;
 
     let d = dispatched.clone();
+    let durable_dispatch = on_dispatch(state, ctx);
     let cb = Callbacks {
         on_rate_limited: Some(on_429(state)),
         resolve_v5_cost: (est0.v5 > 0)
@@ -271,7 +272,15 @@ async fn perform_stream(
             state,
             Some((prep.key.str("discord_id").to_string(), est0.v5 > 0)),
         )),
-        on_dispatch: Some(Box::new(move || d.store(true, Ordering::SeqCst))),
+        on_dispatch: Some(Box::new(move || {
+            let future = durable_dispatch();
+            let d = d.clone();
+            Box::pin(async move {
+                future.await?;
+                d.store(true, Ordering::SeqCst);
+                Ok(())
+            })
+        })),
     };
     let allowance = state
         .allowance

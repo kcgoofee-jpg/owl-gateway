@@ -1,7 +1,9 @@
 //! 计费与结算：V5 额度确认后的重估（流式 / 非流式共用），非流式出图的转发、记账与上游失败的记录。
 
 use super::params::Prepared;
-use super::{before_dispatch, binary, detail160, local, on_429, size_text, up_to_gate};
+use super::{
+    before_dispatch, binary, detail160, local, on_429, on_dispatch, size_text, up_to_gate,
+};
 use crate::accounting::Entry;
 use crate::admission::Est;
 use crate::error::{ApiError, GateError, upstream_transport};
@@ -174,7 +176,7 @@ pub(super) async fn perform_generation(
             state,
             Some((key.str("discord_id").to_string(), est0.v5 > 0)),
         )),
-        on_dispatch: None,
+        on_dispatch: Some(on_dispatch(state, ctx)),
     };
     let url = format!("{}/ai/generate-image", state.nai.image_host());
     let mut opts = RequestOpts::post(url, &prep.body);
