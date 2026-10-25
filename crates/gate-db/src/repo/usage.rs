@@ -8,7 +8,7 @@ use serde::Serialize;
 use serde_json::Value;
 
 /// 一次成功请求的记账内容（`record_success`）。字段缺省值见各字段。
-#[derive(Debug, Clone, Default)]
+#[derive(Debug, Clone, Default, Serialize, serde::Deserialize)]
 pub struct Success {
     pub key_id: i64,
     pub key_name: String,
@@ -22,6 +22,9 @@ pub struct Success {
     pub legacy_free_images: i64,
     pub detail: String,
     pub unconfirmed_anlas: f64,
+    pub remaining_anlas: f64,
+    pub remaining_v5: i64,
+    pub remaining_legacy: i64,
     pub wait_ms: i64,
     pub dur_ms: i64,
     pub up_status: i64,
@@ -36,6 +39,22 @@ pub struct Success {
     /// Anlas the site paid from the upstream account itself (not charged to the member's counters):
     /// written to `usage_log.anlas` together with `anlas`, left out of `counters`.
     pub site_paid_anlas: f64,
+}
+
+#[derive(Debug, Clone)]
+pub struct RequestSettlement {
+    pub request_id: String,
+    pub rid: String,
+    pub key_id: i64,
+    pub status: String,
+    pub day: String,
+    pub month: String,
+    pub exclude_global_v5: bool,
+    pub is_vibe: bool,
+    pub anlas: f64,
+    pub v5: i64,
+    pub legacy: i64,
+    pub result_json: Option<String>,
 }
 
 /// 一条拒绝 / 失败日志（`add_log`）。
@@ -68,7 +87,7 @@ pub struct NewLog {
 /// 请求里除 UA / IP 之外的客户端特征（站长 10-23：防一人多号 / 共用 Key，要能从日志里举证）。
 /// 都不含 Authorization / Cookie 原文；保留期和 `client` / `src` 相同（后台设置 usage_origin_keep_days，0 = 永久，默认永久；见 `Db::purge_usage_origin`）。
 /// 空串写成 NULL。
-#[derive(Debug, Clone, Default, PartialEq, Eq)]
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, serde::Deserialize)]
 pub struct ClientHints {
     /// X-Requested-With（安卓 WebView 套壳 App 的包名），截到 80 个码点。
     pub xrw: String,
@@ -229,15 +248,23 @@ impl Db {
         rid: &str,
         key_id: i64,
         day: &str,
+        month: &str,
+        exclude_global_v5: bool,
+        is_vibe: bool,
         anlas: f64,
         v5: i64,
         legacy: i64,
         now: f64,
     ) -> Result<()> {
-        let (request_id, rid, day) = (request_id.to_owned(), rid.to_owned(), day.to_owned());
+        let (request_id, rid, day, month) = (
+            request_id.to_owned(),
+            rid.to_owned(),
+            day.to_owned(),
+            month.to_owned(),
+        );
         self.write(move |tx| {
-            tx.execute("INSERT INTO request_settlements(request_id,rid,key_id,status,day,anlas,v5,legacy,updated_at) VALUES(?,?,?,'reserved',?,?,?,?,?)",
-                params![request_id, rid, key_id, day, anlas, v5, legacy, now])?;
+            tx.execute("INSERT INTO request_settlements(request_id,rid,key_id,status,day,month,exclude_global_v5,anlas,v5,legacy,is_vibe,updated_at) VALUES(?,?,?,'reserved',?,?,?,?,?,?,?,?)",
+                params![request_id, rid, key_id, day, month, exclude_global_v5, anlas, v5, legacy, is_vibe, now])?;
             Ok(())
         }).await
     }
@@ -247,23 +274,34 @@ impl Db {
         &self,
         request_id: &str,
         day: &str,
+        month: &str,
+        exclude_global_v5: bool,
+        is_vibe: bool,
+        anlas: f64,
+        v5: i64,
+        legacy: i64,
         now: f64,
     ) -> Result<bool> {
-        let (request_id, day) = (request_id.to_owned(), day.to_owned());
-        self.write(move |tx| Ok(tx.execute("UPDATE request_settlements SET status='dispatched',day=?,dispatched_at=?,updated_at=? WHERE request_id=? AND status='reserved'",
-            params![day, now, now, request_id])? == 1)).await
+        let (request_id, day, month) = (request_id.to_owned(), day.to_owned(), month.to_owned());
+        self.write(move |tx| Ok(tx.execute("UPDATE request_settlements SET status='dispatched',day=?,month=?,exclude_global_v5=?,anlas=?,v5=?,legacy=?,is_vibe=?,dispatched_at=?,updated_at=? WHERE request_id=? AND status='reserved'",
+            params![day, month, exclude_global_v5, anlas, v5, legacy, is_vibe, now, now, request_id])? == 1)).await
     }
 
     pub async fn update_request_reservation(
         &self,
         request_id: &str,
+        day: &str,
+        month: &str,
+        exclude_global_v5: bool,
+        is_vibe: bool,
         anlas: f64,
         v5: i64,
         legacy: i64,
     ) -> Result<bool> {
         let request_id = request_id.to_owned();
-        self.write(move |tx| Ok(tx.execute("UPDATE request_settlements SET anlas=?,v5=?,legacy=? WHERE request_id=? AND status='reserved'",
-            params![anlas, v5, legacy, request_id])? == 1)).await
+        let (day, month) = (day.to_owned(), month.to_owned());
+        self.write(move |tx| Ok(tx.execute("UPDATE request_settlements SET day=?,month=?,exclude_global_v5=?,anlas=?,v5=?,legacy=?,is_vibe=? WHERE request_id=? AND status='reserved'",
+            params![day, month, exclude_global_v5, anlas, v5, legacy, is_vibe, request_id])? == 1)).await
     }
 
     /// Persist the complete success payload before applying counters. Repeated identical calls are safe.
@@ -293,12 +331,12 @@ impl Db {
 
     /// Conservative drop handling: an undispatched request is released; a dispatched request with
     /// no durable outcome is held as uncertain. Committed/released rows are untouched.
-    pub async fn close_request_reservation(&self, request_id: &str, now: f64) -> Result<()> {
+    pub async fn close_request_reservation(&self, request_id: &str, now: f64) -> Result<String> {
         let request_id = request_id.to_owned();
         self.write(move |tx| {
             tx.execute("UPDATE request_settlements SET status=CASE status WHEN 'reserved' THEN 'released' WHEN 'dispatched' THEN 'uncertain' ELSE status END,updated_at=? WHERE request_id=?",
                 params![now, request_id])?;
-            Ok(())
+            tx.query_row("SELECT status FROM request_settlements WHERE request_id=?", [&request_id], |r| r.get(0))
         }).await
     }
 
@@ -332,14 +370,8 @@ impl Db {
         request_id: &str,
         now: f64,
     ) -> Result<()> {
-        let payload = serde_json::json!({
-            "key_id": s.key_id, "key_name": s.key_name, "kind": s.kind, "model": s.model,
-            "day": s.day, "images": s.images, "anlas": s.anlas, "tokens": s.tokens,
-            "v5": s.v5, "legacy_free_images": s.legacy_free_images, "detail": s.detail,
-            "unconfirmed_anlas": s.unconfirmed_anlas, "rid": s.rid, "token_id": s.token_id,
-            "site_paid_anlas": s.site_paid_anlas
-        })
-        .to_string();
+        let payload =
+            serde_json::to_string(s).map_err(|e| crate::DbError::Invalid(e.to_string()))?;
         if !self.save_request_result(request_id, &payload, now).await? {
             // A prior commit is idempotent; all other states are an invalid transition.
             let id = request_id.to_owned();
@@ -367,6 +399,7 @@ impl Db {
         let s = s.clone();
         let request_id = request_id.map(str::to_owned);
         self.write(move |tx| {
+            let held = s.remaining_anlas > 0.0 || s.remaining_v5 > 0 || s.remaining_legacy > 0;
             if let Some(id) = request_id.as_deref() {
                 let status: String = tx.query_row("SELECT status FROM request_settlements WHERE request_id=?", [id], |r| r.get(0))?;
                 if status == "committed" { return Ok(()); }
@@ -422,11 +455,61 @@ impl Db {
                 params![now, i64::from(is_image_kind(&s.kind)), now, s.key_id],
             )?;
             if let Some(id) = request_id.as_deref() {
-                tx.execute("UPDATE request_settlements SET status='committed',updated_at=? WHERE request_id=? AND status='result_saved'", params![now, id])?;
+                tx.execute("UPDATE request_settlements SET status=?,anlas=?,v5=?,legacy=?,updated_at=? WHERE request_id=? AND status='result_saved'",
+                    params![if held { "uncertain" } else { "committed" }, s.remaining_anlas, s.remaining_v5, s.remaining_legacy, now, id])?;
             }
             Ok(())
         })
         .await
+    }
+
+    pub async fn commit_saved_request_result(
+        &self,
+        request_id: &str,
+        payload: &str,
+        now: f64,
+    ) -> Result<()> {
+        let success: Success =
+            serde_json::from_str(payload).map_err(|e| crate::DbError::Invalid(e.to_string()))?;
+        self.commit_success(&success, Some(request_id), now).await
+    }
+
+    /// Normalize crash states without replaying upstream: reserved was never dispatched; dispatched is unknown.
+    pub async fn recover_request_settlements(&self, now: f64) -> Result<Vec<RequestSettlement>> {
+        self.write(move |tx| {
+            tx.execute("UPDATE request_settlements SET status='released',updated_at=? WHERE status='reserved'", [now])?;
+            tx.execute("UPDATE request_settlements SET status='uncertain',updated_at=? WHERE status='dispatched'", [now])?;
+            let mut stmt = tx.prepare("SELECT request_id,rid,key_id,status,day,month,exclude_global_v5,anlas,v5,legacy,is_vibe,result_json FROM request_settlements WHERE status IN ('uncertain','result_saved') ORDER BY request_id")?;
+            stmt.query_map([], |r| Ok(RequestSettlement {
+                request_id:r.get(0)?, rid:r.get(1)?, key_id:r.get(2)?, status:r.get(3)?, day:r.get(4)?, month:r.get(5)?,
+                exclude_global_v5:r.get::<_,i64>(6)? != 0, anlas:r.get(7)?, v5:r.get(8)?, legacy:r.get(9)?, is_vibe:r.get::<_,i64>(10)? != 0, result_json:r.get(11)?
+            }))?.collect()
+        }).await
+    }
+
+    pub async fn list_unknown_request_settlements(&self) -> Result<Vec<RequestSettlement>> {
+        self.read(|c| {
+            let mut stmt=c.prepare("SELECT request_id,rid,key_id,status,day,month,exclude_global_v5,anlas,v5,legacy,is_vibe,result_json FROM request_settlements WHERE status='uncertain' ORDER BY updated_at")?;
+            stmt.query_map([], |r| Ok(RequestSettlement { request_id:r.get(0)?, rid:r.get(1)?, key_id:r.get(2)?, status:r.get(3)?, day:r.get(4)?, month:r.get(5)?, exclude_global_v5:r.get::<_,i64>(6)? != 0, anlas:r.get(7)?, v5:r.get(8)?, legacy:r.get(9)?, is_vibe:r.get::<_,i64>(10)? != 0, result_json:r.get(11)? }))?.collect()
+        }).await
+    }
+
+    /// Explicit administrator decision: release the unknown remainder and audit the rationale atomically.
+    pub async fn manually_release_unknown_request(
+        &self,
+        request_id: &str,
+        actor: &str,
+        reason: &str,
+        now: f64,
+    ) -> Result<bool> {
+        let (request_id, actor, reason) =
+            (request_id.to_owned(), actor.to_owned(), reason.to_owned());
+        self.write(move |tx| {
+            let n=tx.execute("UPDATE request_settlements SET status='released_manual',resolution_note=?,updated_at=? WHERE request_id=? AND status='uncertain'", params![reason,now,request_id])?;
+            if n == 0 { return Ok(false); }
+            tx.execute("INSERT INTO admin_actions(ts,actor,action,target,detail,ok) VALUES(?,?,?,?,?,1)", params![now,actor,"request_settlement_release",request_id,reason])?;
+            Ok(true)
+        }).await
     }
 
     /// Anlas already spent on site-paid images through `token_id` (rows whose detail carries `marker`).

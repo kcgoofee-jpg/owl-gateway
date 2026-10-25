@@ -196,6 +196,10 @@ pub const RUST_ADDED_TABLES: &[&str] = &[
 /// 给 3.0 新增的表补列（在 `RUST_ADDED_TABLES` 之后执行；老库已有时报 duplicate column，忽略）。
 /// `tests/schema_parity.rs` 的「Python 建的表」一侧同样在建表之后补这些列。
 pub const RUST_ADDED_TABLE_COLUMNS: &[&str] = &[
+    "ALTER TABLE request_settlements ADD COLUMN month TEXT NOT NULL DEFAULT ''",
+    "ALTER TABLE request_settlements ADD COLUMN exclude_global_v5 INTEGER NOT NULL DEFAULT 0",
+    "ALTER TABLE request_settlements ADD COLUMN is_vibe INTEGER NOT NULL DEFAULT 0",
+    "ALTER TABLE request_settlements ADD COLUMN resolution_note TEXT NOT NULL DEFAULT ''",
     // 这个账号第一次在这台设备 / 这个浏览器上网页登录的时刻（ts 是最近一次）。待审卡片显示「首次 / 最近登录」用；
     // 加列之前的老行为 NULL，读的时候退回 ts。
     "ALTER TABLE device_logins ADD COLUMN first_ts REAL",

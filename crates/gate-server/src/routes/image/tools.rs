@@ -15,6 +15,7 @@ use gate_core::pyval::py_str;
 use gate_core::reasons;
 use gate_upstream::client::{Callbacks, RequestOpts};
 use serde_json::{Value, json};
+use std::sync::Arc;
 
 pub(super) async fn tool(
     state: AppState,
@@ -64,10 +65,10 @@ pub(super) async fn tool(
         v5: 0,
         is_vibe: false,
     };
-    let reserved = reserve_image_budget(&state, &ctx, &key, &est, 0).await?;
+    let reserved = Arc::new(reserve_image_budget(&state, &ctx, &key, &est, 0).await?);
     let (s, c) = (state.clone(), ctx.clone());
     shielded(&state, &ctx, async move {
-        let _held = (admission, slots, reserved);
+        let _held = (admission, slots, reserved.clone());
         let state = s;
         let ctx = c;
         let mut billing_uncertain = false;
@@ -83,7 +84,7 @@ pub(super) async fn tool(
             let cb = Callbacks {
                 on_rate_limited: Some(on_429(&state)),
                 before_dispatch: Some(before_dispatch(&state, None)),
-                on_dispatch: Some(on_dispatch(&state, &ctx)),
+                on_dispatch: Some(on_dispatch(&state, &ctx, reserved.clone())),
                 ..Default::default()
             };
             let resp = match state.nai.request(opts, &cb, None, &ctx).await {
@@ -144,7 +145,8 @@ pub(super) async fn tool(
                         &key,
                         Entry::new(operation, &model, "error")
                             .detail(detail)
-                            .unconfirmed(if billing_uncertain { cost as f64 } else { 0.0 }),
+                            .unconfirmed(if billing_uncertain { cost as f64 } else { 0.0 })
+                            .execution_unknown(billing_uncertain || opaque, if billing_uncertain || opaque { cost as f64 } else { 0.0 }, 0, 0),
                     )
                     .await;
                 if opaque {
@@ -207,10 +209,10 @@ pub(super) async fn vibe(state: AppState, req: Request) -> Result<Response, ApiE
     let admission = image_admission(&state, &ctx, &key).await?;
     let slots = acquire_slots(&state);
     check_image_cooldown(&state)?;
-    let reserved = reserve_image_budget(&state, &ctx, &key, &est, 0).await?;
+    let reserved = Arc::new(reserve_image_budget(&state, &ctx, &key, &est, 0).await?);
     let (s, c) = (state.clone(), ctx.clone());
     shielded(&state, &ctx, async move {
-        let _held = (admission, slots, reserved);
+        let _held = (admission, slots, reserved.clone());
         let (state, ctx) = (s, c);
         let mut opts = RequestOpts::post(
             format!("{}/ai/encode-vibe", state.nai.image_host()),
@@ -224,13 +226,14 @@ pub(super) async fn vibe(state: AppState, req: Request) -> Result<Response, ApiE
         let cb = Callbacks {
             on_rate_limited: Some(on_429(&state)),
             before_dispatch: Some(before_dispatch(&state, None)),
-            on_dispatch: Some(on_dispatch(&state, &ctx)),
+            on_dispatch: Some(on_dispatch(&state, &ctx, reserved.clone())),
             ..Default::default()
         };
-        let err_entry = |detail: String, unconfirmed: f64| {
+        let err_entry = |detail: String, unconfirmed: f64, unknown: bool| {
             Entry::new("vibe_encode", &model, "error")
                 .detail(detail)
                 .unconfirmed(unconfirmed)
+                .execution_unknown(unknown, if unknown { anlas } else { 0.0 }, 0, 0)
         };
         let resp = match state.nai.request(opts, &cb, None, &ctx).await {
             Ok(r) => r,
@@ -239,7 +242,7 @@ pub(super) async fn vibe(state: AppState, req: Request) -> Result<Response, ApiE
                     .settle_record(
                         &ctx,
                         &key,
-                        err_entry("上游编码请求失败，未记费".into(), 0.0),
+                        err_entry("上游编码请求失败，未记费".into(), anlas, true),
                     )
                     .await;
                 return Err(
@@ -252,7 +255,7 @@ pub(super) async fn vibe(state: AppState, req: Request) -> Result<Response, ApiE
                 let exc = up_to_gate(e);
                 let unconfirmed = if exc.billing_uncertain { anlas } else { 0.0 };
                 state
-                    .settle_record(&ctx, &key, err_entry(exc.message.clone(), unconfirmed))
+                    .settle_record(&ctx, &key, err_entry(exc.message.clone(), unconfirmed, exc.billing_uncertain))
                     .await;
                 return Err(exc.into());
             }
@@ -263,7 +266,7 @@ pub(super) async fn vibe(state: AppState, req: Request) -> Result<Response, ApiE
                 .settle_record(
                     &ctx,
                     &key,
-                    err_entry(format!("upstream {}", resp.status), unconfirmed),
+                    err_entry(format!("upstream {}", resp.status), unconfirmed, resp.status >= 500),
                 )
                 .await;
             return Err(GateError::new(
@@ -284,7 +287,7 @@ pub(super) async fn vibe(state: AppState, req: Request) -> Result<Response, ApiE
                 .settle_record(
                     &ctx,
                     &key,
-                    err_entry("上游未返回有效二进制编码，未记费".into(), anlas),
+                    err_entry("上游未返回有效二进制编码，未记费".into(), anlas, true),
                 )
                 .await;
             return Err(GateError::new(502, "Vibe 编码时 NovelAI 返回的数据无效，未扣费。请稍后重试。")

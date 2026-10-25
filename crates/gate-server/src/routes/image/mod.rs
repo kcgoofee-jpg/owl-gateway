@@ -179,28 +179,18 @@ pub(super) fn before_dispatch(
 pub(super) fn on_dispatch(
     state: &AppState,
     ctx: &ReqCtx,
+    reserved: Arc<crate::admission::Reserved>,
 ) -> Box<dyn Fn() -> BoxFuture<'static, Result<(), UpstreamError>> + Send + Sync> {
-    let (s, id, c) = (state.clone(), ctx.internal_id(), ctx.clone());
+    let (s, c, reserved) = (state.clone(), ctx.clone(), reserved.clone());
     Box::new(move || {
-        let (s, c) = (s.clone(), c.clone());
-        let id = id.clone();
+        let (_s, c, reserved) = (s.clone(), c.clone(), reserved.clone());
         Box::pin(async move {
-            let day = s.day();
-            match s.db.dispatch_request_settlement(&id, &day, s.now()).await {
-                Ok(true) => {
+            match reserved.prepare_dispatch().await {
+                Ok((day, _month)) => {
                     c.set_settlement_day(day);
                     Ok(())
                 }
-                Ok(false) => Err(UpstreamError::local(
-                    500,
-                    "请求派发状态无效，未发送上游请求。",
-                    "",
-                )),
-                Err(e) => Err(UpstreamError::local(
-                    500,
-                    format!("保存请求派发状态失败，未发送上游请求：{e}"),
-                    "",
-                )),
+                Err(e) => Err(local(e)),
             }
         })
     })

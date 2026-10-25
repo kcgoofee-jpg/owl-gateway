@@ -176,7 +176,7 @@ pub(super) async fn perform_generation(
             state,
             Some((key.str("discord_id").to_string(), est0.v5 > 0)),
         )),
-        on_dispatch: Some(on_dispatch(state, ctx)),
+        on_dispatch: Some(on_dispatch(state, ctx, reserved.clone())),
     };
     let url = format!("{}/ai/generate-image", state.nai.image_host());
     let mut opts = RequestOpts::post(url, &prep.body);
@@ -221,7 +221,21 @@ pub(super) async fn perform_generation(
                             est.anlas
                         } else {
                             0.0
-                        }),
+                        })
+                        .execution_unknown(
+                            exc.billing_uncertain,
+                            if exc.billing_uncertain {
+                                est.anlas
+                            } else {
+                                0.0
+                            },
+                            if exc.billing_uncertain { est.v5 } else { 0 },
+                            if exc.billing_uncertain {
+                                prep.legacy_free_images
+                            } else {
+                                0
+                            },
+                        ),
                 )
                 .await;
             state
@@ -255,7 +269,17 @@ pub(super) async fn perform_generation(
                 &key,
                 Entry::new("image", &model, "error")
                     .detail(detail)
-                    .unconfirmed(if resp.status >= 500 { est.anlas } else { 0.0 }),
+                    .unconfirmed(if resp.status >= 500 { est.anlas } else { 0.0 })
+                    .execution_unknown(
+                        resp.status >= 500,
+                        if resp.status >= 500 { est.anlas } else { 0.0 },
+                        if resp.status >= 500 { est.v5 } else { 0 },
+                        if resp.status >= 500 {
+                            prep.legacy_free_images
+                        } else {
+                            0
+                        },
+                    ),
             )
             .await;
         state

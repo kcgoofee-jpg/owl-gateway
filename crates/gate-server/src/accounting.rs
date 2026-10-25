@@ -34,6 +34,10 @@ pub struct Entry {
     pub reason: String,
     /// see `gate_db::repo::usage::Success::site_paid_anlas`
     pub site_paid_anlas: f64,
+    pub execution_unknown: bool,
+    pub remaining_anlas: f64,
+    pub remaining_v5: i64,
+    pub remaining_legacy: i64,
 }
 
 impl Entry {
@@ -55,6 +59,19 @@ impl Entry {
     }
     pub fn unconfirmed(mut self, a: f64) -> Self {
         self.unconfirmed_anlas = a;
+        self
+    }
+    pub fn execution_unknown(
+        mut self,
+        unknown: bool,
+        remaining_anlas: f64,
+        remaining_v5: i64,
+        remaining_legacy: i64,
+    ) -> Self {
+        self.execution_unknown = unknown;
+        self.remaining_anlas = remaining_anlas;
+        self.remaining_v5 = remaining_v5;
+        self.remaining_legacy = remaining_legacy;
         self
     }
 }
@@ -116,10 +133,7 @@ impl AppState {
         self.tasks.spawn(async move {
             let now = state.now();
             let settlement_reserved = ctx.has_settlement_reservation();
-            // Free requests can still have an unknown execution result after dispatch; do not infer
-            // certainty from an Anlas estimate of zero.
-            let settlement_uncertain =
-                e.unconfirmed_anlas > 0.0 || (ctx.was_sent() && e.status == "error");
+            let settlement_uncertain = e.execution_unknown || ctx.execution_unknown();
             let successful = e.status == "ok";
             let res = if e.status == "ok" {
                 let success = Success {
@@ -135,6 +149,9 @@ impl AppState {
                     legacy_free_images: e.legacy_free_images,
                     detail: e.detail,
                     unconfirmed_anlas: e.unconfirmed_anlas,
+                    remaining_anlas: e.remaining_anlas,
+                    remaining_v5: e.remaining_v5,
+                    remaining_legacy: e.remaining_legacy,
                     wait_ms: t.wait_ms,
                     dur_ms: t.dur_ms,
                     up_status: i64::from(t.up_status),

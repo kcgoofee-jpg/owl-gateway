@@ -43,11 +43,15 @@ pub struct RuntimeLimits {
 /// 一次出图的额度预留（排队等待期间就占住，防止并发请求一起超额）。
 #[derive(Debug, Clone)]
 pub struct Reservation {
+    pub request_id: String,
     pub key_id: i64,
     pub exclude_global_v5: bool,
+    pub day: String,
+    pub month: String,
     pub anlas: f64,
     pub v5: i64,
     pub legacy: i64,
+    pub is_vibe: bool,
 }
 
 #[derive(Default, Clone)]
@@ -221,6 +225,40 @@ impl AppState {
 
     async fn startup(&self, now: f64) -> anyhow::Result<()> {
         self.load_runtime_limits().await?;
+        // Recover only durable local state. Never replay an upstream generation POST.
+        let pending = self.db.recover_request_settlements(now).await?;
+        for row in pending.iter().filter(|r| r.status == "result_saved") {
+            if let Some(payload) = row.result_json.as_deref()
+                && let Err(e) = self
+                    .db
+                    .commit_saved_request_result(&row.request_id, payload, now)
+                    .await
+            {
+                tracing::error!(request_id = %row.request_id, error = %e, "saved request result recovery failed; budget remains reserved");
+            }
+        }
+        let pending = self.db.recover_request_settlements(now).await?;
+        {
+            let mut budget = self.budget.lock().await;
+            for row in pending {
+                budget.next_id += 1;
+                let id = budget.next_id;
+                budget.reservations.insert(
+                    id,
+                    Reservation {
+                        request_id: row.request_id,
+                        key_id: row.key_id,
+                        exclude_global_v5: row.exclude_global_v5,
+                        day: row.day,
+                        month: row.month,
+                        anlas: row.anlas,
+                        v5: row.v5,
+                        legacy: row.legacy,
+                        is_vibe: row.is_vibe,
+                    },
+                );
+            }
+        }
         let tokens = self.nai.tokens().await;
         // 重启前被 429 / 403 冷却的账号接着冷却，不在部署后立刻再去试探
         let saved = gate_upstream::pool::decode_cooldowns(

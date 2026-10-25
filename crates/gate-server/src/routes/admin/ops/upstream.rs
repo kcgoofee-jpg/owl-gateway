@@ -41,6 +41,73 @@ pub(super) fn router() -> Router<AppState> {
             "/admin/api/reconciliation",
             get(reconciliation_status).post(reconcile),
         )
+        .route("/admin/api/request-settlements", get(request_settlements))
+        .route(
+            "/admin/api/request-settlements/{request_id}/release",
+            post(release_request_settlement),
+        )
+}
+
+async fn request_settlements(State(state): State<AppState>, _s: AdminSession) -> ApiResult {
+    let rows = state.db.list_unknown_request_settlements().await?;
+    Ok(ok_json(&json!({"items": rows.into_iter().map(|r| json!({
+        "request_id": r.request_id, "rid": r.rid, "key_id": r.key_id, "status": r.status,
+        "service_day": r.day, "service_month": r.month, "reserved_anlas": r.anlas,
+        "reserved_v5": r.v5, "reserved_legacy": r.legacy, "is_vibe": r.is_vibe
+    })).collect::<Vec<_>>() })))
+}
+
+async fn release_request_settlement(
+    State(state): State<AppState>,
+    _s: AdminSession,
+    Path(request_id): Path<String>,
+    req: Request,
+) -> ApiResult {
+    let (parts, body) = req.into_parts();
+    let expected = csrf_token(&state, &session_cookie(&parts));
+    let given = crate::auth::header_str(&parts.headers, "x-nai-admin-csrf");
+    if !crate::session::ct_eq(given.as_bytes(), expected.as_bytes()) {
+        return Err(HttpError::new(403, "会话校验失败，请刷新后台后重试").into());
+    }
+    let value = read_json_body(&parts.headers, body, 1024).await?;
+    let reason = value
+        .get("reason")
+        .and_then(Value::as_str)
+        .unwrap_or("")
+        .trim();
+    if value.len() != 2
+        || value.get("confirmed_not_executed").and_then(Value::as_bool) != Some(true)
+        || reason.chars().count() < 12
+        || reason.chars().count() > 500
+    {
+        return Err(HttpError::new(
+            400,
+            "仅在人工确认该请求未执行后提交确认，并提供 12 至 500 字的核对说明",
+        )
+        .into());
+    }
+    let released = state
+        .db
+        .manually_release_unknown_request(&request_id, "站长", reason, state.now())
+        .await?;
+    if !released {
+        return Err(HttpError::new(409, "请求不处于待核对状态").into());
+    }
+    let mut budget = state.budget.lock().await;
+    let ids: Vec<u64> = budget
+        .reservations
+        .iter()
+        .filter_map(|(id, r)| (r.request_id == request_id).then_some(*id))
+        .collect();
+    for id in ids {
+        budget.reservations.remove(&id);
+    }
+    if budget.reservations.is_empty() {
+        state.budget_idle.notify_waiters();
+    }
+    Ok(ok_json(
+        &json!({"ok":true,"status":"released_manual","csrf_token":expected}),
+    ))
 }
 
 // ------------------------------------------------------------------ 令牌池状态

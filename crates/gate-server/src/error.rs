@@ -193,6 +193,7 @@ impl IntoResponse for InternalError {
 /// 在请求上下文里留个记号，错误账本据此不记 Bug（用量日志里照常有一条 error）。
 pub fn upstream_transport(ctx: &crate::reqctx::ReqCtx, message: String) -> ApiError {
     ctx.mark_upstream_fault();
+    ctx.mark_execution_unknown();
     InternalError(message).into()
 }
 

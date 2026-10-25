@@ -263,7 +263,7 @@ async fn perform_stream(
     let mut cancelled = false;
 
     let d = dispatched.clone();
-    let durable_dispatch = on_dispatch(state, ctx);
+    let durable_dispatch = on_dispatch(state, ctx, reserved.clone());
     let cb = Callbacks {
         on_rate_limited: Some(on_429(state)),
         resolve_v5_cost: (est0.v5 > 0)
@@ -480,6 +480,21 @@ async fn perform_stream(
                 .map(Est::from_cost)
                 .unwrap_or(est);
             settled_anlas = settled.anlas;
+            let remaining_images = (image_count - completed).max(0);
+            let mut remaining_body = prep.body.clone();
+            if let Some(p) = remaining_body
+                .get_mut("parameters")
+                .and_then(Value::as_object_mut)
+            {
+                p.insert("n_samples".into(), json!(remaining_images));
+            }
+            let remaining = if billing_uncertain && remaining_images > 0 {
+                policy::estimate_image_cost(&remaining_body, true, est.v5 > 0)
+                    .map(Est::from_cost)
+                    .unwrap_or_default()
+            } else {
+                Est::default()
+            };
             let suffix = if completed < image_count {
                 format!("; 完成 {completed}/{image_count}")
             } else {
@@ -493,13 +508,41 @@ async fn perform_stream(
                         images: completed,
                         anlas: settled.anlas,
                         v5: settled.v5,
-                        legacy_free_images: prep.legacy_free_images,
+                        legacy_free_images: prep.legacy_free_images.min(completed),
                         site_paid_anlas: site_paid,
+                        unconfirmed_anlas: remaining.anlas,
                         detail: format!("{detail}{suffix}"),
                         ..Entry::new("image_stream", &model, "ok")
-                    },
+                    }
+                    .execution_unknown(
+                        billing_uncertain && remaining_images > 0,
+                        remaining.anlas,
+                        remaining
+                            .v5
+                            .max(if est.v5 > 0 { remaining_images } else { 0 }),
+                        if prep.legacy_free_images > 0 {
+                            remaining_images
+                        } else {
+                            0
+                        },
+                    ),
                 )
                 .await;
+            if billing_uncertain && remaining_images > 0 {
+                reserved
+                    .set_remaining_budget(
+                        remaining.anlas,
+                        remaining
+                            .v5
+                            .max(if est.v5 > 0 { remaining_images } else { 0 }),
+                        if prep.legacy_free_images > 0 {
+                            remaining_images
+                        } else {
+                            0
+                        },
+                    )
+                    .await;
+            }
         }
         let ok = completed > 0 && failure.is_none();
         state
@@ -518,8 +561,7 @@ async fn perform_stream(
             )
             .await;
         state.record_upstream(ok);
-        if failure.is_some() || completed == 0 {
-            // 未结算部分单独记为待核对费用
+        if completed == 0 && (failure.is_some() || was_dispatched) {
             state
                 .settle_record(
                     ctx,
@@ -534,7 +576,17 @@ async fn perform_stream(
                             (est.anlas - settled_anlas).max(0.0)
                         } else {
                             0.0
-                        }),
+                        })
+                        .execution_unknown(
+                            billing_uncertain,
+                            if billing_uncertain { est.anlas } else { 0.0 },
+                            if billing_uncertain { est.v5 } else { 0 },
+                            if billing_uncertain {
+                                prep.legacy_free_images
+                            } else {
+                                0
+                            },
+                        ),
                 )
                 .await;
         }

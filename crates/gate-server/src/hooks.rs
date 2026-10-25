@@ -92,7 +92,9 @@ fn boxed<E: std::error::Error + Send + Sync + 'static>(
 
 impl Hooks for GateHooks {
     fn day(&self) -> String {
-        self.clock.day(crate::time::now())
+        crate::reqctx::current()
+            .and_then(|ctx| ctx.settlement_day())
+            .unwrap_or_else(|| self.clock.day(crate::time::now()))
     }
 
     fn now(&self) -> f64 {

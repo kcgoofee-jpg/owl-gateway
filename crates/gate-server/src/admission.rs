@@ -259,6 +259,7 @@ pub async fn quota_image_check(
         .into());
     }
     let day = state.day();
+    let month = state.month();
     let reset = state.clock.next_reset_phrase(state.now());
     let c = state.db.get_counter(key.id(), &day).await?;
     // 跨过 7 点才结算的请求也保守地计入当前周期
@@ -268,7 +269,14 @@ pub async fn quota_image_check(
         .filter(|(id, _)| Some(**id) != exclude)
         .map(|(_, r)| r)
         .collect();
-    let own: Vec<&&Reservation> = pending.iter().filter(|r| r.key_id == key.id()).collect();
+    let own: Vec<&&Reservation> = pending
+        .iter()
+        .filter(|r| r.key_id == key.id() && r.day == day)
+        .collect();
+    let own_month: Vec<&&Reservation> = pending
+        .iter()
+        .filter(|r| r.key_id == key.id() && r.month == month)
+        .collect();
     let daily_images = key.daily_images();
     if legacy_free_images != 0 && daily_images > 0 {
         let used_legacy = c.legacy_free_images + own.iter().map(|r| r.legacy).sum::<i64>();
@@ -300,7 +308,7 @@ pub async fn quota_image_check(
             let total = state.db.day_v5_total(&day).await?;
             let in_flight: i64 = pending
                 .iter()
-                .filter(|r| !r.exclude_global_v5)
+                .filter(|r| r.day == day && !r.exclude_global_v5)
                 .map(|r| r.v5)
                 .sum();
             if (total + in_flight + est.v5) as f64 > g {
@@ -318,9 +326,15 @@ pub async fn quota_image_check(
     }
     if est.anlas > 0.0 {
         let vibe_cap = site_flag_f64(state, &site_flags::GLOBAL_DAILY_ANLAS).await?;
-        let global_in_flight = || pending.iter().map(|r| r.anlas).sum::<f64>();
+        let global_day_in_flight = || {
+            pending
+                .iter()
+                .filter(|r| r.day == day)
+                .map(|r| r.anlas)
+                .sum::<f64>()
+        };
         let pool_check = |used: f64, label: &str| -> Result<(), ApiError> {
-            if used + global_in_flight() + est.anlas > vibe_cap {
+            if used + global_day_in_flight() + est.anlas > vibe_cap {
                 return Err(GateError::with_code(
                     403,
                     format!(
@@ -355,6 +369,7 @@ pub async fn quota_image_check(
         }
         // 每人每日 Anlas 上限：没手动设置的 Key 落到全站默认 member_daily_anlas
         let own_anlas = || own.iter().map(|r| r.anlas).sum::<f64>();
+        let own_month_anlas = || own_month.iter().map(|r| r.anlas).sum::<f64>();
         let member_cap = member_anlas_cap_f64(state, key).await?;
         if member_cap > 0.0 && c.anlas + own_anlas() + est.anlas > member_cap {
             return Err(GateError::with_code(
@@ -370,7 +385,7 @@ pub async fn quota_image_check(
         let month = state.month();
         let used = state.db.month_anlas(key.id(), &month).await?;
         let monthly = key.monthly_anlas();
-        if monthly > 0.0 && used + own_anlas() + est.anlas > monthly {
+        if monthly > 0.0 && used + own_month_anlas() + est.anlas > monthly {
             return Err(GateError::with_code(
                 403,
                 format!(
@@ -383,7 +398,12 @@ pub async fn quota_image_check(
         let budget_cap = site_flag_f64(state, &site_flags::GLOBAL_MONTHLY_ANLAS).await?;
         if budget_cap > 0.0 {
             let all_used = state.db.month_anlas_all(&month).await?;
-            if all_used + global_in_flight() + est.anlas > budget_cap {
+            let global_month_in_flight: f64 = pending
+                .iter()
+                .filter(|r| r.month == month)
+                .map(|r| r.anlas)
+                .sum();
+            if all_used + global_month_in_flight + est.anlas > budget_cap {
                 return Err(GateError::with_code(
                     403,
                     "全站本月 Anlas 预算已用完，未扣费。免费出图不受影响，下月恢复。",
@@ -413,12 +433,25 @@ impl Reserved {
     pub async fn update(&self, est: &Est, legacy: i64) -> Result<(), ApiError> {
         let mut b = self.state.budget.lock().await;
         quota_image_check(&self.state, &b, &self.key, est, legacy, Some(self.id)).await?;
+        let (day, month) = (self.state.day(), self.state.month());
         if !self
             .state
             .db
-            .update_request_reservation(&self.request_id, est.anlas, est.v5, legacy)
+            .update_request_reservation(
+                &self.request_id,
+                &day,
+                &month,
+                self.key.exclude_global_v5(),
+                est.is_vibe,
+                est.anlas,
+                est.v5,
+                legacy,
+            )
             .await
-            .map_err(|e| InternalError(e.to_string()))?
+            .map_err(|e| {
+                tracing::error!(error = %e, "request reservation persistence failed");
+                InternalError("保存额度预留失败，请稍后重试。".into())
+            })?
         {
             return Err(InternalError("持久化额度预留已不在待派发状态".into()).into());
         }
@@ -426,8 +459,61 @@ impl Reserved {
             r.anlas = est.anlas;
             r.v5 = est.v5;
             r.legacy = legacy;
+            r.day = day;
+            r.month = month;
+            r.exclude_global_v5 = self.key.exclude_global_v5();
+            r.is_vibe = est.is_vibe;
         }
         Ok(())
+    }
+
+    /// Recheck current quota and atomically move the reservation into the dispatch period.
+    pub async fn prepare_dispatch(&self) -> Result<(String, String), ApiError> {
+        let mut b = self.state.budget.lock().await;
+        let Some(r) = b.reservations.get(&self.id).cloned() else {
+            return Err(InternalError("请求额度预留已丢失，未发送上游请求。".into()).into());
+        };
+        let est = Est {
+            anlas: r.anlas,
+            v5: r.v5,
+            is_vibe: r.is_vibe,
+        };
+        quota_image_check(&self.state, &b, &self.key, &est, r.legacy, Some(self.id)).await?;
+        let (day, month) = (self.state.day(), self.state.month());
+        let ok = self
+            .state
+            .db
+            .dispatch_request_settlement(
+                &self.request_id,
+                &day,
+                &month,
+                self.key.exclude_global_v5(),
+                r.is_vibe,
+                r.anlas,
+                r.v5,
+                r.legacy,
+                self.state.now(),
+            )
+            .await
+            .map_err(|e| { tracing::error!(error = %e, request_id = %self.request_id, "request dispatch persistence failed"); InternalError("保存请求派发状态失败，未发送上游请求。".into()) })?;
+        if !ok {
+            return Err(InternalError("请求派发状态无效，未发送上游请求。".into()).into());
+        }
+        if let Some(r) = b.reservations.get_mut(&self.id) {
+            r.day = day.clone();
+            r.month = month.clone();
+            r.exclude_global_v5 = self.key.exclude_global_v5();
+        }
+        Ok((day, month))
+    }
+
+    pub async fn set_remaining_budget(&self, anlas: f64, v5: i64, legacy: i64) {
+        let mut b = self.state.budget.lock().await;
+        if let Some(r) = b.reservations.get_mut(&self.id) {
+            r.anlas = anlas.max(0.0);
+            r.v5 = v5.max(0);
+            r.legacy = legacy.max(0);
+        }
     }
 }
 
@@ -443,25 +529,23 @@ impl Drop for Reserved {
         let (state, id, request_id) = (self.state.clone(), self.id, self.request_id.clone());
         let db_state = state.clone();
         state.tasks.spawn(async move {
-            if let Err(e) = db_state
+            let status = match db_state
                 .db
                 .close_request_reservation(&request_id, db_state.now())
                 .await
             {
-                tracing::error!(error = %e, "request settlement finalization failed");
+                Ok(s) => s,
+                Err(e) => {
+                    tracing::error!(error = %e, "request settlement finalization failed");
+                    return;
+                }
+            };
+            if !matches!(status.as_str(), "released" | "committed") {
+                return;
             }
+            let mut b = db_state.budget.lock().await;
+            remove_reservation(&mut b, id, &db_state);
         });
-        match state.budget.try_lock() {
-            Ok(mut b) => remove_reservation(&mut b, id, &state),
-            Err(_) => {
-                // 有人正在核对额度：等它核对完再移除（多占一会儿只会更保守）
-                let s = state.clone();
-                state.tasks.spawn(async move {
-                    let mut b = s.budget.lock().await;
-                    remove_reservation(&mut b, id, &s);
-                });
-            }
-        }
     }
 }
 
@@ -477,28 +561,39 @@ pub async fn reserve_image_budget(
     let res = tokio::time::timeout(Duration::from_secs_f64(t.max(0.0)), async {
         let mut b = state.budget.lock().await;
         quota_image_check(state, &b, key, est, legacy_free_images, None).await?;
+        let (day, month) = (state.day(), state.month());
         state
             .db
             .reserve_request_settlement(
                 &ctx.internal_id(),
                 &ctx.rid(),
                 key.id(),
-                &state.day(),
+                &day,
+                &month,
+                key.exclude_global_v5(),
+                est.is_vibe,
                 est.anlas,
                 est.v5,
                 legacy_free_images,
                 state.now(),
             )
             .await
-            .map_err(|e| InternalError(e.to_string()))?;
+            .map_err(|e| {
+                tracing::error!(error = %e, "request reservation persistence failed");
+                InternalError("保存额度预留失败，请稍后重试。".into())
+            })?;
         ctx.mark_settlement_reserved();
         b.next_id += 1;
         let id = b.next_id;
         b.reservations.insert(
             id,
             Reservation {
+                request_id: ctx.internal_id(),
                 key_id: key.id(),
                 exclude_global_v5: key.exclude_global_v5(),
+                is_vibe: est.is_vibe,
+                day,
+                month,
                 anlas: est.anlas,
                 v5: est.v5,
                 legacy: legacy_free_images,

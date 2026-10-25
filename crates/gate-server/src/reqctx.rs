@@ -23,6 +23,7 @@ struct Inner {
     internal_id: String,
     settlement_reserved: bool,
     settlement_day: Option<String>,
+    execution_unknown: bool,
     rid: String,
     t0: Instant,
     sent: Option<Instant>,
@@ -73,6 +74,7 @@ impl ReqCtx {
             internal_id: hex::encode(rand::random::<[u8; 16]>()),
             settlement_reserved: false,
             settlement_day: None,
+            execution_unknown: false,
             rid: new_rid(),
             t0: Instant::now(),
             sent: None,
@@ -119,6 +121,12 @@ impl ReqCtx {
     }
     pub fn settlement_day(&self) -> Option<String> {
         self.with(|i| i.settlement_day.clone())
+    }
+    pub fn mark_execution_unknown(&self) {
+        self.with(|i| i.execution_unknown = true);
+    }
+    pub fn execution_unknown(&self) -> bool {
+        self.with(|i| i.execution_unknown)
     }
 
     /// 第一次真正发往上游时调用；重试不覆盖。
