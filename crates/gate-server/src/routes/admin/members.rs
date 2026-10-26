@@ -408,7 +408,7 @@ async fn create_key(State(state): State<AppState>, _s: AdminSession, req: Reques
         {
             return Err(http(422, "quota_limits 限额必须在有效范围内"));
         }
-        serde_json::to_string(v).map_err(|e| http(422, &format!("quota_limits 无效：{e}")))
+        serde_json::to_string(v).map_err(|e| http(422, format!("quota_limits 无效：{e}")))
     }).transpose()?.unwrap_or_else(|| serde_json::to_string(
         &gate_core::quota_limits::MemberLimits::legacy(daily_images, daily_v5, daily_anlas, monthly_anlas, -1)
     ).expect("valid manual quota modes"));
