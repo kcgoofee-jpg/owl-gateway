@@ -294,23 +294,6 @@ fn new_rid() -> String {
     format!("{n:08x}")
 }
 
-#[cfg(test)]
-mod tests {
-    use super::ReqCtx;
-
-    #[test]
-    fn correlation_id_is_six_alphanumeric_and_separate_from_request_ids() {
-        let ctx = ReqCtx::new();
-        let correlation = ctx.correlation_id();
-        assert_eq!(correlation.len(), 6);
-        assert!(correlation.bytes().all(|b| b.is_ascii_alphanumeric()));
-        assert_eq!(ctx.correlation_id(), correlation);
-        assert_eq!(ctx.internal_id().len(), 32);
-        assert_eq!(ctx.rid().len(), 8);
-        assert_ne!(correlation, ctx.rid());
-    }
-}
-
 /// 上游观察者：把 gate-upstream 的「已发送 / 状态码」写回请求上下文。
 impl gate_upstream::client::Observer for ReqCtx {
     fn picked(&self, token_id: &str) {
@@ -344,5 +327,22 @@ impl gate_upstream::client::Observer for ReqCtx {
             count = n,
             "上游并发锁（不算限流），网关在同一账号上稍后重试"
         );
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::ReqCtx;
+
+    #[test]
+    fn correlation_id_is_six_alphanumeric_and_separate_from_request_ids() {
+        let ctx = ReqCtx::new();
+        let correlation = ctx.correlation_id();
+        assert_eq!(correlation.len(), 6);
+        assert!(correlation.bytes().all(|b| b.is_ascii_alphanumeric()));
+        assert_eq!(ctx.correlation_id(), correlation);
+        assert_eq!(ctx.internal_id().len(), 32);
+        assert_eq!(ctx.rid().len(), 8);
+        assert_ne!(correlation, ctx.rid());
     }
 }
