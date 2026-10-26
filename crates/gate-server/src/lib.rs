@@ -16,7 +16,6 @@ pub mod defaults;
 pub mod env;
 pub mod error;
 pub mod exporter;
-pub mod feedback;
 pub mod fsutil;
 pub mod guard;
 pub mod hooks;

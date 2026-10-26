@@ -69,7 +69,7 @@ test("首页（游客）：各宽度无孤字、控件对齐", async ({ page }) 
 test.describe("首页（成员）", () => {
   const member = readCreds().member;
   test.skip(!member, "没有成员会话（先跑 cargo xtask dev）");
-  test("各宽度无孤字、控件对齐（含页脚的问卷链接）", async ({ page, context }) => {
+  test("各宽度无孤字、控件对齐", async ({ page, context }) => {
     await asMember(context);
     for (const w of WIDTHS) {
       await page.setViewportSize({ width: w, height: 900 });
@@ -98,7 +98,6 @@ const ADMIN = [
   "/admin/logs/usage",
   "/admin/logs/actions",
   "/admin/logs/bugs",
-  "/admin/inbox/survey",
   "/admin/upstream",
   "/admin/onboarding",
   "/admin/limits",

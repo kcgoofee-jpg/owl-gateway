@@ -109,35 +109,3 @@ export type BugRow = {
   key_name: string;
 };
 export type BugsResp = { errors: BugRow[]; open: number };
-
-export type FeedbackItem = {
-  id: number;
-  ts: number;
-  discord_id: string;
-  username: string;
-  key_id: number | null;
-  key_name: string;
-  /** 显示用的文字：新记录是成员写的话；旧版选择题的记录是一行摘要「（旧版选择题）整体：…；困扰：…」；什么都没有是空串 */
-  text: string;
-  /** 是不是旧版选择题的记录（text 是服务端拼的摘要） */
-  legacy: boolean;
-  client?: string;
-  version?: string;
-  request_id?: string;
-  reviewed_at?: number | null;
-  reviewed_by?: string | null;
-};
-export type FeedbackResp = { items: FeedbackItem[]; csrf_token: string };
-
-export type SurveyRow = {
-  ts: number;
-  name?: string | null;
-  discord_id?: string | null;
-  client?: string | null;
-  understand?: string | null; // 已下线的「限额理解」题：只有旧回答有值，后台不再展示
-  improve?: string | null;
-  improve_other?: string | null;
-};
-export type SurveyResp = {
-  rows: SurveyRow[];
-};

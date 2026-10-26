@@ -23,17 +23,15 @@ pub const NAIMEI_INTENTS: Intents = Intents::GUILDS;
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Command {
     Register,
-    Feedback,
     ResetKey,
 }
 
 impl Command {
-    pub const ALL: [Command; 3] = [Command::Register, Command::Feedback, Command::ResetKey];
+    pub const ALL: [Command; 2] = [Command::Register, Command::ResetKey];
 
     pub const fn name(self) -> &'static str {
         match self {
             Command::Register => "register",
-            Command::Feedback => "反馈",
             Command::ResetKey => "resetkey",
         }
     }
@@ -70,11 +68,6 @@ pub fn definitions() -> Vec<Value> {
                 "description": "收到站长发的邀请 Key 时粘贴在这里，绑定到你的账号（可选）",
                 "required": false,
             })],
-        ),
-        command(
-            Command::Feedback.name(),
-            "写几句话给站长（只有你能看到，不会私信你）",
-            vec![],
         ),
         command(
             Command::ResetKey.name(),

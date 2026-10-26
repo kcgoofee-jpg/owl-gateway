@@ -1,17 +1,16 @@
 //! 公开页面、实时看板、状态与客户端兼容视图。
 //!
-//! - `POST /member/survey`：成员问卷；
 //! - `/public/live`（JSON）、`/public/live/stream`（SSE，3.0 新增）、`/public/status`、`/queue-status`；
 //! - `POST /public/client-error`：网页脚本报错上报；
 //! - `/user/*`、`/ai/user/*`：给原生 NAI 客户端的虚拟订阅 / 数据 / 优先级 / 密钥库 / 账户信息；
 //! - `GET /admin/api/events`（3.0 新增）：后台 SSE（实时快照 + 角标数字）；
 //! - 首页首屏数据（[`landing_boot`]，由 pages.rs 的 `/` 使用）。
 //!
-//! `/healthz`、`/`、`/survey`、`/admin*`、`/_owl/*`、图标在 pages.rs。
+//! `/healthz`、`/`、`/admin*`、`/_owl/*`、图标在 pages.rs。
 
 use super::registration::no_store;
-use crate::auth::{authenticate, client_ip, ctx_of, header_str, key_status_error};
-use crate::error::{ApiError, ApiResult, HttpError, InternalError, ok_json};
+use crate::auth::{authenticate, client_ip, ctx_of, header_str};
+use crate::error::{ApiResult, HttpError, InternalError, ok_json};
 use crate::key::Key;
 use crate::live::{self, Snapshot, StreamKind, StreamSlot, wire_text};
 use crate::session::{self, ADMIN_COOKIE, AdminSession};
@@ -25,7 +24,6 @@ use axum::response::{IntoResponse, Response};
 use axum::routing::{get, post};
 use futures::StreamExt;
 use gate_core::pyc::{strip, take_chars};
-use gate_db::repo::feedback::Survey;
 use serde_json::{Map, Value, json};
 use std::convert::Infallible;
 use std::hash::{Hash, Hasher};
@@ -35,8 +33,6 @@ use tokio::time::{Duration, Instant};
 
 pub fn router() -> Router<AppState> {
     let mut r = Router::new()
-        .route("/member/survey", post(member_survey))
-        .route("/member/feedback", post(member_feedback))
         .route("/public/live", get(public_live))
         .route("/public/live/stream", get(public_live_stream))
         .route("/public/client-error", post(client_error))
@@ -126,113 +122,6 @@ fn text_of(d: &serde_json::Map<String, Value>, name: &str) -> String {
         .filter(|v| !falsy(v))
         .map(value_text)
         .unwrap_or_default()
-}
-
-// ------------------------------------------------------------------ 服务条款 / 隐私政策
-
-// ------------------------------------------------------------------ 成员问卷
-
-/// 问卷身份：先认成员的 Discord 会话（3.0 只留 Discord 登录），没有会话再认 `Authorization: Bearer <Key>`。
-/// 都是 passive：不算活跃、不进防分享统计。失败的格式是 `{"detail": ...}`。
-async fn survey_key(state: &AppState, parts: &axum::http::request::Parts) -> Result<Key, ApiError> {
-    if let Some((_, Some(key))) = session::member_state(state, &parts.headers).await? {
-        ctx_of(parts).set_key(key.id(), key.name());
-        if let Some(e) = key_status_error(&key, state.now()) {
-            return Err(HttpError::new(e.status, e.message).into());
-        }
-        return Ok(key);
-    }
-    match authenticate(state, parts, true).await {
-        Err(ApiError::Gate(e)) => Err(HttpError::new(e.status, e.message).into()),
-        other => other,
-    }
-}
-
-/// 问卷提交：一人一份，重复提交覆盖。
-async fn member_survey(State(state): State<AppState>, req: Request) -> ApiResult {
-    let (parts, body) = req.into_parts();
-    let key = survey_key(&state, &parts).await?;
-    let mut raw = head_bytes(body, 4096).await;
-    if raw.is_empty() {
-        raw = b"{}".to_vec();
-    }
-    let Some(d) = loads_object(&raw) else {
-        return Err(HttpError::new(400, "问卷内容无法读取，请刷新页面后重新提交。").into());
-    };
-    let d = &d;
-    let client = strip(&text_of(d, "client")).to_string();
-    if client.is_empty() {
-        return Err(HttpError::new(422, "请填写你使用的客户端。").into());
-    }
-    let improve: Vec<String> = match d.get("improve") {
-        Some(o) if !falsy(o) => match o {
-            Value::Array(items) => items.iter().map(value_text).collect(),
-            _ => {
-                return Err(
-                    HttpError::new(422, "多选题答案无法读取，请刷新页面后重新提交。").into(),
-                );
-            }
-        },
-        _ => vec![],
-    };
-    let survey = Survey {
-        client,
-        // 「限额理解」题已下线：新版页面不再发，旧页面发来的照存
-        understand: strip(&text_of(d, "understand")).to_string(),
-        improve: improve
-            .iter()
-            .filter(|i| !strip(i).is_empty())
-            .map(|i| take_chars(i, 40))
-            .collect::<Vec<_>>()
-            .join("、"),
-        improve_other: strip(&text_of(d, "improve_other")).to_string(),
-    };
-    state.db.save_survey(key.id(), &survey, state.now()).await?;
-    Ok(ok_json(&json!({"ok": true})))
-}
-
-/// Optional web feedback metadata accompanies the legacy Discord plain-text flow.
-async fn member_feedback(State(state): State<AppState>, req: Request) -> ApiResult {
-    let (parts, body) = req.into_parts();
-    let Some((discord_id, key)) = session::member_state(&state, &parts.headers).await? else {
-        return Err(HttpError::new(401, "未登录或登录已过期，请刷新页面后重新登录。").into());
-    };
-    let raw = head_bytes(body, 8192).await;
-    let Some(data) = loads_object(&raw) else {
-        return Err(HttpError::new(400, "反馈内容无法读取，请刷新页面后重新提交。").into());
-    };
-    let optional_text = |key: &str| -> Result<String, HttpError> {
-        match data.get(key) {
-            Some(Value::String(value)) => Ok(value.clone()),
-            None | Some(Value::Null) => Ok(String::new()),
-            Some(_) => Err(HttpError::new(422, "反馈元数据格式不正确。")),
-        }
-    };
-    let text = optional_text("text")?;
-    let client = optional_text("client")?;
-    let version = optional_text("version")?;
-    let request_id = optional_text("request_id")?;
-    let message = crate::feedback::submit_with_metadata(
-        &state.db,
-        &discord_id,
-        "",
-        key.as_ref().map(Key::id),
-        &text,
-        crate::feedback::Metadata {
-            client: &client,
-            version: &version,
-            request_id: &request_id,
-        },
-        state.now(),
-    )
-    .await
-    .map_err(|e| match e {
-        crate::feedback::SubmitError::Rejected(message) => {
-            ApiError::from(HttpError::new(400, message))
-        }
-        crate::feedback::SubmitError::Db(e) => e.into(),
-    })?;
-    Ok(ok_json(&json!({"message": message})))
 }
 
 // ------------------------------------------------------------------ 实时看板
@@ -912,10 +801,6 @@ pub(super) async fn me_payload(
         out.insert("has_key".into(), json!(false));
         return Ok(Value::Object(out));
     };
-    out.insert(
-        "survey_done".into(),
-        json!(state.db.has_survey(key.id()).await?),
-    );
     let c = state.db.get_counter(key.id(), &state.day()).await?;
     let mut queue = state
         .guard

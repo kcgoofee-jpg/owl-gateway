@@ -1,6 +1,6 @@
 /**
  * 「点了日志再点别的栏目，会跳回日志页」的回归：各页是懒加载的，点别的栏目时旧的日志页还会带着新地址的 path 多渲染一阵，
- * 这时不能再把人 replace 回日志页。旧地址（生成记录 / 反馈 / 问卷搬走了）换到新分区。
+ * 这时不能再把人 replace 回日志页。旧地址（生成记录搬走了）换到新分区。
  */
 import { render } from "preact";
 import { act } from "preact/test-utils";
@@ -56,11 +56,6 @@ describe("日志页的默认子页跳转", () => {
     loc.query = { key: "3,5" };
     await mount("/admin/logs/audit");
     expect(loc.route).toHaveBeenCalledWith("/admin/audit/records?key=3%2C5", true);
-    loc.query = {};
-    await mount("/admin/logs/feedback");
-    expect(loc.route).toHaveBeenCalledWith("/admin/inbox/feedback", true);
-    await mount("/admin/logs/survey");
-    expect(loc.route).toHaveBeenCalledWith("/admin/inbox/survey", true);
   });
 
   it("已经点去别的栏目（地址变了、旧日志页还没卸载）：不能再跳回日志页", async () => {

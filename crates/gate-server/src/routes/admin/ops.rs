@@ -20,8 +20,6 @@ mod system;
 mod upstream;
 mod upstream_information;
 
-pub(super) use upstream_information::{origin_ok, scoped_csrf};
-
 use crate::state::AppState;
 use axum::Router;
 use serde_json::{Value, json};

@@ -13,7 +13,6 @@ function pageRoutes(): Plugin {
         const path = url.split("?")[0] ?? "/";
         const qs = url.slice(path.length);
         if (path === "/") req.url = `/_owl/landing.html${qs}`;
-        else if (path === "/survey") req.url = `/_owl/survey.html${qs}`;
         else if ((path === "/admin" || path.startsWith("/admin/")) && !path.startsWith("/admin/api/"))
           req.url = `/_owl/admin.html${qs}`;
         next();
@@ -39,7 +38,6 @@ export default defineConfig({
       input: {
         landing: resolve(import.meta.dirname, "landing.html"),
         admin: resolve(import.meta.dirname, "admin.html"),
-        survey: resolve(import.meta.dirname, "survey.html"),
       },
     },
   },

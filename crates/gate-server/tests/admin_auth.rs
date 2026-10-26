@@ -36,9 +36,6 @@ const ENDPOINTS: &[(&str, &str)] = &[
     ("GET", "/audit/1/image"),
     ("GET", "/audit/export?key_id=1"),
     ("POST", "/audit/purge-images"),
-    ("GET", "/feedback"),
-    ("GET", "/feedback/export"),
-    ("GET", "/survey"),
     ("POST", "/ops/reset-all-keys"),
     // 待审（防滥用）
     ("GET", "/abuse"),

@@ -315,14 +315,8 @@ test.describe("游客", () => {
 
 test.describe("登录成员", () => {
   test.skip(needMember, `没有成员会话文件 ${COOKIES_FILE}（先跑 cargo xtask dev）`);
-  test.beforeEach(async ({ context, page }) => {
+  test.beforeEach(async ({ context }) => {
     await asMember(context);
-    const base = process.env.E2E_BASE ?? "http://localhost:5174";
-    const survey = await context.request.post(new URL("/member/survey", base).toString(), {
-      data: { client: "Playwright" },
-    });
-    expect(survey.ok()).toBe(true);
-    await patch(page, ME, (b) => ({ ...b, survey_done: true }));
   });
 
   test("额度圆环只显示个人可用额度；公共状态仍显示 V5 用量", async ({ page }) => {
@@ -439,37 +433,6 @@ test.describe("登录成员", () => {
     await expect(page.getByText("已重置，今天的 V4.5、V5、Anlas 额度已恢复")).toBeVisible();
     expect(used).toBe(true);
     await expect(page.getByRole("heading", { name: "重置券" })).toHaveCount(0);
-  });
-
-  test("未填写问卷的登录用户自动弹出问卷", async ({ page }) => {
-    await patch(page, ME, (b) => ({ ...b, survey_done: false }));
-    let body: Record<string, unknown> | null = null;
-    await page.route("**/member/survey", async (route) => {
-      body = route.request().postDataJSON();
-      await route.fulfill({ json: { ok: true } });
-    });
-    await page.goto("/");
-    const dialog = page.getByRole("dialog", { name: "使用体验问卷" });
-    await expect(dialog).toBeVisible();
-    await dialog.getByLabel(/你主要用哪个客户端/).fill("柏宝绘");
-    await dialog.getByRole("button", { name: "提交问卷" }).click();
-    await expect(dialog).toBeHidden();
-    expect(body).toEqual({ client: "柏宝绘", improve: [], improve_other: "" });
-    await expect(page.getByRole("contentinfo").getByRole("link", { name: "使用体验问卷" })).toHaveAttribute(
-      "href",
-      "/survey",
-    );
-    await expect(page.getByRole("banner").getByRole("button", { name: "捐赠" })).toHaveCount(0);
-  });
-
-  test("从问卷页点登录回来：首页把人送回 /survey（一次性）", async ({ page }) => {
-    await page.addInitScript(() => {
-      if (location.pathname === "/") sessionStorage.setItem("owl-next", "/survey");
-    });
-    await page.goto("/");
-    await page.waitForURL("**/survey");
-    await expect(page.getByRole("heading", { level: 1, name: "成员问卷" })).toBeVisible();
-    expect(await page.evaluate(() => sessionStorage.getItem("owl-next"))).toBeNull();
   });
 
   test("已登录但没有 Key：只有加入服务器的入口；邀请链接是新窗口外链，注册关闭时按钮置灰", async ({

@@ -18,17 +18,6 @@
     "integration_types": null
   },
   {
-    "name": "反馈",
-    "description": "写几句话给站长（只有你能看到，不会私信你）",
-    "type": 1,
-    "options": [],
-    "nsfw": false,
-    "dm_permission": true,
-    "default_member_permissions": null,
-    "contexts": null,
-    "integration_types": null
-  },
-  {
     "name": "resetkey",
     "description": "Key 丢了或泄露了？换一把新的（旧的立即失效）",
     "type": 1,

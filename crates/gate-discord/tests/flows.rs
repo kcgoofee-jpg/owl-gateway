@@ -2,7 +2,7 @@
 //! 必须是下面写的这样。网关和 Discord 都换成 `common::MockServer`（本机假服务），测试里不连任何真实的 Discord。
 //!
 //! 管理员命令（`/open /limit /ban /unban /slots /revoke`）和 @奶妹 的自动回复已删除，
-//! `/quota`、`/help` 10-23 删除（额度看状态页和成员页）；`/反馈` 见 `feedback_text.rs`。
+//! `/quota`、`/help` 10-23 删除（额度看状态页和成员页）。
 
 mod common;
 
@@ -374,7 +374,7 @@ async fn ready_syncs_the_commands_then_starts_the_heartbeat_once() {
             put["path"],
             format!("/applications/{APP}/guilds/{GUILD}/commands")
         );
-        assert_eq!(put["json"].as_array().unwrap().len(), 3);
+        assert_eq!(put["json"].as_array().unwrap().len(), 2);
     }
     // 心跳循环的第一轮马上就发
     for _ in 0..50 {

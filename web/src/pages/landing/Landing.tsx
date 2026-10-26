@@ -1,13 +1,12 @@
 /**
  * 成员首页（/）。三种人看到三种首屏：
- * - 游客：首屏显示实时状态，登录入口位于顶栏，下面是客户端设置和使用须知；
- * - 有 Key 的成员：今天的额度圆环，下面状态区、重置券和请求记录；
+ * - 游客：首屏显示实时状态，登录入口位于顶栏，下面是客户端设置、使用须知和示例图瀑布；
+ * - 有 Key 的成员：今天的额度圆环，下面状态区、重置券和请求记录（瀑布只给游客看）；
  * - 登录了还没有 Key：加入服务器的入口排最前，状态区占满整行。
  * 开屏每天播一次，见 Splash.tsx。
  */
 import { useEffect, useState } from "preact/hooks";
-import { Dialog, Skeleton, toast } from "../../ui";
-import { SurveyForm } from "../survey/SurveyForm";
+import { Skeleton, toast } from "../../ui";
 import { StoreCtx } from "./ctx";
 import { Gallery } from "./Gallery";
 import { Grain } from "./Grain";
@@ -77,21 +76,6 @@ function useLoginNotice(role: string, metaReady: boolean) {
   }, [metaReady, waited, role]);
 }
 
-/** 问卷页让未登录的人先登录：登录回调只会回到首页，这里把人送回去。 */
-function useReturnToSurvey(loggedIn: boolean) {
-  useEffect(() => {
-    if (!loggedIn) return;
-    try {
-      if (sessionStorage.getItem("owl-next") === "/survey") {
-        sessionStorage.removeItem("owl-next");
-        location.replace("/survey");
-      }
-    } catch {
-      /* 隐私模式：不跳转 */
-    }
-  }, [loggedIn]);
-}
-
 function Loading() {
   return (
     <div class="wrap lp-body" aria-busy="true">
@@ -116,6 +100,7 @@ function GuestHome() {
       <div class="wrap wrap--narrow lp-body">
         <GuestGuides />
       </div>
+      <Gallery />
     </>
   );
 }
@@ -185,8 +170,6 @@ function Page({ store }: { store: Store }) {
   const reg = store.meta.value.registration;
   // 和圆环看的是同一个初值（页面加载时定好），两边不会对「这次播不播开屏」各说各的
   const [splash, setSplash] = useState(() => splashActive.value);
-  const [surveyDismissed, setSurveyDismissed] = useState(false);
-  const [surveyOpen, setSurveyOpen] = useState(false);
   // 「网页登录一次」提示：只对会被拦的成员显示；关掉后本次浏览器会话不再打扰。
   const [loginGateDismissed, setLoginGateDismissed] = useState(() => {
     try {
@@ -195,10 +178,6 @@ function Page({ store }: { store: Store }) {
       return false;
     }
   });
-  useEffect(() => {
-    if (member?.has_key && member.survey_done === false && !surveyDismissed) setSurveyOpen(true);
-    if (!member?.has_key || member.survey_done) setSurveyOpen(false);
-  }, [member?.has_key, member?.survey_done, surveyDismissed]);
   // 站长 10-24：Key 收在头像菜单里，不再占成员首页；只在第一次使用时提示一次。
   // 每个浏览器提示一次；清掉 localStorage 会再提示一次。
   useEffect(() => {
@@ -220,7 +199,6 @@ function Page({ store }: { store: Store }) {
     return () => clearTimeout(t);
   }, [member?.has_key, splash]);
   useLoginNotice(reg?.role_note || "指定身份组", reg !== undefined);
-  useReturnToSurvey(!!member);
   return (
     <>
       <div class="sky" aria-hidden="true" />
@@ -275,29 +253,8 @@ function Page({ store }: { store: Store }) {
         ) : (
           <GuestHome />
         )}
-        {me !== undefined && <Gallery />}
       </main>
-      {member?.has_key && (
-        <Dialog
-          open={surveyOpen}
-          title="使用体验问卷"
-          onClose={() => {
-            setSurveyOpen(false);
-            setSurveyDismissed(true);
-          }}
-          wide
-        >
-          <SurveyForm
-            me={member}
-            onDone={() => {
-              setSurveyOpen(false);
-              setSurveyDismissed(true);
-              void store.reloadMe();
-            }}
-          />
-        </Dialog>
-      )}
-      <SiteFooter survey={!!member?.has_key} />
+      <SiteFooter />
     </>
   );
 }

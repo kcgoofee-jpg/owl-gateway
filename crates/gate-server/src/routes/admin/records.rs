@@ -1,20 +1,18 @@
-//! 后台「日志与记录」接口（用量日志 / 操作日志 / Bug / 生成记录 / 反馈 / 问卷 / 全站重置）。
+//! 后台「日志与记录」接口（用量日志 / 操作日志 / 生成记录 / 全站重置）。
 //! 导出（zip / CSV）的格式固定，导出的文件有人存档，别随手改列名与列序。
 
+use super::mark_logged;
 use super::req::{AdminPath, AdminQuery, R, bytes_response, http, internal, json_of, py_quote};
-use super::{actor, mark_logged};
 use crate::action_log::log_action;
-use crate::body::read_json_body;
 use crate::error::ApiError;
 use crate::error::ok_json;
-use crate::feedback::{listing, member_label, safe_cell};
-use crate::session::{ADMIN_COOKIE, AdminSession, cookie};
+use crate::session::AdminSession;
 use crate::state::AppState;
 use axum::Router;
-use axum::extract::{Path, Request, State};
+use axum::extract::{Request, State};
 use axum::response::Response;
-use axum::routing::{get, post, put};
-use gate_core::{features, pyc, pyext, pyval};
+use axum::routing::{get, post};
+use gate_core::{features, pyc, pyext};
 use gate_db::repo::admin_records::ActionFilter;
 use gate_db::repo::usage::LogFilter;
 use serde_json::{Value, json};
@@ -34,13 +32,6 @@ pub fn router() -> Router<AppState> {
         .route("/admin/api/audit/purge-images", post(audit_purge_images))
         .route("/admin/api/audit/{audit_id}/thumb", get(audit_thumb))
         .route("/admin/api/audit/{audit_id}/image", get(audit_image))
-        .route("/admin/api/feedback", get(feedback_list))
-        .route(
-            "/admin/api/feedback/{feedback_id}/review",
-            put(feedback_review),
-        )
-        .route("/admin/api/feedback/export", get(feedback_export))
-        .route("/admin/api/survey", get(survey_results))
         .route("/admin/api/ops/reset-all-keys", post(ops_reset_all_keys))
 }
 
@@ -662,161 +653,6 @@ async fn audit_purge_images(State(state): State<AppState>, _s: AdminSession, req
 }
 
 // ----------------------------------------------------------------------------- CSV
-
-/// Python `csv.writer`（QUOTE_MINIMAL，行尾 `\r\n`）。
-fn csv_line(cells: &[String]) -> String {
-    let mut out = String::new();
-    for (i, c) in cells.iter().enumerate() {
-        if i > 0 {
-            out.push(',');
-        }
-        if c.contains([',', '"', '\r', '\n']) {
-            out.push('"');
-            out.push_str(&c.replace('"', "\"\""));
-            out.push('"');
-        } else {
-            out.push_str(c);
-        }
-    }
-    out.push_str("\r\n");
-    out
-}
-
-/// 带 BOM 的 CSV（Excel 打开不乱码）：表头一行 + 数据行。
-fn csv_bytes(header: &[&str], rows: &[Vec<String>]) -> Vec<u8> {
-    let mut s = String::from('\u{feff}');
-    s.push_str(&csv_line(
-        &header.iter().map(|h| (*h).to_string()).collect::<Vec<_>>(),
-    ));
-    for r in rows {
-        s.push_str(&csv_line(r));
-    }
-    s.into_bytes()
-}
-
-/// 成员 /反馈 写的话，最新在前。每条的 `text` 是显示用的文字（2.x 问卷的旧记录是一行摘要，`legacy` 为真）。
-async fn feedback_list(State(state): State<AppState>, _s: AdminSession, req: Request) -> R {
-    let parts = req.into_parts().0;
-    let items = listing(&state.db, 500).await?;
-    let csrf_token = super::ops::scoped_csrf(
-        &state,
-        "feedback-review",
-        &cookie(&parts.headers, ADMIN_COOKIE).unwrap_or_default(),
-    );
-    Ok(ok_json(&json!({"items": items, "csrf_token": csrf_token})))
-}
-
-async fn feedback_review(
-    State(state): State<AppState>,
-    Path(feedback_id): Path<i64>,
-    _s: AdminSession,
-    req: Request,
-) -> R {
-    let (parts, body) = req.into_parts();
-    if !super::ops::origin_ok(&parts.headers) {
-        return Err(http(403, "请求来源校验失败"));
-    }
-    let expected = super::ops::scoped_csrf(
-        &state,
-        "feedback-review",
-        &cookie(&parts.headers, ADMIN_COOKIE).unwrap_or_default(),
-    );
-    let given = crate::auth::header_str(&parts.headers, "x-nai-admin-csrf");
-    if !crate::session::ct_eq(given.as_bytes(), expected.as_bytes()) {
-        return Err(http(403, "会话校验失败，请刷新后台后重试"));
-    }
-    let value = read_json_body(&parts.headers, body, 1024).await?;
-    let Some(reviewed) = value.get("reviewed").and_then(Value::as_bool) else {
-        return Err(http(422, "审核状态必须是布尔值"));
-    };
-    let who = actor(&state, &parts);
-    let changed = state
-        .db
-        .set_feedback_reviewed(
-            feedback_id,
-            reviewed.then_some(state.now()),
-            if reviewed { &who } else { "" },
-        )
-        .await?;
-    if !changed {
-        return Err(http(404, "反馈不存在"));
-    }
-    log_action(
-        &state.db,
-        &who,
-        if reviewed {
-            "查看成员反馈"
-        } else {
-            "重新打开成员反馈"
-        },
-        &format!("反馈 #{feedback_id}"),
-        "",
-        true,
-        state.now(),
-    )
-    .await;
-    Ok(ok_json(&json!({"id": feedback_id, "reviewed": reviewed})))
-}
-
-/// CSV 三列：time、member（Key 名 / 用户名 / Discord ID）、text（2.x 问卷的旧记录是同一行摘要）。
-async fn feedback_export(State(state): State<AppState>, _s: AdminSession, req: Request) -> R {
-    let parts = req.into_parts().0;
-    let st = state.clone();
-    let mut items = listing(&st.db, 100_000).await?;
-    items.sort_by(|a, b| {
-        pyval::number_like(&a["ts"])
-            .partial_cmp(&pyval::number_like(&b["ts"]))
-            .unwrap_or(std::cmp::Ordering::Equal)
-    });
-    let rows: Vec<Vec<String>> = items
-        .iter()
-        .map(|it| {
-            vec![
-                st.clock
-                    .format(it["ts"].as_f64().unwrap_or(0.0), "%Y-%m-%d %H:%M:%S"),
-                safe_cell(&member_label(it)),
-                safe_cell(it["text"].as_str().unwrap_or("")),
-            ]
-        })
-        .collect();
-    let text = csv_bytes(&["time", "member", "text"], &rows);
-    log_action(
-        &st.db,
-        &actor(&st, &parts),
-        "导出成员反馈",
-        "全部CSV",
-        "",
-        true,
-        st.now(),
-    )
-    .await;
-    let fn_ = format!(
-        "owl-feedback-{}.csv",
-        st.clock.format(st.now(), "%Y%m%d-%H%M")
-    );
-    Ok(bytes_response(
-        text,
-        "text/csv; charset=utf-8",
-        &[
-            (
-                "content-disposition",
-                format!(
-                    "attachment; filename=\"{fn_}\"; filename*=UTF-8''{}",
-                    py_quote(&fn_)
-                ),
-            ),
-            ("cache-control", "no-store".to_string()),
-        ],
-    ))
-}
-
-// ----------------------------------------------------------------------------- 问卷
-
-/// 成员详细问卷（/survey 网页页）：逐条明细（选项汇总由前端按明细算）；Discord /反馈 的结果在 /feedback。
-async fn survey_results(State(state): State<AppState>, _s: AdminSession) -> R {
-    let rows = state.db.list_survey().await?;
-    Ok(ok_json(&json!({"total": rows.len(), "rows": rows})))
-}
 
 // ----------------------------------------------------------------------------- 全站重置
 

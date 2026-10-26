@@ -1104,7 +1104,7 @@ async fn client_error_filters() {
     // 来自本站文件的报错才记；页面名只认 landing / admin，其余归 other；来源与堆栈截断
     post(
         vec![("host", "gate.example.top"), ("user-agent", "Mozilla/5.0 (synthetic)")],
-        "{\"page\":\"survey\",\"msg\":\"ReferenceError: y\",\"src\":\"/_owl/assets/app-abc.js\",\"line\":7,\
+        "{\"page\":\"docs\",\"msg\":\"ReferenceError: y\",\"src\":\"/_owl/assets/app-abc.js\",\"line\":7,\
           \"stack\":\"ReferenceError: y\\n    at f (https://gate.example.top/_owl/assets/app-abc.js:7:1)\"}"
             .as_bytes(),
     )
@@ -1117,200 +1117,6 @@ async fn client_error_filters() {
     assert!(
         detail.starts_with("/_owl/assets/app-abc.js:7\nMozilla/5.0 (synthetic)\nReferenceError: y"),
         "{detail:?}"
-    );
-}
-
-// ------------------------------------------------------------------ 问卷
-
-fn survey_body() -> Value {
-    json!({"client": "柏宝绘 1.2", "improve": ["稳定性", "报错提示更清楚"],
-           "improve_other": "深夜偶尔 502"})
-}
-
-#[tokio::test]
-async fn member_survey_errors_and_upsert() {
-    let e = setup(&[]).await;
-    let post = |auth: Option<&'static str>, body: Vec<u8>| {
-        let state = e.state.clone();
-        async move {
-            let mut h = vec![("content-type", "application/json")];
-            let bearer;
-            if let Some(a) = auth {
-                bearer = format!("Bearer {a}");
-                h.push(("authorization", bearer.as_str()));
-            }
-            let (s, _, b) = raw(&state, "POST", "/member/survey", &h, &body).await;
-            (s, json_of(&b))
-        }
-    };
-    let j = |v: Value| serde_json::to_vec(&v).unwrap();
-
-    // 旧版 `HTTPException(exc.status, exc.message)`：{"detail": 原始文案}，没有「提醒」前缀
-    assert_eq!(
-        post(None, j(survey_body())).await,
-        (
-            StatusCode::UNAUTHORIZED,
-            json!({"detail": "未收到 API Key。请在客户端中填入本站发放的 Key。开发者参考：放在 Authorization: Bearer 请求头中"})
-        )
-    );
-    assert_eq!(
-        post(Some("nai-wrong"), j(survey_body())).await,
-        (
-            StatusCode::UNAUTHORIZED,
-            json!({"detail": "API Key 无效。请检查客户端中的 Key 是否完整，或在 Discord 用 /resetkey 重新获取。"})
-        )
-    );
-    assert_eq!(
-        post(Some(TOKEN), b"nope".to_vec()).await,
-        (
-            StatusCode::BAD_REQUEST,
-            json!({"detail": "问卷内容无法读取，请刷新页面后重新提交。"})
-        )
-    );
-    assert_eq!(
-        post(Some(TOKEN), b"[]".to_vec()).await,
-        (
-            StatusCode::BAD_REQUEST,
-            json!({"detail": "问卷内容无法读取，请刷新页面后重新提交。"})
-        )
-    );
-    assert_eq!(
-        post(Some(TOKEN), j(json!({"client": "x"}))).await,
-        (StatusCode::OK, json!({"ok": true}))
-    );
-    // 「限额理解」题已下线，设备也不问：光填它们不算数
-    assert_eq!(
-        post(Some(TOKEN), j(json!({"understand": "x", "device": "x"}))).await,
-        (
-            StatusCode::UNPROCESSABLE_ENTITY,
-            json!({"detail": "请填写你使用的客户端。"})
-        )
-    );
-    assert_eq!(
-        post(Some(TOKEN), j(json!({"client": "  "}))).await,
-        (
-            StatusCode::UNPROCESSABLE_ENTITY,
-            json!({"detail": "请填写你使用的客户端。"})
-        )
-    );
-    assert_eq!(
-        post(Some(TOKEN), Vec::new()).await,
-        (
-            StatusCode::UNPROCESSABLE_ENTITY,
-            json!({"detail": "请填写你使用的客户端。"})
-        )
-    );
-    assert_eq!(
-        post(Some(TOKEN), j(json!({"client": "x", "improve": "abc"}))).await,
-        (
-            StatusCode::UNPROCESSABLE_ENTITY,
-            json!({"detail": "多选题答案无法读取，请刷新页面后重新提交。"})
-        )
-    );
-    assert_eq!(
-        e.state.db.list_survey().await.unwrap().len(),
-        1,
-        "校验失败不新增记录"
-    );
-
-    let (status, ok) = post(Some(TOKEN), j(survey_body())).await;
-    assert_eq!((status, ok), (StatusCode::OK, json!({"ok": true})));
-    let rows = e.state.db.list_survey().await.unwrap();
-    assert_eq!(rows.len(), 1);
-    assert_eq!(rows[0]["key_id"], 1);
-    assert_eq!(rows[0]["client"], "柏宝绘 1.2");
-    assert!(rows[0].get("understand").is_none());
-    assert_eq!(rows[0]["improve"], "稳定性、报错提示更清楚");
-    assert_eq!(rows[0]["improve_other"], "深夜偶尔 502");
-    assert!(rows[0].get("donate").is_none());
-
-    // 重复提交覆盖而不是新增；多选项逐项截 40 个字符、空项丢掉、非字符串按 str() 处理
-    let again = json!({"client": " 换成 Aaalice 了 ",
-                       "improve": ["排队和等待体验", "", "  ", 7, "长".repeat(60)]});
-    assert_eq!(post(Some(TOKEN), j(again)).await.0, StatusCode::OK);
-    let rows = e.state.db.list_survey().await.unwrap();
-    assert_eq!(rows.len(), 1);
-    assert_eq!(rows[0]["client"], "换成 Aaalice 了");
-    assert_eq!(
-        rows[0]["improve"],
-        format!("排队和等待体验、7、{}", "长".repeat(40))
-    );
-
-    // passive：不算「使用」、不写用量日志
-    settle().await;
-    assert!(
-        e.state
-            .db
-            .list_logs(50, 0, &LogFilter::default())
-            .await
-            .unwrap()
-            .is_empty()
-    );
-}
-
-#[tokio::test]
-async fn member_survey_identifies_by_discord_session() {
-    let e = setup(&reg_env()).await;
-    let cookie = register_member(&e.state).await;
-    let body = serde_json::to_vec(&survey_body()).unwrap();
-    // 只带成员会话、不带 Bearer：新问卷页的路径
-    let (status, _, b) = raw(
-        &e.state,
-        "POST",
-        "/member/survey",
-        &[("content-type", "application/json"), ("cookie", &cookie)],
-        &body,
-    )
-    .await;
-    assert_eq!((status, json_of(&b)), (StatusCode::OK, json!({"ok": true})));
-    let rows = e.state.db.list_survey().await.unwrap();
-    assert_eq!(
-        (
-            rows.len(),
-            rows[0]["key_id"].clone(),
-            rows[0]["discord_id"].clone()
-        ),
-        (1, json!(1), json!(MEMBER_ID))
-    );
-
-    // 会话 Cookie 对应的 Key 被停用：和旧版 authenticate 一样 403
-    let fields = json!({"enabled": false});
-    e.state
-        .db
-        .update_key(1, fields.as_object().unwrap())
-        .await
-        .unwrap();
-    let (status, _, b) = raw(
-        &e.state,
-        "POST",
-        "/member/survey",
-        &[("cookie", &cookie)],
-        &body,
-    )
-    .await;
-    assert_eq!(
-        (status, json_of(&b)),
-        (
-            StatusCode::FORBIDDEN,
-            json!({"detail": "这把 Key 已被停用。如有疑问，请在 Discord 服务器联系站长。"})
-        )
-    );
-
-    // 伪造 / 过期的会话不被认，也没有 Bearer：401
-    let (status, _, b) = raw(
-        &e.state,
-        "POST",
-        "/member/survey",
-        &[("cookie", "owl_member=900000000000000001:1:-.deadbeef")],
-        &body,
-    )
-    .await;
-    assert_eq!(
-        (status, json_of(&b)),
-        (
-            StatusCode::UNAUTHORIZED,
-            json!({"detail": "未收到 API Key。请在客户端中填入本站发放的 Key。开发者参考：放在 Authorization: Bearer 请求头中"})
-        )
     );
 }
 
@@ -1572,7 +1378,6 @@ async fn landing_boot_for_member_with_key() {
         [
             "logged_in",
             "discord",
-            "survey_done",
             "has_key",
             "key",
             "name",

@@ -422,7 +422,6 @@ pub fn render(
                     footer class="sp-foot" {
                         nav class="sp-foot-nav" aria-label="站内导航" {
                             a href="/" { "回首页" }
-                            a href="/survey" { "使用体验问卷" }
                         }
                         p class="muted small" {
                             "事件按 调查中 → 已确定 → 监控中 → 已解决 更新。"

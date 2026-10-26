@@ -29,7 +29,6 @@ const SECTIONS = [
   { id: "upstream", title: "上游" },
   { id: "onboarding", title: "领 Key 与功能" },
   { id: "limits", title: "额度与保护" },
-  { id: "inbox", title: "来信" },
   { id: "system", title: "系统" },
 ] as const;
 
@@ -208,31 +207,6 @@ test("额度与保护：全是手动表单 + 只读记录；没有算法说明",
   });
   expect(readback150).toEqual({ legacyProjection: 150, mode: { mode: "limit", value: 150 } });
   await expect(saveQuota).toBeDisabled();
-});
-
-test("来信：问卷 / 文字反馈两个 tab；旧地址换到对应子页；没有 Discord 分区", async ({ page }) => {
-  await visit(page, "inbox", "来信");
-  // 侧栏 / ⌘K 落在分区根路径：换到问卷页
-  await expect(page).toHaveURL(/\/admin\/inbox\/survey$/);
-  const tabs = page.getByRole("navigation", { name: "来信类型" });
-  await expect(tabs.getByRole("link", { name: "问卷" })).toHaveAttribute("aria-current", "page");
-  // 文字反馈不再折在问卷页底部，而是第二个 tab
-  await tabs.getByRole("link", { name: /文字反馈/ }).click();
-  await expect(page).toHaveURL(/\/admin\/inbox\/feedback$/);
-  await expect(page.getByRole("columnheader")).toHaveText([
-    "时间",
-    "成员",
-    "内容",
-    "客户端 / 请求",
-    "处理状态",
-  ]);
-  await expect(page.getByRole("button", { name: /导出 CSV/ })).toBeVisible();
-  // 旧链接（/admin/inbox/feedback、/admin/logs/feedback）都能落到反馈页
-  await page.goto("/admin/inbox/feedback");
-  await expect(page.getByRole("link", { name: /文字反馈/ })).toHaveAttribute("aria-current", "page");
-  await page.goto("/admin/logs/feedback");
-  await expect(page).toHaveURL(/\/admin\/inbox\/feedback$/);
-  await expect(page.locator(".admin-nav__item", { hasText: "Discord" })).toHaveCount(0);
 });
 
 test("系统：只剩告警渠道和后台密码；没有服务器状态、定时任务", async ({ page }) => {

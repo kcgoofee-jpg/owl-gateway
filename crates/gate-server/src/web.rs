@@ -30,7 +30,6 @@ pub const ADMIN_CSP: &str = "default-src 'self'; script-src 'self'; style-src 's
 pub enum Page {
     Landing,
     Admin,
-    Survey,
 }
 
 impl Page {
@@ -38,7 +37,6 @@ impl Page {
         match self {
             Page::Landing => "landing.html",
             Page::Admin => "admin.html",
-            Page::Survey => "survey.html",
         }
     }
 }
@@ -151,7 +149,7 @@ pub fn apply_page_headers(h: &mut HeaderMap, page: Page) {
             h.insert("x-frame-options", HeaderValue::from_static("DENY"));
             h.insert(header::CACHE_CONTROL, HeaderValue::from_static("no-store"));
         }
-        Page::Landing | Page::Survey => {
+        Page::Landing => {
             h.insert(
                 "content-security-policy",
                 HeaderValue::from_static(PUBLIC_CSP),

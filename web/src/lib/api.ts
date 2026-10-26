@@ -89,7 +89,7 @@ export function isNetworkFailure(msg: string): boolean {
  * 脚本错误（ErrorEvent）另带 `filename`（出错脚本的地址）：服务端据此丢弃不在 `/_owl/` 下的报错
  * （旧版缓存页、浏览器插件注入的脚本）。网络失败不报。
  */
-export function installErrorReporter(page: "landing" | "admin" | "survey"): void {
+export function installErrorReporter(page: "landing" | "admin"): void {
   let sent = 0;
   const report = (msg: string, src?: string, line?: number, stack?: string, filename?: string) => {
     if (!msg || msg === "Script error." || isNetworkFailure(msg) || sent++ > 5) return;

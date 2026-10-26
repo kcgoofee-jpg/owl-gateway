@@ -56,7 +56,6 @@ pub fn path_group(uri: &str) -> &'static str {
     } else if path.starts_with("/login")
         || path.starts_with("/logout")
         || path.starts_with("/member")
-        || path.starts_with("/survey")
     {
         "member"
     } else {

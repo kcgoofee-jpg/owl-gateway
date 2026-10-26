@@ -77,12 +77,6 @@ INSERT INTO error_events (sig, source, level, title, detail, count, first_seen, 
 INSERT INTO discord_bans (discord_id, created_at, reason, username, display_name, avatar, banned_by) VALUES ('900000000000000010', 1789780800.0, '刷量', 'spam10', '刷', '', '站长');
 INSERT INTO discord_bans (discord_id, created_at, reason, username, display_name, avatar, banned_by) VALUES ('900000000000000011', 1789867200.0, '转卖 Key', 'seller11', '卖家', 'av11', '系统');
 INSERT INTO discord_bans (discord_id, created_at, reason, username, display_name, avatar, banned_by) VALUES ('900000000000000012', 1789953600.0, '', '', '', '', '站长');
-INSERT INTO feedback (ts, discord_id, username, key_id, answers) VALUES (1789867200.0, '900000000000000001', 'user1', 1, '{"score": "满意", "pain": "出图失败或报错", "wish": "多给一些 V5", "client": "手机 App", "freq": "每天都用"}');
-INSERT INTO feedback (ts, discord_id, username, key_id, answers) VALUES (1789953600.0, '900000000000000002', '=cmd,"x"', 2, '{"score": "一般", "pain": "没什么困扰", "wish": "保持现状就好", "client": "其他", "freq": "偶尔用"}');
-INSERT INTO feedback (ts, discord_id, username, key_id, answers) VALUES (1790029200.0, '900000000000000099', 'gone', 99, '{"score": "非常满意", "pain": "没什么困扰", "wish": "更清楚的教程", "client": "手机 App", "freq": "刚来还没怎么用"}');
-INSERT INTO member_survey (key_id, client, understand, improve, improve_other, donate, ts) VALUES (1, '柏宝绘', '懂了', '多给 V5、出图更快、更清楚的教程', '', '愿意', 1789867200.0);
-INSERT INTO member_survey (key_id, client, understand, improve, improve_other, donate, ts) VALUES (2, 'ComfyUI', '大概懂', '多给 V5', '希望有公告', '再想想', 1789953600.0);
-INSERT INTO member_survey (key_id, client, understand, improve, improve_other, donate, ts) VALUES (6, '手机', '懂了', '出图更快、多给 V5', '', '愿意', 1790036400.0);
 INSERT INTO key_donations (ts, token, message, contact, handled, handled_at, handled_note) VALUES (1789867200.0, 'pst-donate-aaaa', '愿意长期提供', 'x@example.test', 0, NULL, '');
 INSERT INTO key_donations (ts, token, message, contact, handled, handled_at, handled_note) VALUES (1789953600.0, 'pst-donate-bbbb', '试试看', '', 0, NULL, '');
 INSERT INTO key_donations (ts, token, message, contact, handled, handled_at, handled_note) VALUES (1789780800.0, 'pst-donate-cccc', '旧的', '', 1, 1789867200.0, '已接入');

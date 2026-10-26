@@ -63,8 +63,6 @@ export type MeMember = {
   logged_in: true;
   discord?: Discord | null;
   has_key: boolean;
-  /** Current key has already submitted the experience survey. */
-  survey_done?: boolean;
   /** 「每位成员网页登录一次」闸门生效、该成员还没登录：出图会被 403。 */
   requires_web_login?: boolean;
   key?: string;

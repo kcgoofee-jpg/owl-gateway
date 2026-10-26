@@ -44,18 +44,6 @@
   },
   {
    "type": "index",
-   "name": "idx_feedback_discord_id_ts",
-   "tbl_name": "feedback",
-   "sql": "CREATE INDEX idx_feedback_discord_id_ts ON feedback (discord_id, ts DESC)"
-  },
-  {
-   "type": "index",
-   "name": "idx_feedback_ts",
-   "tbl_name": "feedback",
-   "sql": "CREATE INDEX idx_feedback_ts ON feedback (ts)"
-  },
-  {
-   "type": "index",
    "name": "idx_incident_updates",
    "tbl_name": "incident_updates",
    "sql": "CREATE INDEX idx_incident_updates ON incident_updates(incident_id, at)"
@@ -152,12 +140,6 @@
   },
   {
    "type": "table",
-   "name": "feedback",
-   "tbl_name": "feedback",
-   "sql": "CREATE TABLE feedback (      -- 成员用 /反馈 提交的问卷（Discord 弹窗表单，不私信任何人）\n    id INTEGER PRIMARY KEY AUTOINCREMENT,\n    ts REAL NOT NULL,\n    discord_id TEXT NOT NULL,\n    username TEXT NOT NULL DEFAULT '',\n    key_id INTEGER,\n    answers TEXT NOT NULL                  -- JSON：{问题 id: 回答}\n)"
-  },
-  {
-   "type": "table",
    "name": "generation_audit",
    "tbl_name": "generation_audit",
    "sql": "CREATE TABLE generation_audit (\n    id INTEGER PRIMARY KEY AUTOINCREMENT,\n    ts REAL NOT NULL,\n    key_id INTEGER,\n    key_name TEXT NOT NULL DEFAULT '',\n    kind TEXT NOT NULL DEFAULT 'image',\n    model TEXT NOT NULL DEFAULT '',\n    status TEXT NOT NULL DEFAULT '',\n    prompt TEXT NOT NULL DEFAULT '',\n    negative TEXT NOT NULL DEFAULT '',\n    extra TEXT NOT NULL DEFAULT '',\n    thumb BLOB,\n    image BLOB,\n    image_type TEXT NOT NULL DEFAULT ''\n, image_file TEXT, image_size INTEGER)"
@@ -185,12 +167,6 @@
    "name": "key_tags",
    "tbl_name": "key_tags",
    "sql": "CREATE TABLE key_tags (          -- 后台手动标签（只给站长看，成员看不到）\n    key_id INTEGER NOT NULL,\n    tag TEXT NOT NULL,\n    note TEXT NOT NULL DEFAULT '',\n    by TEXT NOT NULL DEFAULT '',\n    ts REAL NOT NULL,\n    PRIMARY KEY (key_id, tag)\n)"
-  },
-  {
-   "type": "table",
-   "name": "member_survey",
-   "tbl_name": "member_survey",
-   "sql": "CREATE TABLE member_survey (    -- 成员详细问卷（/survey 网页，按 Key 识别，一人一份可覆盖；Discord /反馈 弹窗走 feedback 表）\n    key_id INTEGER PRIMARY KEY,\n    client TEXT NOT NULL DEFAULT '',\n    understand TEXT NOT NULL DEFAULT '',\n    improve TEXT NOT NULL DEFAULT '',\n    improve_other TEXT NOT NULL DEFAULT '',\n    donate TEXT NOT NULL DEFAULT '',\n    ts REAL NOT NULL\n)"
   },
   {
    "type": "table",
@@ -1080,64 +1056,6 @@
     0
    ]
   ],
-  "member_survey": [
-   [
-    0,
-    "key_id",
-    "INTEGER",
-    0,
-    null,
-    1
-   ],
-   [
-    1,
-    "client",
-    "TEXT",
-    1,
-    "''",
-    0
-   ],
-   [
-    2,
-    "understand",
-    "TEXT",
-    1,
-    "''",
-    0
-   ],
-   [
-    3,
-    "improve",
-    "TEXT",
-    1,
-    "''",
-    0
-   ],
-   [
-    4,
-    "improve_other",
-    "TEXT",
-    1,
-    "''",
-    0
-   ],
-   [
-    5,
-    "donate",
-    "TEXT",
-    1,
-    "''",
-    0
-   ],
-   [
-    6,
-    "ts",
-    "REAL",
-    1,
-    null,
-    0
-   ]
-  ],
   "key_donations": [
    [
     0,
@@ -1335,56 +1253,6 @@
     "INTEGER",
     1,
     "0",
-    0
-   ]
-  ],
-  "feedback": [
-   [
-    0,
-    "id",
-    "INTEGER",
-    0,
-    null,
-    1
-   ],
-   [
-    1,
-    "ts",
-    "REAL",
-    1,
-    null,
-    0
-   ],
-   [
-    2,
-    "discord_id",
-    "TEXT",
-    1,
-    null,
-    0
-   ],
-   [
-    3,
-    "username",
-    "TEXT",
-    1,
-    "''",
-    0
-   ],
-   [
-    4,
-    "key_id",
-    "INTEGER",
-    0,
-    null,
-    0
-   ],
-   [
-    5,
-    "answers",
-    "TEXT",
-    1,
-    null,
     0
    ]
   ],

@@ -119,15 +119,6 @@ CREATE TABLE IF NOT EXISTS key_tags (          -- 后台手动标签（只给站
     ts REAL NOT NULL,
     PRIMARY KEY (key_id, tag)
 );
-CREATE TABLE IF NOT EXISTS member_survey (    -- 成员详细问卷（/survey 网页，按 Key 识别，一人一份可覆盖；Discord /反馈 弹窗走 feedback 表）
-    key_id INTEGER PRIMARY KEY,
-    client TEXT NOT NULL DEFAULT '',
-    understand TEXT NOT NULL DEFAULT '',
-    improve TEXT NOT NULL DEFAULT '',
-    improve_other TEXT NOT NULL DEFAULT '',
-    donate TEXT NOT NULL DEFAULT '',
-    ts REAL NOT NULL
-);
 CREATE TABLE IF NOT EXISTS key_donations (     -- 访客在首页「捐赠 Key」提交的号（后台人工验证后才接入上游，不自动生效）
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     ts REAL NOT NULL,
@@ -160,16 +151,6 @@ CREATE TABLE IF NOT EXISTS status_hourly (  -- 成员接口每小时各 HTTP 状
     n INTEGER NOT NULL DEFAULT 0,
     PRIMARY KEY (hour, code)
 );
-CREATE TABLE IF NOT EXISTS feedback (      -- 成员用 /反馈 提交的问卷（Discord 弹窗表单，不私信任何人）
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    ts REAL NOT NULL,
-    discord_id TEXT NOT NULL,
-    username TEXT NOT NULL DEFAULT '',
-    key_id INTEGER,
-    answers TEXT NOT NULL                  -- JSON：{问题 id: 回答}
-);
-CREATE INDEX IF NOT EXISTS idx_feedback_ts ON feedback (ts);
-CREATE INDEX IF NOT EXISTS idx_feedback_discord_id_ts ON feedback (discord_id, ts DESC);
 CREATE TABLE IF NOT EXISTS coupons (       -- 成员的券（现在只有「重置券」：在首页自己点一下，重置当天的 V5 / Anlas 额度）
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     key_id INTEGER NOT NULL,

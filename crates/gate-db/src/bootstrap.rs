@@ -228,7 +228,6 @@ const INDEXES: &[&str] = &[
     "CREATE INDEX IF NOT EXISTS idx_audit_key_id ON generation_audit (key_id, id DESC)",
     "CREATE INDEX IF NOT EXISTS idx_admin_actions_action ON admin_actions (action)",
     "CREATE INDEX IF NOT EXISTS idx_error_events_resolved_last_seen ON error_events (resolved_at, last_seen DESC)",
-    "CREATE INDEX IF NOT EXISTS idx_feedback_discord_id_ts ON feedback (discord_id, ts DESC)",
 ];
 
 /// 本版本写入 `PRAGMA user_version` 的值。Python 版从不读它，所以写它不影响回滚。
@@ -259,10 +258,16 @@ fn has_column(conn: &Connection, table: &str, column: &str) -> rusqlite::Result<
     Ok(false)
 }
 
+/// 已下线功能的表：启动时顺手清掉（建表语句已不在 `schema.sql`，线上库里的旧表留着无用）。
+const REMOVED_TABLES: &[&str] = &["member_survey", "feedback"];
+
 /// 建表 + 迁移。
 pub fn run(conn: &mut Connection) -> rusqlite::Result<()> {
     configure(conn)?;
     conn.execute_batch(SCHEMA)?;
+    for t in REMOVED_TABLES {
+        conn.execute(&format!("DROP TABLE IF EXISTS {t}"), [])?;
+    }
     for ddl in ADD_COLUMNS {
         match conn.execute(ddl, []) {
             Ok(_) => {}

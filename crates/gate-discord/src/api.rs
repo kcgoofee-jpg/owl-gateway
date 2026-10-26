@@ -26,26 +26,15 @@ fn id(s: &str) -> Result<u64, ApiError> {
 
 // ---------- 请求体（纯函数） ----------
 
-/// 先确认收到（3 秒内必须回）：
-/// - 斜杠命令：类型 5（DEFERRED_CHANNEL_MESSAGE），带 `flags: 64`（只有触发者可见）；
-/// - 弹窗提交：类型 6（DEFERRED_UPDATE_MESSAGE），不带任何 data
-///   （后面的跟进消息自己带 `flags: 64`）。
-pub fn defer_body(modal_submit: bool) -> Value {
-    if modal_submit {
-        json!({"type": 6})
-    } else {
-        json!({"type": 5, "data": {"flags": EPHEMERAL}})
-    }
+/// 先确认收到（3 秒内必须回）：类型 5（DEFERRED_CHANNEL_MESSAGE），
+/// 带 `flags: 64`（只有触发者可见）。
+pub fn defer_body() -> Value {
+    json!({"type": 5, "data": {"flags": EPHEMERAL}})
 }
 
 /// 直接回复一条只有本人可见的消息：类型 4。
 pub fn message_body(content: &str) -> Value {
     json!({"type": 4, "data": {"tts": false, "content": content, "flags": EPHEMERAL}})
-}
-
-/// 弹出表单：类型 9。
-pub fn modal_body(modal: Value) -> Value {
-    json!({"type": 9, "data": modal})
 }
 
 /// 跟进消息（只有本人可见）。
@@ -145,11 +134,10 @@ mod tests {
     #[test]
     fn defer_bodies() {
         assert_eq!(
-            defer_body(false).to_string(),
+            defer_body().to_string(),
             r#"{"type":5,"data":{"flags":64}}"#
         );
         // 弹窗提交：类型 6 不带 data
-        assert_eq!(defer_body(true).to_string(), r#"{"type":6}"#);
     }
 
     #[test]

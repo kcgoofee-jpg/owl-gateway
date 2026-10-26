@@ -1,4 +1,4 @@
-//! 页面与静态资源：`/`、`/admin`（含 `/admin/*` 前端路由，`/admin/api/*` 除外）、`/survey`、`/_owl/*`、图标、健康检查。
+//! 页面与静态资源：`/`、`/admin`（含 `/admin/*` 前端路由，`/admin/api/*` 除外）、`/_owl/*`、图标、健康检查。
 
 use crate::AppState;
 use crate::error::ok_json;
@@ -16,7 +16,6 @@ pub fn router() -> Router<AppState> {
         .route("/readyz", get(readyz))
         .route("/healthz", get(healthz))
         .route("/", get(landing))
-        .route("/survey", get(survey))
         .route("/admin", get(admin))
         // Starlette 的 redirect_slashes：/admin/ → 307 /admin
         .route(
@@ -67,10 +66,6 @@ const HEALTH_DB_LIMIT: std::time::Duration = std::time::Duration::from_secs(1);
 async fn landing(State(st): State<AppState>, headers: HeaderMap) -> Response {
     let boot = super::public::landing_boot(&st, &headers).await;
     st.assets.page(Page::Landing, boot.as_ref())
-}
-
-async fn survey(State(st): State<AppState>) -> Response {
-    st.assets.page(Page::Survey, None)
 }
 
 async fn admin(State(st): State<AppState>) -> Response {

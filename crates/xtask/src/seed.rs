@@ -23,7 +23,6 @@ use gate_db::Db;
 use gate_db::repo::audit::NewAudit;
 use gate_db::repo::discord::BanInfo;
 use gate_db::repo::errors::{AutoResolve, ErrorRow};
-use gate_db::repo::feedback::Survey;
 use gate_db::repo::keys::NewKey;
 use gate_db::repo::registration::NewRegistration;
 use gate_db::repo::usage::{NewLog, Success};
@@ -450,52 +449,6 @@ async fn seed_member_extras(db: &Db, now: f64, keys: &[SeededKey]) -> Result<()>
     )
     .await?;
 
-    // /反馈：4 份。前三份是成员写的话（`{"text": …}`），最后一份是旧版选择题的记录（看后台怎么显示旧记录）
-    let feedback = [
-        (
-            1usize,
-            r#"{"text": "晚上八点左右排队有点久，希望能快一点。"}"#,
-        ),
-        (
-            2,
-            r#"{"text": "教程写得很清楚，已经在 ComfyUI 里配好了，谢谢站长！\n另外想问一下，V5 的额度以后会不会再多一点？每天三张有时候不太够用，想多试几个提示词。"}"#,
-        ),
-        (3, r#"{"text": "一切正常，没有问题。"}"#),
-        (
-            6,
-            r#"{"score": "满意", "pain": "排队太久 / 经常提示人多", "wish": "多给一些 V5", "client": "手机 App", "freq": "每天都用"}"#,
-        ),
-    ];
-    for (n, (who, answers)) in feedback.into_iter().enumerate() {
-        db.insert_feedback(
-            now - DAY * (n as f64 + 0.5),
-            &keys[who].discord_id,
-            &format!("user{who}"),
-            Some(keys[who].id),
-            answers,
-        )
-        .await?;
-    }
-
-    // 详细问卷（/survey）：三位成员，月见草不填
-    for (who, understand, improve) in [
-        (1usize, "基本理解", "稳定性、教程和文档"),
-        (2, "完全理解", "出图速度"),
-        (3, "基本理解", "多给一些 V5"),
-    ] {
-        db.save_survey(
-            keys[who].id,
-            &Survey {
-                client: "柏宝绘 1.2".into(),
-                understand: understand.into(),
-                improve: improve.into(),
-                improve_other: String::new(),
-            },
-            now - DAY * who as f64 / 2.0,
-        )
-        .await?;
-    }
-
     Ok(())
 }
 
@@ -730,15 +683,8 @@ mod tests {
             assert_eq!(audited, logged);
             assert_eq!(db.audit_image_bytes().await.unwrap(), 0);
 
-            // 会话成员没有问卷、没有券
+            // 会话成员没有券
             let member = seeded.keys[0].id;
-            assert!(
-                db.list_survey()
-                    .await
-                    .unwrap()
-                    .iter()
-                    .all(|r| r["key_id"].as_i64() != Some(member))
-            );
             assert!(
                 db.list_coupons(member, false, now)
                     .await

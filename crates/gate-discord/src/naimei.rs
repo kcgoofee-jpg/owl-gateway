@@ -1,9 +1,7 @@
-//! 奶妹：网关事件循环、斜杠命令分发、反馈弹窗、向网关报心跳。
+//! 奶妹：网关事件循环、斜杠命令分发、向网关报心跳。
 //!
 //! 与 Discord 的交互次序：
 //! - `/register /quota /resetkey /help`：先 `defer()`（3 秒内确认），再去问网关，最后用跟进消息（ephemeral）回话；
-//! - `/反馈`：**立刻弹出**一个只有一段文字的弹窗，不先问网关（先取题目再弹窗，
-//!   网关慢于 3 秒时弹窗会失败）。提交时先 `defer()`，再把文字交给网关，回执只有本人可见；
 //! - 命令出错 → 打 `[bug]` 日志，并回一句「出了点问题……」（已确认过就用跟进消息，否则直接回复）；
 //! - 不发私信、不加表情、不碰论坛，也不读频道里的消息（没有 GUILD_MESSAGES Intent，@奶妹 不会回应）；
 //!   管理员命令都在网页后台，机器人里没有。
@@ -23,8 +21,7 @@ use crate::bridge::{Bridge, who_payload};
 use crate::commands::{self, Command, NAIMEI_INTENTS};
 use crate::config::NaimeiConfig;
 use crate::events::{
-    self, Gateway, GuildInfo, INTERACTION_APPLICATION_COMMAND, INTERACTION_MODAL_SUBMIT,
-    Interaction, ReadyInfo, User,
+    self, Gateway, GuildInfo, INTERACTION_APPLICATION_COMMAND, Interaction, ReadyInfo, User,
 };
 use crate::handlers::{self, Backend, HandlerError};
 
@@ -155,11 +152,10 @@ impl Naimei {
 
     // ---------- 交互入口 ----------
 
-    /// 处理一条 INTERACTION_CREATE（斜杠命令 / 弹窗提交）；其他类型忽略。
+    /// 处理一条 INTERACTION_CREATE（斜杠命令）；其他类型忽略。
     pub async fn handle_interaction(self: &Arc<Self>, it: Interaction) {
         match it.kind {
             INTERACTION_APPLICATION_COMMAND => self.handle_command(&it).await,
-            INTERACTION_MODAL_SUBMIT => self.handle_modal_submit(&it).await,
             _ => {}
         }
     }
@@ -205,7 +201,6 @@ impl Naimei {
     ) -> Result<(), CmdError> {
         match command {
             Command::Register => self.cmd_register(it, r).await,
-            Command::Feedback => self.cmd_feedback(r).await,
             Command::ResetKey => self.cmd_resetkey(it, r).await,
         }
     }
@@ -245,42 +240,6 @@ impl Naimei {
             b.text()
         };
         Ok(r.followup(&text).await?)
-    }
-
-    /// `/反馈`：立刻弹出只有一段文字的表单。成员自己发起，不私信、不群发。
-    async fn cmd_feedback(&self, r: &Responder<'_>) -> Result<(), CmdError> {
-        Ok(r.send_modal(handlers::feedback_modal()).await?)
-    }
-
-    /// 弹窗提交。出错只记日志，不回成员消息。
-    /// 机器人只有 `/反馈` 这一个弹窗，所以不再区分 `custom_id`（网关会拒绝空内容）。
-    async fn handle_modal_submit(self: &Arc<Self>, it: &Interaction) {
-        if let Err(e) = self.submit_feedback(it).await {
-            error!("[bug] feedback submit failed: {}: {e}", e.kind());
-        }
-    }
-
-    async fn submit_feedback(&self, it: &Interaction) -> Result<(), CmdError> {
-        let r = Responder::new(self, it);
-        r.defer().await?;
-        let components = it
-            .data
-            .as_ref()
-            .map(|d| d.components.as_slice())
-            .unwrap_or(&[]);
-        let text = handlers::feedback_text(&events::modal_values(components));
-        let username = it.actor().map_or("", |u| u.username.as_str());
-        let b = self
-            .backend(
-                "/self-register/feedback",
-                it,
-                &[
-                    ("text", json!(text)),
-                    ("username", json!(handlers::clip(username, 80))),
-                ],
-            )
-            .await?;
-        Ok(r.followup(&handlers::feedback_receipt(&b)).await?)
     }
 
     // ---------- 启动 / 同步 ----------
@@ -380,20 +339,14 @@ impl<'a> Responder<'a> {
         Ok(())
     }
 
-    /// 先确认收到：斜杠命令是「正在思考」（类型 5），弹窗提交是无声的更新确认（类型 6）。
+    /// 先确认收到：「正在思考」（类型 5）。
     pub async fn defer(&self) -> Result<(), ApiError> {
-        let modal_submit = self.it.kind == INTERACTION_MODAL_SUBMIT;
-        self.callback(api::defer_body(modal_submit)).await
+        self.callback(api::defer_body()).await
     }
 
     /// 直接回复一条只有本人可见的消息。
     pub async fn send_message(&self, content: &str) -> Result<(), ApiError> {
         self.callback(api::message_body(content)).await
-    }
-
-    /// 弹出表单。
-    pub async fn send_modal(&self, modal: Value) -> Result<(), ApiError> {
-        self.callback(api::modal_body(modal)).await
     }
 
     /// 跟进消息（只有本人可见）。

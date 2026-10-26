@@ -8,11 +8,9 @@ import { Bugs } from "./logs/Bugs";
 import { Usage } from "./logs/Usage";
 import { useOpenBugs } from "./members/shared";
 
-/** 旧地址（生成记录、反馈、问卷原来在日志下）：换到新分区，查询串照带 */
+/** 旧地址（生成记录原来在日志下）：换到新分区，查询串照带 */
 export const MOVED: Record<string, string> = {
   audit: "/admin/audit/records",
-  feedback: "/admin/inbox/feedback",
-  survey: "/admin/inbox/survey",
 };
 
 export const inLogs = (path: string): boolean => inSection("/admin/logs", path);

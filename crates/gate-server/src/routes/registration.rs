@@ -8,8 +8,6 @@
 use crate::action_log::log_action;
 use crate::auth::{client_ip, header_str};
 use crate::error::{ApiError, ApiResult, HttpError, InternalError, ok_json};
-use crate::feedback;
-use crate::key::Key;
 use crate::multipart::read_bounded_body;
 use crate::registration::{DiscordUser, Issued, RegErr, RegistrationService};
 use crate::session::ct_eq;
@@ -29,7 +27,6 @@ pub fn router() -> Router<AppState> {
     Router::new()
         .route("/self-register/resetkey", post(resetkey))
         .route("/self-register/issue", post(issue))
-        .route("/self-register/feedback", post(feedback_submit))
         .route("/self-register/bot/report", post(bot_report))
 }
 
@@ -302,42 +299,6 @@ async fn issue(State(state): State<AppState>, req: Request) -> ApiResult {
             )))
         }
     }
-}
-
-/// /反馈 表单提交（机器人转来）：一段文字，2–1000 字。没领 Key 的成员也能提交。
-async fn feedback_submit(State(state): State<AppState>, req: Request) -> ApiResult {
-    let (parts, body) = req.into_parts();
-    let mut m = read_model(&parts, body).await?;
-    let who = Who::read(&mut m);
-    let username = m.string("username", Some(""));
-    let text = m.string("text", Some(""));
-    let client = m.string("client", Some(""));
-    let version = m.string("version", Some(""));
-    let request_id = m.string("request_id", Some(""));
-    m.finish()?;
-    let svc = authorize(&state, &parts, true)?;
-    let discord_id = checked(svc, &who)?;
-    let key = svc.key_row_for(discord_id).await?;
-    let message = feedback::submit_with_metadata(
-        &state.db,
-        discord_id,
-        &username,
-        key.as_ref().map(Key::id),
-        &text,
-        feedback::Metadata {
-            client: &client,
-            version: &version,
-            request_id: &request_id,
-        },
-        state.now(),
-    )
-    .await
-    .map_err(|e| match e {
-        feedback::SubmitError::Rejected(m) => ApiError::from(HttpError::new(400, m)),
-        feedback::SubmitError::Db(e) => e.into(),
-    })?;
-    log_discord(&state, discord_id, "提交反馈（/反馈）", "", "").await;
-    Ok(ok_json(&json!({"message": message})))
 }
 
 /// 机器人每分钟上报一次心跳，后台「机器人状态」据此显示在线 / 离线。

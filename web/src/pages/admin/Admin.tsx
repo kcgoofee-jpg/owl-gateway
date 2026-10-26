@@ -10,7 +10,6 @@ import {
   Activity,
   Gauge,
   Images,
-  Inbox,
   ListTree,
   LogOut,
   Menu as MenuIcon,
@@ -34,15 +33,7 @@ import { memberLabel } from "./sections/members/logic";
 import type { Member } from "./sections/members/types";
 
 /* ---------------- 分区注册表 ---------------- */
-export type SectionId =
-  | "members"
-  | "audit"
-  | "logs"
-  | "inbox"
-  | "upstream"
-  | "onboarding"
-  | "limits"
-  | "system";
+export type SectionId = "members" | "audit" | "logs" | "upstream" | "onboarding" | "limits" | "system";
 
 type Section = {
   id: SectionId;
@@ -77,14 +68,6 @@ export const SECTIONS: Section[] = [
     path: "/admin/logs",
     icon: ListTree,
     view: lazy(() => import("./sections/logs")),
-  },
-  {
-    id: "inbox",
-    label: "来信",
-    group: "日常",
-    path: "/admin/inbox",
-    icon: Inbox,
-    view: lazy(() => import("./sections/inbox")),
   },
   {
     id: "upstream",

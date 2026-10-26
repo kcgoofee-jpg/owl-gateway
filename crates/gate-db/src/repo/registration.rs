@@ -1,4 +1,4 @@
-//! Discord 领取记录（`discord_registrations`）、待摘身份组（`pending_role_removals`）与成员反馈（`feedback`）。
+//! Discord 领取记录（`discord_registrations`）与待摘身份组（`pending_role_removals`）。
 //!
 //! 领取记录 / 问卷的查询与写入。「几条语句 + 一次 commit」= 这里一个事务；
 //! 中间夹着 Discord 请求的地方分成几个方法（不能在持有未提交写事务时等网络）。
@@ -6,7 +6,6 @@
 use super::INVITE_TAG;
 use crate::{Db, Result, value};
 use rusqlite::{OptionalExtension, params};
-use serde_json::Value;
 
 /// 领取记录里的 Discord 资料（`SELECT username, display_name, avatar`）。
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
@@ -405,121 +404,6 @@ impl Db {
                 params![id, key_id],
             )?;
             mark_role_granted(tx, &id, member_role)
-        })
-        .await
-    }
-
-    // ------------------------------------------------------------------ 成员反馈
-
-    /// 这个人最近一份反馈的时间。
-    pub async fn last_feedback_ts(&self, discord_id: &str) -> Result<Option<f64>> {
-        let id = discord_id.to_string();
-        self.read(move |c| {
-            c.query_row(
-                "SELECT MAX(ts) FROM feedback WHERE discord_id=?",
-                [id],
-                |r| value::f64_opt(r, 0),
-            )
-        })
-        .await
-    }
-
-    /// 存一份反馈（`answers` 是已序列化的 JSON）。
-    pub async fn insert_feedback(
-        &self,
-        ts: f64,
-        discord_id: &str,
-        username: &str,
-        key_id: Option<i64>,
-        answers: &str,
-    ) -> Result<()> {
-        let (id, username, answers) = (
-            discord_id.to_string(),
-            username.to_string(),
-            answers.to_string(),
-        );
-        self.write(move |tx| {
-            tx.execute(
-                "INSERT INTO feedback (ts, discord_id, username, key_id, answers) VALUES (?,?,?,?,?)",
-                params![ts, id, username, key_id, answers],
-            )?;
-            Ok(())
-        })
-        .await
-    }
-
-    /// 后台查看：新 → 旧，附 Key 名字（列顺序：id, ts, discord_id, username, key_id, answers, name）。
-    pub async fn list_feedback(&self, limit: i64) -> Result<Vec<Value>> {
-        self.read(move |c| {
-            let mut stmt = c.prepare(
-                "SELECT f.id, f.ts, f.discord_id, f.username, f.key_id, f.answers, k.name FROM feedback f \
-                 LEFT JOIN api_keys k ON k.id=f.key_id ORDER BY f.ts DESC LIMIT ?",
-            )?;
-            stmt.query_map([limit], value::row_json)?.collect()
-        })
-        .await
-    }
-
-    /// 请求编号只在日志所属 Key 当前归属或已删除 Key 墓碑归属一致时才视为本人请求。
-    pub async fn feedback_request_belongs_to(&self, discord_id: &str, rid: &str) -> Result<bool> {
-        let (discord_id, rid) = (discord_id.to_string(), rid.to_string());
-        self.read(move |c| {
-            c.query_row(
-                "SELECT EXISTS(\
-                    SELECT 1 FROM usage_log u JOIN api_keys k ON k.id=u.key_id \
-                    WHERE u.rid=?1 AND k.discord_id=?2 \
-                    UNION ALL \
-                    SELECT 1 FROM usage_log u JOIN deleted_key_owners d ON d.key_id=u.key_id \
-                    WHERE u.rid=?1 AND d.discord_id=?2\
-                )",
-                params![rid, discord_id],
-                |r| r.get::<_, bool>(0),
-            )
-        })
-        .await
-    }
-
-    /// 反馈审核标记与 answers JSON 一起更新，避免额外 schema 迁移。
-    pub async fn set_feedback_reviewed(
-        &self,
-        id: i64,
-        reviewed_at: Option<f64>,
-        reviewed_by: &str,
-    ) -> Result<bool> {
-        let reviewed_by = reviewed_by.to_string();
-        self.write(move |tx| {
-            let Some(raw) = tx
-                .query_row("SELECT answers FROM feedback WHERE id=?", [id], |r| {
-                    r.get::<_, String>(0)
-                })
-                .optional()?
-            else {
-                return Ok(false);
-            };
-            let mut answers = serde_json::from_str::<Value>(&raw)
-                .ok()
-                .and_then(|v| v.as_object().cloned())
-                .unwrap_or_default();
-            answers.insert(
-                "reviewed_at".into(),
-                reviewed_at.map(Value::from).unwrap_or(Value::Null),
-            );
-            answers.insert(
-                "reviewed_by".into(),
-                if reviewed_at.is_some() {
-                    Value::String(reviewed_by.clone())
-                } else {
-                    Value::Null
-                },
-            );
-            tx.execute(
-                "UPDATE feedback SET answers=? WHERE id=?",
-                params![
-                    serde_json::to_string(&Value::Object(answers)).unwrap_or_else(|_| "{}".into()),
-                    id
-                ],
-            )?;
-            Ok(true)
         })
         .await
     }

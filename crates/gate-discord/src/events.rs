@@ -52,7 +52,7 @@ pub struct CommandOption {
     pub value: Option<Value>,
 }
 
-/// `INTERACTION_CREATE.data`（命令与弹窗提交共用，用不到的字段留空）。
+/// `INTERACTION_CREATE.data`（斜杠命令，用不到的字段留空）。
 #[derive(Debug, Clone, Default, Deserialize)]
 pub struct InteractionData {
     #[serde(default)]
@@ -61,14 +61,10 @@ pub struct InteractionData {
     pub kind: Option<u8>,
     #[serde(default)]
     pub options: Vec<CommandOption>,
-    /// 弹窗提交的组件树，保持原始 JSON，由 `modal_values` 取值。
-    #[serde(default)]
-    pub components: Vec<Value>,
 }
 
-/// 交互类型：2 = 斜杠命令，5 = 弹窗提交。
+/// 交互类型：2 = 斜杠命令。
 pub const INTERACTION_APPLICATION_COMMAND: u8 = 2;
-pub const INTERACTION_MODAL_SUBMIT: u8 = 5;
 
 #[derive(Debug, Clone, Deserialize)]
 pub struct Interaction {
@@ -113,33 +109,6 @@ impl Interaction {
             .as_ref()
             .and_then(|d| d.options.iter().find(|o| o.name == name))
     }
-}
-
-/// 弹窗提交里各文字框的取值：`custom_id` → 值列表（只有一个元素；没填是空串，没有 `value` 字段是空列表）。
-/// 组件树是 `Label(18){ component: TextInput(4){ custom_id, value } }`，旧式 `ActionRow(1){ components: [...] }` 也认。
-pub fn modal_values(components: &[Value]) -> Vec<(String, Vec<String>)> {
-    fn walk(v: &Value, out: &mut Vec<(String, Vec<String>)>) {
-        if let Some(inner) = v.get("component") {
-            walk(inner, out);
-        }
-        if let Some(list) = v.get("components").and_then(Value::as_array) {
-            for c in list {
-                walk(c, out);
-            }
-        }
-        if let Some(id) = v.get("custom_id").and_then(Value::as_str) {
-            let values = match v.get("value") {
-                Some(Value::String(text)) => vec![text.clone()],
-                _ => Vec::new(),
-            };
-            out.push((id.to_owned(), values));
-        }
-    }
-    let mut out = Vec::new();
-    for c in components {
-        walk(c, &mut out);
-    }
-    out
 }
 
 /// READY 里我们关心的部分。
@@ -337,29 +306,5 @@ mod tests {
             Gateway::Other
         ));
         assert!(parse("not json").is_err());
-    }
-
-    #[test]
-    fn modal_values_reads_text_input_value_in_label_and_action_row() {
-        // /反馈：Label(18) 里包着 TextInput(4)，取值字段是 `value`
-        let comps = vec![
-            json!({"type": 18, "id": 1, "component": {"type": 4, "id": 2, "custom_id": "text", "value": "排队有点久\n希望快一点"}}),
-            // 旧式 ActionRow(1) 包着的文字框，以及没填的文字框
-            json!({"type": 1, "components": [{"type": 4, "custom_id": "row", "value": "旧式"}]}),
-            json!({"type": 18, "id": 3, "component": {"type": 4, "id": 4, "custom_id": "empty", "value": ""}}),
-            json!({"type": 18, "id": 5, "component": {"type": 4, "id": 6, "custom_id": "absent"}}),
-        ];
-        assert_eq!(
-            modal_values(&comps),
-            vec![
-                (
-                    "text".to_string(),
-                    vec!["排队有点久\n希望快一点".to_string()]
-                ),
-                ("row".to_string(), vec!["旧式".to_string()]),
-                ("empty".to_string(), vec![String::new()]),
-                ("absent".to_string(), vec![]),
-            ]
-        );
     }
 }

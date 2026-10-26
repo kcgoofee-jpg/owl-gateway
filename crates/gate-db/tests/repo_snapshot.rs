@@ -10,7 +10,6 @@ use gate_core::{clock::Clock, pyval, reasons::reason_label};
 use gate_db::repo::{
     audit::NewAudit,
     discord::BanInfo,
-    feedback::Survey,
     keys::NewKey,
     usage::{LogFilter, NewLog, Success},
 };
@@ -407,18 +406,6 @@ async fn call(db: &Db, c: &Case) -> Out {
             };
             json!(db.list_bans(&q).await?)
         }
-        // ---------------- feedback
-        "save_survey" => {
-            let sv = Survey {
-                client: s(c.kwarg("client"), ""),
-                understand: s(c.kwarg("understand"), ""),
-                improve: s(c.kwarg("improve"), ""),
-                improve_other: s(c.kwarg("improve_other"), ""),
-            };
-            db.save_survey(int(a(0, "key_id"), 0), &sv, now).await?;
-            Value::Null
-        }
-        "list_survey" => json!(db.list_survey().await?),
         // ---------------- keys
         "create_key" => {
             let nk: NewKey = serde_json::from_value(c.arg(0).clone())
@@ -797,7 +784,6 @@ area_tests!(
     coupons,
     admin_actions,
     discord,
-    feedback,
     keys,
     counters,
     usage,
@@ -830,8 +816,6 @@ const METHODS: &[&str] = &[
     "ban_discord",
     "unban_discord",
     "list_bans",
-    "save_survey",
-    "list_survey",
     "create_key",
     "get_key",
     "get_key_by_token",

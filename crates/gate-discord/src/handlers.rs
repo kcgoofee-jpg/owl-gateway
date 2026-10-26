@@ -17,20 +17,9 @@ pub const BACKEND_UNAVAILABLE: &str = "服务暂时不可用，请稍后再试�
 pub const BACKEND_FAILED: &str = "请求失败。";
 pub const REGISTER_WRONG_GUILD: &str = "请在指定服务器使用 /register。";
 pub const REGISTER_UNAVAILABLE: &str = "领 Key 暂不可用，请稍后再试。";
-pub const REGISTER_DONE: &str = "领取成功。Key 已通过 Discord 私密回复发送；登录网站可查看额度，也能在右上角账户菜单复制 Key。首次登录会弹出使用体验问卷。";
+pub const REGISTER_DONE: &str =
+    "领取成功。Key 已通过 Discord 私密回复发送；登录网站可查看额度，也能在右上角账户菜单复制 Key。";
 pub const REGISTER_NOT_ELIGIBLE: &str = "暂时无法领取 Key。请查看这条私密回复中的具体原因；若提示先登录网站核验身份组，请完成后再使用 /register。";
-pub const FEEDBACK_DEFAULT_RECEIPT: &str = "收到啦～";
-pub const FEEDBACK_MODAL_TITLE: &str = "猫头鹰公益站 · 反馈";
-pub const FEEDBACK_LABEL: &str = "想对站长说的话";
-pub const FEEDBACK_PLACEHOLDER: &str =
-    "遇到的问题、建议都可以写。只有站长能看到，回执只有你自己可见。";
-/// 弹窗和文字框的 custom_id（只有这一个弹窗，固定值就够了，机器人重启后提交也认得）。
-pub const FEEDBACK_MODAL_ID: &str = "owl-feedback";
-pub const FEEDBACK_TEXT_ID: &str = "text";
-/// 文字框的字数范围，和网关一致（网关会再校验一遍）。
-pub const FEEDBACK_MIN_LENGTH: u32 = 2;
-pub const FEEDBACK_MAX_LENGTH: u32 = 1000;
-
 /// 网关响应读不懂：缺字段，或字段的形状不对。
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
 pub enum HandlerError {
@@ -189,55 +178,20 @@ pub fn register_message(status: u16, body: &[u8]) -> Result<String, HandlerError
     }
 }
 
-// ---------- /反馈 ----------
-
-/// 弹窗 JSON：一个必填的多行文字框（TextInput，style 2），包在 Label(18) 里。
-/// 点 `/反馈` 立刻弹出，不先问网关（网关慢时「先取题目再弹窗」会超过 3 秒让弹窗失败）。
-pub fn feedback_modal() -> Value {
-    serde_json::json!({
-        "custom_id": FEEDBACK_MODAL_ID,
-        "title": FEEDBACK_MODAL_TITLE,
-        "components": [{
-            "type": 18,
-            "label": FEEDBACK_LABEL,
-            "component": {
-                "type": 4,
-                "custom_id": FEEDBACK_TEXT_ID,
-                "style": 2,
-                "min_length": FEEDBACK_MIN_LENGTH,
-                "max_length": FEEDBACK_MAX_LENGTH,
-                "required": true,
-                "placeholder": FEEDBACK_PLACEHOLDER,
-            },
-        }],
-    })
-}
-
-/// 弹窗提交里文字框的内容（`events::modal_values` 取出的 custom_id → 值列表）；没找到就是空串，交给网关拒绝。
-pub fn feedback_text(submitted: &[(String, Vec<String>)]) -> String {
-    submitted
-        .iter()
-        .find(|(id, _)| id == FEEDBACK_TEXT_ID)
-        .and_then(|(_, v)| v.first())
-        .cloned()
-        .unwrap_or_default()
-}
-
-/// 提交后的回执：200 且是对象 → `message`（没有则「收到啦～」），否则网关的说明文字。
-pub fn feedback_receipt(b: &Backend) -> String {
-    match (&b.data, b.is_ok()) {
-        (Value::Object(o), true) => o
-            .get("message")
-            .map_or_else(|| FEEDBACK_DEFAULT_RECEIPT.to_owned(), show),
-        (_, true) => FEEDBACK_DEFAULT_RECEIPT.to_owned(),
-        _ => b.text(),
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
     use serde_json::json;
+
+    fn interaction(user: Value, member_extra: Value) -> Interaction {
+        serde_json::from_value(json!({
+            "id": "900000000000000010", "application_id": "900000000000000003", "type": 2, "token": "t",
+            "guild_id": "900000000000000001",
+            "member": {"user": user, "nick": member_extra},
+            "data": {"name": "register"},
+        }))
+        .unwrap()
+    }
 
     #[test]
     fn resetkey_text_shows_the_key_once() {
@@ -317,74 +271,6 @@ mod tests {
             REGISTER_UNAVAILABLE
         );
         assert!(register_message(200, b"[1]").is_err());
-    }
-
-    #[test]
-    fn feedback_receipts() {
-        let ok = Backend {
-            status: 200,
-            data: json!({"message": "收到啦，谢谢你的反馈～奶妹会转给站长 ✨"}),
-        };
-        assert_eq!(
-            feedback_receipt(&ok),
-            "收到啦，谢谢你的反馈～奶妹会转给站长 ✨"
-        );
-        let bare = Backend {
-            status: 200,
-            data: json!({}),
-        };
-        assert_eq!(feedback_receipt(&bare), FEEDBACK_DEFAULT_RECEIPT);
-        let list = Backend {
-            status: 200,
-            data: json!([1]),
-        };
-        assert_eq!(feedback_receipt(&list), FEEDBACK_DEFAULT_RECEIPT);
-        let cd = Backend {
-            status: 400,
-            data: json!("刚刚已经收到你的反馈啦，过 10 分钟再提交新的吧。"),
-        };
-        assert_eq!(
-            feedback_receipt(&cd),
-            "刚刚已经收到你的反馈啦，过 10 分钟再提交新的吧。"
-        );
-        assert_eq!(
-            feedback_receipt(&Backend::unavailable()),
-            BACKEND_UNAVAILABLE
-        );
-    }
-
-    #[test]
-    fn feedback_modal_is_one_required_paragraph_in_a_label() {
-        assert_eq!(
-            feedback_modal().to_string(),
-            r#"{"custom_id":"owl-feedback","title":"猫头鹰公益站 · 反馈","components":[{"type":18,"label":"想对站长说的话","component":{"type":4,"custom_id":"text","style":2,"min_length":2,"max_length":1000,"required":true,"placeholder":"遇到的问题、建议都可以写。只有站长能看到，回执只有你自己可见。"}}]}"#
-        );
-        // Discord 的长度限制：标题 / Label ≤ 45 字，占位符 ≤ 100 字
-        assert!(FEEDBACK_MODAL_TITLE.chars().count() <= 45);
-        assert!(FEEDBACK_LABEL.chars().count() <= 45);
-        assert!(FEEDBACK_PLACEHOLDER.chars().count() <= 100);
-    }
-
-    #[test]
-    fn feedback_text_comes_from_the_text_input_only() {
-        let submitted = vec![
-            ("other".to_string(), vec!["不相干".to_string()]),
-            ("text".to_string(), vec!["排队有点久".to_string()]),
-        ];
-        assert_eq!(feedback_text(&submitted), "排队有点久");
-        assert_eq!(feedback_text(&submitted[..1]), "");
-        assert_eq!(feedback_text(&[]), "");
-        assert_eq!(feedback_text(&[("text".to_string(), vec![])]), "");
-    }
-
-    fn interaction(user: Value, member_extra: Value) -> Interaction {
-        serde_json::from_value(json!({
-            "id": "900000000000000010", "application_id": "900000000000000003", "type": 2, "token": "t",
-            "guild_id": "900000000000000001",
-            "member": {"user": user, "nick": member_extra},
-            "data": {"name": "register"},
-        }))
-        .unwrap()
     }
 
     #[test]

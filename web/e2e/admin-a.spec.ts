@@ -50,11 +50,6 @@ const PAGES: Array<{ name: string; path: string; ready: (p: Page) => ReturnType<
     path: "/admin/logs/bugs",
     ready: (p) => p.getByRole("button", { name: "全部标记已处理" }),
   },
-  {
-    name: "inbox-survey",
-    path: "/admin/inbox/survey",
-    ready: (p) => p.getByText("已填", { exact: true }).or(p.getByText("还没有成员填过问卷")),
-  },
 ];
 
 async function open(
@@ -587,47 +582,6 @@ test.describe("已登录", () => {
     await off.getByRole("button", { name: "停用", exact: true }).click();
     await expect(off).toBeHidden();
     await expect(tmp).toHaveCount(0);
-    expect(errs).toEqual([]);
-  });
-
-  test("来信：问卷 / 文字反馈是两个 tab，反馈一条一行、旧版选择题显示成一行摘要，可搜索", async ({
-    page,
-  }) => {
-    const errs = watchConsole(page, "/admin/api/events");
-    await open(page, "/admin/inbox/survey", PAGES[5]?.ready as never);
-    // 分区根路径换到问卷页；来信有两个子页
-    await page.goto("/admin/inbox");
-    await expect(page).toHaveURL(/\/admin\/inbox\/survey$/);
-    const tabs = page.getByRole("navigation", { name: "来信类型" });
-    await expect(tabs.getByRole("link", { name: "问卷" })).toHaveAttribute("aria-current", "page");
-    // 日志页搬走的旧反馈地址直接落在文字反馈子页（不再折在问卷页底部）
-    await page.goto("/admin/logs/feedback");
-    await expect(page).toHaveURL(/\/admin\/inbox\/feedback$/);
-    await expect(tabs.getByRole("link", { name: /文字反馈/ })).toHaveAttribute("aria-current", "page");
-    await expect(page.getByRole("columnheader")).toHaveText([
-      "时间",
-      "成员",
-      "内容",
-      "客户端 / 请求",
-      "处理状态",
-    ]);
-    // 评价筛选和选择题统计已经去掉
-    await expect(page.getByLabel("评价")).toHaveCount(0);
-    await expect(page.getByText("好评满意率")).toHaveCount(0);
-    // 新记录是成员写的话；旧记录（种子里有一条）是一行摘要
-    await expect(page.getByText("晚上八点左右排队有点久，希望能快一点。")).toBeVisible();
-    await expect(page.getByText(/^（旧版选择题）整体：满意；困扰：排队太久/)).toBeVisible();
-    expect(await seriousViolations(page), "feedback").toEqual([]);
-    // 按内容搜；换成找不到的关键字显示空状态
-    const box = page.getByRole("searchbox", { name: "搜索" });
-    await box.fill("ComfyUI");
-    await expect(page.getByText("教程写得很清楚")).toBeVisible();
-    await expect(page.getByText("晚上八点左右排队有点久")).toHaveCount(0);
-    await box.fill("旧版选择题");
-    await expect(page.getByText(/^（旧版选择题）/)).toBeVisible();
-    await expect(page.getByText("教程写得很清楚")).toHaveCount(0);
-    await box.fill("没有人会写这句话");
-    await expect(page.getByText("未找到符合条件的反馈")).toBeVisible();
     expect(errs).toEqual([]);
   });
 

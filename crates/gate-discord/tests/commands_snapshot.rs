@@ -36,7 +36,7 @@ fn command_definitions_equal_the_snapshot() {
 fn only_the_member_commands_are_registered() {
     let defs = commands::definitions();
     let names: Vec<&str> = defs.iter().map(|d| d["name"].as_str().unwrap()).collect();
-    assert_eq!(names, ["register", "反馈", "resetkey"]);
+    assert_eq!(names, ["register", "resetkey"]);
     for d in &defs {
         // 所有人都能用：没有权限限制；只注册斜杠命令，没有右键菜单命令
         assert!(d["default_member_permissions"].is_null(), "{d}");
