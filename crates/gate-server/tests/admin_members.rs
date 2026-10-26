@@ -590,12 +590,11 @@ async fn explicit_quota_modes_round_trip_with_limit_zero() {
     assert_eq!(r.json()["key"]["quota_limits"]["images"]["mode"], "limit");
     assert_eq!(r.json()["key"]["quota_limits"]["images"]["value"], 0.0);
     let stored = e.state.db.get_key(1).await.unwrap().unwrap();
-    assert_eq!(
+    assert!(
         stored["quota_limits"]
             .as_str()
             .unwrap()
-            .contains("\"value\":0"),
-        true
+            .contains("\"value\":0")
     );
 }
 
