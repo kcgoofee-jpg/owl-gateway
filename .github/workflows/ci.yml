@@ -15,6 +15,8 @@ permissions:
 env:
   CARGO_TERM_COLOR: always
   CARGO_INCREMENTAL: 0
+  CARGO_NET_RETRY: "3"
+  CARGO_NET_TIMEOUT: "30"
 
 jobs:
   web:
@@ -41,10 +43,28 @@ jobs:
       - run: pnpm vitest run
       - run: pnpm vite build
 
-  rust:
-    name: rust (fmt / clippy / test)
+  # Lint and test run on separate runners (shared rust-cache): clippy 的 check 产物和
+  # test 的二进制产物本来就不能复用，串行等于把工作区编两遍。
+  lint:
+    name: rust (fmt / clippy)
     runs-on: ubuntu-24.04
-    # Hang guard only: ~7 minutes warm, worst-case cold build stays well below this.
+    # Hang guard only: ~4 minutes warm.
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v7
+      - name: BoringSSL build deps
+        run: bash tools/ci/build-deps.sh
+        timeout-minutes: 5
+      - run: rustup show active-toolchain || rustup toolchain install
+      - uses: Swatinem/rust-cache@v2
+      # fmt 不编译：放在最前面，格式错误 30 秒内就能反馈
+      - run: cargo fmt --all --check
+      - run: cargo clippy --workspace --all-targets --locked -- -D warnings
+
+  test:
+    name: rust (test)
+    runs-on: ubuntu-24.04
+    # Hang guard only: ~5 minutes warm, worst-case cold build stays well below this.
     timeout-minutes: 30
     steps:
       - uses: actions/checkout@v7
@@ -53,8 +73,6 @@ jobs:
         timeout-minutes: 5
       - run: rustup show active-toolchain || rustup toolchain install
       - uses: Swatinem/rust-cache@v2
-      - run: cargo fmt --all --check
-      - run: cargo clippy --workspace --all-targets --locked -- -D warnings
       - run: cargo test --workspace --locked
 
   e2e:
@@ -70,18 +88,17 @@ jobs:
       - name: Use runner BoringSSL build tools
         run: bash tools/ci/build-deps.sh
         timeout-minutes: 5
-      - name: Update apt indexes
-        run: sudo apt-get update
-        timeout-minutes: 5
       # Prevent dpkg from rebuilding the man-db index after each package install.
       - name: Skip man-db triggers
         run: sudo rm -f /var/lib/man-db/auto-update
-      - name: Install lightweight CJK font
+      - name: Update apt indexes and install lightweight CJK font
         # WQY MicroHei covers the simplified-Chinese UI text used by the layout checks;
         # Noto CJK was a 61 MB package and dominated E2E setup downloads.
         # Acquire::Retries: the 24-minute failed run (39969197783) was a slow apt mirror,
         # not a regression — retry the download instead of burning the whole step timeout.
-        run: sudo apt-get install -y -o Acquire::Retries=3 --no-install-recommends fonts-wqy-microhei
+        run: |
+          sudo apt-get update -o Acquire::Retries=3 -o Acquire::http::Timeout=30
+          sudo apt-get install -y -o Acquire::Retries=3 --no-install-recommends fonts-wqy-microhei
         timeout-minutes: 10
       - run: rustup show active-toolchain || rustup toolchain install
       - uses: Swatinem/rust-cache@v2

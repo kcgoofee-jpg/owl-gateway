@@ -8,6 +8,9 @@
 
 ### 成员可感知
 
+- **The gallery waterfall is a guest view again (10-26).** The homepage 示例图瀑布 shows for signed-out visitors only; members with a Key see their quota rings and status without the example wall underneath.
+- **The survey and the feedback channels are gone (10-26).** The one-time 使用体验问卷 (page, first-login dialog and footer link) and the member feedback flow (the bot's /反馈 command and the web submission behind it) are removed; the bot is back to just /register and /resetkey. Problems and requests: write in the Discord server directly.
+
 - **Homepage meters keep their shape; three owner asks land (10-24).** The trial restyle of the guest meters is reverted whole — the numbers, layout and wording everyone knows are back. What stays: the shared gauge draws at twice the stroke with a slightly deeper bow, the standing gallery hint line is gone, and the gaps around the guide tabs and the gallery tighten to an even rhythm.
 
 - **A calmer type scale.** Interface text now steps through four sizes — 12 for auxiliary, 14 for body, 18 for headings, 26 for the first-screen headline — instead of six close values; nothing else about the layout changes. The 智绘姬 guide drops its error-code paragraph, which repeated the usage-rules tab verbatim.
@@ -64,6 +67,10 @@
 - 登录回调的 state 改成带签名、10 分钟有效，Discord 内置浏览器丢了 Cookie 也能完成登录（此前日志里的 `state_ok=n`）。
 
 ### 站长 / 运维
+
+- **The admin inbox section is removed with its features.** 问卷 and 文字反馈 tabs, their APIs (`/member/survey`, `/member/feedback`, `/self-register/feedback`, `/admin/api/feedback*`, `/admin/api/survey`), the Discord modal plumbing, and the `member_survey` / `feedback` tables (dropped on next boot) are gone; old addresses to `/admin/inbox/*` and `/admin/logs/{feedback,survey}` now 404.
+- **The upstream page is rebuilt around what an API key can tell (10-26).** One aggregate read (`GET /admin/api/upstream`) now returns the whole page: one row per account merging the token pool state, the cached official readings (V5 allowance from /user/subscription, ban/verification state from /user/information), per-account request windows and the reconciliation Anlas estimate, plus history, unknown settlements and the two session CSRF tokens. Five read endpoints and the six-card layout collapse into it; each account is one card (official readings, ledger estimate, local observations, v5-limit form), and the two upstream-touching actions stay explicit (查询官方信息 with its 5-minute cooldown, 查询并核对).
+- **CI: rust lint/test split onto parallel runners.** fmt+clippy and cargo test no longer share a job (clippy's check artifacts were never reusable by test — serially the workspace was built twice); the apt index update folds into the font-install step, and cargo network calls retry.
 
 - **Upstream snapshots record per account.** `upstream_snapshots` gains a `token_id` column and the hourly job now writes one row per upstream account (its own V5 percent, recharge rate and Anlas) instead of a single site-wide aggregate. The measured recovery estimate on the 额度记录 page is computed per account from its own snapshot series and its own V5 output, shown as 实测 next to 官方恢复. Old aggregate rows (empty token_id) stay for history and no longer feed the estimate.
 - **The members page slims down.** Sorting now lives only on the column headers (they already switch direction on click): the toolbar sort dropdown and its direction toggle are gone. Low-frequency filter chips（还没出过图 / 快被回收 / 24 小时新加入 / 邀请 Key）fold into a 更多 menu that echoes the selection as a closable chip. The audit section drops the 大图 view (the gallery plus its lightbox already cover it), and member detail keeps buttons for actions while the 生成记录 / 请求 jumps become plain links.
