@@ -40,23 +40,30 @@ const STATUS: Record<string, { text: string; tone: "ok" | "warn" | "danger" }> =
 
 export function deliveryLabel(state: MyRequest["delivery_state"]): { text: string; tone: "warn" | "danger" } {
   switch (state) {
-    case "transport_complete": return { text: "服务端传输完成（未确认客户端收到）", tone: "warn" };
-    case "transport_interrupted": return { text: "传输中断", tone: "danger" };
-    case "pending": return { text: "传输中", tone: "warn" };
-    default: return { text: "传输状态未知", tone: "warn" };
+    case "transport_complete":
+      return { text: "服务端传输完成（未确认客户端收到）", tone: "warn" };
+    case "transport_interrupted":
+      return { text: "传输中断", tone: "danger" };
+    case "pending":
+      return { text: "传输中", tone: "warn" };
+    default:
+      return { text: "传输状态未知", tone: "warn" };
   }
 }
 
-export function settlementLabel(status: MyRequest["settlement_status"]): { text: string; tone: "warn" | "danger" } | null {
+export function settlementLabel(
+  status: MyRequest["settlement_status"],
+): { text: string; tone: "warn" | "danger" } | null {
   if (status !== "uncertain") return null;
   return { text: "执行结果待核对 · 有未知余量", tone: "warn" };
 }
 
 export function RequestRow({ r }: { r: MyRequest }) {
   const pendingSettlement = settlementLabel(r.settlement_status);
-  const s = pendingSettlement && r.status !== "ok"
-    ? { text: "执行结果待核对", tone: "warn" as const }
-    : STATUS[r.status] ?? { text: r.status, tone: "warn" as const };
+  const s =
+    pendingSettlement && r.status !== "ok"
+      ? { text: "执行结果待核对", tone: "warn" as const }
+      : (STATUS[r.status] ?? { text: r.status, tone: "warn" as const });
   const timing = [
     r.wait_s != null && r.wait_s >= 1 ? `排队 ${Math.round(r.wait_s)} 秒` : "",
     r.dur_s != null ? `出图 ${Math.round(r.dur_s)} 秒` : "",
@@ -71,8 +78,12 @@ export function RequestRow({ r }: { r: MyRequest }) {
         <span class="spacer" />
         {r.rid && <span class="lp-req__id">编号 {r.rid}</span>}
         <Badge tone={s.tone}>{s.text}</Badge>
-        {r.status === "ok" && pendingSettlement && <Badge tone={pendingSettlement.tone}>{pendingSettlement.text}</Badge>}
-        {r.status === "ok" && <Badge tone={deliveryLabel(r.delivery_state).tone}>{deliveryLabel(r.delivery_state).text}</Badge>}
+        {r.status === "ok" && pendingSettlement && (
+          <Badge tone={pendingSettlement.tone}>{pendingSettlement.text}</Badge>
+        )}
+        {r.status === "ok" && (
+          <Badge tone={deliveryLabel(r.delivery_state).tone}>{deliveryLabel(r.delivery_state).text}</Badge>
+        )}
       </div>
       {r.status === "ok" ? (
         <p class="lp-req__line">{okLine(r)}</p>
@@ -83,10 +94,17 @@ export function RequestRow({ r }: { r: MyRequest }) {
         </p>
       )}
       {pendingSettlement && (
-        <p class="lp-req__meta small">已确认的生成结果仍按上方记录；仍待核对余量：{r.remaining_anlas ?? 0} Anlas · V5 {r.remaining_v5 ?? 0} · 免费图 {r.remaining_legacy ?? 0}。请勿自动重发，先核对请求记录。</p>
+        <p class="lp-req__meta small">
+          已确认的生成结果仍按上方记录；仍待核对余量：{r.remaining_anlas ?? 0} Anlas · V5{" "}
+          {r.remaining_v5 ?? 0} · 免费图 {r.remaining_legacy ?? 0}。请勿自动重发，先核对请求记录。
+        </p>
       )}
       {r.status === "ok" && r.image_available && r.image_url && (
-        <p class="lp-req__meta small"><a href={r.image_url} target="_blank" rel="noreferrer">取回已保存图片</a></p>
+        <p class="lp-req__meta small">
+          <a href={r.image_url} target="_blank" rel="noreferrer">
+            取回已保存图片
+          </a>
+        </p>
       )}
       {timing && <p class="lp-req__meta muted small">{timing}</p>}
     </li>
