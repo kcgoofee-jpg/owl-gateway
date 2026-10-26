@@ -427,7 +427,14 @@ pub async fn build_status(state: &AppState) -> Result<Value, InternalError> {
         Ok(s) => json!({"ok": s.ok, "error": s.error}),
         Err(_) => json!({"ok": 0, "error": 0}),
     };
-    let image_jobs = state.budget.lock().await.reservations.len();
+    let image_jobs = state
+        .budget
+        .lock()
+        .await
+        .reservations
+        .values()
+        .filter(|r| r.active)
+        .count();
     let env = &state.env;
     let algo = pyval::py_str(&site_flag(state, &ALGO_NOTICE).await?);
     let policy = crate::v5_access::evaluate(state, None).await?;

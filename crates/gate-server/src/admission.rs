@@ -519,7 +519,7 @@ impl Reserved {
 
 fn remove_reservation(b: &mut crate::state::Budget, id: u64, state: &AppState) {
     b.reservations.remove(&id);
-    if b.reservations.is_empty() {
+    if !b.reservations.values().any(|r| r.active) {
         state.budget_idle.notify_waiters();
     }
 }
@@ -540,11 +540,18 @@ impl Drop for Reserved {
                     return;
                 }
             };
-            if !matches!(status.as_str(), "released" | "committed") {
-                return;
-            }
             let mut b = db_state.budget.lock().await;
-            remove_reservation(&mut b, id, &db_state);
+            if matches!(
+                status.as_str(),
+                "released" | "committed" | "released_manual"
+            ) {
+                remove_reservation(&mut b, id, &db_state);
+            } else if let Some(reservation) = b.reservations.get_mut(&id) {
+                reservation.active = false;
+                if !b.reservations.values().any(|r| r.active) {
+                    db_state.budget_idle.notify_waiters();
+                }
+            }
         });
     }
 }
@@ -589,6 +596,7 @@ pub async fn reserve_image_budget(
             id,
             Reservation {
                 request_id: ctx.internal_id(),
+                active: true,
                 key_id: key.id(),
                 exclude_global_v5: key.exclude_global_v5(),
                 is_vibe: est.is_vibe,

@@ -329,6 +329,158 @@ async fn unauthorized_disables_token() {
     );
 }
 
+/// A token can be quarantined by another request while this image waits for its last slot.
+/// Non-stream requests may safely reselect because no POST has happened yet; streaming must
+/// either reselect before the send boundary or fail locally without posting to the disabled token.
+#[tokio::test]
+async fn token_disabled_during_slot_wait_is_not_used_for_nonstream_or_stream_post() {
+    async fn quarantine(c: &NaiClient<TestHooks>, up: &MockUpstream, t1: &str, t2_id: &str) {
+        up.push(
+            "/ai/generate-image/suggest-tags",
+            Reply::status(401, "nope"),
+        );
+        let mut tags = RequestOpts::get(format!(
+            "{}/ai/generate-image/suggest-tags?model=m&prompt=p",
+            up.url()
+        ));
+        tags.accept = "application/json";
+        assert!(
+            c.request(tags, &Callbacks::default(), None, &NoObserver)
+                .await
+                .is_err()
+        );
+        assert!(
+            c.tokens()
+                .await
+                .iter()
+                .find(|t| t.token_id == gate_upstream::headers::token_id(t1))
+                .unwrap()
+                .fields()
+                .disabled
+        );
+        assert!(c.set_admin_enabled(t2_id, true).await);
+    }
+
+    // Non-stream: a queued request is safely selected onto the healthy token and sent once.
+    let up = MockUpstream::start().await;
+    up.push(
+        "/ai/generate-image",
+        Reply::status(200, "PK:synthetic-image"),
+    );
+    let hooks = TestHooks::default();
+    let c = NaiClient::new(
+        config(&up.url(), false),
+        hooks,
+        vec![(T1.into(), 5, false), (T2.into(), 5, false)],
+    )
+    .unwrap();
+    let tokens = c.tokens().await;
+    let t1 = tokens
+        .iter()
+        .find(|t| t.token_id == gate_upstream::headers::token_id(T1))
+        .unwrap();
+    let t2_id = gate_upstream::headers::token_id(T2);
+    assert!(c.set_admin_enabled(&t2_id, false).await);
+    let held = t1.image_slots.try_acquire().unwrap();
+    let mut body = image_body(1);
+    let c_wait = c.clone();
+    let url = up.url();
+    let body_wait = body.clone();
+    let task = tokio::spawn(async move {
+        let mut opts = image_opts(&url, &body_wait, 1);
+        opts.v5_free = true;
+        c_wait
+            .request(opts, &Callbacks::default(), None, &NoObserver)
+            .await
+    });
+    tokio::time::timeout(Duration::from_secs(2), async {
+        while t1.fields().pending_v5 == 0 {
+            tokio::time::sleep(Duration::from_millis(2)).await;
+        }
+    })
+    .await
+    .unwrap();
+    quarantine(&c, &up, T1, &t2_id).await;
+    drop(held);
+    let response = task.await.unwrap().unwrap();
+    assert_eq!(response.status, 200);
+    let posts = up.requests_to("/ai/generate-image");
+    assert_eq!(posts.len(), 1);
+    assert_eq!(
+        posts[0].header("authorization"),
+        Some(format!("Bearer {T2}").as_str())
+    );
+
+    // Stream: if the selector has not moved to T2 before the slot opens, reject before POST.
+    let up = MockUpstream::start().await;
+    up.push(
+        "/ai/generate-image-stream",
+        Reply::status(200, "PK:synthetic-image"),
+    );
+    let c = NaiClient::new(
+        config(&up.url(), false),
+        TestHooks::default(),
+        vec![(T1.into(), 5, false), (T2.into(), 5, false)],
+    )
+    .unwrap();
+    let tokens = c.tokens().await;
+    let t1 = tokens
+        .iter()
+        .find(|t| t.token_id == gate_upstream::headers::token_id(T1))
+        .unwrap();
+    let t2_id = gate_upstream::headers::token_id(T2);
+    assert!(c.set_admin_enabled(&t2_id, false).await);
+    let held = t1.image_slots.try_acquire().unwrap();
+    body["parameters"]["stream"] = json!("msgpack");
+    let c_wait = c.clone();
+    let url = format!("{}/ai/generate-image-stream", up.url());
+    let body_wait = body.clone();
+    let task = tokio::spawn(async move {
+        c_wait
+            .image_stream(
+                &url,
+                &body_wait,
+                1,
+                false,
+                true,
+                10.0,
+                &Callbacks::default(),
+                None,
+                &NoObserver,
+            )
+            .await
+    });
+    tokio::time::timeout(Duration::from_secs(2), async {
+        while t1.fields().pending_v5 == 0 {
+            tokio::time::sleep(Duration::from_millis(2)).await;
+        }
+    })
+    .await
+    .unwrap();
+    quarantine(&c, &up, T1, &t2_id).await;
+    drop(held);
+    match task.await.unwrap() {
+        Ok(stream) => stream.finish().await,
+        Err(err) => assert_eq!(
+            err.status, 503,
+            "only a known local refusal is allowed: {err:?}"
+        ),
+    }
+    let posts = up.requests_to("/ai/generate-image-stream");
+    assert!(
+        posts
+            .iter()
+            .all(|r| r.header("authorization") == Some(format!("Bearer {T2}").as_str())),
+        "stream POSTs may use a healthy replacement only: {posts:?}"
+    );
+    if posts.is_empty() {
+        // No replacement was selected in time; it must be a known local refusal.
+        assert_eq!(t1.fields().pending_v5, 0);
+    } else {
+        assert_eq!(posts.len(), 1);
+    }
+}
+
 /// 出图节奏只有一个旋钮（站长 10-23）：每张出完后这个账号歇 [最少, 最多] 秒（账号保护 `Hooks::post_jitter`）。
 #[tokio::test]
 async fn each_image_is_followed_by_a_rest() {

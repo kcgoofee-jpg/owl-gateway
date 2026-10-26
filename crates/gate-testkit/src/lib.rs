@@ -400,14 +400,27 @@ async fn render(reply: Reply) -> Response {
 
 /// 一张最小的真 PNG（64×64，能被图片库解码、能过「完整图片」校验）。
 pub fn tiny_png() -> Vec<u8> {
+    tiny_png_variant(0)
+}
+
+/// Distinct deterministic picture for concurrency / ownership tests.
+pub fn tiny_png_variant(seed: u8) -> Vec<u8> {
     let img = image::RgbImage::from_fn(64, 64, |x, y| {
-        image::Rgb([(x * 4) as u8, (y * 4) as u8, 128])
+        image::Rgb([
+            (x * 4) as u8 ^ seed,
+            (y * 4) as u8,
+            128u8.wrapping_add(seed),
+        ])
     });
     let mut out = std::io::Cursor::new(Vec::new());
     image::DynamicImage::ImageRgb8(img)
         .write_to(&mut out, image::ImageFormat::Png)
         .expect("编码 PNG");
     out.into_inner()
+}
+
+pub fn base64_tiny_png_variant(seed: u8) -> String {
+    base64::engine::general_purpose::STANDARD.encode(tiny_png_variant(seed))
 }
 
 /// 与 NovelAI 一样的 zip：image_0.png …
@@ -424,6 +437,18 @@ pub fn zip_of_pngs(n: usize) -> Vec<u8> {
             .expect("zip");
             z.write_all(&png).expect("zip");
         }
+        z.finish().expect("zip");
+    }
+    buf.into_inner()
+}
+
+pub fn zip_of_png_variant(seed: u8) -> Vec<u8> {
+    let mut buf = std::io::Cursor::new(Vec::new());
+    {
+        let mut z = zip::ZipWriter::new(&mut buf);
+        z.start_file("image_0.png", zip::write::SimpleFileOptions::default())
+            .expect("zip");
+        z.write_all(&tiny_png_variant(seed)).expect("zip");
         z.finish().expect("zip");
     }
     buf.into_inner()
@@ -455,7 +480,14 @@ pub fn sse_event(event: &str, data: &Value) -> Vec<u8> {
 
 /// 一次完整的流式出图：每张 2 个 intermediate + 1 个 final。
 pub fn image_stream(n: usize, wire: &str) -> Vec<(Duration, Bytes)> {
-    let png = tiny_png();
+    image_stream_with_png(n, wire, tiny_png())
+}
+
+pub fn image_stream_variant(n: usize, wire: &str, seed: u8) -> Vec<(Duration, Bytes)> {
+    image_stream_with_png(n, wire, tiny_png_variant(seed))
+}
+
+fn image_stream_with_png(n: usize, wire: &str, png: Vec<u8>) -> Vec<(Duration, Bytes)> {
     let b64 = base64::engine::general_purpose::STANDARD.encode(&png);
     let mut chunks = Vec::new();
     for i in 0..n {

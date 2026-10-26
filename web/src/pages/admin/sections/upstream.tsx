@@ -7,6 +7,7 @@ import AllowanceCard from "./upstream/allowance";
 import type { PoolData } from "./upstream/core";
 import InformationCard from "./upstream/information";
 import ReconcileCard from "./upstream/reconcile";
+import SettlementCard from "./upstream/settlements";
 import TokensCard from "./upstream/tokens";
 import "./upstream.css";
 
@@ -22,6 +23,7 @@ export default function Upstream() {
       <AllowanceCard />
       <InformationCard />
       <ReconcileCard />
+      <SettlementCard />
     </Sect>
   );
 }

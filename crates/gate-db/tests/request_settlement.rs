@@ -1,6 +1,6 @@
 use gate_db::Db;
 use gate_db::repo::keys::NewKey;
-use gate_db::repo::usage::Success;
+use gate_db::repo::usage::{NewLog, Success};
 use serde_json::json;
 
 #[tokio::test]
@@ -184,6 +184,20 @@ async fn recovery_commits_saved_success_once_and_retains_unknown_budget() {
         .await
         .unwrap();
     assert_eq!(status, "result_saved");
+    let fault_payload_after_failure: Option<String> = db
+        .read(|c| {
+            c.query_row(
+                "SELECT result_json FROM request_settlements WHERE request_id='fault'",
+                [],
+                |r| r.get(0),
+            )
+        })
+        .await
+        .unwrap();
+    assert_eq!(
+        fault_payload_after_failure.as_deref(),
+        Some(fault_payload.as_str())
+    );
 
     db.reserve_request_settlement(
         "unknown",
@@ -256,6 +270,20 @@ async fn recovery_commits_saved_success_once_and_retains_unknown_budget() {
     db.commit_saved_request_result("fault", &fault_payload, 9.1)
         .await
         .unwrap();
+    let payload_after_commit: Option<String> = db
+        .read(|c| {
+            c.query_row(
+                "SELECT result_json FROM request_settlements WHERE request_id='known'",
+                [],
+                |r| r.get(0),
+            )
+        })
+        .await
+        .unwrap();
+    assert!(
+        payload_after_commit.is_none(),
+        "success payload is removed after atomic commit"
+    );
     let log_link: (String, f64) = db
         .read(|c| {
             c.query_row(
@@ -337,4 +365,70 @@ async fn recovery_commits_saved_success_once_and_retains_unknown_budget() {
         .await
         .unwrap();
     assert_eq!(actions, 1);
+}
+
+#[tokio::test]
+async fn unknown_failure_usage_log_is_linked_by_internal_id_and_exposes_remaining_budget() {
+    let dir = tempfile::tempdir().unwrap();
+    let db = Db::open(dir.path().join("gate.db")).unwrap();
+    let key: NewKey = serde_json::from_value(json!({
+        "name":"unknown owner", "token":"nai-unknown-owner-test-key-00000000",
+        "daily_images":10, "monthly_anlas":1000.0, "daily_text_tokens":1000, "rpm":60
+    }))
+    .unwrap();
+    let key_id = db.create_key(&key, 1.0).await.unwrap()["id"]
+        .as_i64()
+        .unwrap();
+    db.reserve_request_settlement(
+        "internal-unknown",
+        "short-rid",
+        key_id,
+        "2026-10-25",
+        "2026-10",
+        false,
+        false,
+        4.0,
+        1,
+        1,
+        1.0,
+    )
+    .await
+    .unwrap();
+    db.dispatch_request_settlement(
+        "internal-unknown",
+        "2026-10-25",
+        "2026-10",
+        false,
+        false,
+        4.0,
+        1,
+        1,
+        2.0,
+    )
+    .await
+    .unwrap();
+    db.record_settled_failure(
+        &NewLog {
+            key_id: Some(key_id),
+            key_name: "unknown owner".into(),
+            kind: "image".into(),
+            model: "nai-diffusion-4-5-full".into(),
+            status: "error".into(),
+            up_status: 500,
+            rid: "short-rid".into(),
+            detail: "500 执行结果未知".into(),
+            ..Default::default()
+        },
+        "internal-unknown",
+        true,
+        3.0,
+    )
+    .await
+    .unwrap();
+    let rows = db.member_logs(key_id, 0.0, 0, "", 10).await.unwrap();
+    assert_eq!(rows.len(), 1);
+    assert_eq!(rows[0]["settlement_status"], "uncertain");
+    assert_eq!(rows[0]["remaining_anlas"], 4.0);
+    assert_eq!(rows[0]["remaining_v5"], 1);
+    assert_eq!(rows[0]["remaining_legacy"], 1);
 }

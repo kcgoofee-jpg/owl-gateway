@@ -471,6 +471,11 @@ impl<H: Hooks> NaiClient<H> {
             {
                 return Attempt::Done(Err(e));
             }
+            // The account can be disabled/cooldown while this request waits on the upstream slot.
+            // Retry is safe here: the POST has not started and no dispatch callback has been recorded.
+            if !token.usable(hooks.now()) {
+                return Attempt::Retry;
+            }
             if let Some(check) = cb.before_dispatch.as_ref()
                 && let Err(e) = check().await
             {
@@ -918,6 +923,15 @@ impl<H: Hooks> NaiClient<H> {
                 {
                     fl.finish().await;
                     return Err(e);
+                }
+                // Streaming POSTs are never retried after an ambiguous send. At this point we
+                // still have not persisted dispatch or sent anything, so refuse locally.
+                if !token.usable(hooks.now()) {
+                    fl.finish().await;
+                    return Err(UpstreamError::new(
+                        503,
+                        "所选上游账号状态已变化，本次请求尚未发送；请稍后重试。",
+                    ));
                 }
                 if let Some(on) = cb.on_dispatch.as_ref()
                     && let Err(e) = on().await

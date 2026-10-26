@@ -27,6 +27,8 @@ pub struct NewAudit<'a> {
     pub image_type: &'a str,
     /// 请求编号（与 usage_log.rid 相同）。
     pub rid: &'a str,
+    /// Durable internal request identity. Empty for legacy/non-settled audit rows.
+    pub request_id: &'a str,
 }
 
 /// `audit_images_for_key` 产出的一条：(id, ts, image_type, prompt, negative, extra, 原图字节)。
@@ -197,6 +199,7 @@ impl Db {
         let negative = a.negative.to_string();
         let extra = a.extra.to_string();
         let rid = a.rid.to_string();
+        let request_id = a.request_id.to_string();
         let thumb = a.thumb.map(<[u8]>::to_vec);
         let image_type = if image.is_some() {
             a.image_type.to_string()
@@ -229,6 +232,12 @@ impl Db {
                         rid
                     ],
                 )?;
+                if !request_id.is_empty() {
+                    tx.execute(
+                        "INSERT INTO audit_request_links(request_id,audit_id) VALUES(?,?)",
+                        params![request_id, tx.last_insert_rowid()],
+                    )?;
+                }
                 Ok(())
             })
             .await;
@@ -331,6 +340,26 @@ impl Db {
             ),
             None => (None, String::new()),
         })
+    }
+
+    /// Retrieve a still-retained generated image only through the owning key and durable request ID.
+    pub async fn member_audit_image(
+        &self,
+        key_id: i64,
+        request_id: &str,
+    ) -> Result<Option<(Vec<u8>, String)>> {
+        let request_id = request_id.to_owned();
+        let id = self.read(move |c| {
+            c.query_row(
+                "SELECT a.id FROM generation_audit a JOIN audit_request_links al ON al.audit_id=a.id JOIN usage_request_links u ON u.request_id=al.request_id JOIN usage_log l ON l.id=u.usage_log_id WHERE a.key_id=? AND al.request_id=? AND a.status='ok' AND l.key_id=a.key_id AND l.status='ok' LIMIT 1",
+                rusqlite::params![key_id, request_id], |r| r.get::<_, i64>(0),
+            ).optional()
+        }).await?;
+        let Some(id) = id else {
+            return Ok(None);
+        };
+        let (image, kind) = self.audit_image(id).await?;
+        Ok(image.map(|bytes| (bytes, kind)))
     }
 
     /// 某把 Key 的全部生成记录（只要文字，不读图片）：多人导出时，原图过期的账号也要把提示词列出来。

@@ -204,12 +204,15 @@ pub(super) async fn shielded<T: Send + 'static>(
     fut: impl Future<Output = Result<T, ApiError>> + Send + 'static,
 ) -> Result<T, ApiError> {
     let (tx, rx) = tokio::sync::oneshot::channel();
-    let c = ctx.clone();
+    let (c, s) = (ctx.clone(), state.clone());
     state.tasks.spawn(ctx.clone().scope(async move {
         let r = fut.await;
         // 调用方已经走了：客户端自己的行为，不记 Bug（见 stream.rs），只留一行日志
         if tx.send(r).is_err() {
             tracing::info!(rid = %c.rid(), "客户端在图片返回前断开连接（图已生成并计数）");
+            if let Err(e) = s.db.set_request_delivery(&c.internal_id(), "transport_interrupted", s.now()).await {
+                tracing::error!(error = %e, request_id = %c.internal_id(), "delivery state update failed after early disconnect");
+            }
         }
     }));
     rx.await

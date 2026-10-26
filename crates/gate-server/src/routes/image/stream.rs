@@ -12,7 +12,7 @@ use crate::reqctx::ReqCtx;
 use crate::state::AppState;
 use axum::body::Body;
 use axum::http::HeaderValue;
-use axum::response::{IntoResponse, Response};
+use axum::response::Response;
 use bytes::Bytes;
 use futures::StreamExt;
 use gate_core::image_events::{ImageEventTracker, WireFormat, encode_image_event};
@@ -55,7 +55,7 @@ struct StreamSink {
 
 enum Head {
     Start,
-    Error(u16, String),
+    Error(u16, Value),
 }
 
 impl StreamSink {
@@ -83,13 +83,14 @@ impl StreamSink {
         }
     }
 
-    async fn error(&mut self, status: u16, message: &str) {
+    async fn error(&mut self, error: GateError) {
+        let status = crate::error::member_status(error.status, error.upstream).0;
+        let body = error.response_body();
         if let Some(h) = self.head.take() {
-            let _ = h.send(Head::Error(status, message.to_string()));
+            let _ = h.send(Head::Error(status, body));
         } else {
-            let (status, replaced) = crate::error::member_status(status, true);
-            let message = replaced.unwrap_or(message);
-            let ev = json!({"event_type": "error", "error": message, "message": message, "status_code": status});
+            let message = body["message"].as_str().unwrap_or("请求失败");
+            let ev = json!({"event_type": "error", "error": body["error"], "message": message, "status_code": status});
             if let Ok(frame) = encode_image_event(&ev, self.wire) {
                 self.chunk(frame).await;
             }
@@ -145,11 +146,8 @@ pub(super) async fn stream(
             h.insert("x-accel-buffering", HeaderValue::from_static("no"));
             Ok(track_delivery(r, &state, &ctx))
         }
-        Ok(Head::Error(status, message)) => {
-            // Head errors here are upstream failures: never show a member a 402 (see member_status)
-            let (status, replaced) = crate::error::member_status(status, true);
-            let message = replaced.map_or(message, str::to_string);
-            let mut r = json_response(status, &json!({"error": message, "message": message}));
+        Ok(Head::Error(status, body)) => {
+            let mut r = json_response(status, &body);
             if status == 429 {
                 r.headers_mut()
                     .insert("retry-after", HeaderValue::from(15u64));
@@ -220,11 +218,11 @@ async fn run_stream(
                     .detail(detail160(exc.status, &exc.message))
                     .reason(exc.code.clone()),
             );
-            sink.error(exc.status, &exc.message).await;
+            sink.error(exc).await;
         }
-        Err(other) => {
-            let resp = other.into_response();
-            sink.error(resp.status().as_u16(), "服务器内部错误，已自动记录")
+        Err(_other) => {
+            let unknown = ctx.execution_unknown();
+            sink.error(GateError::new(500, "服务器内部错误，已自动记录。").uncertain(unknown))
                 .await;
         }
     }
@@ -440,7 +438,20 @@ async fn perform_stream(
             } else {
                 format!("{message}（上游：{}）", tracker.error_detail())
             });
-            sink.error(status, &message).await;
+            sink.error(
+                GateError::with_code(
+                    status,
+                    message,
+                    if uncertain {
+                        "execution_unknown"
+                    } else {
+                        "upstream_error"
+                    },
+                )
+                .uncertain(uncertain)
+                .from_upstream(true),
+            )
+            .await;
             None
         }
         Err(g) => {

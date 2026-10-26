@@ -269,6 +269,10 @@ pub fn current_rid() -> String {
     current().map(|c| c.rid()).unwrap_or_default()
 }
 
+pub fn current_execution_unknown() -> bool {
+    current().is_some_and(|c| c.execution_unknown())
+}
+
 /// 8 位十六进制（`secrets.token_hex(4)`）。
 fn new_rid() -> String {
     let n: u32 = rand::random();

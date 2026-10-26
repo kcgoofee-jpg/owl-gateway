@@ -48,13 +48,19 @@ pub(super) fn router() -> Router<AppState> {
         )
 }
 
-async fn request_settlements(State(state): State<AppState>, _s: AdminSession) -> ApiResult {
+async fn request_settlements(
+    State(state): State<AppState>,
+    _s: AdminSession,
+    req: Request,
+) -> ApiResult {
+    let (parts, _) = req.into_parts();
+    let csrf = csrf_token(&state, &session_cookie(&parts));
     let rows = state.db.list_unknown_request_settlements().await?;
     Ok(ok_json(&json!({"items": rows.into_iter().map(|r| json!({
         "request_id": r.request_id, "rid": r.rid, "key_id": r.key_id, "status": r.status,
         "service_day": r.day, "service_month": r.month, "reserved_anlas": r.anlas,
         "reserved_v5": r.v5, "reserved_legacy": r.legacy, "is_vibe": r.is_vibe
-    })).collect::<Vec<_>>() })))
+    })).collect::<Vec<_>>(), "csrf_token": csrf })))
 }
 
 async fn release_request_settlement(
@@ -102,7 +108,7 @@ async fn release_request_settlement(
     for id in ids {
         budget.reservations.remove(&id);
     }
-    if budget.reservations.is_empty() {
+    if !budget.reservations.values().any(|r| r.active) {
         state.budget_idle.notify_waiters();
     }
     Ok(ok_json(

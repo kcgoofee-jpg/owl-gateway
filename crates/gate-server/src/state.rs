@@ -44,6 +44,8 @@ pub struct RuntimeLimits {
 #[derive(Debug, Clone)]
 pub struct Reservation {
     pub request_id: String,
+    /// True while queued or executing; false for durable unknown results held only for quota.
+    pub active: bool,
     pub key_id: i64,
     pub exclude_global_v5: bool,
     pub day: String,
@@ -247,6 +249,7 @@ impl AppState {
                     id,
                     Reservation {
                         request_id: row.request_id,
+                        active: false,
                         key_id: row.key_id,
                         exclude_global_v5: row.exclude_global_v5,
                         day: row.day,

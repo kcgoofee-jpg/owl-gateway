@@ -2214,6 +2214,7 @@ async fn reconciliation_waits_for_inflight_reservations_and_blocks_admission() {
         1,
         Reservation {
             request_id: "test-reservation".into(),
+            active: true,
             key_id: 1,
             day: "2026-10-25".into(),
             month: "2026-10".into(),

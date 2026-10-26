@@ -637,6 +637,7 @@ async fn call(db: &Db, c: &Case) -> Out {
                 image: image.as_deref(),
                 image_type: &image_type,
                 rid: "",
+                request_id: "",
             };
             let uuid = c
                 .get("uuids")

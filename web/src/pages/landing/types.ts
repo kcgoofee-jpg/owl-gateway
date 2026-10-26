@@ -107,6 +107,15 @@ export interface MyRequest {
   status: string;
   /** Server-side response body delivery; absence in legacy rows means unknown. */
   delivery_state?: "transport_complete" | "transport_interrupted" | "pending" | "unknown";
+  /** Durable execution outcome; uncertain rows retain an unconfirmed budget remainder. */
+  settlement_status?: string | null;
+  remaining_anlas?: number;
+  remaining_v5?: number;
+  remaining_legacy?: number;
+  /** True only when the retained audit store still has an image for this key and RID. */
+  image_available?: boolean;
+  /** Opaque owner-scoped URL generated from the durable internal request link. */
+  image_url?: string | null;
   images: number;
   /** 成员自己花的 Anlas（本站账号代付的记 0） */
   anlas: number;

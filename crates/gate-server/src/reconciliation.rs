@@ -308,7 +308,7 @@ pub async fn run_with(state: &AppState, wait_timeout: Duration) -> Result<Value,
             let guard = tokio::time::timeout_at(deadline, state.budget.lock())
                 .await
                 .map_err(|_| busy())?;
-            if guard.reservations.is_empty() {
+            if !guard.reservations.values().any(|r| r.active) {
                 break guard;
             }
             // 先登记等待再放锁：预留清空的通知不会落在两者之间

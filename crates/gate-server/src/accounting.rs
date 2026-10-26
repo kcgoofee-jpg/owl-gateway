@@ -134,7 +134,6 @@ impl AppState {
             let now = state.now();
             let settlement_reserved = ctx.has_settlement_reservation();
             let settlement_uncertain = e.execution_unknown || ctx.execution_unknown();
-            let successful = e.status == "ok";
             let res = if e.status == "ok" {
                 let success = Success {
                     key_id,
@@ -171,44 +170,41 @@ impl AppState {
                     state.db.record_success(&success, now).await
                 }
             } else {
-                state
-                    .db
-                    .add_log(
-                        &NewLog {
-                            key_id: Some(key_id),
-                            key_name,
-                            kind: e.kind.clone(),
-                            model: e.model,
-                            status: e.status.clone(),
-                            images: e.images,
-                            anlas: e.anlas,
-                            tokens: e.tokens,
-                            detail: e.detail,
-                            unconfirmed_anlas: e.unconfirmed_anlas,
-                            wait_ms: t.wait_ms,
-                            dur_ms: t.dur_ms,
-                            up_status: i64::from(t.up_status),
-                            rid: t.rid,
-                            reason: e.reason,
-                            token_id: t.token_id,
-                            client,
-                            ip,
-                            hints,
-                        },
-                        now,
-                    )
-                    .await
+                let failure = NewLog {
+                    key_id: Some(key_id),
+                    key_name,
+                    kind: e.kind.clone(),
+                    model: e.model,
+                    status: e.status.clone(),
+                    images: e.images,
+                    anlas: e.anlas,
+                    tokens: e.tokens,
+                    detail: e.detail,
+                    unconfirmed_anlas: e.unconfirmed_anlas,
+                    wait_ms: t.wait_ms,
+                    dur_ms: t.dur_ms,
+                    up_status: i64::from(t.up_status),
+                    rid: t.rid,
+                    reason: e.reason,
+                    token_id: t.token_id,
+                    client,
+                    ip,
+                    hints,
+                };
+                if settlement_reserved {
+                    state
+                        .db
+                        .record_settled_failure(
+                            &failure,
+                            &ctx.internal_id(),
+                            settlement_uncertain,
+                            now,
+                        )
+                        .await
+                } else {
+                    state.db.add_log(&failure, now).await
+                }
             };
-            if res.is_ok()
-                && settlement_reserved
-                && !successful
-                && let Err(err) = state
-                    .db
-                    .resolve_request_failure(&ctx.internal_id(), settlement_uncertain, now)
-                    .await
-            {
-                tracing::error!(error = %err, "request settlement failure transition failed");
-            }
             if let Err(err) = res {
                 tracing::error!("request accounting failed");
                 // 「成员拿到了图但账没落库」的唯一线索：带上定位信息
@@ -374,6 +370,7 @@ impl AppState {
             image: image.as_deref(),
             image_type: &image_type,
             rid: &ctx.rid(),
+            request_id: &ctx.internal_id(),
         };
         if let Err(e) = self.db.add_audit(&row, self.now(), &self.clock).await {
             self.bug("audit", Some(("DbError", &e.to_string())), ctx);

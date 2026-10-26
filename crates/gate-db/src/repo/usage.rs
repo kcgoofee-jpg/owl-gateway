@@ -195,6 +195,41 @@ fn is_image_kind(kind: &str) -> bool {
     matches!(kind, "image" | "image_stream")
 }
 
+fn insert_usage_log(tx: &rusqlite::Transaction<'_>, l: &NewLog, now: f64) -> rusqlite::Result<()> {
+    let h = l.hints.columns();
+    tx.execute(
+        INSERT_LOG,
+        params![
+            now,
+            l.key_id,
+            pyc::take_chars(&l.key_name, 80),
+            l.kind,
+            pyc::take_chars(&l.model, 80),
+            l.status,
+            l.images,
+            l.anlas,
+            l.tokens,
+            pyc::take_chars(&l.detail, 500),
+            l.unconfirmed_anlas,
+            l.wait_ms.max(0),
+            l.dur_ms.max(0),
+            l.up_status,
+            pyc::take_chars(&l.rid, 16),
+            pyc::take_chars(&l.reason, 24),
+            l.token_id,
+            pyc::take_chars(&l.client, 160),
+            pyc::take_chars(&l.ip, 64),
+            h[0],
+            h[1],
+            h[2],
+            h[3],
+            h[4],
+            h[5]
+        ],
+    )?;
+    Ok(())
+}
+
 /// 组装日志筛选的 WHERE 子句：返回 (` WHERE ...` 或空串, 绑定参数)。
 fn log_filter(f: &LogFilter) -> (String, Vec<SqlValue>) {
     let mut clauses: Vec<String> = Vec::new();
@@ -471,7 +506,7 @@ impl Db {
                 params![now, i64::from(is_image_kind(&s.kind)), result_at, s.key_id],
             )?;
             if let Some(id) = request_id.as_deref() {
-                tx.execute("UPDATE request_settlements SET status=?,anlas=?,v5=?,legacy=?,updated_at=? WHERE request_id=? AND status='result_saved'",
+                tx.execute("UPDATE request_settlements SET status=?,anlas=?,v5=?,legacy=?,result_json=NULL,updated_at=? WHERE request_id=? AND status='result_saved'",
                     params![if held { "uncertain" } else { "committed" }, s.remaining_anlas, s.remaining_v5, s.remaining_legacy, now, id])?;
             }
             Ok(())
@@ -569,41 +604,28 @@ impl Db {
 
     pub async fn add_log(&self, l: &NewLog, now: f64) -> Result<()> {
         let l = l.clone();
+        self.write(move |tx| insert_usage_log(tx, &l, now)).await
+    }
+
+    /// Persist a member-visible failure and link it to its settlement in one transaction.
+    pub async fn record_settled_failure(
+        &self,
+        l: &NewLog,
+        request_id: &str,
+        uncertain: bool,
+        now: f64,
+    ) -> Result<()> {
+        let (l, id, target) = (
+            l.clone(),
+            request_id.to_owned(),
+            if uncertain { "uncertain" } else { "released" },
+        );
         self.write(move |tx| {
-            let h = l.hints.columns();
-            tx.execute(
-                INSERT_LOG,
-                params![
-                    now,
-                    l.key_id,
-                    pyc::take_chars(&l.key_name, 80),
-                    l.kind,
-                    pyc::take_chars(&l.model, 80),
-                    l.status,
-                    l.images,
-                    l.anlas,
-                    l.tokens,
-                    pyc::take_chars(&l.detail, 500),
-                    l.unconfirmed_anlas,
-                    l.wait_ms.max(0),
-                    l.dur_ms.max(0),
-                    l.up_status,
-                    pyc::take_chars(&l.rid, 16),
-                    pyc::take_chars(&l.reason, 24),
-                    l.token_id,
-                    pyc::take_chars(&l.client, 160),
-                    pyc::take_chars(&l.ip, 64),
-                    h[0],
-                    h[1],
-                    h[2],
-                    h[3],
-                    h[4],
-                    h[5],
-                ],
-            )?;
+            insert_usage_log(tx, &l, now)?;
+            tx.execute("INSERT INTO usage_request_links(request_id,usage_log_id) VALUES(?,last_insert_rowid())", [&id])?;
+            tx.execute("UPDATE request_settlements SET status=?,updated_at=? WHERE request_id=? AND status IN ('reserved','dispatched')", params![target, now, id])?;
             Ok(())
-        })
-        .await
+        }).await
     }
 
     /// 清掉 `before`（Unix 秒）之前日志里的 User-Agent 和来源 IP（改成空串，日志本身保留）；返回清掉的行数。
@@ -658,7 +680,10 @@ impl Db {
         self.read(move |c| {
             let mut stmt = c.prepare(
                 "SELECT l.id, l.rid, l.ts, l.kind, l.model, l.status, l.images, l.anlas, l.wait_ms, l.dur_ms, l.reason, l.detail, \
-                 COALESCE(s.delivery_state,'unknown') AS delivery_state FROM usage_log l LEFT JOIN usage_request_links u ON u.usage_log_id=l.id LEFT JOIN request_settlements s ON s.request_id=u.request_id \
+                 (EXISTS(SELECT 1 FROM audit_request_links al JOIN generation_audit a ON a.id=al.audit_id WHERE al.request_id=u.request_id AND a.key_id=l.key_id AND a.status='ok' AND (a.image IS NOT NULL OR a.image_file IS NOT NULL)) = 1) AS image_available, \
+                 COALESCE(s.delivery_state,'unknown') AS delivery_state, s.status AS settlement_status, \
+                 COALESCE(s.anlas,0) AS remaining_anlas, COALESCE(s.v5,0) AS remaining_v5, COALESCE(s.legacy,0) AS remaining_legacy, u.request_id \
+                 FROM usage_log l LEFT JOIN usage_request_links u ON u.usage_log_id=l.id LEFT JOIN request_settlements s ON s.request_id=u.request_id \
                  WHERE l.key_id=?1 AND l.ts>=?2 AND (?3=0 OR l.id<?3) \
                  AND (?4='' OR l.status=?4) ORDER BY l.id DESC LIMIT ?5",
             )?;

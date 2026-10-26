@@ -150,6 +150,67 @@ async fn nonstream_body_drop_keeps_success_charge_and_marks_interrupted() {
 }
 
 #[tokio::test]
+async fn disconnect_before_generation_finishes_still_commits_once_and_marks_interrupted() {
+    let e = setup(&[]).await;
+    e.mock.push(
+        "/ai/generate-image",
+        Reply::Chunks {
+            status: 200,
+            content_type: "application/zip".into(),
+            chunks: vec![(
+                std::time::Duration::from_millis(180),
+                bytes::Bytes::from(gate_testkit::zip_of_pngs(1)),
+            )],
+        },
+    );
+    let req = Request::builder()
+        .method("POST")
+        .uri("/ai/generate-image")
+        .header("authorization", format!("Bearer {TOKEN}"))
+        .header("content-type", "application/json")
+        .body(Body::from(
+            serde_json::to_vec(&image_body("nai-diffusion-4-5-full", 1)).unwrap(),
+        ))
+        .unwrap();
+    let task = tokio::spawn(gate_server::app(e.state.clone()).oneshot(req));
+    tokio::time::timeout(std::time::Duration::from_secs(1), async {
+        while e.mock.requests_to("/ai/generate-image").is_empty() {
+            tokio::time::sleep(std::time::Duration::from_millis(2)).await;
+        }
+    })
+    .await
+    .unwrap();
+    task.abort();
+    let _ = task.await;
+    tokio::time::sleep(std::time::Duration::from_millis(300)).await;
+    let rows = logs(&e.state).await;
+    assert_eq!(e.mock.requests_to("/ai/generate-image").len(), 1);
+    assert_eq!(
+        rows.iter().filter(|r| r["status"] == "ok").count(),
+        1,
+        "{rows:?}"
+    );
+    assert_eq!(
+        e.state
+            .db
+            .get_counter(1, &e.state.day())
+            .await
+            .unwrap()
+            .images,
+        1
+    );
+    let rid = rows.iter().find(|r| r["status"] == "ok").unwrap()["rid"]
+        .as_str()
+        .unwrap()
+        .to_string();
+    let delivery: String = e.state.db.read(move |c| c.query_row(
+        "SELECT s.delivery_state FROM usage_log l JOIN usage_request_links u ON u.usage_log_id=l.id JOIN request_settlements s ON s.request_id=u.request_id WHERE l.rid=?",
+        [rid], |r| r.get(0),
+    )).await.unwrap();
+    assert_eq!(delivery, "transport_interrupted");
+}
+
+#[tokio::test]
 async fn stream_disconnect_after_final_keeps_single_image_charge_and_marks_interrupted() {
     let e = setup(&[]).await;
     let req = Request::builder()
@@ -1074,8 +1135,9 @@ async fn stream_upstream_failure_before_start_is_plain_json() {
     assert!(status.is_server_error(), "{status}");
     assert_eq!(headers["content-type"], "application/json");
     let body: Value = serde_json::from_slice(&out).unwrap();
-    assert_eq!(body["error"], body["message"], "{body}");
-    assert!(body["error"].is_string(), "{body}");
+    assert_eq!(body["error"]["message"], body["message"], "{body}");
+    assert_eq!(body["error"]["execution_unknown"], true, "{body}");
+    assert_eq!(body["error"]["retryable"], false, "{body}");
     assert_eq!(headers["cache-control"], "no-store");
     assert_eq!(headers["x-accel-buffering"], "no");
     let rows = logs(&e.state).await;

@@ -28,4 +28,17 @@ describe("request delivery status", () => {
     expect(host.textContent).toContain("传输状态未知");
     expect(host.textContent).not.toContain("服务端传输完成");
   });
+
+  it("shows unknown remainder without hiding a partial generated success", () => {
+    render(<RequestRow r={{ ...base, settlement_status: "uncertain", remaining_anlas: 2, remaining_v5: 1 }} />, host);
+    expect(host.querySelector(".badge--ok")?.textContent).toBe("已生成");
+    expect(host.textContent).toContain("执行结果待核对 · 有未知余量");
+    expect(host.textContent).toContain("仍待核对余量：2 Anlas · V5 1");
+  });
+
+  it("does not label an unknown execution as a definite failure", () => {
+    render(<RequestRow r={{ ...base, status: "error", settlement_status: "uncertain" }} />, host);
+    expect(host.textContent).toContain("执行结果待核对");
+    expect(host.textContent).not.toContain("失败");
+  });
 });

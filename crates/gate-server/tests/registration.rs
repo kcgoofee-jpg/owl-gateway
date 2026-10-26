@@ -10,6 +10,8 @@ use axum::extract::{Request, State};
 use axum::http::{HeaderMap, StatusCode};
 use axum::response::Response;
 use common::{Call, Env, set_setting, setup, setup_registration};
+use gate_db::repo::audit::NewAudit;
+use gate_db::repo::usage::{NewLog, Success};
 use gate_server::registration::{DiscordUser, Issued, RegErr};
 use serde_json::{Value, json};
 use std::net::SocketAddr;
@@ -2714,6 +2716,438 @@ async fn public_me_matches_legacy_and_coupons_work() {
         json!({"logged_in": true, "discord": {"id": MEMBER, "username": "alice",
         "display_name": "Alice", "avatar": "a1b2"}, "has_key": false})
     );
+}
+
+#[tokio::test]
+async fn member_image_download_is_scoped_to_session_key_even_when_rid_collides() {
+    let (e, _d) = setup_reg(&[]).await;
+    open_registration(&e).await;
+    issue(&e, MEMBER).await;
+    issue(&e, OTHER).await;
+    let key_for = |id: &'static str| async {
+        e.state.db.key_row_for_discord(id).await.unwrap().unwrap()["id"]
+            .as_i64()
+            .unwrap()
+    };
+    let member_key = key_for(MEMBER).await;
+    let other_key = key_for(OTHER).await;
+    let clock = e.state.clock.clone();
+    for (request_id, key_id, name, rid, image) in [
+        (
+            "00000000000000000000000000000001",
+            member_key,
+            "member",
+            "same-rid",
+            b"member image".as_slice(),
+        ),
+        (
+            "00000000000000000000000000000002",
+            other_key,
+            "other",
+            "same-rid",
+            b"other image".as_slice(),
+        ),
+        (
+            "00000000000000000000000000000003",
+            member_key,
+            "member",
+            "same-rid",
+            b"second member image".as_slice(),
+        ),
+        (
+            "00000000000000000000000000000004",
+            member_key,
+            "member",
+            "member-only-rid",
+            b"private image".as_slice(),
+        ),
+    ] {
+        e.state
+            .db
+            .reserve_request_settlement(
+                request_id,
+                rid,
+                key_id,
+                &e.state.day(),
+                &e.state.month(),
+                false,
+                false,
+                0.0,
+                0,
+                1,
+                e.state.now(),
+            )
+            .await
+            .unwrap();
+        e.state
+            .db
+            .dispatch_request_settlement(
+                request_id,
+                &e.state.day(),
+                &e.state.month(),
+                false,
+                false,
+                0.0,
+                0,
+                1,
+                e.state.now(),
+            )
+            .await
+            .unwrap();
+        e.state
+            .db
+            .record_success_settled(
+                &Success {
+                    key_id,
+                    key_name: name.into(),
+                    kind: "image".into(),
+                    model: "model".into(),
+                    day: e.state.day(),
+                    rid: rid.into(),
+                    images: 1,
+                    ..Default::default()
+                },
+                request_id,
+                e.state.now(),
+            )
+            .await
+            .unwrap();
+        e.state
+            .db
+            .add_audit(
+                &NewAudit {
+                    key_id: Some(key_id),
+                    key_name: name,
+                    kind: "image",
+                    model: "model",
+                    status: "ok",
+                    rid,
+                    image: Some(image),
+                    image_type: "image/png",
+                    request_id,
+                    ..Default::default()
+                },
+                e.state.now(),
+                &clock,
+            )
+            .await
+            .unwrap();
+    }
+    e.state
+        .db
+        .add_log(
+            &NewLog {
+                key_id: Some(member_key),
+                key_name: "member".into(),
+                kind: "image".into(),
+                status: "ok".into(),
+                rid: "legacy-rid".into(),
+                images: 1,
+                ..Default::default()
+            },
+            e.state.now(),
+        )
+        .await
+        .unwrap();
+    e.state
+        .db
+        .add_audit(
+            &NewAudit {
+                key_id: Some(member_key),
+                key_name: "member",
+                kind: "image",
+                model: "model",
+                status: "ok",
+                rid: "legacy-rid",
+                image: Some(b"legacy image"),
+                image_type: "image/png",
+                ..Default::default()
+            },
+            e.state.now(),
+            &clock,
+        )
+        .await
+        .unwrap();
+    let member_cookie = login_member(&e, MEMBER).await;
+    let other_cookie = login_member(&e, OTHER).await;
+    let member_rows: Value = serde_json::from_slice(
+        &Call::new("GET", "/public/me/requests")
+            .header("cookie", member_cookie.clone())
+            .send(&e.state)
+            .await
+            .2,
+    )
+    .unwrap();
+    let same_rid_urls: Vec<String> = member_rows["items"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .filter(|r| r["rid"] == "same-rid")
+        .map(|r| {
+            r["image_url"]
+                .as_str()
+                .unwrap_or_else(|| panic!("request has no image URL: {r}"))
+                .to_owned()
+        })
+        .collect();
+    assert_eq!(same_rid_urls.len(), 2);
+    let legacy = member_rows["items"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|r| r["rid"] == "legacy-rid")
+        .unwrap();
+    assert_eq!(
+        legacy["image_available"], false,
+        "legacy RID alone is not a safe image association"
+    );
+    assert_eq!(legacy["image_url"], Value::Null);
+    assert!(
+        same_rid_urls
+            .contains(&"/public/me/requests/image/00000000000000000000000000000001".to_string())
+    );
+    assert!(
+        same_rid_urls
+            .contains(&"/public/me/requests/image/00000000000000000000000000000003".to_string())
+    );
+    let (status, _, member_image) = Call::new(
+        "GET",
+        "/public/me/requests/image/00000000000000000000000000000001",
+    )
+    .header("cookie", member_cookie.clone())
+    .send(&e.state)
+    .await;
+    assert_eq!(status, 200);
+    assert_eq!(member_image, b"member image");
+    let (status, _, second_member_image) = Call::new(
+        "GET",
+        "/public/me/requests/image/00000000000000000000000000000003",
+    )
+    .header("cookie", member_cookie.clone())
+    .send(&e.state)
+    .await;
+    assert_eq!(status, 200);
+    assert_eq!(second_member_image, b"second member image");
+    let other_rows: Value = serde_json::from_slice(
+        &Call::new("GET", "/public/me/requests")
+            .header("cookie", other_cookie.clone())
+            .send(&e.state)
+            .await
+            .2,
+    )
+    .unwrap();
+    let other_url = other_rows["items"][0]["image_url"].as_str().unwrap();
+    let (status, _, other_image) = Call::new("GET", other_url)
+        .header("cookie", other_cookie.clone())
+        .send(&e.state)
+        .await;
+    assert_eq!(status, 200);
+    assert_eq!(other_image, b"other image");
+    let (status, _, private_image) = Call::new(
+        "GET",
+        "/public/me/requests/image/00000000000000000000000000000004",
+    )
+    .header("cookie", member_cookie)
+    .send(&e.state)
+    .await;
+    assert_eq!(status, 200);
+    assert_eq!(private_image, b"private image");
+    let (status, _, _) = Call::new(
+        "GET",
+        "/public/me/requests/image/00000000000000000000000000000004",
+    )
+    .header("cookie", other_cookie.clone())
+    .send(&e.state)
+    .await;
+    assert_eq!(status, 404, "another member cannot fetch a retained image");
+    let (status, _, _) = Call::new(
+        "GET",
+        "/public/me/requests/image/ffffffffffffffffffffffffffffffff",
+    )
+    .header("cookie", other_cookie)
+    .send(&e.state)
+    .await;
+    assert_eq!(status, 404, "unknown or expired images are not returned");
+}
+
+#[tokio::test]
+async fn overlapping_image_and_stream_responses_keep_prompt_images_with_their_owners() {
+    async fn pair(e: &Env, stream: bool) {
+        let member = e
+            .state
+            .db
+            .key_row_for_discord(MEMBER)
+            .await
+            .unwrap()
+            .unwrap();
+        let other = e
+            .state
+            .db
+            .key_row_for_discord(OTHER)
+            .await
+            .unwrap()
+            .unwrap();
+        let member_token = member["token"].as_str().unwrap().to_string();
+        let other_token = other["token"].as_str().unwrap().to_string();
+        let (path, seed_a, seed_b) = if stream {
+            ("/ai/generate-image-stream", 17u8, 91u8)
+        } else {
+            ("/ai/generate-image", 31u8, 122u8)
+        };
+        let body = |prompt: &str| json!({"input":prompt,"model":"nai-diffusion-4-5-full","action":"generate","parameters":{"width":832,"height":1216,"steps":28,"n_samples":1,"scale":5,"sampler":"k_euler_ancestral","stream":if stream {"sse"} else {""}}});
+        let reply = |seed: u8, slow: bool| {
+            let delay = if slow {
+                std::time::Duration::from_millis(70)
+            } else {
+                std::time::Duration::from_millis(1)
+            };
+            let chunks = if stream {
+                gate_testkit::image_stream_variant(1, "sse", seed)
+                    .into_iter()
+                    .map(|(_, bytes)| (delay, bytes))
+                    .collect()
+            } else {
+                vec![(
+                    delay,
+                    axum::body::Bytes::from(gate_testkit::zip_of_png_variant(seed)),
+                )]
+            };
+            gate_testkit::Reply::Chunks {
+                status: 200,
+                content_type: if stream {
+                    "text/event-stream"
+                } else {
+                    "application/zip"
+                }
+                .into(),
+                chunks,
+            }
+        };
+        e.mock.push(path, reply(seed_a, true));
+        e.mock.push(path, reply(seed_b, false));
+        let state_a = e.state.clone();
+        let body_a = body("prompt member A");
+        let task_a = tokio::spawn(async move {
+            Call::new("POST", path)
+                .bearer(&member_token)
+                .json(body_a)
+                .send(&state_a)
+                .await
+        });
+        tokio::time::timeout(std::time::Duration::from_secs(1), async {
+            while e.mock.requests_to(path).is_empty() {
+                tokio::time::sleep(std::time::Duration::from_millis(2)).await;
+            }
+        })
+        .await
+        .unwrap();
+        let state_b = e.state.clone();
+        let body_b = body("prompt member B");
+        let task_b = tokio::spawn(async move {
+            Call::new("POST", path)
+                .bearer(&other_token)
+                .json(body_b)
+                .send(&state_b)
+                .await
+        });
+        tokio::time::timeout(std::time::Duration::from_secs(1), async {
+            while e.mock.requests_to(path).len() < 2 {
+                tokio::time::sleep(std::time::Duration::from_millis(2)).await;
+            }
+        })
+        .await
+        .unwrap();
+        let fast = tokio::time::timeout(std::time::Duration::from_millis(500), &mut { task_b })
+            .await
+            .unwrap()
+            .unwrap();
+        assert!(
+            !task_a.is_finished(),
+            "the second prompt must finish before the deliberately delayed first response"
+        );
+        let slow = tokio::time::timeout(std::time::Duration::from_secs(3), task_a)
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!((fast.0, slow.0), (StatusCode::OK, StatusCode::OK));
+        if stream {
+            assert!(
+                fast.2
+                    .windows(gate_testkit::base64_tiny_png_variant(seed_b).len())
+                    .any(|w| w == gate_testkit::base64_tiny_png_variant(seed_b).as_bytes())
+            );
+            assert!(
+                slow.2
+                    .windows(gate_testkit::base64_tiny_png_variant(seed_a).len())
+                    .any(|w| w == gate_testkit::base64_tiny_png_variant(seed_a).as_bytes())
+            );
+        } else {
+            assert_eq!(fast.2, gate_testkit::zip_of_png_variant(seed_b));
+            assert_eq!(slow.2, gate_testkit::zip_of_png_variant(seed_a));
+        }
+        common::settle().await;
+        let member_cookie = login_member(e, MEMBER).await;
+        let other_cookie = login_member(e, OTHER).await;
+        let member_rid = slow.1["x-request-id"].to_str().unwrap();
+        let other_rid = fast.1["x-request-id"].to_str().unwrap();
+        let member_rows: Value = serde_json::from_slice(
+            &Call::new("GET", "/public/me/requests")
+                .header("cookie", member_cookie.clone())
+                .send(&e.state)
+                .await
+                .2,
+        )
+        .unwrap();
+        let member_image_path = member_rows["items"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|r| r["rid"].as_str() == Some(member_rid))
+            .unwrap()["image_url"]
+            .as_str()
+            .unwrap()
+            .to_owned();
+        let member_image = Call::new("GET", &member_image_path);
+        let (status, _, bytes) = member_image
+            .header("cookie", member_cookie)
+            .send(&e.state)
+            .await;
+        assert_eq!(status, StatusCode::OK);
+        assert_eq!(bytes, gate_testkit::tiny_png_variant(seed_a));
+        let other_rows: Value = serde_json::from_slice(
+            &Call::new("GET", "/public/me/requests")
+                .header("cookie", other_cookie.clone())
+                .send(&e.state)
+                .await
+                .2,
+        )
+        .unwrap();
+        let other_image_path = other_rows["items"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|r| r["rid"].as_str() == Some(other_rid))
+            .unwrap()["image_url"]
+            .as_str()
+            .unwrap()
+            .to_owned();
+        let other_image = Call::new("GET", &other_image_path);
+        let (status, _, bytes) = other_image
+            .header("cookie", other_cookie)
+            .send(&e.state)
+            .await;
+        assert_eq!(status, StatusCode::OK);
+        assert_eq!(bytes, gate_testkit::tiny_png_variant(seed_b));
+    }
+
+    for stream in [false, true] {
+        let (e, _d) = setup_reg(&[("NAI_TOKENS", "pst-synthetic-a,pst-synthetic-b")]).await;
+        open_registration(&e).await;
+        issue(&e, MEMBER).await;
+        issue(&e, OTHER).await;
+        set_setting(&e, "audit_thumbs", "1").await;
+        pair(&e, stream).await;
+    }
 }
 
 // ------------------------------------------------------------------ 已移除的捐赠入口

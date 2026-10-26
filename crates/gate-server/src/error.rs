@@ -2,7 +2,7 @@
 //!
 //! 1. [`GateError`]（成员接口）：顶层 `statusCode` / `message` 与 NovelAI 官方错误格式一致，
 //!    客户端直接显示这句话；消息统一带「猫头鹰公益站提醒：」前缀，免得成员以为是 NovelAI 官方出错。
-//!    `{"statusCode": s, "message": m, "error": {"message": m, "status": s, "request_id": rid}}`
+//!    `{"statusCode": s, "message": m, "error": {"message": m, "status": s, "request_id": rid, "code": code, "execution_unknown": bool, "retryable": bool}}`
 //! 2. [`HttpError`]（后台 / 桥接 / 成员页接口，对应 FastAPI 的 `HTTPException`）：`{"detail": m}`。
 //! 3. 未预料的内部错误（500）：`{"error": {"message": "...错误编号 rid", "status": 500, "request_id": rid}}`，
 //!    并带 `X-Request-Id`。
@@ -22,6 +22,7 @@ pub struct GateError {
     pub message: String,
     pub code: String,
     pub billing_uncertain: bool,
+    pub retryable: bool,
     /// 失败的原因在上游（上游返回 5xx / 连不上 / 返回内容无效）。给成员的响应不变，
     /// 但错误账本（[`crate::accounting::error_ledger`]）不把它记成 Bug：上游故障在用量日志和「上游」页里看得到，不是本站的缺陷。
     pub upstream: bool,
@@ -64,6 +65,7 @@ impl GateError {
             message: message.into(),
             code: code.into(),
             billing_uncertain: false,
+            retryable: status == 429,
             upstream: false,
             retry_after: None,
         }
@@ -83,17 +85,79 @@ impl GateError {
 
     pub fn uncertain(mut self, yes: bool) -> Self {
         self.billing_uncertain = yes;
+        if yes {
+            self.retryable = false;
+        }
+        self
+    }
+
+    pub fn retryable(mut self, yes: bool) -> Self {
+        self.retryable = yes && !self.billing_uncertain;
         self
     }
 
     /// 带前缀的成员可见文案。
     pub fn display_message(&self) -> String {
-        if self.message.starts_with(NOTICE_PREFIX) {
+        let base = if self.message.starts_with(NOTICE_PREFIX) {
             self.message.clone()
         } else {
             format!("{NOTICE_PREFIX}{}", self.message)
+        };
+        if self.billing_uncertain {
+            let base = base.replace("未扣费", "尚未确认记账");
+            format!("{base} 执行结果未知，请勿自动重发；请先在“我的请求”中核对。")
+        } else {
+            base
         }
     }
+
+    pub fn response_body(&self) -> Value {
+        let rid = crate::reqctx::current_rid();
+        member_error_body(
+            self.status,
+            &self.message,
+            &self.code,
+            self.upstream,
+            self.billing_uncertain,
+            self.retryable,
+            &rid,
+        )
+    }
+}
+
+pub fn member_error_body(
+    status: u16,
+    detail: &str,
+    code: &str,
+    upstream: bool,
+    execution_unknown: bool,
+    retryable: bool,
+    rid: &str,
+) -> Value {
+    let (status, replaced) = member_status(status, upstream);
+    let message = replaced.map_or_else(
+        || {
+            let base = if detail.starts_with(NOTICE_PREFIX) {
+                detail.to_string()
+            } else {
+                format!("{NOTICE_PREFIX}{detail}")
+            };
+            if execution_unknown {
+                let base = base.replace("未扣费", "尚未确认记账");
+                format!("{base} 执行结果未知，请勿自动重发；请先在“我的请求”中核对。")
+            } else {
+                base
+            }
+        },
+        |m| format!("{NOTICE_PREFIX}{m}"),
+    );
+    json!({
+        "statusCode": status,
+        "message": message,
+        "error": {"message": message, "status": status, "request_id": rid,
+            "code": code, "execution_unknown": execution_unknown,
+            "retryable": retryable && !execution_unknown && status == 429},
+    })
 }
 
 /// 附在响应扩展里，让外层中间件（记拒绝日志 / Bug 追踪）知道这是哪种错误。
@@ -102,17 +166,8 @@ pub struct GateErrorInfo(pub GateError);
 
 impl IntoResponse for GateError {
     fn into_response(self) -> Response {
-        let rid = crate::reqctx::current_rid();
-        let (status, replaced) = member_status(self.status, self.upstream);
-        let message = match replaced {
-            Some(m) => format!("{NOTICE_PREFIX}{m}"),
-            None => self.display_message(),
-        };
-        let body = json!({
-            "statusCode": status,
-            "message": message,
-            "error": {"message": message, "status": status, "request_id": rid},
-        });
+        let (status, _) = member_status(self.status, self.upstream);
+        let body = self.response_body();
         let mut resp = json_response(status, &body);
         if status == 429 {
             let secs = self
@@ -171,12 +226,21 @@ pub struct InternalErrorInfo(pub String);
 impl IntoResponse for InternalError {
     fn into_response(self) -> Response {
         let rid = crate::reqctx::current_rid();
-        let message =
-            format!("{NOTICE_PREFIX}服务器内部错误，已自动记录。反馈时请附上错误编号 {rid}");
+        let execution_unknown = crate::reqctx::current_execution_unknown();
+        let message = if execution_unknown {
+            format!(
+                "{NOTICE_PREFIX}请求可能已到达上游，执行结果未知。请勿自动重发；先在“我的请求”中核对。反馈时请附上错误编号 {rid}"
+            )
+        } else {
+            format!("{NOTICE_PREFIX}服务器内部错误，已自动记录。反馈时请附上错误编号 {rid}")
+        };
         let body = json!({"message": message, "error": {
             "message": message,
             "status": 500,
             "request_id": rid,
+            "code": if execution_unknown { "execution_unknown" } else { "internal_error" },
+            "execution_unknown": execution_unknown,
+            "retryable": false,
         }});
         let mut resp = json_response(500, &body);
         if !rid.is_empty()
@@ -290,6 +354,19 @@ mod tests {
             .retry_after(42)
             .into_response();
         assert_eq!(resp.headers()["retry-after"], "42");
+        let resp = GateError::with_code(502, "unknown", "execution_unknown")
+            .uncertain(true)
+            .into_response();
+        let body = resp.into_body().collect().await.unwrap().to_bytes();
+        let v: Value = serde_json::from_slice(&body).unwrap();
+        assert_eq!(v["error"]["execution_unknown"], true);
+        assert_eq!(v["error"]["retryable"], false);
+        assert_eq!(v["error"]["code"], "execution_unknown");
+        assert!(v["message"].as_str().unwrap().contains("请勿自动重发"));
+        let resp = GateError::with_code(403, "quota", "quota").into_response();
+        let body = resp.into_body().collect().await.unwrap().to_bytes();
+        let v: Value = serde_json::from_slice(&body).unwrap();
+        assert_eq!(v["error"]["retryable"], false);
         // No member-facing code path constructs a 402 any more
         let root = concat!(env!("CARGO_MANIFEST_DIR"), "/..");
         for dir in ["gate-server/src", "gate-upstream/src", "gate-core/src"] {
@@ -327,7 +404,7 @@ mod tests {
         let body = resp.into_body().collect().await.unwrap().to_bytes();
         assert_eq!(
             std::str::from_utf8(&body).unwrap(),
-            r#"{"statusCode":429,"message":"猫头鹰公益站提醒：请求过于频繁，上限每分钟 10 次，请稍后重试。","error":{"message":"猫头鹰公益站提醒：请求过于频繁，上限每分钟 10 次，请稍后重试。","status":429,"request_id":""}}"#
+            r#"{"statusCode":429,"message":"猫头鹰公益站提醒：请求过于频繁，上限每分钟 10 次，请稍后重试。","error":{"message":"猫头鹰公益站提醒：请求过于频繁，上限每分钟 10 次，请稍后重试。","status":429,"request_id":"","code":"key_rate","execution_unknown":false,"retryable":true}}"#
         );
     }
 
