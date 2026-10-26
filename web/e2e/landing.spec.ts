@@ -65,8 +65,8 @@ test.describe("游客", () => {
     await tabs.nth(2).click();
     const rules = page.locator(".lp-rules");
     await expect(rules).toContainText("每日 7 点重置");
-    await expect(rules).toContainText("每人每日上限");
-    await expect(rules).toContainText("V5 可能因账号额度恢复暂停");
+    await expect(rules).toContainText("模型权限和额度因人而异");
+    await expect(rules).toContainText("V5 受本站开放策略及可用账号资源影响，可能暂时不可用或暂停");
     // 使用须知里不写接入地址（地址只在客户端设置里出现）
     await expect(rules.getByText("地址", { exact: false })).toHaveCount(0);
     const text = await page.locator("main").innerText();
@@ -539,6 +539,7 @@ test.describe("登录成员", () => {
         ...b,
         coupons: [{ id: 1, kind: "reset", note: "测试", expires_at: now + 86400 }],
       }));
+      await page.route("**/public/me/coupons/1/use", (route) => route.fulfill({ json: { ok: true } }));
       await page.goto("/");
       await page.locator(".lp-quota").waitFor();
       expect(await seriousViolations(page)).toEqual([]);

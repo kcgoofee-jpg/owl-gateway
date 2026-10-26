@@ -290,7 +290,7 @@ test.describe("已登录", () => {
         m.rejected_24h = 0;
         m.auto_tags = [];
       }
-      const rows = people.slice(0, 3);
+      const rows = people.filter((m) => m.enabled && m.role !== "invite").slice(0, 3);
       rows.forEach((m, i) => {
         m.rejected_24h = 2;
         m.auto_tags = i === 0 ? [{ tag: "角色超 6 个", count: 2 }] : [{ tag: "请求过快", count: 2 }];
