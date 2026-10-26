@@ -328,8 +328,8 @@ test.describe("登录成员", () => {
     const box = await quota.boundingBox();
     expect(box && box.y < 300).toBe(true);
     await expect(quota).not.toContainText("点重置");
-    await expect(quota.locator(".ring-item")).toHaveCount(2);
-    await expect(quota.locator(".ring-label b")).toHaveText(["V4.5", "Anlas"]);
+    await expect(quota.locator(".ring-item")).toHaveCount(3);
+    await expect(quota.locator(".ring-label b")).toHaveText(["V4.5", "V5", "Anlas"]);
     await expect(page.getByRole("region", { name: "当前状态" }).locator(".lp-meter").nth(1)).toContainText(
       "V5",
     );
@@ -362,15 +362,15 @@ test.describe("登录成员", () => {
     expect(errors).toEqual([]);
   });
 
-  test("不限额的环：一整圈淡色实线，环里是 ∞", async ({ page }) => {
+  test("个人 V4.5 额度 0（10-27 = 停用）：环显示暂停", async ({ page }) => {
     await patch(page, ME, (b) => ({
       ...b,
       today: { ...(b.today as object), daily_images: 0 },
     }));
     await page.goto("/");
     const v45 = page.locator(".ring-item.t-v45");
-    await expect(v45.locator(".ring__num")).toHaveText("∞");
-    await expect(v45.locator(".ring__arc--unlimited")).toHaveCount(1);
+    await expect(v45.locator(".ring__num--paused")).toHaveText("暂停");
+    await expect(v45.locator(".ring__arc--unlimited")).toHaveCount(0);
   });
 
   test("Key：收进右上角账户菜单，可从菜单复制 Key 和接入地址", async ({ page, context }) => {

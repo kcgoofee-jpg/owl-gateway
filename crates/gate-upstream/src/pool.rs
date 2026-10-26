@@ -21,6 +21,9 @@ use crate::scheduler::Scheduler;
 use std::collections::{BTreeMap, HashMap};
 use std::sync::{Arc, Mutex};
 
+/// 新 Token 的免费 V5 日限默认值（= 放开，只受全站管；10-27 起 0 的语义是「停用」）。
+pub const V5_DAILY_LIMIT_DEFAULT: i64 = 9999;
+
 /// 每把上游 Token 的可变状态（旧版 `TokenState` 的 slots）。
 #[derive(Debug, Clone)]
 pub struct TokenFields {
@@ -587,7 +590,13 @@ impl Pool {
         saved_enabled: Option<bool>,
     ) -> Result<Arc<Token>, String> {
         let mut pool = self.state.lock().await;
-        let new = Token::new(token, pool.tokens.len(), 0, allow_anlas);
+        // 10-27：新 Token 默认 9999（放开，站长再收紧）；0 现在是「停用」，不能再当默认
+        let new = Token::new(
+            token,
+            pool.tokens.len(),
+            V5_DAILY_LIMIT_DEFAULT,
+            allow_anlas,
+        );
         if pool.tokens.iter().any(|t| t.token_id == new.token_id) {
             return Err("这把 Token 已经在令牌池里".into());
         }
@@ -978,11 +987,12 @@ impl Pool {
     }
 }
 
-/// 这把 Token 当日免费 V5 还没到后台设的上限（含已预留的；上限 0 = 不限）。
+/// 这把 Token 当日免费 V5 还没到后台设的上限（含已预留的）。10-27 规范化：0 = 停用这把 Token 的
+/// 免费 V5（存量 0 已由启动迁移刷成 9999），不再是不限。
 async fn under_v5_limit(hooks: &dyn Hooks, t: &Token) -> Result<bool, UpstreamError> {
     let (limit, pending) = t.with(|f| (f.v5_daily_limit, f.pending_v5));
     if limit == 0 {
-        return Ok(true);
+        return Ok(false);
     }
     let used = hooks
         .upstream_v5_counter(&t.token_id, &hooks.day())

@@ -85,13 +85,14 @@ async fn put_settings(State(state): State<AppState>, _s: AdminSession, req: Requ
         Some(v) => {
             let value = gate_core::quota_limits::GlobalLimits::from_value(v)
                 .ok_or_else(|| HttpError::new(422, "quota_modes 格式无效"))?;
+            // 10-27 规范化：0 = 停用，上限 9999（每月池 99999），不再有「不限」
             let fields = [
-                (value.register_daily_images, 100_000.0),
-                (value.register_daily_v5, 100_000.0),
-                (value.global_daily_v5, 100_000.0),
-                (value.global_daily_anlas, 100_000.0),
-                (value.member_daily_anlas, 100_000.0),
-                (value.global_monthly_anlas, 1_000_000.0),
+                (value.register_daily_images, 9999.0),
+                (value.register_daily_v5, 9999.0),
+                (value.global_daily_v5, 9999.0),
+                (value.global_daily_anlas, 9999.0),
+                (value.member_daily_anlas, 9999.0),
+                (value.global_monthly_anlas, 99_999.0),
             ];
             if fields.iter().any(|(mode, max)| match mode {
                 gate_core::quota_limits::Limit::Inherit => true,
@@ -216,17 +217,10 @@ async fn put_settings(State(state): State<AppState>, _s: AdminSession, req: Requ
         };
         Ok(strict_num(&value, kind, 0.0, hi, spec.key)?)
     }
-    let monthly = field(
-        &state,
-        &body,
-        &GLOBAL_MONTHLY_ANLAS,
-        Kind::Float,
-        1_000_000.0,
-    )
-    .await?;
-    let daily_v5 = field(&state, &body, &GLOBAL_DAILY_V5, Kind::Int, 100_000.0).await?;
-    let daily_anlas = field(&state, &body, &GLOBAL_DAILY_ANLAS, Kind::Int, 100_000.0).await?;
-    let member = field(&state, &body, &MEMBER_DAILY_ANLAS, Kind::Int, 100_000.0).await?;
+    let monthly = field(&state, &body, &GLOBAL_MONTHLY_ANLAS, Kind::Float, 99_999.0).await?;
+    let daily_v5 = field(&state, &body, &GLOBAL_DAILY_V5, Kind::Int, 9999.0).await?;
+    let daily_anlas = field(&state, &body, &GLOBAL_DAILY_ANLAS, Kind::Int, 9999.0).await?;
+    let member = field(&state, &body, &MEMBER_DAILY_ANLAS, Kind::Int, 9999.0).await?;
     // 每人每日 V4.5 / V5（0 = 不限）、V5 暂停（开关）
     let v45 = field(&state, &body, &REGISTER_DAILY_IMAGES, Kind::Int, 100_000.0).await?;
     let v5_each = field(&state, &body, &REGISTER_DAILY_V5, Kind::Int, 100_000.0).await?;

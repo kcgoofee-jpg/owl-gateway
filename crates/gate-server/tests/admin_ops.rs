@@ -72,7 +72,7 @@ fn last_action(rows: &[(String, String, String, String, bool)]) -> (&str, &str, 
 
 // ------------------------------------------------------------------ 预算
 
-const SETTINGS_DEFAULT: &str = r#"{"global_monthly_anlas":10000.0,"global_daily_v5":150,"global_daily_anlas":200,"member_daily_anlas":50,"register_daily_images":150,"register_daily_v5":0,"v5_paused":false,"v5_access_mode":"legacy","v5_authorized_discord_ids":[],"gateway_owner_discord_ids":[],"gateway_admin_discord_ids":[],"v5_medium_mode":"off","v5_medium_state":{"active":false}}"#;
+const SETTINGS_DEFAULT: &str = r#"{"global_monthly_anlas":10000.0,"global_daily_v5":150,"global_daily_anlas":200,"member_daily_anlas":50,"register_daily_images":150,"register_daily_v5":9999,"v5_paused":false,"v5_access_mode":"legacy","v5_authorized_discord_ids":[],"gateway_owner_discord_ids":[],"gateway_admin_discord_ids":[],"v5_medium_mode":"off","v5_medium_state":{"active":false}}"#;
 
 #[tokio::test]
 async fn settings_get_put_and_stored_strings() {
@@ -89,7 +89,7 @@ async fn settings_get_put_and_stored_strings() {
     assert_eq!(s, 200);
     assert_eq!(
         t,
-        r#"{"ok":true,"global_monthly_anlas":10000.0,"global_daily_v5":150,"global_daily_anlas":200,"member_daily_anlas":50,"register_daily_images":150,"register_daily_v5":0,"v5_paused":false,"v5_access_mode":"legacy","v5_medium_mode":"off"}"#
+        r#"{"ok":true,"global_monthly_anlas":10000.0,"global_daily_v5":150,"global_daily_anlas":200,"member_daily_anlas":50,"register_daily_images":150,"register_daily_v5":9999,"v5_paused":false,"v5_access_mode":"legacy","v5_medium_mode":"off"}"#
     );
     assert!(changed(&before, &settings(&e).await).is_empty());
 
@@ -98,40 +98,40 @@ async fn settings_get_put_and_stored_strings() {
     let ok_cases: Vec<(Value, &str, [&str; 4])> = vec![
         (
             json!({"global_monthly_anlas": 5000, "global_daily_v5": 200, "member_daily_anlas": 40, "v5_alert_threshold": 30}),
-            r#"{"ok":true,"global_monthly_anlas":5000.0,"global_daily_v5":200,"global_daily_anlas":200,"member_daily_anlas":40,"register_daily_images":150,"register_daily_v5":0,"v5_paused":false,"v5_access_mode":"legacy","v5_medium_mode":"off"}"#,
+            r#"{"ok":true,"global_monthly_anlas":5000.0,"global_daily_v5":200,"global_daily_anlas":200,"member_daily_anlas":40,"register_daily_images":150,"register_daily_v5":9999,"v5_paused":false,"v5_access_mode":"legacy","v5_medium_mode":"off"}"#,
             ["5000.0", "200", "40", "30"],
         ),
         // 字符串数字也收（与旧版 float("1e3") 一致）
         (
             json!({"global_monthly_anlas": "1e3"}),
-            r#"{"ok":true,"global_monthly_anlas":1000.0,"global_daily_v5":200,"global_daily_anlas":200,"member_daily_anlas":40,"register_daily_images":150,"register_daily_v5":0,"v5_paused":false,"v5_access_mode":"legacy","v5_medium_mode":"off"}"#,
+            r#"{"ok":true,"global_monthly_anlas":1000.0,"global_daily_v5":200,"global_daily_anlas":200,"member_daily_anlas":40,"register_daily_images":150,"register_daily_v5":9999,"v5_paused":false,"v5_access_mode":"legacy","v5_medium_mode":"off"}"#,
             ["1000.0", "200", "40", "30"],
         ),
         // 0 被夹到下限：库里是整数 "0"，响应仍是请求值的浮点写法（旧版怪癖）
         (
             json!({"global_monthly_anlas": 0}),
-            r#"{"ok":true,"global_monthly_anlas":0.0,"global_daily_v5":200,"global_daily_anlas":200,"member_daily_anlas":40,"register_daily_images":150,"register_daily_v5":0,"v5_paused":false,"v5_access_mode":"legacy","v5_medium_mode":"off"}"#,
+            r#"{"ok":true,"global_monthly_anlas":0.0,"global_daily_v5":200,"global_daily_anlas":200,"member_daily_anlas":40,"register_daily_images":150,"register_daily_v5":9999,"v5_paused":false,"v5_access_mode":"legacy","v5_medium_mode":"off"}"#,
             ["0", "200", "40", "30"],
         ),
         (
-            json!({"global_monthly_anlas": 1000000}),
-            r#"{"ok":true,"global_monthly_anlas":1000000.0,"global_daily_v5":200,"global_daily_anlas":200,"member_daily_anlas":40,"register_daily_images":150,"register_daily_v5":0,"v5_paused":false,"v5_access_mode":"legacy","v5_medium_mode":"off"}"#,
-            ["1000000", "200", "40", "30"],
+            json!({"global_monthly_anlas": 99999}),
+            r#"{"ok":true,"global_monthly_anlas":99999.0,"global_daily_v5":200,"global_daily_anlas":200,"member_daily_anlas":40,"register_daily_images":150,"register_daily_v5":9999,"v5_paused":false,"v5_access_mode":"legacy","v5_medium_mode":"off"}"#,
+            ["99999", "200", "40", "30"],
         ),
         (
             json!({"global_monthly_anlas": 12.5}),
-            r#"{"ok":true,"global_monthly_anlas":12.5,"global_daily_v5":200,"global_daily_anlas":200,"member_daily_anlas":40,"register_daily_images":150,"register_daily_v5":0,"v5_paused":false,"v5_access_mode":"legacy","v5_medium_mode":"off"}"#,
+            r#"{"ok":true,"global_monthly_anlas":12.5,"global_daily_v5":200,"global_daily_anlas":200,"member_daily_anlas":40,"register_daily_images":150,"register_daily_v5":9999,"v5_paused":false,"v5_access_mode":"legacy","v5_medium_mode":"off"}"#,
             ["12.5", "200", "40", "30"],
         ),
         (
             json!({"global_daily_v5": "150"}),
-            r#"{"ok":true,"global_monthly_anlas":12.5,"global_daily_v5":150,"global_daily_anlas":200,"member_daily_anlas":40,"register_daily_images":150,"register_daily_v5":0,"v5_paused":false,"v5_access_mode":"legacy","v5_medium_mode":"off"}"#,
+            r#"{"ok":true,"global_monthly_anlas":12.5,"global_daily_v5":150,"global_daily_anlas":200,"member_daily_anlas":40,"register_daily_images":150,"register_daily_v5":9999,"v5_paused":false,"v5_access_mode":"legacy","v5_medium_mode":"off"}"#,
             ["12.5", "150", "40", "30"],
         ),
         // 12.0 作为整数字段：存 "12"
         (
             json!({"global_monthly_anlas": 7.0, "global_daily_v5": 12.0}),
-            r#"{"ok":true,"global_monthly_anlas":7.0,"global_daily_v5":12,"global_daily_anlas":200,"member_daily_anlas":40,"register_daily_images":150,"register_daily_v5":0,"v5_paused":false,"v5_access_mode":"legacy","v5_medium_mode":"off"}"#,
+            r#"{"ok":true,"global_monthly_anlas":7.0,"global_daily_v5":12,"global_daily_anlas":200,"member_daily_anlas":40,"register_daily_images":150,"register_daily_v5":9999,"v5_paused":false,"v5_access_mode":"legacy","v5_medium_mode":"off"}"#,
             ["7.0", "12", "40", "30"],
         ),
     ];
@@ -164,12 +164,12 @@ async fn settings_get_put_and_stored_strings() {
         ),
         (
             json!({"global_daily_v5": -1}),
-            "global_daily_v5 必须在 0～100000 之间",
+            "global_daily_v5 必须在 0～9999 之间",
         ),
         (json!({"global_daily_v5": true}), "global_daily_v5 不能为空"),
         (
             json!({"global_monthly_anlas": 2e6}),
-            "global_monthly_anlas 必须在 0.0～1000000.0 之间",
+            "global_monthly_anlas 必须在 0.0～99999.0 之间",
         ),
         (
             json!({"global_monthly_anlas": null}),
@@ -181,15 +181,15 @@ async fn settings_get_put_and_stored_strings() {
         ),
         (
             json!({"member_daily_anlas": 100001}),
-            "member_daily_anlas 必须在 0～100000 之间",
+            "member_daily_anlas 必须在 0～9999 之间",
         ),
         (
             json!({"global_daily_anlas": 100001}),
-            "global_daily_anlas 必须在 0～100000 之间",
+            "global_daily_anlas 必须在 0～9999 之间",
         ),
         (
             json!({"global_daily_anlas": -1}),
-            "global_daily_anlas 必须在 0～100000 之间",
+            "global_daily_anlas 必须在 0～9999 之间",
         ),
         (
             json!({"global_daily_anlas": 1.5}),
@@ -318,7 +318,7 @@ async fn global_daily_anlas_pool_is_editable() {
         // 0 = 不开放 Vibe；12.0 作为整数字段存 "12"
         (json!({"global_daily_anlas": 0}), 0, "0"),
         (json!({"global_daily_anlas": 12.0}), 12, "12"),
-        (json!({"global_daily_anlas": 100000}), 100000, "100000"),
+        (json!({"global_daily_anlas": 9999}), 9999, "9999"),
     ] {
         let (s, v) = api.json("PUT", "/settings", Some(body.clone())).await;
         assert_eq!(
@@ -335,7 +335,7 @@ async fn global_daily_anlas_pool_is_editable() {
     // 不带这个字段的保存不会把它改掉
     api.json("PUT", "/settings", Some(json!({"member_daily_anlas": 60})))
         .await;
-    assert_eq!(settings(&e).await["global_daily_anlas"], "100000");
+    assert_eq!(settings(&e).await["global_daily_anlas"], "9999");
     // 准入真的读这个设置：池子是 0 时没有 Anlas 权限的成员用不了 Vibe（见 admission）
     assert_eq!(
         gate_core::site_flags::get_from_raw(
@@ -345,7 +345,7 @@ async fn global_daily_anlas_pool_is_editable() {
                 .get("global_daily_anlas")
                 .map(String::as_str),
         ),
-        json!(100000)
+        json!(9999)
     );
 }
 
@@ -483,7 +483,7 @@ async fn runtime_limits_validate_apply_and_persist() {
 /// 账号保护字段（名字, 默认, 下限, 上限），顺序同接口。每小时上限 / 按时段放行 10-22 删除；
 /// 间隔抖动 `interval_jitter` 10-23 删除（出图节奏只剩出完后歇 N～M 秒，下限 1 秒）。
 const GUARD_FIELDS: [(&str, i64, i64, i64); 5] = [
-    ("account_daily_cap", 2400, 0, 20000),
+    ("account_daily_cap", 2400, 0, 9999),
     ("post_jitter_min", 1, 1, 30),
     ("post_jitter_max", 3, 1, 30),
     ("queue_per_member", 2, 1, 5),
@@ -556,7 +556,7 @@ async fn guard_get_put() {
         ),
         (
             json!({"account_daily_cap": -1}),
-            "每个上游账号每天最多出图张数 必须在 0～20000 之间".to_string(),
+            "每个上游账号每天最多出图张数 必须在 0～9999 之间".to_string(),
         ),
     ] {
         api.fails("PUT", "/guard", Some(body), 422, &detail).await;
@@ -796,7 +796,7 @@ async fn ops_snapshot_defaults() {
         json!({
             "registration": {"configured": false, "open": false, "max_users": 0, "features": null, "daily_images": 150,
                 // 新 Key 默认不过期
-                "daily_v5": 0, "image_scope": "all", "expires_days": 0, "role_guild": "", "role_id": "", "role_note": "", "role_extra": [],
+                "daily_v5": 9999, "image_scope": "all", "expires_days": 0, "role_guild": "", "role_id": "", "role_note": "", "role_extra": [],
                 "active": 0},
             "features": {
                 "global": {"image": true, "upscale": true, "augment": true, "vibe": true, "tags": true},
@@ -1140,7 +1140,7 @@ async fn ops_registration_defaults_are_constants_not_env() {
     assert_eq!(
         v["registration"],
         json!({"configured": true, "open": false, "max_users": 10, "features": ["image"], "daily_images": 150,
-               "daily_v5": 0, "image_scope": "all", "expires_days": 0, "role_guild": "", "role_id": "", "role_note": "", "role_extra": [],
+               "daily_v5": 9999, "image_scope": "all", "expires_days": 0, "role_guild": "", "role_id": "", "role_note": "", "role_extra": [],
                "active": 2})
     );
     // 站长在后台改过的值优先于 defaults 里的常量
@@ -1391,7 +1391,7 @@ async fn upstream_token_settings_endpoints() {
     let conc = format!("/upstream-tokens/{id}/image-concurrency");
     let en = format!("/upstream-tokens/{id}/enabled");
 
-    let msg5 = "上游 V5 日限额必须是 0～100000 的整数（0 为不限）";
+    let msg5 = "上游 V5 日限额必须是 0～9999 的整数（0 = 停用免费 V5）";
     for bad in [
         json!(-1),
         json!(100001),

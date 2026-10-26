@@ -1,6 +1,6 @@
 /**
  * 已登录、有 Key 的首屏：今天的额度画成居中的圆环（行由 quotaRows 决定：V4.5、V5，Anlas 只在设了上限时出现）。
- * - 圆环里只放今天剩余的数字，不限额时是 ∞；弧长 = 剩余比例；不限额的环是一整圈淡色实线。
+ * - 圆环里只放今天剩余的数字；弧长 = 剩余比例。停用 / 用完显示「暂停」（10-27 起没有「不限」档）。
  * - 圆环下面只有类型名（17px、600），和圆环水平居中对齐；每天总量不再显示（数字只留环里那一个）。
  * - 快用完、用完时变色沿用 toneFor；V5 能用的是个人剩余和全站剩余的较小值，全站用完时显示「暂停」。
  * - 首次出现：开屏落地后（没有开屏就立刻）弧从空画到当前、数字从 0 数上来；之后数字变了（比如用了重置券）
@@ -26,16 +26,15 @@ function shape(r: QuotaRow) {
 
 function Ring({ row, intro }: { row: QuotaRow; intro: boolean }) {
   const paused = !!row.paused;
-  const unlimited = row.cap <= 0 && !paused;
   const target = shape(row);
   // intro：先停在「空弧、0」，等开屏落地后再动
-  const [shown, setShown] = useState(() => (intro && !unlimited ? { left: 0, gap: 100 } : target));
+  const [shown, setShown] = useState(() => (intro && !paused ? { left: 0, gap: 100 } : target));
   const prev = useRef(shown);
   const playing = useRef<{ stop: () => void } | null>(null);
   const waiting = intro && splashActive.value;
 
   useEffect(() => {
-    if (unlimited || waiting) return;
+    if (paused || waiting) return;
     const from = prev.current;
     if (from.left === target.left && from.gap === target.gap) return;
     if (reduceMotion()) {
@@ -58,35 +57,26 @@ function Ring({ row, intro }: { row: QuotaRow; intro: boolean }) {
     });
     playing.current = ctl;
     return () => ctl.stop();
-  }, [target.left, target.gap, unlimited, waiting]);
+  }, [target.left, target.gap, paused, waiting]);
 
   // 颜色按「还剩多少」算：被全站剩余量卡住时也会提前变色
   const tone = paused ? "paused" : toneFor(row.cap - target.left, row.cap);
   const type = TYPE[row.id];
   const title = paused
     ? `${row.label}：${row.hint ?? "全站今天的额度用完了"}`
-    : unlimited
-      ? `${row.label}：${row.hint ?? "个人不限"}，今天已出 ${fmt(row.used)}`
-      : `${row.label}：今天还剩 ${fmt(target.left)}，每天 ${fmt(row.cap)}`;
+    : `${row.label}：今天还剩 ${fmt(target.left)}，每天 ${fmt(row.cap)}`;
   return (
     <li class={`ring-item t-${type}`}>
       <span class="sr-only">{title}</span>
       <div class="ring" data-tone={tone} title={title} aria-hidden="true">
         <svg viewBox="0 0 104 104" aria-hidden="true">
           <circle class="ring__track" cx="52" cy="52" r="46" />
-          <circle
-            class={cx("ring__arc", unlimited && "ring__arc--unlimited")}
-            cx="52"
-            cy="52"
-            r="46"
-            pathLength={100}
-            stroke-dashoffset={unlimited ? undefined : shown.gap}
-          />
+          <circle class="ring__arc" cx="52" cy="52" r="46" pathLength={100} stroke-dashoffset={shown.gap} />
         </svg>
         {paused ? (
           <span class="ring__num ring__num--paused">暂停</span>
         ) : (
-          <span class="ring__num">{unlimited ? "∞" : fmt(Math.round(shown.left))}</span>
+          <span class="ring__num">{fmt(Math.round(shown.left))}</span>
         )}
       </div>
       <p class="ring-label" aria-hidden="true">

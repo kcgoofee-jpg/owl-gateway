@@ -115,17 +115,17 @@ pub enum Effect {
 // 手动额度的下发与首页文案
 // ---------------------------------------------------------------------------
 
-/// 站长手动定的额度（都已按登记表解析、夹好）。
+/// 站长手动定的额度（都已按登记表解析、夹好）。10-27 规范化：0 = 停用，上限最大 9999。
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Manual {
-    /// V4.5 每人每天（0 = 不限）
+    /// V4.5 每人每天（0 = 停用）
     pub daily_images: i64,
-    /// V5 每人每天（0 = 不限，只受全站管）
+    /// V5 每人每天（0 = 停用）
     pub daily_v5: i64,
-    /// 全站每日 V5（0 = 不限）
+    /// 全站每日 V5（0 = 停用）
     pub global_v5: i64,
     pub v5_paused: bool,
-    /// Anlas 每人每天（0 = 不限）
+    /// Anlas 每人每天（0 = 停用）
     pub member_anlas: i64,
 }
 
@@ -143,20 +143,18 @@ pub fn quota_notice(m: &Manual, reset_hour: i64) -> String {
     let v45 = if m.daily_images > 0 {
         format!("V4.5 每人 {} 张/天", m.daily_images)
     } else {
-        "V4.5 每人不限".to_string()
+        "V4.5 已停用".to_string()
     };
     let v5 = if m.v5_paused {
         " · V5 暂停中".to_string()
+    } else if m.daily_v5 == 0 {
+        " · V5 已停用".to_string()
     } else {
-        let each = if m.daily_v5 > 0 {
-            format!("每人 {} 张", m.daily_v5)
-        } else {
-            "每人不限".to_string()
-        };
+        let each = format!("每人 {} 张", m.daily_v5);
         if m.global_v5 > 0 {
             format!(" · V5 {each}（全站今日共 {} 张，先到先得）", m.global_v5)
         } else {
-            format!(" · V5 {each}")
+            " · V5 已停用（全站池未开放）".to_string()
         }
     };
     let anlas = if m.member_anlas > 0 {
@@ -353,7 +351,19 @@ mod tests {
         };
         assert_eq!(
             quota_notice(&open, 7),
-            "今日额度：V4.5 每人不限（每日 7 点重置） · V5 每人 10 张（全站今日共 300 张，先到先得）"
+            "今日额度：V4.5 已停用（每日 7 点重置） · V5 每人 10 张（全站今日共 300 张，先到先得）"
+        );
+        // 10-27：全局 V5 池停用（0）时不再显示成「不限」
+        let closed = Manual {
+            v5_paused: false,
+            daily_v5: 10,
+            global_v5: 0,
+            member_anlas: 0,
+            daily_images: 150,
+        };
+        assert_eq!(
+            quota_notice(&closed, 7),
+            "今日额度：V4.5 每人 150 张/天（每日 7 点重置） · V5 已停用（全站池未开放）"
         );
     }
 

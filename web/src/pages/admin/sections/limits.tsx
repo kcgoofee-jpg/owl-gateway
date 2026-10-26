@@ -6,10 +6,12 @@ import { act, useAdmin } from "../Admin";
 import { CardPending, SectionHead, TableWrap, useBusy } from "./_kit";
 import {
   agoText,
+  DAILY_CAP_MAX,
   dash,
   type GlobalQuotaModes,
   type Guard,
   guardSpecs,
+  MONTHLY_CAP_MAX,
   QUOTA_SPECS,
   type Records,
   RUNTIME_SPECS,
@@ -123,16 +125,28 @@ const MODE_LABELS: Record<
   global_monthly_anlas: { label: "Anlas 全站每月", unit: "Anlas" },
 };
 
+/** 迁移前的旧数据可能是 unlimited：显示与编辑都折算成上限值（9999 / 每月池 99999）。 */
+const boundMode = (name: keyof typeof MODE_LABELS, mode: GlobalQuotaModes[keyof typeof MODE_LABELS]) =>
+  mode.mode === "unlimited"
+    ? { mode: "limit" as const, value: name === "global_monthly_anlas" ? MONTHLY_CAP_MAX : DAILY_CAP_MAX }
+    : mode;
+
 function QuotaModesCard(props: {
   title: string;
   data: GlobalQuotaModes;
   names: Array<keyof typeof MODE_LABELS>;
   done: string;
 }) {
-  const [modes, setModes] = useState(props.data);
+  // 10-27 规范化：全局额度就是一个数字（0 = 停用，上限 9999 / 每月池 99999），没有「不限」档
+  const normalize = (d: GlobalQuotaModes): GlobalQuotaModes => {
+    const out = { ...d };
+    for (const name of props.names) out[name] = boundMode(name, d[name]);
+    return out;
+  };
+  const [modes, setModes] = useState(() => normalize(props.data));
   const [saving, setSaving] = useState(false);
-  useEffect(() => setModes(props.data), [props.data]);
-  const changed = JSON.stringify(modes) !== JSON.stringify(props.data);
+  useEffect(() => setModes(normalize(props.data)), [props.data]);
+  const changed = JSON.stringify(modes) !== JSON.stringify(normalize(props.data));
   const save = async () => {
     setSaving(true);
     const ok = await act("PUT", "/admin/api/settings", { quota_modes: modes }, props.done);
@@ -148,39 +162,25 @@ function QuotaModesCard(props: {
         {props.names.map((name) => {
           const mode = modes[name];
           const spec = MODE_LABELS[name];
+          const max = name === "global_monthly_anlas" ? MONTHLY_CAP_MAX : DAILY_CAP_MAX;
           return (
             <div class="field" key={name}>
               <span>{spec.label}</span>
-              <select
-                class="select"
-                aria-label={`${spec.label} 模式`}
-                value={mode.mode}
-                onChange={(e) =>
-                  setMode(
-                    name,
-                    e.currentTarget.value === "limit"
-                      ? { mode: "limit", value: mode.mode === "limit" ? mode.value : 0 }
-                      : { mode: "unlimited" },
-                  )
-                }
-              >
-                <option value="limit">限制数量</option>
-                <option value="unlimited">不限</option>
-              </select>
-              {mode.mode === "limit" && (
-                <div class="field__control">
-                  <input
-                    class="input"
-                    type="number"
-                    min="0"
-                    step={name === "global_monthly_anlas" ? "any" : 1}
-                    aria-label={`${spec.label} 限额`}
-                    value={mode.value}
-                    onInput={(e) => setMode(name, { mode: "limit", value: Number(e.currentTarget.value) })}
-                  />
-                  <small>{spec.unit}；限额可以设为 0，表示拒绝额度内请求</small>
-                </div>
-              )}
+              <div class="field__control">
+                <input
+                  class="input"
+                  type="number"
+                  min="0"
+                  max={max}
+                  step={name === "global_monthly_anlas" ? "any" : 1}
+                  aria-label={`${spec.label} 限额（0 = 停用）`}
+                  value={mode.mode === "limit" ? mode.value : 0}
+                  onInput={(e) => setMode(name, { mode: "limit", value: Number(e.currentTarget.value) })}
+                />
+                <small>
+                  {spec.unit}；0 = 停用，上限 {max.toLocaleString("en-US")}
+                </small>
+              </div>
             </div>
           );
         })}

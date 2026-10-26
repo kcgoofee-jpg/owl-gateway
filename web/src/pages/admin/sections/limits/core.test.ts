@@ -3,7 +3,7 @@ import { agoText, dash, guardSpecs, QUOTA_SPECS, RUNTIME_SPECS } from "./core";
 
 describe("额度与保护：全是手动设置", () => {
   it("每人 / 全站额度的范围与后端一致", () => {
-    expect(QUOTA_SPECS.register_daily_images).toMatchObject({ kind: "int", min: 0, max: 100_000 });
+    expect(QUOTA_SPECS.register_daily_images).toMatchObject({ kind: "int", min: 0, max: 9999 });
     expect(QUOTA_SPECS.global_monthly_anlas?.kind).toBe("float");
     // 自动档已删除：只有关 / 开
     const medium = QUOTA_SPECS.v5_medium_mode;

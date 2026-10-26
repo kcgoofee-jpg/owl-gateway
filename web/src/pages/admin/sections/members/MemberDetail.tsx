@@ -94,10 +94,11 @@ export function MemberDetail(props: { m: MemberRow; now: number; act: DetailActi
   const quotaSource = k.quota_auto ? "auto" : "manual";
   // 今天的 V4.5 / V5 用量在列表行里已经有了，这里只补行里没有的 Anlas
   const anlasUsed = Math.round(u.anlas || 0);
+  // 10-27 规范化：上限是数字，0 = 停用；旧数据的 unlimited 显示为 9999（迁移已折算，这里只是兜底）
   const limitText = (mode: NonNullable<KeyRow["quota_limits"]>["images"]): string => {
     if (mode.mode === "inherit") return "继承统一额度";
-    if (mode.mode === "unlimited") return "不限";
-    return `限 ${mode.value}`;
+    if (mode.mode === "unlimited") return "限 9999";
+    return mode.value === 0 ? "停用" : `限 ${mode.value}`;
   };
   const limitsValid = k.quota_limits_valid !== false;
   const anlas = !k.allow_anlas
@@ -152,9 +153,9 @@ export function MemberDetail(props: { m: MemberRow; now: number; act: DetailActi
             <dd>
               {!limitsValid
                 ? "额度配置损坏"
-                : `V4.5 ${limitText(k.quota_limits?.images ?? { mode: "unlimited" })}`}
+                : `V4.5 ${limitText(k.quota_limits?.images ?? { mode: "limit", value: 9999 })}`}
               {k.image_model_scope === "all"
-                ? ` · V5 ${limitText(k.quota_limits?.v5 ?? { mode: "unlimited" })}`
+                ? ` · V5 ${limitText(k.quota_limits?.v5 ?? { mode: "limit", value: 9999 })}`
                 : " · 不能用 V5"}
             </dd>
             {m.reset_today && m.reset_today.count > 0 && (

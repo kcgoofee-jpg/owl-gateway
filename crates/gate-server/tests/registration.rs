@@ -476,7 +476,7 @@ async fn idle_recycled_member_is_told_why_when_registering_again() {
 
 // ------------------------------------------------------------------ 桥接：发 Key
 
-const WELCOME: &str = "🦉 **欢迎来到猫头鹰公益站！** 这是你的 API Key（只发这一次，请先保存）：\n`<KEY>`\n\n**三步开始出图（以柏宝绘为例）**\n1. 打开柏宝绘 → 渠道 → 配置 → 新建接入点\n2. 接口地址填 `https://gate.test`（**不要**加 /v1）\n3. API Key 填上面 `nai-` 开头的整串，保存后随便生成一张图试试\n其他支持自定义 NovelAI 地址的客户端同样这样填。\n\n**不确定填对没有？** 在 https://gate.test 用 Discord 登录，能看到自己的额度就说明 Key 正常。首次登录未提交使用体验问卷时，网站会自动打开问卷。\n\n**规则**\n• 每日额度：每人每天最多 V4.5 及以下 150 张，全站共用额度池；每天 7 点重置\n• 已开通功能：文生图\n• 连续 3 天没有成功出图会被自动回收（不另行提醒），之后可以再 /register 领新的\n• 每把 Key 同时生成 1 张、最多再排 2 张，多发的会被退回，等前面的出完再发\n• 只提供免费出图：V4.5 及以下总像素 ≤1024×1024（宽高取 64 的倍数，超出自动等比缩小）；V5 只有 832×1216、1216×832、1024×1024 三种尺寸，其他尺寸会自动换成最接近的一种；≤28 步、每次 1 张；图生图 / 局部重绘不开放；Vibe 在「已开通功能」里时可用，消耗每日 Anlas 额度\n• Key 只给本服务器成员：退出服务器后 Key 自动失效\n• 一人一把，请勿分享：共用或转售会被回收\n\n**常用命令**：`/resetkey` Key 丢了或泄露时换新 · `/反馈` 给站长留言；额度在 https://gate.test 登录后查看\n遇到问题到 🛠️｜问题反馈 发截图（记得打码 Key）。";
+const WELCOME: &str = "🦉 **欢迎来到猫头鹰公益站！** 这是你的 API Key（只发这一次，请先保存）：\n`<KEY>`\n\n**三步开始出图（以柏宝绘为例）**\n1. 打开柏宝绘 → 渠道 → 配置 → 新建接入点\n2. 接口地址填 `https://gate.test`（**不要**加 /v1）\n3. API Key 填上面 `nai-` 开头的整串，保存后随便生成一张图试试\n其他支持自定义 NovelAI 地址的客户端同样这样填。\n\n**不确定填对没有？** 在 https://gate.test 用 Discord 登录，能看到自己的额度就说明 Key 正常。首次登录未提交使用体验问卷时，网站会自动打开问卷。\n\n**规则**\n• 每日额度：每人每天最多 V4.5 及以下 150 张；V5 9999 张，全站共用额度池；每天 7 点重置\n• 已开通功能：文生图\n• 连续 3 天没有成功出图会被自动回收（不另行提醒），之后可以再 /register 领新的\n• 每把 Key 同时生成 1 张、最多再排 2 张，多发的会被退回，等前面的出完再发\n• 只提供免费出图：V4.5 及以下总像素 ≤1024×1024（宽高取 64 的倍数，超出自动等比缩小）；V5 只有 832×1216、1216×832、1024×1024 三种尺寸，其他尺寸会自动换成最接近的一种；≤28 步、每次 1 张；图生图 / 局部重绘不开放；Vibe 在「已开通功能」里时可用，消耗每日 Anlas 额度\n• Key 只给本服务器成员：退出服务器后 Key 自动失效\n• 一人一把，请勿分享：共用或转售会被回收\n\n**常用命令**：`/resetkey` Key 丢了或泄露时换新；额度在 https://gate.test 登录后查看\n遇到问题到 🛠️｜问题反馈 发截图（记得打码 Key）。";
 
 /// 没配 `REGISTER_EXPIRES_DAYS`：新 Key 不过期，欢迎私信里也没有「有效期」那一行
 #[tokio::test]
@@ -532,7 +532,7 @@ async fn issue_mints_a_key_exactly_like_legacy() {
     assert_eq!(row["discord_id"], MEMBER);
     assert_eq!(row["enabled"], 1);
     assert_eq!(row["daily_images"], 150);
-    assert_eq!(row["daily_v5"], 0);
+    assert_eq!(row["daily_v5"], 9999);
     assert_eq!(row["rpm"], 10);
     assert_eq!(row["allow_anlas"], 0);
     assert_eq!(row["allow_img2img"], 0);
@@ -2384,7 +2384,7 @@ async fn public_me_matches_legacy_and_coupons_work() {
     );
     assert_eq!(
         me.2["today"],
-        json!({"images": 0, "v5": 0, "legacy": 0, "daily_images": 150, "daily_v5": 0,
+        json!({"images": 0, "v5": 0, "legacy": 0, "daily_images": 150, "daily_v5": 9999,
                "quota_limits": {"images": {"mode": "inherit"}, "v5": {"mode": "inherit"}, "daily_anlas": {"mode": "inherit"}, "monthly_anlas": {"mode": "unlimited"}},
                "quota_limits_valid": true,
                "site_v5_left": 150, "site_v5_cap": 150, "upstream_v5_free": true, "v5_paused": false,
@@ -3361,7 +3361,7 @@ async fn registration_settings_ops_match_legacy() {
     let message = r.2["message"].as_str().unwrap();
     assert!(
         message.contains(
-            "• 每日额度：每人每天最多 V4.5 及以下 100 张，全站共用额度池；每天 7 点重置\n"
+            "• 每日额度：每人每天最多 V4.5 及以下 100 张；V5 9999 张，全站共用额度池；每天 7 点重置\n"
         ),
         "{message}"
     );

@@ -68,7 +68,7 @@ fn constants() {
     // 加了出图间隔 AIMD 的四个参数 interval_*（默认值 = gate_upstream::pace 的常量）
     // 10-23：出图间隔抖动 interval_jitter 删除；歇的下限 1 秒（原来写死的 SETTLE_GAP）
     let want: [(&str, i64, i64, i64); 5] = [
-        ("account_daily_cap", 2400, 0, 20000),
+        ("account_daily_cap", 2400, 0, 9999),
         ("post_jitter_min", 1, 1, 30),
         ("post_jitter_max", 3, 1, 30),
         ("queue_per_member", 2, 1, 5),

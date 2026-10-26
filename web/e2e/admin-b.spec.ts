@@ -146,9 +146,8 @@ test("额度与保护：改一项运行限制并保存（不合法时不能保�
 
 test("额度与保护：全是手动表单 + 只读记录；没有算法说明", async ({ page }) => {
   await visit(page, "limits", "额度与保护");
-  const imagesMode = page.getByLabel("V4.5 每人每天 模式");
-  const imagesLimit = page.getByLabel("V4.5 每人每天 限额");
-  await expect(imagesMode).toHaveValue("limit");
+  // 10-27：全局额度没有「模式」下拉了——就是一个数字，0 = 停用
+  const imagesLimit = page.getByLabel("V4.5 每人每天 限额（0 = 停用）");
   await expect(imagesLimit).toHaveValue("150");
   await expect(page.getByLabel("单号每天上限", { exact: false })).toHaveValue("2400");
   await expect(page.getByLabel("每人排队", { exact: false })).toHaveValue("2");

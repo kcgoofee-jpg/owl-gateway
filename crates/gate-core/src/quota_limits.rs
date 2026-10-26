@@ -1,7 +1,15 @@
 //! Explicit quota modes. Access permissions are intentionally modeled elsewhere.
+//!
+//! 站长 10-27 的规范化：额度数字一律 **0–9999（每月池 0–99999），0 = 停用**，「不限」不再是可设置的选项
+//! （想放开就填上限值）。[`Limit::Unlimited`] 保留为内部兼容态（旧数据防御性处理），存储与 UI 不再产生它。
 
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
+
+/// 每日额度数字的统一上限。
+pub const DAILY_CAP_MAX: f64 = 9999.0;
+/// 每月池的统一上限（按月结算的数字比每日大一个量级）。
+pub const MONTHLY_CAP_MAX: f64 = 99999.0;
 
 #[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -28,12 +36,12 @@ impl GlobalLimits {
     pub fn from_value(value: &Value) -> Option<Self> {
         let limits: Self = serde_json::from_value(value.clone()).ok()?;
         [
-            (limits.register_daily_images, 100_000.0, true),
-            (limits.register_daily_v5, 100_000.0, true),
-            (limits.global_daily_v5, 100_000.0, true),
-            (limits.global_daily_anlas, 100_000.0, true),
-            (limits.member_daily_anlas, 100_000.0, true),
-            (limits.global_monthly_anlas, 1_000_000.0, false),
+            (limits.register_daily_images, DAILY_CAP_MAX, true),
+            (limits.register_daily_v5, DAILY_CAP_MAX, true),
+            (limits.global_daily_v5, DAILY_CAP_MAX, true),
+            (limits.global_daily_anlas, DAILY_CAP_MAX, true),
+            (limits.member_daily_anlas, DAILY_CAP_MAX, true),
+            (limits.global_monthly_anlas, MONTHLY_CAP_MAX, false),
         ]
         .iter()
         .all(|(mode, max, integer)| match mode {
@@ -47,13 +55,9 @@ impl GlobalLimits {
     }
 
     pub fn from_legacy(values: [f64; 6]) -> Self {
-        let mode = |n: f64| {
-            if n <= 0.0 {
-                Limit::Unlimited
-            } else {
-                Limit::Limit(n)
-            }
-        };
+        // 10-27 规范化：数字 0 = 停用（不再把 0 读成「不限」）。storage 里不该再有 0：
+        // bootstrap 迁移已把存量 0 刷成上限值；这里是没跑迁移的兜底。
+        let mode = |n: f64| Limit::Limit(n.max(0.0));
         Self {
             register_daily_images: mode(values[0]),
             register_daily_v5: mode(values[1]),
@@ -77,16 +81,18 @@ impl MemberLimits {
         fn valid(mode: Limit, allow_inherit: bool, integer: bool, max: f64) -> bool {
             match mode {
                 Limit::Inherit => allow_inherit,
+                // 兼容态：迁移前的旧数据可能还带着 unlimited，读到就放行（resolve 成无上限）；
+                // 新写入走数字 0 = 停用，UI 不再提供不限。
                 Limit::Unlimited => true,
                 Limit::Limit(n) => {
                     n.is_finite() && n >= 0.0 && n <= max && (!integer || n.fract() == 0.0)
                 }
             }
         }
-        valid(self.images, true, true, 1_000_000.0)
-            && valid(self.v5, true, true, 100_000.0)
-            && valid(self.daily_anlas, true, false, 100_000.0)
-            && valid(self.monthly_anlas, false, false, 100_000.0)
+        valid(self.images, true, true, DAILY_CAP_MAX)
+            && valid(self.v5, true, true, DAILY_CAP_MAX)
+            && valid(self.daily_anlas, true, false, DAILY_CAP_MAX)
+            && valid(self.monthly_anlas, false, false, MONTHLY_CAP_MAX)
     }
 
     pub fn legacy(images: i64, v5: i64, daily_anlas: f64, monthly_anlas: f64, auto: i64) -> Self {
@@ -193,8 +199,9 @@ mod tests {
 
     #[test]
     fn global_anlas_zero_legacy_splits_public_access_and_paid_pool() {
+        // 10-27 起 legacy 数字 0 = 停用（上限 0），不再读成「不限」
         let zero = GlobalLimits::from_legacy([100.0, 0.0, 20.0, 0.0, 50.0, 1000.0]);
-        assert_eq!(zero.global_daily_anlas, Limit::Unlimited);
+        assert_eq!(zero.global_daily_anlas, Limit::Limit(0.0));
         assert!(!zero.public_vibe_enabled);
         let positive = GlobalLimits::from_legacy([100.0, 0.0, 20.0, 10.0, 50.0, 1000.0]);
         assert_eq!(positive.global_daily_anlas, Limit::Limit(10.0));

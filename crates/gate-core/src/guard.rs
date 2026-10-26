@@ -57,7 +57,7 @@ pub const FIELDS: [Field; 5] = [
         "account_daily_cap",
         ACCOUNT_DAILY_CAP_DEFAULT,
         0,
-        20000,
+        9999,
         "每个上游账号每天最多出图张数",
     ),
     // 出图节奏只剩这一对（站长 10-23）：每张出完后这个账号歇 N～M 秒（均匀随机）再开始下一张。
@@ -184,7 +184,7 @@ impl GuardCore {
     }
 
     /// Daily cap for one account right now: a live temporary override, else `account_daily_cap`
-    /// (manual). `account_daily_cap` = 0 is unlimited.
+    /// (manual). 10-27 起 0 = 停用（不再是不限）。
     pub fn daily_cap_for(&self, token_id: &str, now: f64) -> i64 {
         match self.token_daily_caps.get(token_id) {
             Some(&(cap, until)) if now < until => cap,
@@ -192,10 +192,10 @@ impl GuardCore {
         }
     }
 
-    /// 这个账号今天出满了吗（`used` ≥ 今天的上限；上限 0 = 不限，永远不满）。与 [`Self::token_block_reason`] 同一判断。
+    /// 这个账号今天出满了吗（`used` ≥ 今天的上限）。10-27 起上限 0 = 停用（永不放行），
+    /// 不再是「不限」；存量 0 已由启动迁移刷成 9999。与 [`Self::token_block_reason`] 同一判断。
     pub fn at_daily_cap(&self, token_id: &str, used: i64, now: f64) -> bool {
-        let daily = self.daily_cap_for(token_id, now);
-        daily != 0 && used >= daily
+        used >= self.daily_cap_for(token_id, now)
     }
 
     fn v(&self, name: &str) -> i64 {
@@ -344,7 +344,8 @@ impl GuardCore {
             return Some(Reason::new(text, reasons::BREAKER));
         }
         let daily = self.daily_cap_for(token_id, now);
-        if daily != 0 && used >= daily as f64 {
+        // 10-27 起 0 = 停用（存量 0 已迁移成 9999）：上限 0 的账号一张都不放
+        if used >= daily as f64 {
             return Some(Reason::new(
                 format!(
                     "本站今日出图总量已达上限，每个账号每天 {daily} 张，未扣费。{}恢复。",

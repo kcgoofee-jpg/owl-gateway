@@ -163,9 +163,10 @@ impl AppState {
                 .iter()
                 .enumerate()
                 .map(|(i, t)| {
+                    // 库里没有设置行的 Token 默认 9999（放开，站长再收紧）；0 现在是「停用」
                     (
                         t.clone(),
-                        0,
+                        gate_upstream::pool::V5_DAILY_LIMIT_DEFAULT,
                         env.nai_token_allow_anlas.get(i).copied().unwrap_or(true),
                     )
                 })

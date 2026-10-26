@@ -74,7 +74,7 @@ describe("createDefaults", () => {
 });
 
 describe("buildBody", () => {
-  it("手动模式显式区分限制0与不限", () => {
+  it("手动模式发 limit 模式（0 = 停用，显式区别于继承）", () => {
     const f = { ...defaults(), name: " 张三 ", daily_images: "0", daily_v5: "0" };
     const r = buildBody(f);
     expect(r.ok).toBe(true);
@@ -119,19 +119,19 @@ describe("buildBody", () => {
     expect(r.ok && [r.body.rpm, r.body.expires_days]).toEqual([20, 0]);
   });
 
-  it("开通 Anlas 时日 / 月额度不能都不限", () => {
+  it("开通 Anlas 时日 / 月上限不能都是 0（0 = 停用）", () => {
     const f = {
       ...defaults(),
       allow_anlas: true,
-      daily_anlas_mode: "unlimited" as const,
-      monthly_anlas_mode: "unlimited" as const,
+      daily_anlas_mode: "limit" as const,
+      monthly_anlas_mode: "limit" as const,
       daily_anlas: "0",
       monthly_anlas: "0",
     };
     const r = buildBody(f);
     expect(r.ok).toBe(false);
-    if (!r.ok) expect(r.errors.allow_anlas).toContain("不能都选择不限");
-    expect(buildBody({ ...f, monthly_anlas: "10", monthly_anlas_mode: "limit" }).ok).toBe(true);
+    if (!r.ok) expect(r.errors.allow_anlas).toContain("至少一项大于 0");
+    expect(buildBody({ ...f, monthly_anlas: "10" }).ok).toBe(true);
   });
 
   it("功能：仅选中模式必须至少选一个；「全部」发 null", () => {

@@ -1,6 +1,7 @@
 /**
  * 新建 / 编辑 Key 的表单模型：默认值、从已有 Key 还原、校验并拼出请求体（纯函数，单测覆盖）。
- * 规则与后端一致：数值不能为空 / 为负 / 带小数（整数字段）；0 表示不限；开通 Anlas 时每日 / 每月 Anlas 上限不能都是 0。
+ * 规则与后端一致（10-27 规范化）：数值不能为空 / 为负 / 带小数（整数字段）；**0 = 停用，上限 9999（每月池 99999），
+ * 没有「不限」**；开通 Anlas 时每日 / 每月上限至少一项大于 0。旧数据里的 unlimited 模式在还原时折算成上限值。
  * 新建时的默认值全部来自服务端（/admin/api/ops）：每日 V4.5 / V5 张数和有效天数是后台「领 Key」的设置，
  * Anlas 上限、每分钟请求数是服务端常量；这里不另写一套。每分钟请求数、有效天数默认留空 = 不发给后端（用服务端默认值）。
  */
@@ -13,13 +14,13 @@ export type KeyForm = {
   quota: "auto" | "manual";
   scope: "legacy" | "all";
   daily_images: string;
-  images_mode: "inherit" | "unlimited" | "limit";
+  images_mode: "inherit" | "limit";
   daily_v5: string;
-  v5_mode: "inherit" | "unlimited" | "limit";
+  v5_mode: "inherit" | "limit";
   daily_anlas: string;
-  daily_anlas_mode: "inherit" | "unlimited" | "limit";
+  daily_anlas_mode: "inherit" | "limit";
   monthly_anlas: string;
-  monthly_anlas_mode: "unlimited" | "limit";
+  monthly_anlas_mode: "limit";
   allow_anlas: boolean;
   exclude_global_v5: boolean;
   featMode: "all" | "custom";
@@ -64,11 +65,21 @@ export function createDefaults(ops: OpsSnapshot | null): KeyForm {
   };
 }
 
+/** 旧数据里的 unlimited（迁移前的「不限」）折算成上限值；每月池用大上限。 */
+const UNLIMITED_FALLBACK = {
+  images: 9999,
+  v5: 9999,
+  daily_anlas: 9999,
+  monthly_anlas: 99999,
+} as const;
+
 export function formFromKey(k: KeyRow, role: Role): KeyForm {
+  const bound = (limit: QuotaLimit, field: keyof typeof UNLIMITED_FALLBACK): QuotaLimit =>
+    limit.mode === "unlimited" ? { mode: "limit", value: UNLIMITED_FALLBACK[field] } : limit;
   const fallback = (value: number, auto: boolean, anlas = false): QuotaLimit => {
     if (anlas && value === 0) return { mode: "inherit" };
     if (auto && !anlas) return { mode: "inherit" };
-    return value === 0 ? { mode: "unlimited" } : { mode: "limit", value };
+    return { mode: "limit", value };
   };
   const modes = k.quota_limits ?? {
     images: fallback(k.daily_images, k.quota_auto),
@@ -76,22 +87,26 @@ export function formFromKey(k: KeyRow, role: Role): KeyForm {
     daily_anlas: fallback(k.daily_anlas, false, true),
     monthly_anlas: fallback(k.monthly_anlas, false),
   };
-  const modeName = (limit: QuotaLimit) => limit.mode;
-  const modeValue = (limit: QuotaLimit, fallbackValue: number) =>
-    limit.mode === "limit" ? String(limit.value) : String(fallbackValue);
+  const modeName = (limit: QuotaLimit) => (limit.mode === "unlimited" ? "limit" : limit.mode);
+  const modeValue = (limit: QuotaLimit, field: keyof typeof UNLIMITED_FALLBACK, fallbackValue: number) =>
+    limit.mode === "unlimited"
+      ? String(UNLIMITED_FALLBACK[field])
+      : limit.mode === "limit"
+        ? String(limit.value)
+        : String(fallbackValue);
   return {
     name: k.name,
     role,
     quota: k.quota_auto ? "auto" : "manual",
     scope: k.image_model_scope === "all" ? "all" : "legacy",
-    daily_images: modeValue(modes.images, k.daily_images),
-    images_mode: modeName(modes.images),
-    daily_v5: modeValue(modes.v5, k.daily_v5),
-    v5_mode: modeName(modes.v5),
-    daily_anlas: modeValue(modes.daily_anlas, k.daily_anlas),
-    daily_anlas_mode: modeName(modes.daily_anlas),
-    monthly_anlas: modeValue(modes.monthly_anlas, k.monthly_anlas),
-    monthly_anlas_mode: modeName(modes.monthly_anlas) as "unlimited" | "limit",
+    daily_images: modeValue(bound(modes.images, "images"), "images", k.daily_images),
+    images_mode: modeName(bound(modes.images, "images")) as KeyForm["images_mode"],
+    daily_v5: modeValue(bound(modes.v5, "v5"), "v5", k.daily_v5),
+    v5_mode: modeName(bound(modes.v5, "v5")) as KeyForm["v5_mode"],
+    daily_anlas: modeValue(bound(modes.daily_anlas, "daily_anlas"), "daily_anlas", k.daily_anlas),
+    daily_anlas_mode: modeName(bound(modes.daily_anlas, "daily_anlas")) as KeyForm["daily_anlas_mode"],
+    monthly_anlas: modeValue(bound(modes.monthly_anlas, "monthly_anlas"), "monthly_anlas", k.monthly_anlas),
+    monthly_anlas_mode: modeName(bound(modes.monthly_anlas, "monthly_anlas")) as "limit",
     allow_anlas: k.allow_anlas,
     exclude_global_v5: k.exclude_global_v5,
     featMode: k.features == null ? "all" : "custom",
@@ -133,24 +148,21 @@ export function buildBody(f: KeyForm): BuildResult {
       max: number,
       int = true,
     ): QuotaLimit => {
-      if (mode !== "limit") return { mode: mode as "inherit" | "unlimited" };
+      if (mode !== "limit") return { mode: "inherit" };
       return { mode: "limit", value: num(field, label, { max, int }) };
     };
-    const images = modeLimit(f.images_mode, "daily_images", "每日图片张数", 1_000_000);
-    const v5 = modeLimit(f.v5_mode, "daily_v5", "每日 V5 张数", 100_000);
-    const dAnlas = modeLimit(f.daily_anlas_mode, "daily_anlas", "每日 Anlas 上限", 100_000, false);
-    const mAnlas = modeLimit(f.monthly_anlas_mode, "monthly_anlas", "每月 Anlas 上限", 100_000, false);
+    const images = modeLimit(f.images_mode, "daily_images", "每日图片张数", 9999);
+    const v5 = modeLimit(f.v5_mode, "daily_v5", "每日 V5 张数", 9999);
+    const dAnlas = modeLimit(f.daily_anlas_mode, "daily_anlas", "每日 Anlas 上限", 9999, false);
+    const mAnlas = modeLimit(f.monthly_anlas_mode, "monthly_anlas", "每月 Anlas 上限", 99999, false);
     body.quota_limits = { images, v5, daily_anlas: dAnlas, monthly_anlas: mAnlas };
     body.allow_anlas = f.allow_anlas;
     body.exclude_global_v5 = f.exclude_global_v5;
-    if (
-      f.allow_anlas &&
-      !errors.daily_anlas &&
-      !errors.monthly_anlas &&
-      dAnlas.mode === "unlimited" &&
-      mAnlas.mode === "unlimited"
-    ) {
-      errors.allow_anlas = "开通 Anlas 时，每日和每月 Anlas 不能都选择不限";
+    if (f.allow_anlas && !errors.daily_anlas && !errors.monthly_anlas) {
+      const cap = (x: QuotaLimit) => (x.mode === "limit" ? x.value : Number.POSITIVE_INFINITY);
+      if (cap(dAnlas) === 0 && cap(mAnlas) === 0) {
+        errors.allow_anlas = "开通 Anlas 时，每日和每月上限至少一项大于 0（0 = 停用）";
+      }
     }
     if (f.featMode === "custom") {
       if (!f.feats.length) errors.feats = "至少选一个功能，或改选「全部已开放功能」";

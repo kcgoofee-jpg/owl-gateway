@@ -63,7 +63,8 @@ pub fn router() -> Router<AppState> {
 }
 
 const NO_KEY: &str = "key 不存在";
-const ANLAS_CAP: &str = "开通 Anlas 时必须设置每日或每月 Anlas 上限（0 = 不限），不能两项都留空";
+const ANLAS_CAP: &str =
+    "开通 Anlas 时每日 / 每月上限至少一项大于 0（0 = 停用该档），不能两项都是 0";
 const FEATURES_HINT: &str = "image,upscale,augment,vibe,tags";
 const ROLE_HINT: &str = "身份组只能是 regular（普通）或 invite（邀请）；站长 / 测试身份组已删除";
 
@@ -331,30 +332,26 @@ async fn create_key(State(state): State<AppState>, _s: AdminSession, req: Reques
     let reg = ops::registration_settings(st).await?;
     let field = |name: &str, default: Value| body.get(name).cloned().unwrap_or(default);
 
+    // 10-27 额度规范化：0 = 停用，上限最大 9999（每月池 99999），不再有「不限」
     let daily_images = strict_int(
         &field("daily_images", json!(reg.daily_images)),
         0,
-        1_000_000,
+        9999,
         "daily_images",
     )?;
     let monthly_anlas = strict_float(
         &field("monthly_anlas", json!(defaults::MANUAL_KEY_MONTHLY_ANLAS)),
         0.0,
-        100_000.0,
+        99_999.0,
         "monthly_anlas",
     )?;
     let daily_anlas = strict_float(
         &field("daily_anlas", json!(defaults::MANUAL_KEY_DAILY_ANLAS)),
         0.0,
-        100_000.0,
+        9999.0,
         "daily_anlas",
     )?;
-    let daily_v5 = strict_int(
-        &field("daily_v5", json!(reg.daily_v5)),
-        0,
-        100_000,
-        "daily_v5",
-    )?;
+    let daily_v5 = strict_int(&field("daily_v5", json!(reg.daily_v5)), 0, 9999, "daily_v5")?;
     let rpm = strict_int(
         &field("rpm", json!(defaults::MANUAL_KEY_RPM)),
         1,
@@ -555,19 +552,19 @@ async fn patch_key(
     if let Some(v) = body.get("daily_anlas") {
         fields.insert(
             "daily_anlas".into(),
-            pyval::float(strict_float(v, 0.0, 100_000.0, "daily_anlas")?),
+            pyval::float(strict_float(v, 0.0, 9999.0, "daily_anlas")?),
         );
     }
     if let Some(v) = body.get("daily_v5") {
         fields.insert(
             "daily_v5".into(),
-            json!(strict_int(v, 0, 100_000, "daily_v5")?),
+            json!(strict_int(v, 0, 9999, "daily_v5")?),
         );
     }
     if let Some(v) = body.get("monthly_anlas") {
         fields.insert(
             "monthly_anlas".into(),
-            pyval::float(strict_float(v, 0.0, 100_000.0, "monthly_anlas")?),
+            pyval::float(strict_float(v, 0.0, 99_999.0, "monthly_anlas")?),
         );
     }
     if let Some(v) = body.get("quota_limits") {

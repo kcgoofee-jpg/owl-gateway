@@ -47,12 +47,13 @@ describe("quotaRows", () => {
     const rows = quotaRows(member({ today: { images: 30, v5: 4, daily_images: 150, daily_v5: 6 } }));
     expect(rows[0]?.used).toBe(26);
   });
-  it("个人 V5 不限（0）且模型范围是 all：仍显示，注明受全站上限约束", () => {
+  it("个人 V5 上限 0（10-27 = 停用）且模型范围是 all：仍显示，圆环暂停", () => {
     const v5 = quotaRows(
       member({ today: { images: 1, v5: 2, legacy: 1, daily_images: 150, daily_v5: 0 } }),
     ).find((r) => r.id === "v5");
     expect(v5?.cap).toBe(0);
-    expect(v5?.hint).toContain("全站日上限");
+    expect(v5?.paused).toBe(true);
+    expect(v5?.hint).toContain("已停用");
   });
   it("没配 V5 上限且模型范围不是 all：不显示 V5；没配 Anlas 上限：不显示 Anlas", () => {
     const rows = quotaRows(
@@ -63,9 +64,10 @@ describe("quotaRows", () => {
     );
     expect(rows.map((r) => r.id)).toEqual(["legacy"]);
   });
-  it("个人不限 V4.5：上限 0", () => {
+  it("个人 V4.5 上限 0（10-27 = 停用）：圆环暂停", () => {
     const rows = quotaRows(member({ today: { images: 1, legacy: 1, daily_images: 0 } }));
     expect(rows[0]?.cap).toBe(0);
+    expect(rows[0]?.paused).toBe(true);
   });
   it("V5 能用的是个人剩余和全站剩余的较小值；全站不设限只看个人", () => {
     const v5 = (today: Record<string, unknown>) =>
@@ -77,17 +79,17 @@ describe("quotaRows", () => {
     expect(v5({ site_v5_left: null, site_v5_cap: null })?.left).toBeUndefined();
     expect(v5({ site_v5_left: null })?.paused).toBeFalsy();
   });
-  it("全站 V5 用完：圆环暂停；个人不限时按全站的量画", () => {
+  it("全站 V5 用完：圆环暂停", () => {
     const rows = (today: Record<string, unknown>) =>
       quotaRows(
         member({
           image_scope: "all",
-          today: { images: 0, v5: 2, legacy: 0, daily_images: 150, daily_v5: 0, ...today },
+          today: { images: 0, v5: 2, legacy: 0, daily_images: 150, daily_v5: 20, ...today },
         }),
       ).find((r) => r.id === "v5");
     expect(rows({ site_v5_left: 0, site_v5_cap: 300 })?.paused).toBe(true);
-    const open = rows({ site_v5_left: 120, site_v5_cap: 300 });
-    expect([open?.cap, open?.used, open?.left, open?.paused]).toEqual([300, 180, 120, undefined]);
+    const open = rows({ site_v5_left: 3, site_v5_cap: 300 });
+    expect([open?.cap, open?.used, open?.left, open?.paused]).toEqual([20, 2, 3, undefined]);
   });
 });
 

@@ -134,7 +134,7 @@ async fn create_key_validates_then_stores_manual_quota() {
     for (body, detail) in [
         (
             json!({"daily_images": -1}),
-            "daily_images 必须在 0～1000000 之间",
+            "daily_images 必须在 0～9999 之间",
         ),
         (
             json!({"daily_images": "abc"}),
@@ -145,7 +145,7 @@ async fn create_key_validates_then_stores_manual_quota() {
         (json!({"daily_images": 1.5}), "daily_images 必须是整数"),
         (
             json!({"monthly_anlas": 100001}),
-            "monthly_anlas 必须在 0.0～100000.0 之间",
+            "monthly_anlas 必须在 0.0～99999.0 之间",
         ),
         (json!({"rpm": 0}), "rpm 必须在 1～600 之间"),
         (
@@ -155,7 +155,7 @@ async fn create_key_validates_then_stores_manual_quota() {
         (
             json!({"allow_anlas": true, "daily_anlas": 0, "monthly_anlas": 0}),
             // 文案写「0 = 不限」，但两项都是 0 实际被拒——与旧版一致
-            "开通 Anlas 时必须设置每日或每月 Anlas 上限（0 = 不限），不能两项都留空",
+            "开通 Anlas 时每日 / 每月上限至少一项大于 0（0 = 停用该档），不能两项都是 0",
         ),
         (
             json!({"features": ["nope"]}),
@@ -285,10 +285,10 @@ async fn invite_keys_are_numbered_and_tagged() {
     assert_eq!(r.status, 200, "{}", r.text());
     let key = &r.json()["key"];
     assert_eq!(key["name"], "邀请-5");
-    // 额度读手动的每人额度、有效期读「领 Key」的设置、模型范围固定含 V5（没设过：150 张 / 0 张 V5 / 不过期），
+    // 额度读手动的每人额度、有效期读「领 Key」的设置、模型范围固定含 V5（没设过：150 张 / 9999 张 V5 / 不过期），
     // 有没有配注册服务都一样
     assert_eq!(key["daily_images"], 150);
-    assert_eq!(key["daily_v5"], 0);
+    assert_eq!(key["daily_v5"], 9999);
     assert_eq!(key["image_model_scope"], "all");
     assert_eq!(key["daily_anlas"], 0.0);
     assert!(key["expires_at"].is_null());
@@ -360,7 +360,7 @@ async fn new_key_defaults_follow_the_registration_settings() {
         ),
         (
             &json!(150),
-            &json!(0),
+            &json!(9999),
             &json!(10),
             &json!(0.0),
             &json!(2500.0)
@@ -482,7 +482,7 @@ async fn patch_key_updates_fields_and_quota_ownership() {
         (json!({"role": "boss"}), H),
         (
             json!({"allow_anlas": true}),
-            "开通 Anlas 时必须设置每日或每月 Anlas 上限（0 = 不限），不能两项都留空",
+            "开通 Anlas 时每日 / 每月上限至少一项大于 0（0 = 停用该档），不能两项都是 0",
         ),
     ] {
         a.patch(&url, body).await.assert_detail(422, detail);

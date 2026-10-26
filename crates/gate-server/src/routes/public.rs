@@ -813,13 +813,16 @@ pub(super) async fn me_payload(
         }
     }
     // 全站今天还剩多少张 V5（首页 V5 圆环取「个人剩余」和它的较小值）。
-    // null = 不受全站限制：全站不设限（global_daily_v5=0），或这把 Key 不计入全站 V5
+    // null = 不受全站限制（只剩一种情况：这把 Key 不计入全站 V5）。10-27 起全站池 0 = 停用（0 剩余）。
     let g = crate::ops::global_daily_v5(&state.db).await?;
     let v5_access = crate::v5_access::evaluate(state, Some(key.str("discord_id"))).await?;
     let (site_v5_left, site_v5_cap) = if v5_access.paused || !v5_access.decision.allowed {
         // 暂停：全站今天没有 V5（不能按「不限」显示）
         (json!(0), Value::Null)
-    } else if g > 0 && !key.exclude_global_v5() {
+    } else if g == 0 {
+        // 全站 V5 池停用
+        (json!(0), json!(0))
+    } else if !key.exclude_global_v5() {
         let used = state.db.day_v5_total(&state.day()).await?;
         (json!((g - used).max(0)), json!(g))
     } else {

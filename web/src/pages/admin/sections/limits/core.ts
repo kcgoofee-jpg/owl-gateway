@@ -20,7 +20,14 @@ export type Settings = {
   gateway_admin_discord_ids: string[];
 };
 
+/**
+ * 10-27 规范化：全局额度只有数字一种形态（0 = 停用，上限 9999 / 每月池 99999），没有「不限」。
+ * `unlimited` 分支保留只为兼容迁移前的旧接口数据，UI 不再产生它。
+ */
 export type QuotaMode = { mode: "unlimited" } | { mode: "limit"; value: number };
+/** 全局额度数字的统一上限（与后端 DAILY_CAP_MAX / MONTHLY_CAP_MAX 一致） */
+export const DAILY_CAP_MAX = 9999;
+export const MONTHLY_CAP_MAX = 99999;
 export type GlobalQuotaModes = {
   register_daily_images: QuotaMode;
   register_daily_v5: QuotaMode;
@@ -37,49 +44,49 @@ export const QUOTA_SPECS: Record<string, FieldSpec> = {
     kind: "int",
     label: "V4.5 每人每天",
     min: 0,
-    max: 100_000,
+    max: 9999,
     unit: "张",
-    hint: "统一额度；0 = 不设个人日上限",
+    hint: "统一额度；0 = 停用 V4.5",
   },
   register_daily_v5: {
     kind: "int",
     label: "V5 每人每天",
     min: 0,
-    max: 100_000,
+    max: 9999,
     unit: "张",
-    hint: "统一额度；0 = 不设个人日上限",
+    hint: "统一额度；0 = 停用 V5",
   },
   global_daily_v5: {
     kind: "int",
     label: "V5 全站每天",
     min: 0,
-    max: 100_000,
+    max: 9999,
     unit: "张",
-    hint: "全站日上限，不是官方余量；0 = 不设上限",
+    hint: "全站日上限，不是官方余量；0 = 停用全站 V5",
   },
   member_daily_anlas: {
     kind: "int",
     label: "Anlas 每人每天",
     unit: "Anlas",
     min: 0,
-    max: 100_000,
-    hint: "个人默认日上限，独立额度优先；0 = 不设上限",
+    max: 9999,
+    hint: "个人默认日上限，独立额度优先；0 = 停用",
   },
   global_daily_anlas: {
     kind: "int",
     label: "Anlas 全站每天",
     unit: "Anlas",
     min: 0,
-    max: 100_000,
-    hint: "大于 0 时限制全站 Anlas 消耗；0 时关闭免费 Key 的 Vibe / 精确参考，付费 Key 不受此日上限限制",
+    max: 9999,
+    hint: "全站 Anlas 日池；0 = 停用（免费 Key 的 Vibe / 精确参考随之关闭，付费 Key 不受限）",
   },
   global_monthly_anlas: {
     kind: "float",
     label: "Anlas 全站每月",
     unit: "Anlas",
     min: 0,
-    max: 1_000_000,
-    hint: "全站月度 Anlas 消耗上限；0 = 不设上限",
+    max: 99999,
+    hint: "全站月度 Anlas 消耗上限；0 = 停用",
   },
   v5_medium_mode: {
     kind: "select",

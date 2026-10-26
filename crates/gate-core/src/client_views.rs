@@ -239,9 +239,9 @@ mod tests {
 
     #[test]
     fn paused_v5_is_zero_not_unlimited() {
-        // 全站和个人都不限时，平常是「不限」；暂停时必须是 0 / 0
+        // 10-27 规范化：上限是数字（9999 = 放开），暂停时必须是 0 / 0
         let mut k = key();
-        k["daily_v5"] = json!(0);
+        k["daily_v5"] = json!(9999);
         let data = SubscriptionData {
             month_anlas_used: 0.0,
             daily_v5_used: 0,
@@ -250,11 +250,12 @@ mod tests {
             v5_paused: false,
             v5_access_allowed: true,
             global_quota_modes: crate::quota_limits::GlobalLimits::from_legacy([
-                150.0, 0.0, 0.0, 200.0, 50.0, 10000.0,
+                150.0, 9999.0, 9999.0, 200.0, 50.0, 10000.0,
             ]),
         };
         let open = subscription_payload(&k, 0.0, &data).unwrap();
-        assert_eq!(open["naiGate"]["v5Unlimited"], true);
+        assert_eq!(open["naiGate"]["v5DailyLimit"], 9999);
+        assert_eq!(open["naiGate"]["v5Unlimited"], false);
         let paused = SubscriptionData {
             v5_paused: true,
             ..data
@@ -286,7 +287,7 @@ mod tests {
     #[test]
     fn denied_v5_is_zero_not_unlimited() {
         let mut k = key();
-        k["daily_v5"] = json!(0);
+        k["daily_v5"] = json!(9999);
         let d = SubscriptionData {
             month_anlas_used: 0.0,
             daily_v5_used: 0,
@@ -295,7 +296,7 @@ mod tests {
             v5_paused: false,
             v5_access_allowed: false,
             global_quota_modes: crate::quota_limits::GlobalLimits::from_legacy([
-                150.0, 0.0, 0.0, 200.0, 50.0, 10000.0,
+                150.0, 9999.0, 9999.0, 200.0, 50.0, 10000.0,
             ]),
         };
         let result = subscription_payload(&k, 0.0, &d).unwrap();

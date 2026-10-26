@@ -413,6 +413,7 @@ fn sanitize_replaces_keys_and_drops_secrets_and_content() {
         keys,
         [
             "guard_account_daily_cap",
+            "quota_9999_migrated",
             "quota_modes_v1",
             "quota_modes_v2_migrated",
             "register_open"

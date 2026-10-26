@@ -391,11 +391,14 @@ async fn set_v5_limit(
     let (parts, body) = req.into_parts();
     let body = read_json_body(&parts.headers, body, BODY_LIMIT).await?;
     let limit = match body.get("v5_daily_limit").and_then(pyval::strict_int) {
-        Some(n) if (0..=100_000).contains(&n) => n,
+        // 10-27 规范化：0 = 停用这把 Token 的免费 V5，上限最大 9999（存量 0 已迁移成 9999）
+        Some(n) if (0..=9999).contains(&n) => n,
         _ => {
-            return Err(
-                HttpError::new(422, "上游 V5 日限额必须是 0～100000 的整数（0 为不限）").into(),
-            );
+            return Err(HttpError::new(
+                422,
+                "上游 V5 日限额必须是 0～9999 的整数（0 = 停用免费 V5）",
+            )
+            .into());
         }
     };
     if !exists(&state, &id).await {

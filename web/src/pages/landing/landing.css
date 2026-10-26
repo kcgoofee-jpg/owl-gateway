@@ -248,11 +248,6 @@
   stroke-linecap: round;
   stroke-dasharray: 100;
 }
-/* 不限额：一整圈淡色实线 */
-.ring__arc--unlimited {
-  stroke-dasharray: none;
-  opacity: 0.45;
-}
 .ring__num {
   position: relative;
   font-size: var(--fs-2xl);

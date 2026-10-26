@@ -194,15 +194,18 @@ fn welcome_v5_available(
 /// 额度由全站共享额度池提供；每人的数字是个人上限。
 pub fn welcome_message(w: &Welcome) -> String {
     let site = w.site.trim_end_matches('/');
+    // 10-27 额度规范化：0 = 停用，上限 9999（= 放开）；「不限张数」的旧说法不再出现
     let mut cap = if !w.images_available {
         "V4.5 及以下当前不可用".to_string()
     } else if w.daily_images == 0 {
-        "V4.5 及以下不限张数".to_string()
+        "V4.5 及以下已停用".to_string()
     } else {
         format!("V4.5 及以下 {} 张", w.daily_images)
     };
     if w.v5 && w.daily_v5 != 0 {
         cap.push_str(&format!("；V5 {} 张", w.daily_v5));
+    } else if w.v5 {
+        cap.push_str("；V5 已停用");
     }
     let mut rules = vec![format!(
         "• 每日额度：每人每天最多 {cap}，全站共用额度池；每天 {} 点重置",
@@ -238,7 +241,7 @@ pub fn welcome_message(w: &Welcome) -> String {
          其他支持自定义 NovelAI 地址的客户端同样这样填。\n\n\
          **不确定填对没有？** 在 {site} 用 Discord 登录，能看到自己的额度就说明 Key 正常。首次登录未提交使用体验问卷时，网站会自动打开问卷。\n\n\
          **规则**\n{rules}\n\n\
-         **常用命令**：`/resetkey` Key 丢了或泄露时换新 · `/反馈` 给站长留言；额度在 {site} 登录后查看\n\
+         **常用命令**：`/resetkey` Key 丢了或泄露时换新；额度在 {site} 登录后查看\n\
          遇到问题到 🛠️｜问题反馈 发截图（记得打码 Key）。",
         key = w.key,
         rules = rules.join("\n"),
@@ -1427,7 +1430,7 @@ mod tests {
     fn welcome_text_covers_v5_sizes_and_unlimited() {
         let t = welcome_message(&welcome(0, 3));
         assert!(
-            t.contains("每人每天最多 V4.5 及以下不限张数；V5 3 张，全站共用额度池"),
+            t.contains("每人每天最多 V4.5 及以下已停用；V5 3 张，全站共用额度池"),
             "{t}"
         );
         assert!(
@@ -1436,13 +1439,13 @@ mod tests {
             ),
             "{t}"
         );
-        // 能用 V5 但没有单独的个人上限：不写 V5 张数，尺寸照写
+        // 能用 V5 但个人上限是 0（10-27 语义 = 停用）：明说停用，不写张数
         let t = welcome_message(&Welcome {
             v5: true,
             ..welcome(30, 0)
         });
         assert!(
-            t.contains("每人每天最多 V4.5 及以下 30 张，全站共用"),
+            t.contains("每人每天最多 V4.5 及以下 30 张；V5 已停用，全站共用额度池"),
             "{t}"
         );
         assert!(t.contains("V5 只有 832×1216"), "{t}");

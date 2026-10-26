@@ -1389,7 +1389,7 @@ async fn landing_boot_for_member_with_key() {
         boot["live"]["me"],
         json!({"mine": [{"state": "waiting", "position": 1}], "waiting": 1, "running": 0})
     );
-    // 全站 V5 不设限（global_daily_v5=0）：首页 V5 圆环只看个人剩余
+    // 全站 V5 池停用（global_daily_v5=0，10-27 语义）：首页 V5 圆环显示 0 / 0
     p.state
         .db
         .set_setting("global_daily_v5", "0")
@@ -1399,7 +1399,7 @@ async fn landing_boot_for_member_with_key() {
     let today = &boot_of(&String::from_utf8(body).unwrap())["me"]["today"];
     assert_eq!(
         (&today["site_v5_left"], &today["site_v5_cap"]),
-        (&Value::Null, &Value::Null)
+        (&json!(0), &json!(0))
     );
 }
 

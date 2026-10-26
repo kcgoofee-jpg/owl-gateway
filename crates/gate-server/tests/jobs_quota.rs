@@ -55,14 +55,14 @@ async fn v45_limit_is_the_manual_number_for_new_and_old_members() {
         let k = key_row(&e, id).await;
         assert_eq!(
             (&k["daily_images"], &k["daily_v5"], &k["image_model_scope"]),
-            (&json!(150), &json!(0), &json!("legacy")),
+            (&json!(150), &json!(9999), &json!("legacy")),
             "Key {id}"
         );
     }
     assert_eq!(key_row(&e, manual).await["daily_images"], 33);
     assert_eq!(
         setting(&e.state, "algo_notice").await.unwrap(),
-        "今日额度：V4.5 每人 150 张/天（每日 7 点重置） · V5 每人不限（全站今日共 150 张，先到先得） · Anlas 每人 50/天"
+        "今日额度：V4.5 每人 150 张/天（每日 7 点重置） · V5 每人 9999 张（全站今日共 150 张，先到先得） · Anlas 每人 50/天"
     );
     // 再跑一轮：没有要同步的了
     assert!(!quota(&e).await.contains("同步"));
@@ -247,7 +247,7 @@ async fn old_algorithm_settings_are_ignored() {
     let k = key_row(&e, id).await;
     assert_eq!(
         (&k["daily_images"], &k["daily_v5"]),
-        (&json!(150), &json!(0))
+        (&json!(150), &json!(9999))
     );
     assert!(!gate_server::ops::v5_paused(&e.state.db).await.unwrap());
 }

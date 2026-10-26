@@ -195,11 +195,17 @@ test.describe("已登录", () => {
     await expect(dlg.getByText("每日图片张数不能为空")).toBeVisible();
     await images.fill("-3");
     await dlg.getByRole("button", { name: "保存" }).click();
-    await expect(dlg.getByText(/必须在 0～1000000 之间/)).toBeVisible();
+    await expect(dlg.getByText(/必须在 0～9999 之间/)).toBeVisible();
     await images.fill("100");
+    // 10-27：日 / 月上限都是 0 会被「至少一项大于 0」拦下（0 = 停用），日 0 + 月 10 才能存
     await dlg.getByRole("spinbutton", { name: /^每日 Anlas 上限/ }).fill("0");
     await dlg.getByRole("spinbutton", { name: /^每月 Anlas 上限/ }).fill("0");
     await dlg.getByRole("checkbox", { name: /^允许消耗 Anlas/ }).check();
+    await dlg.getByRole("button", { name: "保存" }).click();
+    await expect(
+      dlg.getByText("开通 Anlas 时，每日和每月上限至少一项大于 0（0 = 停用）"),
+    ).toBeVisible();
+    await dlg.getByRole("spinbutton", { name: /^每月 Anlas 上限/ }).fill("10");
     const saveResponse = page.waitForResponse(
       (response) =>
         /\/admin\/api\/keys\/\d+$/.test(new URL(response.url()).pathname) &&
@@ -210,7 +216,7 @@ test.describe("已登录", () => {
     expect(saved.status()).toBe(200);
     const quotas = (await saved.json()).key.quota_limits;
     expect(quotas.daily_anlas).toEqual({ mode: "limit", value: 0 });
-    expect(quotas.monthly_anlas).toEqual({ mode: "limit", value: 0 });
+    expect(quotas.monthly_anlas).toEqual({ mode: "limit", value: 10 });
     await expect(dlg).toBeHidden();
     expect(await seriousViolations(page), "key-dialog").toEqual([]);
     // 已保存后再编辑一项：取消时先确认放弃。

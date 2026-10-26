@@ -120,10 +120,10 @@ pub static GLOBAL_DAILY_V5: Spec = bounded(
         Kind::Int,
         SpecDefault::Int(150),
         "额度 / 首页 / 客户端",
-        "全站每日 V5 张数（0 = 不限）",
+        "全站每日 V5 张数（0 = 停用）",
     ),
     0,
-    100000,
+    9999,
 );
 /// 全站每日 Anlas 池（Vibe PVP）。没设过按 200；2.x / 3.0 早期的默认值取环境变量 `GLOBAL_DAILY_ANLAS`，
 /// 现已删除（默认值直接写在登记表里）。
@@ -133,10 +133,10 @@ pub static GLOBAL_DAILY_ANLAS: Spec = bounded(
         Kind::Int,
         SpecDefault::Int(200),
         "额度 / Vibe PVP",
-        "全站每日 Anlas 额度（0 = 不开放 Vibe；Vibe PVP 抢额度）",
+        "全站每日 Anlas 额度（0 = 停用，Vibe 对公不开放；Vibe PVP 抢额度）",
     ),
     0,
-    100000,
+    9999,
 );
 /// 全站每月 Anlas 预算。没设过按 10000；环境变量 `GLOBAL_MONTHLY_ANLAS` 已删除（默认值直接写在这里）。
 pub static GLOBAL_MONTHLY_ANLAS: Spec = bounded(
@@ -145,10 +145,10 @@ pub static GLOBAL_MONTHLY_ANLAS: Spec = bounded(
         Kind::Float,
         SpecDefault::Float(10000.0),
         "额度 / Anlas 池",
-        "全站每月 Anlas 预算（0 = 不限）",
+        "全站每月 Anlas 预算（0 = 停用）",
     ),
     0,
-    1_000_000,
+    99999,
 );
 pub static MEMBER_DAILY_ANLAS: Spec = bounded(
     spec(
@@ -156,36 +156,36 @@ pub static MEMBER_DAILY_ANLAS: Spec = bounded(
         Kind::Int,
         SpecDefault::Int(50),
         "额度 / Anlas 池",
-        "每人每日 Anlas 上限（仅对未手动设置 Anlas 日额度的 Key 生效；0 = 不限）。Vibe 编码一张参考图约 2 点，50 点 ≈ 25 次/天，防单人吃光全站 PVP 池",
+        "每人每日 Anlas 上限（仅对未手动设置 Anlas 日额度的 Key 生效；0 = 停用）。Vibe 编码一张参考图约 2 点，50 点 ≈ 25 次/天，防单人吃光全站 PVP 池",
     ),
     0,
-    100000,
+    9999,
 );
 /// V4.5 每人每天张数（手动，站长 10-23：新号老号一样，算法不改；新号爬坡 `newbie_ramp_*` 已删除）。
-/// 额度同步任务把它下发给 `quota_auto=1` 的成员 Key，新领的 Key 也用它。没设过按 150，0 = 不限。
+/// 额度同步任务把它下发给 `quota_auto=1` 的成员 Key，新领的 Key 也用它。没设过按 150，0 = 停用。
 pub static REGISTER_DAILY_IMAGES: Spec = bounded(
     spec(
         "register_daily_images",
         Kind::Int,
         SpecDefault::Int(150),
         "额度 / V4.5",
-        "V4.5 每人每天张数（手动；0 = 不限）",
+        "V4.5 每人每天张数（手动；0 = 停用）",
     ),
     0,
-    100000,
+    9999,
 );
 /// V5 每人每天张数（手动，站长 10-23：按电量自动定的 V5 方案已删除）。同步方式同 [`REGISTER_DAILY_IMAGES`]。
-/// 没设过按 0（= 不限，只受全站每日 V5 管）。
+/// 没设过按 9999（等于放开，只受全站每日 V5 管）。
 pub static REGISTER_DAILY_V5: Spec = bounded(
     spec(
         "register_daily_v5",
         Kind::Int,
-        SpecDefault::Int(0),
+        SpecDefault::Int(9999),
         "额度 / V5",
-        "V5 每人每天张数（手动；0 = 不限）",
+        "V5 每人每天张数（手动；0 = 停用）",
     ),
     0,
-    100000,
+    9999,
 );
 /// V5 暂停（手动开关，站长 10-23）：开着时 V5 请求在本地直接拒（402，不扣 Anlas、不发上游），
 /// 首页 / 成员页 / 客户端订阅信息都按暂停显示。
@@ -405,7 +405,7 @@ mod tests {
         assert!(v.is_f64());
         assert_eq!(
             encode(&GLOBAL_MONTHLY_ANLAS, &json!("5000000")).unwrap(),
-            "1000000"
+            "99999"
         );
     }
 
@@ -417,7 +417,7 @@ mod tests {
         assert_eq!(get_from_raw(&GLOBAL_DAILY_ANLAS, Some("abc")), json!(200));
         assert_eq!(
             encode(&GLOBAL_DAILY_ANLAS, &json!("100001")).unwrap(),
-            "100000"
+            "9999"
         );
     }
 
