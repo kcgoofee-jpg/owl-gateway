@@ -2088,7 +2088,6 @@ async fn reconciliation_compares_balances() {
 
     // 官方出错：不推进基线，不泄露响应；失败的尝试也进了冷却
     for (reply, why) in [
-        (Reply::json(401, &json!({"token": "leak-me"})), "401"),
         (Reply::status(500, "leak-me"), "500"),
         (Reply::status(200, "not-json"), "not-json"),
         (
@@ -2119,6 +2118,31 @@ async fn reconciliation_compares_balances() {
         assert_eq!(st["history"].as_array().unwrap().len(), 2, "{why}");
         assert!(st["retry_after"].as_i64().unwrap() > 0, "{why}");
     }
+
+    // 401 仍使用通用错误文案，但会隔离失效账号；放在最后，避免改变后续错误场景的前置条件。
+    e.state
+        .db
+        .set_setting(gate_server::reconciliation::COOLDOWN_SETTING, "0")
+        .await
+        .unwrap();
+    e.mock.push(
+        SUBSCRIPTION_OK,
+        Reply::json(401, &json!({"token": "leak-me"})),
+    );
+    let (s, _, t) = api
+        .raw("POST", "/reconciliation", Some(json!({})), &h)
+        .await
+        .parts();
+    assert_eq!(
+        (s, t.as_str()),
+        (503, r#"{"detail":"官方余额未能完整读取；上次结果已保留"}"#)
+    );
+    assert!(
+        api.get_ok("/reconciliation").await["retry_after"]
+            .as_i64()
+            .unwrap()
+            > 0
+    );
 }
 
 #[tokio::test]

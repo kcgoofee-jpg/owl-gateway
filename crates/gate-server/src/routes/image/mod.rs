@@ -166,7 +166,7 @@ pub(super) fn before_dispatch(
                     return Err(UpstreamError::local(
                         403,
                         snapshot.decision.reason,
-                        gate_core::reasons::V5_EXHAUSTED,
+                        gate_core::reasons::FEATURE_OFF,
                     ));
                 }
             }

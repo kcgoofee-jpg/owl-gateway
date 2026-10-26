@@ -254,7 +254,7 @@ pub async fn quota_image_check(
         return Err(GateError::with_code(
             403,
             "V5 当前未授权此成员使用，未扣费。".to_string(),
-            reasons::V5_EXHAUSTED,
+            reasons::FEATURE_OFF,
         )
         .into());
     }

@@ -338,6 +338,13 @@ async fn restricted_v5_denial_does_not_dispatch_or_consume_quota() {
         e.state.db.get_counter(1, &e.state.day()).await.unwrap().v5,
         0
     );
+    let logs = e
+        .state
+        .db
+        .list_logs(1, 0, &gate_db::repo::usage::LogFilter::default())
+        .await
+        .unwrap();
+    assert_eq!(logs[0]["reason"], gate_core::reasons::FEATURE_OFF);
 }
 
 #[tokio::test]
@@ -434,6 +441,13 @@ async fn queued_v5_is_rechecked_after_subject_revocation() {
         e.state.db.get_counter(1, &e.state.day()).await.unwrap().v5,
         1
     );
+    let logs = e
+        .state
+        .db
+        .list_logs(1, 0, &gate_db::repo::usage::LogFilter::default())
+        .await
+        .unwrap();
+    assert_eq!(logs[0]["reason"], gate_core::reasons::FEATURE_OFF);
 }
 
 #[tokio::test]
