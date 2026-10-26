@@ -183,6 +183,10 @@ restart_container() {
   fi
   # 停站是预期的：这里只是把实测的中断时长报出来
   probe_report || true
+  # docker load 每次都会留一层旧的悬空镜像；换版成功后顺手清掉，别让磁盘慢慢被吃满
+  if pruned=$(docker image prune -f 2>/dev/null | tail -1) && [[ -n $pruned && $pruned != "Total reclaimed space: 0B" ]]; then
+    log "✓ 清理悬空镜像：$pruned"
+  fi
   log "$GATE = $(docker inspect -f '{{.Image}}' "$GATE" | cut -c8-19)"
 }
 

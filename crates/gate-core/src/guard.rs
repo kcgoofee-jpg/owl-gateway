@@ -198,14 +198,6 @@ impl GuardCore {
         daily != 0 && used >= daily
     }
 
-    /// Today's daily caps summed over these accounts (0 when `account_daily_cap` is 0 = unlimited).
-    pub fn total_daily_cap(&self, token_ids: &[String], now: f64) -> i64 {
-        if self.v("account_daily_cap") == 0 {
-            return 0;
-        }
-        token_ids.iter().map(|t| self.daily_cap_for(t, now)).sum()
-    }
-
     fn v(&self, name: &str) -> i64 {
         self.values[name]
     }
@@ -495,8 +487,8 @@ impl GuardCore {
         }
     }
 
-    /// 匿名的排队视图：waiting / running 数量；给定 key_id 时附上这把 Key 的图所处位置（1 起，按预计开始先后），
-    /// 上游给过估计的再附 `start_at`（预计开始的墙钟时刻）。
+    /// 匿名的排队视图：waiting / running 数量；给定 key_id 时附上这把 Key 的图所处位置（1 起，按预计开始先后）。
+    /// 10-27 起不再附上游的预计开始时刻（`start_at`）：首页只显示位次，不做时间估算。
     pub fn queue_view(&self, key_id: Option<i64>) -> Value {
         let waiting = self.waiting_sorted();
         let running: Vec<&Entry> = self.entries.iter().filter(|e| e.running).collect();
@@ -515,9 +507,6 @@ impl GuardCore {
                     let mut m = Map::new();
                     m.insert("state".into(), Value::String("waiting".into()));
                     m.insert("position".into(), Value::from(i + 1));
-                    if let Some(at) = e.eta {
-                        m.insert("start_at".into(), Value::from(at));
-                    }
                     mine.push(Value::Object(m));
                 }
             }
@@ -636,8 +625,8 @@ mod tests {
         assert_eq!(pos(&g, 1), 2);
         // 还没排到账号的（没有估计）在后面
         assert_eq!(pos(&g, 3), 3);
-        assert_eq!(g.queue_view(Some(2))["mine"][0]["start_at"], NOON + 5.0);
-        assert!(g.queue_view(Some(3))["mine"][0].get("start_at").is_none());
+        // 10-27 起：视图只给位次，不再带预计开始时刻（估算只留在内部排序用）
+        assert!(g.queue_view(Some(2))["mine"][0].get("start_at").is_none());
     }
 
     #[test]

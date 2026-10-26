@@ -1,6 +1,6 @@
 [package]
 name = "gate-discord"
-description = "Discord 机器人：奶妹（领 Key / 额度 / 换 Key / 反馈）。"
+description = "Discord 机器人：奶妹（领 Key / 换 Key）。"
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true

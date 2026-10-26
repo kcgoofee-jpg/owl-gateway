@@ -358,12 +358,6 @@
   font-variant-numeric: tabular-nums;
   color: var(--text-2);
 }
-.lp-req__id {
-  white-space: nowrap;
-  font-family: var(--mono);
-  font-size: var(--fs-xs, 0.75rem);
-  color: var(--text-3, var(--text-2));
-}
 .lp-req__model {
   font-weight: 600;
 }
@@ -591,19 +585,6 @@
   font-size: var(--fs-xs);
   font-weight: 400;
 }
-.lp-meter__caption {
-  color: var(--muted);
-  font-size: var(--fs-xs);
-}
-.lp-meter.stat--warn .lp-meter__num {
-  color: var(--warn);
-}
-.lp-meter.stat--danger .lp-meter__num {
-  color: var(--danger);
-}
-.lp-meter.lp-meter--paused .lp-meter__num {
-  color: var(--muted);
-}
 
 /* Status and allowance sit directly on the page, without a card surface. */
 .lp-status {
@@ -671,13 +652,6 @@
     flex-wrap: nowrap;
     column-gap: var(--sp-1);
     min-width: 0;
-  }
-
-  .lp-meter__caption {
-    min-width: 0;
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
   }
 }
 

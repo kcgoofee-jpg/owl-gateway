@@ -103,8 +103,11 @@ export function deriveStatus(live: Live | null, opts: DeriveOpts = {}): StatusVi
     live.queue?.full === true
   ) {
     out = view("warn", "排队已满", `最多 ${queueCap} 张，稍后再试`);
-  } else if (waiting + running > 0) {
-    out = view("busy", "全站正在出图", waiting > 0 ? `队列 ${waiting} 张` : "");
+  } else if (waiting > 0) {
+    // 站长 10-27：排队状态只说一个数——当前排队张数
+    out = view("busy", `排队 ${waiting} 张`);
+  } else if (running > 0) {
+    out = view("busy", "正在出图");
   } else {
     out = view("ok", "马上开始", "通道空闲");
   }
@@ -112,80 +115,19 @@ export function deriveStatus(live: Live | null, opts: DeriveOpts = {}): StatusVi
   if (myRunning) {
     out = view("mine", "你的图正在生成");
   } else if (myWaiting) {
-    const headline = `你的图排第 ${myWaiting.position} 位`;
+    const headline = `您排在 ${myWaiting.position}/${waiting} 位`;
     out = view("mine", headline, "", headline);
   }
   return out;
 }
 
-export type Usage = { used: number; cap: number };
-
-/** 全站今日用量：0 的上限 = 站长关掉了这个上限（显示「不限」），不要写死历史数字。 */
-export function dailyUsage(live: Live | null): { total: Usage; v5: Usage } {
+/** 今天重置以来各生成了多少张：图例只显示这个，不再折算「剩余额度」。 */
+export function generatedToday(live: Live | null): { total: number; v45: number; v5: number } {
   const q = live?.quota ?? {};
-  return {
-    total: { used: num(q.images_today), cap: num(q.images_cap) },
-    v5: { used: num(q.v5_today), cap: num(q.v5_cap) },
-  };
+  const total = Math.max(0, num(q.images_today));
+  const v5 = Math.max(0, Math.min(total, num(q.v5_today)));
+  return { total, v45: total - v5, v5 };
 }
 
-export type MeterView = {
-  label: string;
-  used: number;
-  cap: number;
-  paused?: boolean;
-  /** 暂停时的悬停说明和数字位置的短字（缺省是「V5 免费额度暂时用完」/「暂时用完」） */
-  hint?: string;
-  short?: string;
-};
-
-/** 站长手动暂停 V5 时的说明（首页仪表、成员页圆环共用） */
+/** 站长手动暂停 V5 时的说明（成员页圆环用） */
 export const V5_PAUSED_HINT = "V5 暂停，请使用 V4.5";
-
-/**
- * The two daily meters. A meter that is full switches to the next day's allowance (0 / cap, "明天 N 点起",
- * or "今天 N 点起" between midnight and the reset):
- * nothing more can happen today, so showing what comes next manages expectations better than a red bar.
- */
-export function dailyMeters(
-  live: Live | null,
-  nowMs: number = Date.now(),
-): { total: MeterView; v5: MeterView } {
-  const u = dailyUsage(live);
-  const r = nextReset(live?.guard?.blocked?.text ?? "", nowMs);
-  const pick = (x: Usage, today: string, next: string): MeterView =>
-    x.cap > 0 && x.used >= x.cap
-      ? { label: `${next}${r.word}可用（${r.word} ${r.hour} 点起）`, used: 0, cap: x.cap }
-      : { label: today, used: x.used, cap: x.cap };
-  const v5: MeterView = live?.quota?.v5_paused
-    ? {
-        label: "V5 暂停中",
-        used: u.v5.used,
-        cap: u.v5.cap,
-        paused: true,
-        hint: V5_PAUSED_HINT,
-        short: "暂停中",
-      }
-    : live?.quota?.v5_access_mode === "closed"
-      ? {
-          label: "V5 已关闭",
-          used: u.v5.used,
-          cap: u.v5.cap,
-          paused: true,
-          hint: "当前策略已关闭 V5",
-          short: "已关闭",
-        }
-      : live?.quota?.v5_access_mode === "restricted"
-        ? {
-            label: "V5 仅授权成员可用",
-            used: u.v5.used,
-            cap: u.v5.cap,
-            paused: true,
-            hint: "V5 当前按授权主体开放",
-            short: "仅授权",
-          }
-        : live?.quota?.upstream_v5_free === false
-          ? { label: "V5 暂时用完", used: u.v5.used, cap: u.v5.cap, paused: true }
-          : pick(u.v5, "V5 已用", "V5 ");
-  return { total: pick(u.total, "全站今日已用", "全站"), v5 };
-}

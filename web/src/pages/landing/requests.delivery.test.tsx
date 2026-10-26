@@ -28,15 +28,28 @@ describe("request delivery status", () => {
     render(<RequestRow r={{ ...base, delivery_state: "transport_interrupted" }} />, host);
     expect(host.textContent).toContain("已生成");
     expect(host.textContent).toContain("传输中断");
-    expect(host.textContent).not.toContain("客户端已收到");
     expect(host.querySelector(".badge--ok")?.textContent).toBe("已生成");
     expect(host.querySelector(".badge--danger")?.textContent).toBe("传输中断");
   });
 
-  it("does not treat legacy rows without a delivery field as received", () => {
-    render(<RequestRow r={base} />, host);
+  it("keeps an in-flight transport visible", () => {
+    render(<RequestRow r={{ ...base, delivery_state: "pending" }} />, host);
+    expect(host.textContent).toContain("传输中");
+  });
+
+  /**
+   * 站长 10-27：传输完成不再提示——图到没到成员自己看得到，服务端也确认不了客户端收到
+   * （那需要客户端回执）；老记录没有交付状态，同样不提示。
+   */
+  it("shows no delivery badge for transport_complete or legacy rows", () => {
+    render(<RequestRow r={{ ...base, delivery_state: "transport_complete" }} />, host);
     expect(host.textContent).toContain("已生成");
-    expect(host.textContent).toContain("传输状态未知");
+    expect(host.textContent).not.toContain("服务端传输完成");
+    expect(host.textContent).not.toContain("未确认客户端收到");
+    expect(host.textContent).not.toContain("传输状态未知");
+    expect(host.textContent).not.toContain("传输");
+    render(<RequestRow r={base} />, host);
+    expect(host.textContent).not.toContain("传输状态未知");
     expect(host.textContent).not.toContain("服务端传输完成");
   });
 
@@ -56,8 +69,10 @@ describe("request delivery status", () => {
     expect(host.textContent).not.toContain("失败");
   });
 
-  it("shows the upstream support code on the member's own request row", () => {
-    render(<RequestRow r={{ ...base, correlation_id: "aB12z9" }} />, host);
-    expect(host.textContent).toContain("NovelAI 排障号：aB12z9");
+  it("merges the secondary facts into one muted meta line（10-27 排版精简）", () => {
+    render(<RequestRow r={{ ...base, correlation_id: "aB12z9", wait_s: 54, dur_s: 37 }} />, host);
+    const meta = host.querySelector(".lp-req__meta.muted");
+    expect(meta?.textContent).toBe("排队 54 秒 · 出图 37 秒 · 编号 abc12345 · NovelAI 排障号 aB12z9");
+    expect(host.querySelector(".lp-req__head")?.textContent).not.toContain("编号");
   });
 });

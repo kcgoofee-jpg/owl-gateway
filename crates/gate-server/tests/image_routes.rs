@@ -2211,27 +2211,15 @@ async fn paid_v5_refuses_when_account_anlas_is_short() {
     assert_eq!(member_anlas(&e.state).await, 0.0);
 }
 
-/// `/public/live` tells whether any upstream account still has free V5 (same check the gateway uses):
-/// once the only account is confirmed empty it turns false.
+/// Once the only account's free V5 allowance reads empty, free V5 is refused (10-27 起
+/// `/public/live` 不再镜像这个状态，拒绝原因只在 429 / 403 原文里)。
 #[tokio::test]
-async fn live_reports_when_upstream_free_v5_is_exhausted() {
+async fn free_v5_is_refused_once_upstream_allowance_reads_empty() {
     let e = setup(&[]).await;
     allow_v5(&e.state).await;
-    let live = |e: &common::Env| {
-        let state = e.state.clone();
-        async move {
-            let (status, _, body) = call(&state, "GET", "/public/live", None, None).await;
-            assert_eq!(status, 200);
-            let v: Value = serde_json::from_slice(&body).unwrap();
-            v["quota"]["upstream_v5_free"].clone()
-        }
-    };
-    assert_eq!(live(&e).await, json!(true));
     e.mock.set_v5_percent(0);
     let (status, _) = v5_post(&e, image_body("nai-diffusion-5-full", 1)).await;
     assert_eq!(status, 403);
-    e.state.live.invalidate();
-    assert_eq!(live(&e).await, json!(false));
 }
 
 /// Raw `director_reference_images` (older third-party clients) reach the upstream in the official

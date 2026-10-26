@@ -38,16 +38,20 @@ const STATUS: Record<string, { text: string; tone: "ok" | "warn" | "danger" }> =
   cancelled: { text: "已取消", tone: "warn" },
 };
 
-export function deliveryLabel(state: MyRequest["delivery_state"]): { text: string; tone: "warn" | "danger" } {
+/**
+ * 交付徽标只留异常态：传输完成不显示——图到没到成员自己看得到，服务端也无法确认客户端收到
+ * （那需要客户端回执，没有这个机制），原提示是冗余的（站长 10-27）。老记录没有交付状态，同样不提示。
+ */
+export function deliveryLabel(
+  state: MyRequest["delivery_state"],
+): { text: string; tone: "warn" | "danger" } | null {
   switch (state) {
-    case "transport_complete":
-      return { text: "服务端传输完成（未确认客户端收到）", tone: "warn" };
     case "transport_interrupted":
       return { text: "传输中断", tone: "danger" };
     case "pending":
       return { text: "传输中", tone: "warn" };
     default:
-      return { text: "传输状态未知", tone: "warn" };
+      return null;
   }
 }
 
@@ -64,9 +68,13 @@ export function RequestRow({ r }: { r: MyRequest }) {
     pendingSettlement && r.status !== "ok"
       ? { text: "执行结果待核对", tone: "warn" as const }
       : (STATUS[r.status] ?? { text: r.status, tone: "warn" as const });
-  const timing = [
+  const delivery = r.status === "ok" ? deliveryLabel(r.delivery_state) : null;
+  // 次要信息合并成一行灰字，标题行只留时间和状态（10-27 排版精简）
+  const meta = [
     r.wait_s != null && r.wait_s >= 1 ? `排队 ${Math.round(r.wait_s)} 秒` : "",
     r.dur_s != null ? `出图 ${Math.round(r.dur_s)} 秒` : "",
+    r.rid ? `编号 ${r.rid}` : "",
+    r.correlation_id ? `NovelAI 排障号 ${r.correlation_id}` : "",
   ]
     .filter(Boolean)
     .join(" · ");
@@ -76,14 +84,11 @@ export function RequestRow({ r }: { r: MyRequest }) {
         <time class="lp-req__time">{secTime(r.ts)}</time>
         <span class="lp-req__model">{modelLabel(r)}</span>
         <span class="spacer" />
-        {r.rid && <span class="lp-req__id">编号 {r.rid}</span>}
         <Badge tone={s.tone}>{s.text}</Badge>
         {r.status === "ok" && pendingSettlement && (
           <Badge tone={pendingSettlement.tone}>{pendingSettlement.text}</Badge>
         )}
-        {r.status === "ok" && (
-          <Badge tone={deliveryLabel(r.delivery_state).tone}>{deliveryLabel(r.delivery_state).text}</Badge>
-        )}
+        {delivery && <Badge tone={delivery.tone}>{delivery.text}</Badge>}
       </div>
       {r.status === "ok" ? (
         <p class="lp-req__line">{okLine(r)}</p>
@@ -99,7 +104,6 @@ export function RequestRow({ r }: { r: MyRequest }) {
           {r.remaining_v5 ?? 0} · 免费图 {r.remaining_legacy ?? 0}。请勿自动重发，先核对请求记录。
         </p>
       )}
-      {r.correlation_id && <p class="lp-req__meta muted small">NovelAI 排障号：{r.correlation_id}</p>}
       {r.status === "ok" && r.image_available && r.image_url && (
         <p class="lp-req__meta small">
           <a href={r.image_url} target="_blank" rel="noreferrer">
@@ -107,7 +111,7 @@ export function RequestRow({ r }: { r: MyRequest }) {
           </a>
         </p>
       )}
-      {timing && <p class="lp-req__meta muted small">{timing}</p>}
+      {meta && <p class="lp-req__meta muted small">{meta}</p>}
     </li>
   );
 }

@@ -3,31 +3,22 @@ import { cx } from "../../ui";
 const ARC = "M 3 27 Q 500 -5 997 27";
 const fmt = (n: number) => n.toLocaleString("en-US");
 
-type Row = {
-  kind: "v45" | "v5";
-  name: string;
-  capped: boolean;
-  unlimited: boolean;
-  paused: boolean;
-  remaining: boolean;
-  value: number;
-  pct: number;
-  tone: "warn" | "danger" | undefined;
-  m: { label: string; cap: number; hint?: string; short?: string };
-};
+type Row = { kind: "v45" | "v5"; value: number };
 
-/** One shared daily scale. Left to right: the amber V4.5 stretch, then the blue V5 stretch, then the track. */
-export function SiteGauge({ rows, generated }: { rows: Row[]; generated: { total: number; v5: number } }) {
-  const cap = rows[0]?.m.cap ?? 0;
-  const total = Math.max(0, generated.total);
-  const v5 = Math.max(0, Math.min(total, generated.v5));
-  const usedPct = cap > 0 ? Math.min(100, (total / cap) * 100) : 0;
-  const v5Pct = cap > 0 ? Math.min(usedPct, (v5 / cap) * 100) : 0;
-  const v45Pct = usedPct - v5Pct;
+/**
+ * 今天重置以来全站生成了多少张：一条共享的浅弧按 V4.5 / V5 的占比分段，图例给出两个张数。
+ * 10-27 起不再显示「剩余额度」：上限与暂停只在拒绝原因里出现，看板只报已经发生的事。
+ */
+export function SiteGauge({ rows, total }: { rows: Row[]; total: number }) {
+  const sum = Math.max(1, total);
+  const v45 = rows.find((r) => r.kind === "v45")?.value ?? 0;
+  const v5 = rows.find((r) => r.kind === "v5")?.value ?? 0;
+  const v45Pct = total > 0 ? (v45 / sum) * 100 : 0;
+  const v5Pct = total > 0 ? (v5 / sum) * 100 : 0;
   return (
     <div class="lp-meters">
       <svg class="lp-site-gauge" viewBox="0 0 1000 32" preserveAspectRatio="none" aria-hidden="true">
-        <title>{`V4.5 在前、V5 在后；今日已出 ${total} 张，其中 V5 ${v5} 张`}</title>
+        <title>{`今日已出 ${total} 张，其中 V4.5 ${v45} 张、V5 ${v5} 张`}</title>
         <path class="lp-site-gauge__track" d={ARC} />
         {v45Pct > 0 && (
           <path
@@ -48,62 +39,22 @@ export function SiteGauge({ rows, generated }: { rows: Row[]; generated: { total
         )}
       </svg>
       <div class="lp-meter__legend">
-        {rows.map((r) => {
-          const future = !r.paused && !r.m.label.includes("已用");
-          const caption = r.paused
-            ? (r.m.short ?? "暂时用完")
-            : future
-              ? (r.m.label.match(/（(.+)）/)?.[1] ?? r.name)
-              : !r.capped
-                ? ""
-                : r.pct <= 10
-                  ? `仅剩 ${Math.round(r.pct)}%`
-                  : "";
-          const description = r.paused
-            ? (r.m.hint ?? "V5 暂时用完")
-            : r.capped
-              ? `${r.name} ${fmt(r.value)} 张，每日 ${fmt(r.m.cap)} 张${caption ? `；${caption}` : ""}`
-              : `${r.name} 不限，今日已出 ${fmt(r.kind === "v5" ? generated.v5 : total)} 张`;
-          const content = (
-            <>
-              <span class="lp-meter__name">
-                <i aria-hidden="true" />
-                {r.kind === "v45" ? "V4.5" : "V5"}
-                {r.remaining && " 剩余"}
-              </span>
-              <b class="lp-meter__num">
-                {r.paused ? caption : r.unlimited ? "不限" : fmt(r.value)}
-                {!r.paused && !r.unlimited && <small>张</small>}
-              </b>
-              {!r.paused && caption && <span class="lp-meter__caption">{caption}</span>}
-            </>
-          );
-          const className = cx(
-            "lp-meter",
-            `stat--${r.kind}`,
-            r.tone && `stat--${r.tone}`,
-            r.paused && "lp-meter--paused",
-          );
-          return r.capped ? (
-            <div
-              key={r.kind}
-              class={className}
-              title={description}
-              role="progressbar"
-              aria-label={r.kind === "v45" ? "V4.5" : "V5"}
-              aria-valuemin={0}
-              aria-valuemax={r.m.cap}
-              aria-valuenow={r.value}
-              aria-valuetext={description}
-            >
-              {content}
-            </div>
-          ) : (
-            <div key={r.kind} class={className} title={description}>
-              {content}
-            </div>
-          );
-        })}
+        {rows.map((r) => (
+          <div
+            key={r.kind}
+            class={cx("lp-meter", `stat--${r.kind}`)}
+            title={`今天重置以来 ${r.kind === "v45" ? "V4.5" : "V5"} 已生成 ${fmt(r.value)} 张`}
+          >
+            <span class="lp-meter__name">
+              <i aria-hidden="true" />
+              {r.kind === "v45" ? "V4.5" : "V5"} 已出
+            </span>
+            <b class="lp-meter__num">
+              {fmt(r.value)}
+              <small>张</small>
+            </b>
+          </div>
+        ))}
       </div>
     </div>
   );

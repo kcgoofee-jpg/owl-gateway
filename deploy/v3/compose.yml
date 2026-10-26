@@ -41,7 +41,7 @@ services:
       internal:
         aliases: [nai-gate]
 
-  # 奶妹（/register /quota /resetkey /help /反馈）。只拿它需要的变量，不带上游 Token。
+  # 奶妹（/register /resetkey）。只拿它需要的变量，不带上游 Token。
   # REGISTRATION_BRIDGE_SECRET 不能为空：没配机器人启动即失败（容器会一直重启，日志里有原因）。
   naimei:
     image: owl-gate:current

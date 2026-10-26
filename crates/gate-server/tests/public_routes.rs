@@ -228,7 +228,6 @@ async fn public_live_shape_and_key_order() {
             "quota",
             "queue",
             "guard",
-            "accounts",
             "members",
             "cycle",
             "rules",
@@ -245,56 +244,29 @@ async fn public_live_shape_and_key_order() {
     assert_eq!(v["auth"], json!({"requests": 2, "rejected": 1}));
     assert_eq!(
         keys(&v["quota"]),
-        // 节约模式折算的 units_today 已删除（weight 恒为 1）
-        [
-            "images_today",
-            "images_cap",
-            "v5_today",
-            "v5_cap",
-            "upstream_v5_free",
-            "v5_paused",
-            "v5_access_mode"
-        ]
+        // 10-27 起图例只显示「今天各生成了多少张」：上限、暂停、访问策略都不再看板重复
+        ["images_today", "v5_today"]
     );
     assert_eq!(v["quota"]["images_today"], 0);
-    assert_eq!(v["quota"]["images_cap"], 2400);
     assert_eq!(
         v["queue"],
         json!({"waiting": 0, "running": 0, "full": false})
     );
-    // 10 分钟突发窗口已删除：没有 burst_cap / burst_wait
-    // start_in：网关自己估的「现在再来一张多久后开始」（选号用的同一个数），首页排队估算直接用
-    assert_eq!(
-        keys(&v["guard"]),
-        ["next_in", "start_in", "cooldown", "blocked"]
-    );
-    assert_eq!(v["guard"]["next_in"], json!(0.0));
-    assert_eq!(v["guard"]["start_in"], json!(0));
+    // 排队时间估算已删除：guard 只剩冷却与全站拦截原因
+    assert_eq!(keys(&v["guard"]), ["cooldown", "blocked"]);
+    assert_eq!(v["guard"]["cooldown"], json!(0));
     assert_eq!(v["guard"]["blocked"], Value::Null);
-    assert_eq!(
-        v["accounts"],
-        json!([{"usable": true, "cooling": 0, "full": false}])
-    );
     // 注册服务已配置：members 是 {max, active, open}
     assert_eq!(v["members"], json!({"max": 10, "active": 0, "open": false}));
     // 一个账号平均多久开始一张：还没有出图耗时样本（测试环境也不歇）→ 默认 10 秒
     assert_eq!(v["cycle"], json!(10.0));
-    // 保底 `base`、空闲借用 `borrow_open`、Anlas 自动分配占位 `anlas` 已删除
-    assert_eq!(
-        keys(&v["rules"]),
-        ["key_queue", "queue_cap", "daily_cap", "rest", "quota"]
-    );
+    // 保底 `base`、空闲借用 `borrow_open`、Anlas 自动分配占位 `anlas`、`daily_cap` / `quota` 已删除
+    assert_eq!(keys(&v["rules"]), ["key_queue", "queue_cap", "rest"]);
     let rules = &v["rules"];
     // 全站排队上限 = min(账号排队 5, 排队超时内真能开始的张数)：测试环境还估不出周期 → 只按 5
     assert_eq!(rules["queue_cap"], 5);
-    assert_eq!(rules["daily_cap"], 2400);
     // 出图节奏只剩一个手动旋钮：每张出完后歇 1～3 秒
     assert_eq!(rules["rest"], json!([1, 3]));
-    // 手动额度（没设过用默认值）
-    assert_eq!(
-        rules["quota"],
-        json!({"ceiling": 150, "v5_each": 0, "v5_global": 150, "v5_paused": false, "v5_access_mode": "legacy"})
-    );
     assert_eq!(v["site"], "https://gate.example.top");
     assert_eq!(v["discord_invite"], "https://discord.gg/abc");
     assert_eq!(v["key_inactivity_delete_days"], 3);
@@ -392,8 +364,7 @@ async fn public_rules_announce_restricted_v5_without_exposing_subjects() {
         .unwrap();
     e.state.live.invalidate();
     let (_, _, live) = get_json(&e.state, "/public/live", &[]).await;
-    assert_eq!(live["quota"]["v5_access_mode"], "restricted");
-    assert_eq!(live["rules"]["quota"]["v5_access_mode"], "restricted");
+    // 10-27 起看板不带访问策略字段：策略通过 meta 的 algo_notice 一句话说清
     assert!(
         live["algo_notice"]
             .as_str()
@@ -402,12 +373,12 @@ async fn public_rules_announce_restricted_v5_without_exposing_subjects() {
     );
     assert!(!live.to_string().contains("900000000000000081"));
     assert!(
-        live["quota"].get("v5_access_allowed").is_none(),
-        "shared live must not expose individual authorization"
+        !live.to_string().contains("v5_access_mode"),
+        "shared live must not carry the policy fields"
     );
 }
 
-/// 今天出满的账号（单号每日上限）虽然「可用」，但不再接图：首页估算不算它，网关也不给它的开始时间。
+/// 今天出满的账号（单号每日上限）虽然「可用」，但不再接图：全站所有账号出满时，首页说明原因。
 #[tokio::test]
 async fn public_live_marks_accounts_at_their_daily_cap() {
     let e = setup(&reg_env()).await;
@@ -419,11 +390,6 @@ async fn public_live_marks_accounts_at_their_daily_cap() {
         .unwrap();
     e.state.live.invalidate();
     let (_, _, v) = get_json(&e.state, "/public/live", &[]).await;
-    assert_eq!(
-        v["accounts"],
-        json!([{"usable": true, "cooling": 0, "full": true}])
-    );
-    assert_eq!(v["guard"]["start_in"], Value::Null, "没有能接图的账号");
     assert_eq!(v["guard"]["blocked"]["code"], "daily_cap");
 }
 
@@ -474,10 +440,10 @@ async fn public_live_me_for_logged_in_member_only() {
     let (status, headers, v) = get_json(&e.state, "/public/live", &[("cookie", &cookie)]).await;
     assert_eq!(status, 200);
     assert_eq!(headers["cache-control"], "no-store");
-    // 排第 2、约 2 × 2.5 秒（1 个可用账号）
+    // 排第 2（10-27 起不再给时间估算）
     assert_eq!(
         v["me"],
-        json!({"mine": [{"state": "waiting", "position": 2, "eta": 5}], "waiting": 2, "running": 0})
+        json!({"mine": [{"state": "waiting", "position": 2}], "waiting": 2, "running": 0})
     );
     // 共享快照没有被某个成员的 me 污染（旧版红线）
     let (_, _, guest_again) = get_json(&e.state, "/public/live", &[]).await;
@@ -1202,7 +1168,7 @@ async fn live_stream_carries_my_queue_per_connection() {
     let m2 = member.next_data(Duration::from_secs(5)).await.unwrap();
     assert_eq!(
         m2["me"],
-        json!({"mine": [{"state": "waiting", "position": 1, "eta": 10}], "waiting": 1, "running": 0})
+        json!({"mine": [{"state": "waiting", "position": 1}], "waiting": 1, "running": 0})
     );
     // 访客那条流看到的是全站数字，没有任何人的位置
     let g2 = guest.next_data(Duration::from_secs(5)).await.unwrap();
@@ -1354,7 +1320,7 @@ async fn landing_boot_for_guest() {
     assert_eq!(keys(&boot["live"]), keys(&live));
     assert_eq!(boot["live"]["me"], Value::Null);
     assert_eq!(boot["live"]["site"], "https://gate.example.top");
-    assert_eq!(boot["live"]["quota"]["images_cap"], 2400);
+    assert_eq!(boot["live"]["quota"]["images_today"], 0);
     assert_eq!(boot["status"]["site"], "https://gate.example.top");
     assert_eq!(boot["status"]["web_login"], true);
     assert_eq!(
@@ -1421,7 +1387,7 @@ async fn landing_boot_for_member_with_key() {
     // 看板里带我的排队
     assert_eq!(
         boot["live"]["me"],
-        json!({"mine": [{"state": "waiting", "position": 1, "eta": 10}], "waiting": 1, "running": 0})
+        json!({"mine": [{"state": "waiting", "position": 1}], "waiting": 1, "running": 0})
     );
     // 全站 V5 不设限（global_daily_v5=0）：首页 V5 圆环只看个人剩余
     p.state

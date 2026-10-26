@@ -116,14 +116,10 @@ pub const DEFAULT_CYCLE: f64 = 10.0;
 pub async fn build(state: &AppState, now: f64) -> Result<Map<String, Value>, InternalError> {
     struct Acct {
         usable: bool,
-        cooling: i64,
-        next_in: f64,
         /// 这个账号两次开始出图的平均间距（出图耗时 + 出完后平均歇的秒数）。
         cycle: f64,
         /// 今天出满了（单号每日上限）：账号本身可用，但不会再接图。
         full: bool,
-        /// 网关估计：现在再来一张，这个账号多久后能开始（含它前面排着的张数）。
-        start_in: f64,
     }
     impl Acct {
         /// 能接新图：可用且今天没出满。
@@ -133,43 +129,29 @@ pub async fn build(state: &AppState, now: f64) -> Result<Map<String, Value>, Int
     }
     let pool = state.nai.tokens().await;
     let day = state.day();
-    let mono = state.nai.mono();
     let mut accounts: Vec<Acct> = Vec::with_capacity(pool.len());
     let mut images_today = 0i64;
     for t in &pool {
         let c = state.db.get_upstream_counter(&t.token_id, &day).await?;
         images_today += c.images;
-        let f = t.fields();
         let pacing = state.nai.pacing(t);
         accounts.push(Acct {
             usable: t.usable(now),
-            cooling: if !f.disabled && f.admin_enabled {
-                ((f.blocked_until - now) as i64).max(0)
-            } else {
-                0
-            },
-            next_in: pyc::round((f.image_next_at - mono).max(0.0), 1),
             cycle: pacing.cycle,
             full: state
                 .guard
                 .with(|g| g.at_daily_cap(&t.token_id, c.images, now)),
-            start_in: pacing.next_start_in,
         });
     }
     let values = state.guard.with(|g| g.values.clone());
     let gv = |name: &str| values.get(name).copied().unwrap_or(0);
-    let usable = (accounts.iter().filter(|a| a.usable).count() as i64).max(1);
-    let v5_cap = crate::ops::global_daily_v5(&state.db).await?;
-    let v5_access = crate::v5_access::evaluate(state, None).await?;
-    let v5_paused = v5_access.paused;
-    let v5_access_mode = v5_access.mode.as_str();
-    // 10 分钟突发窗口已删除：`guard` 段不再有 `burst_cap` / `burst_wait`。
     // 出图间隔与间隔抖动 10-23 删除：每个账号的节奏 = 出图耗时 + 出完后歇 N～M 秒
     let (rest_min, rest_max) = (
         gv("post_jitter_min"),
         gv("post_jitter_max").max(gv("post_jitter_min")),
     );
-    // 周期、开始时间都只看能接新图的账号（可用且今天没出满）：出满的账号不会再接图
+    // 周期只看能接新图的账号（可用且今天没出满）：出满的账号不会再接图。
+    // `cycle` 是首页使用指南里「生图间隔」建议的依据，不再用于排队时间估算。
     let cycles: Vec<f64> = accounts
         .iter()
         .filter(|a| a.open() && a.cycle > 0.0)
@@ -180,26 +162,7 @@ pub async fn build(state: &AppState, now: f64) -> Result<Map<String, Value>, Int
     } else {
         cycles.iter().sum::<f64>() / cycles.len() as f64
     };
-    let next_in = accounts
-        .iter()
-        .filter(|a| a.open())
-        .map(|a| a.next_in)
-        .reduce(f64::min);
-    // 网关自己的估计：现在再来一张，最早多久后能开始（选号用的同一个数，取整秒，免得每秒都推一次快照）
-    let start_in = accounts
-        .iter()
-        .filter(|a| a.open())
-        .map(|a| a.start_in)
-        .reduce(f64::min)
-        .map(|v| v.max(0.0).round() as i64);
 
-    // 调度规则（首页「点一步看规则」用）：全是站点级参数和汇总，不含任何个人信息。
-    // 额度都是站长手动定的（10-23 起没有自动额度算法）
-    let quota = {
-        let m = crate::jobs::quota::manual(state).await?;
-        json!({"ceiling": m.daily_images, "v5_each": m.daily_v5, "v5_global": m.global_v5,
-               "v5_paused": m.v5_paused, "v5_access_mode": v5_access_mode})
-    };
     let token_ids: Vec<String> = pool
         .iter()
         .filter(|t| t.usable(now))
@@ -243,14 +206,6 @@ pub async fn build(state: &AppState, now: f64) -> Result<Map<String, Value>, Int
         let active = state.db.registered_member_count(state.now()).await?;
         members = json!({"max": cfg.max_users, "active": active, "open": cfg.open});
     }
-    // Each usable account's cap today: a temporary manual raise, else the automatic cap (<= the owner's value)
-    let daily_cap_total = if gv("account_daily_cap") == 0 {
-        0
-    } else if token_ids.is_empty() {
-        gv("account_daily_cap") * usable
-    } else {
-        state.guard.with(|g| g.total_daily_cap(&token_ids, now))
-    };
     let mut body = Map::new();
     body.insert("t".into(), json!(now));
     body.insert("mode".into(), json!("fifo")); // 启用轮流出图后为 "drr"
@@ -258,18 +213,13 @@ pub async fn build(state: &AppState, now: f64) -> Result<Map<String, Value>, Int
         "auth".into(),
         json!({"requests": requests, "rejected": rejected}),
     );
+    // 首页图例只说「今天重置以来各生成了多少张」，不再折算剩余额度：
+    // 上限、暂停、访问策略是准入逻辑（guard / me payload）的事，不在看板上重复。
     body.insert(
         "quota".into(),
         json!({
             "images_today": images_today,
-            // 节约模式的折算张数 `units_today` 已删除：每日上限就按 images_today 比
-            "images_cap": daily_cap_total,
             "v5_today": state.db.day_v5_total(&day).await?,
-            "v5_cap": v5_cap,
-            // 动态额度把今天的 V5 暂停了：和「账号免费 V5 用完」同样显示暂停
-            "upstream_v5_free": upstream_v5_free(state).await && !v5_paused,
-            "v5_paused": v5_paused,
-            "v5_access_mode": v5_access_mode,
         }),
     );
     // queue.full：网关此刻是否会以「排队满」拒绝新图（与 guard.admit_image 同一判断），首页直接用它，不在前端重算
@@ -285,39 +235,23 @@ pub async fn build(state: &AppState, now: f64) -> Result<Map<String, Value>, Int
     body.insert(
         "guard".into(),
         json!({
-            // `min(..., default=0)`：没有可用账号时是整数 0
-            "next_in": next_in.map_or(json!(0), pyval::float),
-            // 没有能接新图的账号时为 null
-            "start_in": start_in,
             "cooldown": state.cooldown.remaining(now),
             "blocked": blocked,
         }),
     );
-    body.insert(
-        "accounts".into(),
-        Value::Array(
-            accounts
-                .iter()
-                .map(|a| json!({"usable": a.usable, "cooling": a.cooling, "full": a.full}))
-                .collect(),
-        ),
-    );
     body.insert("members".into(), members);
-    // 一个账号平均多久开始一张（可用账号的平均周期）；首页排队估算用
+    // 一个账号平均多久开始一张（可用账号的平均周期）；首页使用指南的「生图间隔」建议用
     body.insert("cycle".into(), json!(pyc::round(cycle, 1)));
     body.insert(
         "rules".into(),
         // 3.0 删掉的字段：`base`（保底）、`borrow_open`（空闲借用）、
-        // `anlas`（早已下线的 Anlas 自动分配占位）
+        // `anlas`（早已下线的 Anlas 自动分配占位）、`daily_cap` / `quota`（10-27 删除：
+        // 额度与上限只在 guard 拒绝时通过 429 原文出现，看板不再重复展示）
         json!({
-            // 全站排队上限：每个账号取 min(设置, 排队超时内真能开始的张数) 相加；null = 不限。
-            // 每小时上限（10-22）、安静时段（10-23）删除
             // 字段名沿用旧的 key_queue（客户端兼容）；值是每人排队上限 queue_per_member
             "key_queue": gv("queue_per_member"),
             "queue_cap": queue_cap,
-            "daily_cap": daily_cap_total,
             "rest": [rest_min, rest_max], // 每张出完后这个账号歇 N～M 秒
-            "quota": quota, // 手动额度
         }),
     );
     Ok(body)
@@ -330,30 +264,10 @@ pub async fn upstream_v5_free(state: &AppState) -> bool {
     state.nai.v5_free_open().await.unwrap_or(true)
 }
 
-/// 这把 Key 的图现在排第几 / 是否在生成。
-/// `eta`：已经排到账号上的用上游客户端的估计（`start_at`，按那个账号前面排了几张和它现在的间隔算）；
-/// 还没排到的按 位次 × 全站每张的放行间隔（[`Snapshot::site_interval`]：单账号周期 ÷ 可用账号数）。
-pub fn mine(state: &AppState, key_id: i64, snap: &Snapshot) -> Value {
-    let mut view = state.guard.with(|g| g.queue_view(Some(key_id)));
-    let interval = snap.site_interval();
-    let mut items = view.get_mut("mine").map(Value::take).unwrap_or(json!([]));
-    if let Value::Array(list) = &mut items {
-        for item in list {
-            let Some(o) = item.as_object_mut() else {
-                continue;
-            };
-            let start_at = o.remove("start_at").and_then(|v| v.as_f64());
-            if o.get("state").and_then(Value::as_str) == Some("waiting") {
-                let pos = o.get("position").and_then(Value::as_i64).unwrap_or(0);
-                let eta = match start_at {
-                    Some(at) => (at - state.now()).max(0.0),
-                    None => pos as f64 * interval,
-                };
-                o.insert("eta".into(), json!(eta.round() as i64));
-            }
-        }
-    }
-    json!({"mine": items, "waiting": view["waiting"], "running": view["running"]})
+/// 这把 Key 的图现在排第几 / 是否在生成：`mine`（逐张 state + 位次）、`waiting` / `running`。
+/// 10-27 起不带任何时间估算（`eta` / `start_at` 已删除）：首页只显示「您排在 X/Y 位」。
+pub fn mine(state: &AppState, key_id: i64) -> Value {
+    state.guard.with(|g| g.queue_view(Some(key_id)))
 }
 
 /// 变化很慢的站点信息（meta）。
@@ -503,7 +417,7 @@ fn content_sig(body: &Map<String, Value>, admin: bool) -> u64 {
         {
             let g2: Map<String, Value> = g
                 .iter()
-                .filter(|(k, _)| !matches!(k.as_str(), "next_in" | "start_in" | "cooldown"))
+                .filter(|(k, _)| k.as_str() != "cooldown")
                 .map(|(k, v)| (k.clone(), v.clone()))
                 .collect();
             m.insert(k.clone(), Value::Object(g2));
@@ -515,32 +429,6 @@ fn content_sig(body: &Map<String, Value>, admin: bool) -> u64 {
 }
 
 impl Snapshot {
-    /// 全站平均每张图的放行间隔（秒）：`cycle`（单账号周期 = 出图耗时 + 出完后平均歇的秒数）÷ 能接新图的账号数
-    /// （可用且今天没出满）。
-    /// 几个账号同时出图，排队估算按它算。
-    pub fn site_interval(&self) -> f64 {
-        let per_account = self
-            .body
-            .get("cycle")
-            .and_then(Value::as_f64)
-            .filter(|v| *v > 0.0)
-            .unwrap_or(DEFAULT_CYCLE);
-        let usable = self
-            .body
-            .get("accounts")
-            .and_then(Value::as_array)
-            .map_or(0, |a| {
-                a.iter()
-                    .filter(|x| {
-                        x.get("usable").and_then(Value::as_bool) == Some(true)
-                            && x.get("full").and_then(Value::as_bool) != Some(true)
-                    })
-                    .count()
-            })
-            .max(1);
-        per_account / usable as f64
-    }
-
     fn new(body: Map<String, Value>) -> Self {
         let json = wire_text(&Value::Object(body.clone()));
         Self {
@@ -870,26 +758,6 @@ mod tests {
     }
 
     #[test]
-    fn site_interval_divides_by_usable_accounts() {
-        let snap = |v: Value| Snapshot::new(v.as_object().unwrap().clone());
-        let two = snap(
-            json!({"cycle": 17.5, "accounts": [{"usable": true}, {"usable": true}, {"usable": false}]}),
-        );
-        assert_eq!(two.site_interval(), 8.75);
-        // 今天出满的账号不再接图：不算
-        let one = snap(
-            json!({"cycle": 17.5, "accounts": [{"usable": true, "full": true}, {"usable": true, "full": false}]}),
-        );
-        assert_eq!(one.site_interval(), 17.5);
-        // 没有可用账号也不除以 0；没有 cycle 时按默认 10 秒
-        assert_eq!(
-            snap(json!({"cycle": 17.5, "accounts": []})).site_interval(),
-            17.5
-        );
-        assert_eq!(snap(json!({})).site_interval(), DEFAULT_CYCLE);
-    }
-
-    #[test]
     fn render_appends_me_last() {
         let mut body = Map::new();
         body.insert("t".into(), json!(1.5));
@@ -906,36 +774,36 @@ mod tests {
 
     #[test]
     fn signature_ignores_t_and_countdowns() {
-        let mk = |t: f64, requests: i64, next_in: f64| {
+        let mk = |t: f64, requests: i64, cooldown: i64| {
             let mut m = Map::new();
             m.insert("t".into(), json!(t));
             m.insert("auth".into(), json!({"requests": requests}));
             m.insert(
                 "guard".into(),
-                json!({"hour": 3, "next_in": next_in, "cooldown": 0}),
+                json!({"hour": 3, "cooldown": cooldown, "blocked": Value::Null}),
             );
             Snapshot::new(m)
         };
-        let base = mk(1.0, 5, 5.0);
+        let base = mk(1.0, 5, 5);
         // 只有 t 不同：不算变化
-        let later = mk(2.0, 5, 5.0);
+        let later = mk(2.0, 5, 5);
         assert_eq!(base.sig, later.sig);
         assert_eq!(base.admin_sig, later.admin_sig);
         // 倒计时变了：公开页要推，后台不推
-        let counting = mk(2.0, 5, 4.0);
+        let counting = mk(2.0, 5, 4);
         assert_ne!(base.sig, counting.sig);
         assert_eq!(base.admin_sig, counting.admin_sig);
         // 滚动窗口里的请求数变了：同上
-        let busier = mk(2.0, 6, 5.0);
+        let busier = mk(2.0, 6, 5);
         assert_ne!(base.sig, busier.sig);
         assert_eq!(base.admin_sig, busier.admin_sig);
-        // 真正的状态变了（每小时出图数）：两边都要推
+        // 真正的状态变了（拦截原因）：两边都要推
         let mut m = Map::new();
         m.insert("t".into(), json!(2.0));
         m.insert("auth".into(), json!({"requests": 5}));
         m.insert(
             "guard".into(),
-            json!({"hour": 4, "next_in": 5.0, "cooldown": 0}),
+            json!({"hour": 3, "cooldown": 5, "blocked": {"code": "daily_cap", "text": "x"}}),
         );
         let changed = Snapshot::new(m);
         assert_ne!(base.sig, changed.sig);

@@ -8,16 +8,19 @@
 #   tools/deploy.sh ... --force  pass --force to cutover.sh (skip its active-queue guard)
 #
 # Steps: pick run -> refuse unless every job passed -> skip if already live -> download
-# artifacts -> sync deployment scripts -> stage image without touching the rollback tag -> wait for
-# an idle queue -> promote staged image and stop-then-start (the old gateway finishes accepted work before
-# the new one starts, so only one gateway ever sends to an upstream account; the site is down 1-2 minutes)
-# -> healthcheck + smoke inside the container -> public /healthz.
+# artifacts (the image tarball is skipped when the server already loaded that exact image,
+# e.g. a cutover retry) -> sync deployment scripts -> stage image without touching the rollback
+# tag -> wait for an idle queue -> promote staged image and stop-then-start (the old gateway
+# finishes accepted work before the new one starts, so only one gateway ever sends to an upstream
+# account; the site is down 1-2 minutes) -> healthcheck + smoke inside the container -> public
+# /healthz -> optional Discord notice (export DISCORD_ALERT_WEBHOOK in owl.env).
 # Rollback on failure: ssh in and run `/opt/owl/cutover.sh previous`.
 #
 # Needs: gh (logged in), ~/.config/owl/owl.env exporting OWL_IP (never printed),
 # ~/.ssh/naigate_ed25519. Output masks IPv4 addresses.
 set -euo pipefail
 cd "$(dirname "$0")/.."
+start=$SECONDS
 
 REPO=${OWL_REPO:-kcgoofee-jpg/owl-gateway}
 DOMAIN=${OWL_DOMAIN:-gate.davidzhao.top}
@@ -84,14 +87,23 @@ if [[ $live == running ]]; then
   exit 0
 fi
 
+# 服务器已经 load 过这个 sha（上次 cutover 中断后的重试）：几百 MB 的镜像 tar 不用再下载上传
+have_image=$(remote "docker image inspect owl-gate:$sha >/dev/null 2>&1 && echo yes || echo no")
+if [[ $have_image == yes ]]; then
+  say "owl-gate:${sha:0:7} already staged on the server; skipping image download/upload"
+fi
+
 tmp=$(mktemp -d)
 trap 'rm -rf "$tmp"' EXIT
 say "downloading artifacts"
-gh run download "$run_id" -R "$REPO" -n owl-gate-image -n nai-ops-linux-musl -D "$tmp"
+dl=(-n nai-ops-linux-musl)
+[[ $have_image == yes ]] || dl+=(-n owl-gate-image)
+gh run download "$run_id" -R "$REPO" "${dl[@]}" -D "$tmp"
 
-say "uploading candidate image, nai-ops, cutover.sh, caddy-reload.sh, compose.yml"
-scp -q "${KEY[@]}" "$tmp/owl-gate-image/owl-gate.tar.gz" "$tmp/nai-ops-linux-musl/nai-ops" \
-  deploy/v3/cutover.sh deploy/v3/caddy-reload.sh deploy/v3/compose.yml "root@$OWL_IP:/opt/owl/" 2>&1 | mask
+say "uploading nai-ops, cutover.sh, caddy-reload.sh, compose.yml$([[ $have_image == yes ]] || echo ', candidate image')"
+files=("$tmp/nai-ops-linux-musl/nai-ops" deploy/v3/cutover.sh deploy/v3/caddy-reload.sh deploy/v3/compose.yml)
+[[ $have_image == yes ]] || files=("$tmp/owl-gate-image/owl-gate.tar.gz" "${files[@]}")
+scp -q "${KEY[@]}" "${files[@]}" "root@$OWL_IP:/opt/owl/" 2>&1 | mask
 
 say "cutover"
 remote "set -e; cd /opt/owl; chmod +x cutover.sh caddy-reload.sh
@@ -105,4 +117,13 @@ remote 'for i in $(seq 1 30); do docker exec owl-gate nai-gate healthcheck >/dev
   docker exec owl-gate nai-gate healthcheck && docker exec owl-gate nai-ops smoke http://127.0.0.1:8000 | tail -3' \
   || die "post-deploy checks failed; consider: /opt/owl/cutover.sh previous"
 curl -fsS -m 10 "https://$DOMAIN/healthz" | grep -q '"ok":true' || die "public /healthz not ok"
-say "live: owl-gate:${sha:0:7}"
+say "live: owl-gate:${sha:0:7} ($((SECONDS - start))s total)"
+
+# 可选：部署完成通知。owl.env 里 export DISCORD_ALERT_WEBHOOK 即开启；发不出去不影响部署结果。
+if [[ -n ${DISCORD_ALERT_WEBHOOK:-} ]]; then
+  now=$(TZ=Asia/Shanghai date '+%m-%d %H:%M')
+  curl -fsS -m 15 -H 'Content-Type: application/json' \
+    -d "{\"content\":\"🚀 猫头鹰公益站已上线 ${sha:0:7}（${now} 北京时间，部署用时 $((SECONDS - start))s）。出问题时：ssh 上服务器执行 /opt/owl/cutover.sh previous 回上一版。\"}" \
+    "$DISCORD_ALERT_WEBHOOK" >/dev/null 2>&1 ||
+    say "Discord 通知发送失败（不影响部署）"
+fi

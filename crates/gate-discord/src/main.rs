@@ -16,7 +16,7 @@ struct Cli {
 
 #[derive(Subcommand)]
 enum Bot {
-    /// 奶妹：领 Key / 额度 / 反馈（需要 DISCORD_BOT_TOKEN、DISCORD_GUILD_ID、REGISTRATION_BRIDGE_SECRET）
+    /// 奶妹：领 Key / 换 Key（需要 DISCORD_BOT_TOKEN、DISCORD_GUILD_ID、REGISTRATION_BRIDGE_SECRET）
     Naimei,
 }
 

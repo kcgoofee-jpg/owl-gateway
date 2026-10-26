@@ -1,4 +1,4 @@
-/** 日志：请求日志 / 操作日志 / Bug 追踪。生成记录、来信（反馈 / 问卷）各自是独立分区。 */
+/** 日志：请求日志 / 操作日志 / Bug 追踪。生成记录是独立分区。 */
 import { useEffect } from "preact/hooks";
 import { useLocation } from "preact-iso";
 import { Badge } from "../../../ui";

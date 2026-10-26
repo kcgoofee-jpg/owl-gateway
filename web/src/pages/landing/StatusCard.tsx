@@ -1,11 +1,11 @@
 import { useEffect, useState } from "preact/hooks";
 import { cx, Skeleton } from "../../ui";
 import { useStore } from "./ctx";
-import { dailyMeters, dailyUsage, deriveStatus } from "./status";
+import { deriveStatus, generatedToday } from "./status";
 import { StatRows } from "./Usage";
 
 /**
- * 全站实时状态：一句话（能不能马上出图 + 原因）+ 全站今日用量。所有访客都看得到。
+ * 全站实时状态：一句话（能不能马上出图 + 原因）+ 今天重置以来各生成了多少张。所有访客都看得到。
  * 游客登录入口统一放在顶栏。
  */
 export function StatusCard(props: { class?: string }) {
@@ -14,8 +14,7 @@ export function StatusCard(props: { class?: string }) {
   const view = deriveStatus(data, {
     nowMs: Date.now(),
   });
-  const meters = dailyMeters(data);
-  const usage = dailyUsage(data);
+  const generated = generatedToday(data);
 
   // 读屏只在实时状态变化时播报。
   const announce = view?.announce ?? "";
@@ -55,15 +54,7 @@ export function StatusCard(props: { class?: string }) {
         )}
       </div>
       {/* 还没读到数据时不画仪表（否则会先闪一下「0」） */}
-      {data ? (
-        <StatRows
-          total={meters.total}
-          v5={meters.v5}
-          generated={{ total: usage.total.used, v5: usage.v5.used }}
-        />
-      ) : (
-        <Skeleton h="56px" />
-      )}
+      {data ? <StatRows generated={generated} /> : <Skeleton h="56px" />}
     </section>
   );
 }

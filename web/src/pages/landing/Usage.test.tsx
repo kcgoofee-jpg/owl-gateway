@@ -3,118 +3,41 @@ import { afterEach, describe, expect, it } from "vitest";
 import { StatRows } from "./Usage";
 
 const host = document.createElement("div");
-const v5 = { label: "V5 已用", used: 0, cap: 0 };
 
 afterEach(() => render(null, host));
 
-describe("compact shared allowance arc", () => {
-  it("exposes remaining images and capacity to sighted users and screen readers", () => {
-    render(<StatRows total={{ label: "全站今日已用", used: 123, cap: 500 }} v5={v5} />, host);
-    const gauge = host.querySelector('.stat--v45[role="progressbar"]');
-    expect(gauge?.getAttribute("aria-label")).toBe("V4.5");
-    expect(gauge?.getAttribute("aria-valuenow")).toBe("377");
-    expect(gauge?.getAttribute("aria-valuemax")).toBe("500");
-    expect(gauge?.getAttribute("aria-valuetext")).toContain("377 张，每日 500 张");
-    expect(gauge?.textContent).toContain("V4.5 剩余377张");
+/** 站长 10-27：图例只说「今天重置以来各生成了多少张」，没有剩余额度、没有暂停态。 */
+describe("StatRows: generated-today legend", () => {
+  it("shows both generated counts and the composition arc", () => {
+    render(<StatRows generated={{ total: 123, v45: 103, v5: 20 }} />, host);
+    expect(host.querySelector(".stat--v45.lp-meter")?.textContent).toContain("V4.5 已出103张");
+    expect(host.querySelector(".stat--v5.lp-meter")?.textContent).toContain("V5 已出20张");
     expect(host.querySelectorAll("svg.lp-site-gauge")).toHaveLength(1);
-    expect(host.textContent).not.toContain("全站剩余");
+    expect(host.textContent).not.toContain("剩余");
     expect(host.textContent).not.toMatch(/已用 \d+%/);
   });
 
-  it("keeps the next reset explicit instead of promising an available full allowance", () => {
-    render(<StatRows total={{ label: "全站明天可用（明天 7 点起）", used: 0, cap: 500 }} v5={v5} />, host);
-    const gauge = host.querySelector(".stat--v45.lp-meter");
-    expect(gauge?.getAttribute("aria-valuetext")).toContain("明天 7 点起");
-    expect(gauge?.textContent).toContain("明天 7 点起");
-    expect(gauge?.textContent).not.toContain("100%");
+  it("draws V4.5 first from the origin, V5 right after it（黄前蓝后）", () => {
+    render(<StatRows generated={{ total: 100, v45: 80, v5: 20 }} />, host);
+    const all = host.querySelector("path.stat--v45");
+    const subset = host.querySelector("path.stat--v5");
+    expect(all?.getAttribute("stroke-dasharray")).toBe("80 100");
+    expect(all?.getAttribute("stroke-dashoffset")).toBeNull();
+    expect(subset?.getAttribute("stroke-dasharray")).toBe("20 100");
+    expect(subset?.getAttribute("stroke-dashoffset")).toBe("-80");
+    expect(subset?.getAttribute("d")).toBe(all?.getAttribute("d"));
   });
 
-  it("does not invent a percentage or progressbar for an unlimited allowance", () => {
-    render(<StatRows total={{ label: "全站今日已用", used: 123, cap: 0 }} v5={v5} />, host);
-    expect(host.querySelector(".stat--v45[role=progressbar]")).toBeNull();
-    expect(host.querySelector(".stat--v45.lp-meter")?.textContent).toContain("V4.5 剩余不限");
-    expect(host.querySelector(".stat--v45.lp-meter")?.textContent).not.toContain("不限量");
+  it("a lone V5 image draws only the blue stretch, no amber invented", () => {
+    render(<StatRows generated={{ total: 1, v45: 0, v5: 1 }} />, host);
+    expect(host.querySelector("path.stat--v5")?.getAttribute("stroke-dasharray")).toBe("100 100");
+    expect(host.querySelector("path.stat--v45")).toBeNull();
+    expect(host.querySelector("svg title")?.textContent).toContain("今日已出 1 张，其中 V4.5 0 张、V5 1 张");
+  });
+
+  it("nothing generated yet: plain track, zeroed legend", () => {
+    render(<StatRows generated={{ total: 0, v45: 0, v5: 0 }} />, host);
     expect(host.querySelector(".lp-site-gauge__fill")).toBeNull();
+    expect(host.querySelector(".stat--v45.lp-meter")?.textContent).toContain("V4.5 已出0张");
   });
-
-  it("shows 不限 for an unlimited V5 total and keeps today's usage in the tooltip", () => {
-    render(
-      <StatRows
-        total={{ label: "全站今日已用", used: 123, cap: 500 }}
-        v5={{ label: "V5 已用", used: 106, cap: 0 }}
-      />,
-      host,
-    );
-    const v5Row = host.querySelector(".stat--v5.lp-meter");
-    expect(v5Row?.textContent).toContain("V5 剩余不限");
-    expect(v5Row?.textContent).not.toContain("已出");
-    expect(v5Row?.textContent).not.toContain("不限量");
-    expect(v5Row?.getAttribute("title")).toBe("V5 剩余 不限，今日已出 106 张");
-  });
-
-  it("signals a low remaining allowance in text as well as color", () => {
-    render(<StatRows total={{ label: "全站今日已用", used: 480, cap: 500 }} v5={v5} />, host);
-    expect(host.querySelector(".stat--v45.lp-meter")?.textContent).toContain("仅剩 4%");
-  });
-
-  it("retains the paused V5 state beside the site allowance", () => {
-    render(
-      <StatRows
-        total={{ label: "全站今日已用", used: 100, cap: 500 }}
-        v5={{ label: "V5 暂停中", used: 10, cap: 60, paused: true, short: "暂停中" }}
-      />,
-      host,
-    );
-    expect(host.querySelector(".lp-meter--paused")?.textContent).toContain("V5 剩余暂停中");
-    expect(host.querySelector('.lp-meter--paused[role="progressbar"]')?.getAttribute("aria-valuenow")).toBe(
-      "0",
-    );
-  });
-});
-
-it("draws V4.5 first from the origin, V5 right after it (站长 10-24：黄前蓝后)", () => {
-  render(
-    <StatRows
-      total={{ label: "全站今日已用", used: 100, cap: 500 }}
-      v5={{ label: "V5 已用", used: 20, cap: 60 }}
-    />,
-    host,
-  );
-  const all = host.querySelector("path.stat--v45");
-  const subset = host.querySelector("path.stat--v5");
-  // V4.5 自己的长度 = 总量 − V5（100−20)/500 = 16，V5 = 20/500 = 4，接在 V4.5 后面
-  expect(all?.getAttribute("stroke-dasharray")).toBe("16 100");
-  expect(all?.getAttribute("stroke-dashoffset")).toBeNull();
-  expect(subset?.getAttribute("stroke-dasharray")).toBe("4 100");
-  expect(subset?.getAttribute("stroke-dashoffset")).toBe("-16");
-  expect(subset?.getAttribute("d")).toBe(all?.getAttribute("d"));
-  expect(host.textContent).not.toMatch(/已用 \d+%/);
-});
-
-it("a lone V5 image draws only the blue stretch at the origin, no amber invented", () => {
-  render(
-    <StatRows
-      total={{ label: "全站今日已用", used: 1, cap: 100 }}
-      v5={{ label: "V5 已用", used: 1, cap: 20 }}
-    />,
-    host,
-  );
-  expect(host.querySelector("path.stat--v5")?.getAttribute("stroke-dasharray")).toBe("1 100");
-  expect(host.querySelector("path.stat--v45")).toBeNull();
-  expect(host.querySelector("svg title")?.textContent).toContain("今日已出 1 张，其中 V5 1 张");
-});
-
-it("retains actual generation history when a paused or next-day quota hides its usage", () => {
-  render(
-    <StatRows
-      total={{ label: "全站明天可用（明天 7 点起）", used: 0, cap: 100 }}
-      v5={{ label: "V5 暂停中", used: 0, cap: 20, paused: true, short: "暂停中" }}
-      generated={{ total: 100, v5: 20 }}
-    />,
-    host,
-  );
-  expect(host.querySelector("path.stat--v5")?.getAttribute("stroke-dasharray")).toBe("20 100");
-  expect(host.textContent).not.toMatch(/已用 \d+%/);
-  expect(host.textContent).toContain("明天 7 点起");
-  expect(host.textContent).toContain("暂停中");
 });

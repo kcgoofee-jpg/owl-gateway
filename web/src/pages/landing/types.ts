@@ -4,38 +4,28 @@
  */
 
 /** /public/live 里的「我的排队」：登录成员才有 */
-export type MineItem = { state: "running" } | { state: "waiting"; position: number; eta: number };
+export type MineItem = { state: "running" } | { state: "waiting"; position: number };
 export type LiveMine = { mine?: MineItem[]; waiting?: number; running?: number };
 
 export type Blocked = { code?: string; text?: string };
 
 export type Live = {
+  /** 图例只说「今天重置以来各生成了多少张」；上限与暂停只在拒绝原因里出现 */
   quota?: {
     images_today?: number;
-    images_cap?: number;
     v5_today?: number;
-    v5_cap?: number;
-    /** false = 没有任何上游账号还有免费 V5（网关会拒绝 V5）；缺省按 true */
-    upstream_v5_free?: boolean;
-    /** true = 站长手动暂停了 V5（网关会拒绝 V5；upstream_v5_free 同时为 false） */
-    v5_paused?: boolean;
-    v5_access_mode?: "legacy" | "closed" | "restricted" | "everyone";
   };
   /** full：网关此刻会不会以「排队满」拒绝新图 */
   queue?: { waiting?: number; running?: number; full?: boolean };
   guard?: {
     cooldown?: number;
     blocked?: Blocked | null;
-    /** 网关的估计：现在再来一张，最早多久后能开始（秒，选号用的同一个数）；没有能接图的账号时为 null */
-    start_in?: number | null;
   };
   rules?: {
     queue_cap?: number;
   };
-  /** 一个账号平均多久开始一张（秒，出图耗时 + 出完后歇的秒数）：排队时间估算用 */
+  /** 一个账号平均多久开始一张（秒，出图耗时 + 出完后歇的秒数）：使用指南「生图间隔」建议用 */
   cycle?: number;
-  /** 上游账号：几个能接图（可用且今天没出满）= 几张图同时出 */
-  accounts?: { usable?: boolean; cooling?: number; full?: boolean }[];
   me?: LiveMine | null;
 } & Meta;
 

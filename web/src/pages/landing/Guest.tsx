@@ -174,7 +174,7 @@ function Rules() {
       </Rule>
       <Rule k="常用命令">
         在 <span class="lp-nb">Discord 服务器</span>里用 <code>/register</code> 领 Key、
-        <code>/resetkey</code> 换新 Key、<code>/反馈</code> 给站长留言；额度和用量在本页登录后查看。
+        <code>/resetkey</code> 换新 Key；额度和用量在本页登录后查看。
       </Rule>
       <Rule k="一人一把">
         Key 仅限本人使用，共用或转售会被回收；退出 <span class="lp-nb">Discord 服务器</span>后 Key

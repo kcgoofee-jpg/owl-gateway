@@ -134,13 +134,13 @@ async fn viewer_key_id(state: &AppState, headers: &HeaderMap) -> Option<i64> {
     }
 }
 
-/// 首页实时架构图：只含汇总数字 + meta；登录的成员附上「我的排队」，看板第一格直接显示排第几。
+/// 首页实时架构图：只含汇总数字 + meta；登录的成员附上「我的排队」，看板第一格直接显示排在第几位。
 async fn public_live(State(state): State<AppState>, req: Request) -> ApiResult {
     let (parts, _) = req.into_parts();
     let snap = state.live.current(&state).await?;
     let me = viewer_key_id(&state, &parts.headers)
         .await
-        .map(|id| live::mine(&state, id, &snap));
+        .map(|id| live::mine(&state, id));
     Ok(no_store(json_text(snap.render(me.as_ref()))))
 }
 
@@ -202,9 +202,7 @@ async fn next_live(mut c: LiveConn) -> Option<(Result<Event, Infallible>, LiveCo
             c.key_id = viewer_key_id(&c.state, &c.headers).await;
             c.checked = Instant::now();
         }
-        let me = c
-            .key_id
-            .map(|id| wire_text(&live::mine(&c.state, id, &snap)));
+        let me = c.key_id.map(|id| wire_text(&live::mine(&c.state, id)));
         let sig = match &me {
             Some(m) => combine(snap.sig, m),
             None => snap.sig,
@@ -894,7 +892,7 @@ pub async fn landing_boot(state: &AppState, headers: &HeaderMap) -> Option<Value
         Ok(snap) => {
             boot.insert(
                 "live".into(),
-                snap.value(key_id.map(|id| live::mine(state, id, &snap))),
+                snap.value(key_id.map(|id| live::mine(state, id))),
             );
         }
         Err(e) => tracing::warn!(target: "boot", "首屏 live 取数失败：{}", e.0),

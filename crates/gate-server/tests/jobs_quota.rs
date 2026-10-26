@@ -184,11 +184,11 @@ async fn manual_v5_pause_refuses_and_shows_zero_everywhere() {
             .unwrap()
             .contains("V5 暂停中")
     );
+    // 10-27 起看板不再带 V5 暂停 / 余量字段：暂停状态通过 algo_notice 与拒绝原因（下面 403）体现
     let (_, _, live) = Call::new("GET", "/public/live").send(&e.state).await;
     let live: Value = serde_json::from_slice(&live).unwrap();
-    assert_eq!(live["quota"]["v5_paused"], true);
-    assert_eq!(live["quota"]["upstream_v5_free"], false);
-    assert_eq!(live["rules"]["quota"]["v5_paused"], true);
+    assert!(live["quota"].get("v5_paused").is_none());
+    assert!(live["rules"].get("quota").is_none());
 
     let (status, _, resp) = Call::new("POST", "/ai/generate-image")
         .bearer("nai-synthetic-0900")

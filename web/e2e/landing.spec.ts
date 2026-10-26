@@ -39,14 +39,16 @@ test.describe("游客", () => {
     await expect(h1).toHaveClass(/sr-only/);
     await expect(page.locator(".lp-lead")).toHaveCount(0);
 
-    // 实时状态：一句话 + 两条用量；两个数字都是「剩余」，V5 不限量时写「不限」，没有进度条
+    // 实时状态：一句话 + 今天各生成了多少张（站长 10-27：图例不再显示剩余额度，也没有进度条）
     const status = page.getByRole("region", { name: "当前状态" });
     await expect(status).toBeVisible();
     await expect(status.locator(".lp-status__text")).not.toBeEmpty();
     await expect(status.locator(".lp-meter")).toHaveCount(2);
-    await expect(status.getByRole("progressbar", { name: "V4.5" })).toBeVisible();
-    await expect(status).not.toContainText("全站剩余");
+    await expect(status).toContainText("V4.5 已出");
+    await expect(status).toContainText("V5 已出");
+    await expect(status).not.toContainText("剩余");
     await expect(status).not.toContainText(/已用 \d+%/);
+    await expect(status.locator("[role=progressbar]")).toHaveCount(0);
     await expect(status).not.toContainText("登录时会读取");
     await expect(page.getByRole("banner").getByRole("link", { name: "用 Discord 登录" })).toBeVisible();
     await expect(status.getByRole("link", { name: "用 Discord 登录" })).toHaveCount(0);
@@ -116,9 +118,9 @@ test.describe("游客", () => {
         coupons: [],
       },
       live: {
-        quota: { images_today: 123, images_cap: 500, v5_today: 9, v5_cap: 60 },
+        quota: { images_today: 123, v5_today: 9 },
         queue: { waiting: 0, running: 0 },
-        guard: { hour: 1, hour_cap: 100, cooldown: 0, blocked: null },
+        guard: { cooldown: 0, blocked: null },
         cycle: 5,
       },
       status: { web_login: true },
@@ -141,9 +143,9 @@ test.describe("游客", () => {
     await expect(page.getByRole("banner").getByRole("button", { name: /注入用户/ })).toBeVisible();
     // 圆环里是今天剩余的数（40 − 2 = 38），下面写总量
     await expect(page.locator(".lp-quota")).toContainText("V4.5：今天还剩 38，每天 40");
-    // 仪表写剩余张数：500 - 123 = 377，V5 60 - 9 = 51
-    await expect(page.locator(".lp-status")).toContainText("V4.5 剩余377张");
-    await expect(page.locator(".lp-status")).toContainText("V5 剩余51张");
+    // 图例写今天各生成了多少张：123 张里 V5 占 9，V4.5 占 114
+    await expect(page.locator(".lp-status")).toContainText("V4.5 已出114张");
+    await expect(page.locator(".lp-status")).toContainText("V5 已出9张");
     await expect(page.locator(".lp-status__text")).toHaveText("马上开始 · 通道空闲");
     expect(meRequests).toEqual([]);
   });
@@ -280,7 +282,7 @@ test.describe("游客", () => {
     expect(res.status()).toBe(200);
     expect(res.headers()["content-type"]).toContain("text/event-stream");
     await expect(page.locator(".lp-status__text")).not.toBeEmpty();
-    await expect(page.locator(".lp-status").getByRole("progressbar", { name: "V4.5" })).toBeVisible();
+    await expect(page.locator(".lp-status").locator(".lp-meter").first()).toContainText("V4.5 已出");
   });
 
   test("手机 375px：无横向滚动、控件不溢出", async ({ page }) => {

@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { dailyMeters, dailyUsage, deriveStatus } from "./status";
+import { deriveStatus, generatedToday } from "./status";
 import type { Live } from "./types";
 
 /**
@@ -17,7 +17,7 @@ const API = {
 };
 
 const idle = (over: Partial<Live> = {}): Live => ({
-  quota: { images_today: 10, images_cap: 1000, v5_today: 2, v5_cap: 63 },
+  quota: { images_today: 10, v5_today: 2 },
   queue: { waiting: 0, running: 0 },
   guard: { cooldown: 0, blocked: null },
   rules: { queue_cap: 5 },
@@ -41,18 +41,18 @@ describe("deriveStatus：正常与排队", () => {
     expect(v?.sentence).toBe("马上开始 · 通道空闲");
   });
 
-  it("有人排队：全站正在出图 + 队列张数（站长 10-24），不显示秒数", () => {
+  it("有人排队：只显示当前排队张数（站长 10-27），不显示秒数", () => {
     const v = deriveStatus(idle({ queue: { waiting: 3, running: 1 } }), { nowMs: 0 });
     expect(v?.tone).toBe("busy");
-    expect(v?.headline).toBe("全站正在出图");
-    expect(v?.detail).toBe("队列 3 张");
-    expect(v?.announce).toBe("全站正在出图 · 队列 3 张");
+    expect(v?.headline).toBe("排队 3 张");
+    expect(v?.announce).toBe("排队 3 张");
     expect(v?.sentence).not.toMatch(/秒|分钟|后开始/);
   });
 
-  it("没有放行间隔时同样带队列数量", () => {
-    const v = deriveStatus(idle({ queue: { waiting: 2, running: 0 }, cycle: 0 }));
-    expect(v?.sentence).toBe("全站正在出图 · 队列 2 张");
+  it("只有人在出图、没人排队：正在出图", () => {
+    const v = deriveStatus(idle({ queue: { waiting: 0, running: 2 } }));
+    expect(v?.tone).toBe("busy");
+    expect(v?.sentence).toBe("正在出图");
   });
 
   it("排队已满", () => {
@@ -141,94 +141,44 @@ describe("deriveStatus：我的图优先", () => {
     expect(v?.sentence).toBe("你的图正在生成");
   });
 
-  it("我的图只显示当前排位，不显示估算 ETA", () => {
+  it("我的图在排队：您排在 X/Y（X=位次，Y=当前排队张数；站长 10-27），不做时间估算", () => {
     const v = deriveStatus(
       idle({
-        me: { mine: [{ state: "waiting", position: 4, eta: 30 }], waiting: 4, running: 1 },
+        me: { mine: [{ state: "waiting", position: 4 }], waiting: 4, running: 1 },
       }),
     );
-    expect(v?.sentence).toBe("你的图排第 4 位");
-    expect(v?.announce).toBe("你的图排第 4 位");
+    expect(v?.sentence).toBe("您排在 4/4 位");
+    expect(v?.announce).toBe("您排在 4/4 位");
+    expect(v?.sentence).not.toMatch(/秒|分钟|后开始/);
   });
 
   it("即使全站被拦下，已经排上队的图仍显示自己的位置（与旧版一致）", () => {
     const v = deriveStatus(
       blocked("daily_cap", API.daily, {
-        me: { mine: [{ state: "waiting", position: 1, eta: 15 }], waiting: 1, running: 0 },
+        me: { mine: [{ state: "waiting", position: 1 }], waiting: 1, running: 0 },
       }),
     );
-    expect(v?.headline).toBe("你的图排第 1 位");
+    expect(v?.headline).toBe("您排在 1/1 位");
   });
 });
 
-describe("dailyUsage", () => {
-  it("按实际张数；上限 0 = 不限", () => {
-    const u = dailyUsage(idle({ quota: { images_today: 10, images_cap: 0, v5_today: 3, v5_cap: 0 } }));
-    expect(u.total).toEqual({ used: 10, cap: 0 });
-    expect(u.v5).toEqual({ used: 3, cap: 0 });
+describe("generatedToday：图例只报今天各生成了多少张", () => {
+  it("V4.5 = 总数 − V5，不出现负数", () => {
+    expect(generatedToday(idle({ quota: { images_today: 10, v5_today: 3 } }))).toEqual({
+      total: 10,
+      v45: 7,
+      v5: 3,
+    });
+  });
+  it("V5 大于总数时按总数封顶（脏数据不产生负的 V4.5）", () => {
+    expect(generatedToday(idle({ quota: { images_today: 2, v5_today: 5 } }))).toEqual({
+      total: 2,
+      v45: 0,
+      v5: 2,
+    });
   });
   it("没有数据全是 0", () => {
-    expect(dailyUsage(idle({ quota: { images_today: 7, images_cap: 1000 } })).total).toEqual({
-      used: 7,
-      cap: 1000,
-    });
-    expect(dailyUsage(null)).toEqual({ total: { used: 0, cap: 0 }, v5: { used: 0, cap: 0 } });
-  });
-});
-
-// 北京时间 10-19 14:00 与 10-20 01:00：只有 V5 满了时没有 429 原文，「今天 / 明天」按北京时间算
-const AFTERNOON = Date.parse("2026-10-19T14:00:00+08:00");
-const AFTER_MIDNIGHT = Date.parse("2026-10-20T01:00:00+08:00");
-
-describe("dailyMeters: a full meter shows tomorrow", () => {
-  it("full total and full V5 switch to tomorrow's allowance; the reset hour comes from the 429 text", () => {
-    const live = idle({
-      quota: { images_today: 2803, images_cap: 2800, v5_today: 224, v5_cap: 224 },
-      guard: { blocked: { code: "daily_cap", text: "本站今天的出图总量用完了，没有扣费。明天 7 点恢复" } },
-    });
-    const m = dailyMeters(live);
-    expect(m.total).toEqual({ label: "全站明天可用（明天 7 点起）", used: 0, cap: 2800 });
-    expect(m.v5).toEqual({ label: "V5 明天可用（明天 7 点起）", used: 0, cap: 224 });
-  });
-  it("only the full meter switches; unlimited and partly used stay as today", () => {
-    const m = dailyMeters(
-      idle({ quota: { images_today: 900, images_cap: 2800, v5_today: 224, v5_cap: 224 } }),
-      AFTERNOON,
-    );
-    expect(m.total).toEqual({ label: "全站今日已用", used: 900, cap: 2800 });
-    expect(m.v5.label).toBe("V5 明天可用（明天 7 点起）");
-    expect(dailyMeters(idle({ quota: { images_today: 5, images_cap: 0 } })).total.label).toBe("全站今日已用");
-  });
-  it("after midnight and before the 7:00 reset, a full meter says today", () => {
-    const v5Full = idle({ quota: { images_today: 900, images_cap: 2800, v5_today: 224, v5_cap: 224 } });
-    expect(dailyMeters(v5Full, AFTER_MIDNIGHT).v5.label).toBe("V5 今天可用（今天 7 点起）");
-    const allFull = idle({
-      quota: { images_today: 2800, images_cap: 2800, v5_today: 224, v5_cap: 224 },
-      guard: { blocked: { code: "daily_cap", text: "本站今天的出图总量用完了，没有扣费。今天 7 点恢复" } },
-    });
-    expect(dailyMeters(allFull, AFTERNOON).total.label).toBe("全站今天可用（今天 7 点起）");
-  });
-});
-
-describe("dailyMeters: upstream V5 exhausted", () => {
-  it("false pauses the V5 meter; missing or true leaves it alone", () => {
-    const q = { images_today: 5, images_cap: 2800, v5_today: 10, v5_cap: 224 };
-    expect(dailyMeters(idle({ quota: { ...q, upstream_v5_free: false } })).v5).toEqual({
-      label: "V5 暂时用完",
-      used: 10,
-      cap: 224,
-      paused: true,
-    });
-    expect(dailyMeters(idle({ quota: q })).v5.paused).toBeUndefined();
-    // 站长手动暂停：同样是暂停的仪表，换成「暂停中」的说明
-    expect(dailyMeters(idle({ quota: { ...q, upstream_v5_free: false, v5_paused: true } })).v5).toEqual({
-      label: "V5 暂停中",
-      used: 10,
-      cap: 224,
-      paused: true,
-      hint: "V5 暂停，请使用 V4.5",
-      short: "暂停中",
-    });
-    expect(dailyMeters(idle({ quota: { ...q, upstream_v5_free: true } })).v5.paused).toBeUndefined();
+    expect(generatedToday(null)).toEqual({ total: 0, v45: 0, v5: 0 });
+    expect(generatedToday(idle({ quota: {} }))).toEqual({ total: 0, v45: 0, v5: 0 });
   });
 });
