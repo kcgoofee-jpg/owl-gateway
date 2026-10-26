@@ -2321,7 +2321,7 @@ async fn allowance_snapshot_is_read_only() {
         api.text("GET", "/allowance", None).await,
         (
             200,
-            r#"{"threshold":20,"accounts":[{"account":1,"percent":null,"recharge_per_day":null,"is_negative":null,"checked_at":null,"low":false,"uncertain":true,"error":null,"stale":true}],"mode":"on_demand"}"#.into()
+            r#"{"threshold":20,"accounts":[{"account":1,"percent":null,"time_until_next_percent_seconds":null,"current_response_recharge_per_day_estimate":null,"historical_sample_based_recharge_per_day_estimate":null,"recharge_per_day":null,"active":null,"tier":null,"expires_at":null,"is_grace_period":null,"account_type":null,"purchased_percent":null,"fixed_anlas":null,"purchased_anlas":null,"is_negative":null,"checked_at":null,"low":false,"uncertain":true,"error":null,"stale":true}],"mode":"on_demand"}"#.into()
         )
     );
     // 查看额度不会去问 NovelAI（只有真实出图会刷新缓存）

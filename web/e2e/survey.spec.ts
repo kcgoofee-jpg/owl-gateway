@@ -106,8 +106,11 @@ test.describe("登录成员", () => {
   test("已登录但还没有 Key：不显示题目，提示领取方式", async ({ page }) => {
     await patch(page, ME, (b) => ({ ...b, has_key: false, key: undefined }));
     await page.goto("/survey");
-    await expect(page.getByText("你还没有 Key，所以暂时不能填写问卷")).toBeVisible();
+    await expect(
+      page.getByText("你还没有 Key，所以暂时不能填写使用体验问卷；仍可以在下面提交反馈。"),
+    ).toBeVisible();
     await expect(page.getByRole("group")).toHaveCount(0);
+    await expect(page.getByRole("region", { name: "提交反馈" })).toBeVisible();
   });
 
   test("键盘：聚焦选项时整行有可见的焦点环", async ({ page }) => {

@@ -715,7 +715,12 @@ async fn feedback_list_and_csv_export() {
             "key_id",
             "key_name",
             "text",
-            "legacy"
+            "legacy",
+            "client",
+            "version",
+            "request_id",
+            "reviewed_at",
+            "reviewed_by"
         ]
     );
     assert_eq!(items[0]["text"], "=HYPERLINK(1)");

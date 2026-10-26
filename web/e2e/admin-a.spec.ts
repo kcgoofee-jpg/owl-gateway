@@ -590,7 +590,13 @@ test.describe("已登录", () => {
     await page.goto("/admin/logs/feedback");
     await expect(page).toHaveURL(/\/admin\/inbox\/feedback$/);
     await expect(tabs.getByRole("link", { name: /文字反馈/ })).toHaveAttribute("aria-current", "page");
-    await expect(page.getByRole("columnheader")).toHaveText(["时间", "成员", "内容"]);
+    await expect(page.getByRole("columnheader")).toHaveText([
+      "时间",
+      "成员",
+      "内容",
+      "客户端 / 请求",
+      "处理状态",
+    ]);
     // 评价筛选和选择题统计已经去掉
     await expect(page.getByLabel("评价")).toHaveCount(0);
     await expect(page.getByText("好评满意率")).toHaveCount(0);

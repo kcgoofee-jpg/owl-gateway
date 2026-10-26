@@ -130,8 +130,8 @@ async fn put_settings(State(state): State<AppState>, _s: AdminSession, req: Requ
             )?,
         ),
     ];
-    let policy_values = if let Some(mode) = &policy_mode {
-        Some(vec![
+    let policy_values = policy_mode.as_ref().map(|mode| {
+        vec![
             (crate::v5_access::MODE_KEY.to_string(), mode.clone()),
             (
                 crate::v5_access::SUBJECTS_KEY.to_string(),
@@ -145,10 +145,8 @@ async fn put_settings(State(state): State<AppState>, _s: AdminSession, req: Requ
                 crate::v5_access::ADMINS_KEY.to_string(),
                 subject_settings[2].1.clone().unwrap(),
             ),
-        ])
-    } else {
-        None
-    };
+        ]
+    });
     // 降档模式：只认 off / on 两个小写字符串，其他（含已删除的 auto）一律 422；缺省保持原值
     let medium_mode = match body.get(V5_MEDIUM_MODE.key) {
         Some(v) => v.clone(),

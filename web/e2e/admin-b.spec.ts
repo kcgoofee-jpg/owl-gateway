@@ -182,7 +182,13 @@ test("来信：问卷 / 文字反馈两个 tab；旧地址换到对应子页；�
   // 文字反馈不再折在问卷页底部，而是第二个 tab
   await tabs.getByRole("link", { name: /文字反馈/ }).click();
   await expect(page).toHaveURL(/\/admin\/inbox\/feedback$/);
-  await expect(page.getByRole("columnheader")).toHaveText(["时间", "成员", "内容"]);
+  await expect(page.getByRole("columnheader")).toHaveText([
+    "时间",
+    "成员",
+    "内容",
+    "客户端 / 请求",
+    "处理状态",
+  ]);
   await expect(page.getByRole("button", { name: /导出 CSV/ })).toBeVisible();
   // 旧链接（/admin/inbox/feedback、/admin/logs/feedback）都能落到反馈页
   await page.goto("/admin/inbox/feedback");

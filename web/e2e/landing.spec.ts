@@ -617,7 +617,12 @@ test.describe("状态页", () => {
     const [sb, tb] = [await sub.boundingBox(), await strong.boundingBox()];
     expect(sb && tb && sb.x > tb.x + tb.width).toBe(true);
     await expect(page.locator(".sp-comps .sp-comp")).toHaveCount(2);
-    await expect(page.locator(".sp-comps rect")).toHaveCount(32);
+    const strips = page.locator(".sp-comps svg");
+    await expect(strips).toHaveCount(2);
+    const dayCount = await strips.first().locator("title").first().textContent();
+    const days = Number(dayCount?.match(/共 (\d+) 天/)?.[1]);
+    expect(days).toBeGreaterThanOrEqual(1);
+    await expect(page.locator(".sp-comps rect")).toHaveCount(days * 2);
     // 页面里没有内联 style（CSP 是 style-src 'self'）
     expect(await page.locator("[style]").count()).toBe(0);
   });

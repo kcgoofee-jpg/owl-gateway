@@ -2514,6 +2514,7 @@ async fn public_me_matches_legacy_and_coupons_work() {
             "name",
             "expires_at",
             "image_scope",
+            "subject_roles",
             "today",
             "queue",
             "coupons",
@@ -2537,7 +2538,8 @@ async fn public_me_matches_legacy_and_coupons_work() {
     assert_eq!(
         me.2["today"],
         json!({"images": 0, "v5": 0, "legacy": 0, "daily_images": 150, "daily_v5": 0,
-               "site_v5_left": 150, "site_v5_cap": 150, "upstream_v5_free": true, "v5_paused": false, "anlas": 0,
+               "site_v5_left": 150, "site_v5_cap": 150, "upstream_v5_free": true, "v5_paused": false,
+               "v5_access_allowed": true, "v5_access_reason": "legacy policy", "anlas": 0,
                "daily_anlas": 50, "reset_hour": 7})
     );
     assert_eq!(me.2["queue"], json!([]));
