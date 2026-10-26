@@ -135,6 +135,8 @@ pub type BeforeDispatch<'a> =
 /// 调用方回调（旧版的 `on_rate_limited` / `resolve_v5_cost` / `before_dispatch` / `on_dispatch`）。
 #[derive(Default)]
 pub struct Callbacks<'a> {
+    /// Stable six-character NovelAI support code for this logical gateway request.
+    pub correlation_id: Option<String>,
     /// 上游 429：参数是解析后的 Retry-After 秒数（未钳制，与旧版一致由回调自己处理）。
     pub on_rate_limited: Option<Box<dyn Fn(f64) -> BoxFuture<'static, ()> + Send + Sync + 'a>>,
     /// V5 是否已按 Anlas 计费的最终确认（参数：官方免费额度是否已耗尽）。回调可以拒绝（额度复核不过），

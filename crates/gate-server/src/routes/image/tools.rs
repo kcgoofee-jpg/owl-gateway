@@ -84,6 +84,7 @@ pub(super) async fn tool(
             opts.max_response_bytes = Some(MAX_RESPONSE_BYTES);
             opts.queue_timeout = state.limits().queue_timeout;
             let cb = Callbacks {
+                correlation_id: Some(ctx.correlation_id()),
                 on_rate_limited: Some(on_429(&state)),
                 before_dispatch: Some(before_dispatch(&state, None)),
                 on_dispatch: Some(on_dispatch(&state, &ctx, reserved.clone())),
@@ -226,6 +227,7 @@ pub(super) async fn vibe(state: AppState, req: Request) -> Result<Response, ApiE
         opts.max_response_bytes = Some(MAX_RESPONSE_BYTES);
         opts.queue_timeout = state.limits().queue_timeout;
         let cb = Callbacks {
+            correlation_id: Some(ctx.correlation_id()),
             on_rate_limited: Some(on_429(&state)),
             before_dispatch: Some(before_dispatch(&state, None)),
             on_dispatch: Some(on_dispatch(&state, &ctx, reserved.clone())),

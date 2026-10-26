@@ -114,6 +114,7 @@ export interface MyRequest {
   remaining_legacy?: number;
   /** True only when the retained audit store still has an image for this key and RID. */
   image_available?: boolean;
+  correlation_id?: string;
   /** Opaque owner-scoped URL generated from the durable internal request link. */
   image_url?: string | null;
   images: number;

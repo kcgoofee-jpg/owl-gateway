@@ -55,4 +55,9 @@ describe("request delivery status", () => {
     expect(host.textContent).toContain("执行结果待核对");
     expect(host.textContent).not.toContain("失败");
   });
+
+  it("shows the upstream support code on the member's own request row", () => {
+    render(<RequestRow r={{ ...base, correlation_id: "aB12z9" }} />, host);
+    expect(host.textContent).toContain("NovelAI 排障号：aB12z9");
+  });
 });

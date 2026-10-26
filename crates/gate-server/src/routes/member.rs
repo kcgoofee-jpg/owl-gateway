@@ -427,6 +427,7 @@ fn my_request_item(r: &serde_json::Value) -> serde_json::Value {
         "remaining_v5": r["remaining_v5"],
         "remaining_legacy": r["remaining_legacy"],
         "image_available": image_available,
+        "correlation_id": r["correlation_id"],
         "image_url": if image_available {
             r["request_id"].as_str().map(|id| format!("/public/me/requests/image/{id}"))
         } else { None },

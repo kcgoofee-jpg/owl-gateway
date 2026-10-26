@@ -99,6 +99,7 @@ export function RequestRow({ r }: { r: MyRequest }) {
           {r.remaining_v5 ?? 0} · 免费图 {r.remaining_legacy ?? 0}。请勿自动重发，先核对请求记录。
         </p>
       )}
+      {r.correlation_id && <p class="lp-req__meta muted small">NovelAI 排障号：{r.correlation_id}</p>}
       {r.status === "ok" && r.image_available && r.image_url && (
         <p class="lp-req__meta small">
           <a href={r.image_url} target="_blank" rel="noreferrer">

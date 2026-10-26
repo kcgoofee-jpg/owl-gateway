@@ -56,6 +56,18 @@ fn auth_of(r: &gate_testkit::Recorded) -> String {
         .unwrap_or_default()
 }
 
+fn correlation_of(r: &gate_testkit::Recorded) -> String {
+    r.headers
+        .iter()
+        .find(|(k, _)| k == "x-correlation-id")
+        .map(|(_, v)| v.clone())
+        .unwrap_or_default()
+}
+
+fn valid_correlation_id(id: &str) -> bool {
+    id.len() == 6 && id.bytes().all(|b| b.is_ascii_alphanumeric())
+}
+
 /// 成员自己的 Key（id=1）累计花掉的 Anlas。
 async fn member_anlas(state: &AppState) -> f64 {
     state
@@ -97,6 +109,36 @@ async fn generate_image_ok_records_usage() {
     assert!(headers.get("x-request-id").is_some());
     let sent = e.mock.requests_to("/ai/generate-image");
     assert_eq!(sent.len(), 1);
+    let correlation_id = correlation_of(&sent[0]);
+    assert!(valid_correlation_id(&correlation_id), "{correlation_id}");
+    let (request_id, bound_rid, bound_correlation): (String, String, String) = e
+        .state
+        .db
+        .read({
+            let correlation_id = correlation_id.clone();
+            move |c| {
+                c.query_row(
+            "SELECT request_id,rid,correlation_id FROM request_settlements WHERE correlation_id=?",
+            [correlation_id],
+            |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)),
+        )
+            }
+        })
+        .await
+        .unwrap();
+    assert_eq!(request_id.len(), 32);
+    assert_eq!(bound_rid, headers["x-request-id"]);
+    assert_eq!(bound_correlation, correlation_id);
+    let owned = e.state.db.member_logs(1, 0.0, 0, "", 10).await.unwrap();
+    assert_eq!(owned[0]["correlation_id"], correlation_id);
+    assert!(
+        e.state
+            .db
+            .member_logs(2, 0.0, 0, "", 10)
+            .await
+            .unwrap()
+            .is_empty()
+    );
     let rows = logs(&e.state).await;
     assert_eq!(rows.len(), 1);
     assert_eq!(rows[0]["status"], "ok");
@@ -106,6 +148,54 @@ async fn generate_image_ok_records_usage() {
     assert!(detail.starts_with("832x1216/28step 免费"), "{detail}");
     let c = e.state.db.get_counter(1, &e.state.day()).await.unwrap();
     assert_eq!((c.images, c.legacy_free_images), (1, 1));
+}
+
+#[tokio::test]
+async fn image_tool_sends_and_persists_support_correlation_id() {
+    use base64::Engine;
+    let e = setup(&[]).await;
+    e.state
+        .db
+        .run_script(vec![
+            "UPDATE api_keys SET allow_img2img=1, allow_anlas=1, daily_anlas=10, features='image,upscale,augment,vibe' WHERE id=1"
+                .into(),
+        ])
+        .await
+        .unwrap();
+    let image = image::GrayImage::from_fn(64, 64, |x, y| image::Luma([((x * 4) ^ y) as u8]));
+    let mut png = std::io::Cursor::new(Vec::new());
+    image.write_to(&mut png, image::ImageFormat::Png).unwrap();
+    let source = base64::engine::general_purpose::STANDARD.encode(png.into_inner());
+    let (status, _, body) = call(
+        &e.state,
+        "POST",
+        "/ai/upscale",
+        Some(TOKEN),
+        Some(json!({"image": source})),
+    )
+    .await;
+    assert_eq!(status, 200, "{}", String::from_utf8_lossy(&body));
+    let sent = e.mock.requests_to("/ai/upscale");
+    assert_eq!(sent.len(), 1);
+    let correlation_id = correlation_of(&sent[0]);
+    assert!(valid_correlation_id(&correlation_id), "{correlation_id}");
+    let (request_id, bound_correlation): (String, String) = e
+        .state
+        .db
+        .read({
+            let correlation_id = correlation_id.clone();
+            move |c| {
+                c.query_row(
+            "SELECT request_id,correlation_id FROM request_settlements WHERE correlation_id=?",
+            [correlation_id],
+            |r| Ok((r.get(0)?, r.get(1)?)),
+        )
+            }
+        })
+        .await
+        .unwrap();
+    assert_eq!(request_id.len(), 32);
+    assert_eq!(bound_correlation, correlation_id);
 }
 
 #[tokio::test]
@@ -246,14 +336,18 @@ async fn stream_disconnect_after_final_keeps_single_image_charge_and_marks_inter
     );
     drop(body);
     let rows = logs(&e.state).await;
-    assert_eq!(e.mock.requests_to("/ai/generate-image-stream").len(), 1);
+    let sent = e.mock.requests_to("/ai/generate-image-stream");
+    assert_eq!(sent.len(), 1);
+    let correlation_id = correlation_of(&sent[0]);
+    assert!(valid_correlation_id(&correlation_id), "{correlation_id}");
     assert_eq!(rows.iter().filter(|r| r["status"] == "ok").count(), 1);
     assert_eq!(rows.iter().find(|r| r["rid"] == rid).unwrap()["images"], 1);
-    let delivery: String = e.state.db.read(move |c| c.query_row(
-        "SELECT s.delivery_state FROM usage_log l JOIN usage_request_links u ON u.usage_log_id=l.id JOIN request_settlements s ON s.request_id=u.request_id WHERE l.rid=?",
-        [rid], |r| r.get(0),
+    let (delivery, bound_correlation): (String, String) = e.state.db.read(move |c| c.query_row(
+        "SELECT s.delivery_state,s.correlation_id FROM usage_log l JOIN usage_request_links u ON u.usage_log_id=l.id JOIN request_settlements s ON s.request_id=u.request_id WHERE l.rid=?",
+        [rid], |r| Ok((r.get(0)?, r.get(1)?)),
     )).await.unwrap();
     assert_eq!(delivery, "transport_interrupted");
+    assert_eq!(bound_correlation, correlation_id);
     assert_eq!(
         e.state
             .db
@@ -1000,6 +1094,22 @@ async fn unknown_model_is_rejected_and_logged() {
     assert_eq!(rows[0]["status"], "rejected");
     assert_eq!(rows[0]["reason"], "feature_off", "{rows:?}");
     assert!(e.mock.requests_to("/ai/generate-image").is_empty());
+    let correlated_dispatches: i64 = e
+        .state
+        .db
+        .read(|c| {
+            c.query_row(
+                "SELECT COUNT(*) FROM request_settlements WHERE correlation_id!=''",
+                [],
+                |r| r.get(0),
+            )
+        })
+        .await
+        .unwrap();
+    assert_eq!(
+        correlated_dispatches, 0,
+        "rejected requests are not correlated as sent"
+    );
 }
 
 /// 参数校验挡下的拒绝（这条路径记日志时没带原因码）：写日志时就归类成 param，不等重启回填。

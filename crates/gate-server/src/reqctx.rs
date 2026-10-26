@@ -21,6 +21,7 @@ impl std::fmt::Debug for ReqCtx {
 
 struct Inner {
     internal_id: String,
+    correlation_id: String,
     settlement_reserved: bool,
     settlement_day: Option<String>,
     execution_unknown: bool,
@@ -72,6 +73,7 @@ impl ReqCtx {
     pub fn new() -> Self {
         Self(Arc::new(Mutex::new(Inner {
             internal_id: hex::encode(rand::random::<[u8; 16]>()),
+            correlation_id: new_correlation_id(),
             settlement_reserved: false,
             settlement_day: None,
             execution_unknown: false,
@@ -108,6 +110,11 @@ impl ReqCtx {
     /// this value is never exposed as the user's request number.
     pub fn internal_id(&self) -> String {
         self.with(|i| i.internal_id.clone())
+    }
+
+    /// Short NovelAI support correlation code. This is separate from both the internal ID and rid.
+    pub fn correlation_id(&self) -> String {
+        self.with(|i| i.correlation_id.clone())
     }
 
     pub fn mark_settlement_reserved(&self) {
@@ -269,6 +276,14 @@ pub fn current_rid() -> String {
     current().map(|c| c.rid()).unwrap_or_default()
 }
 
+fn new_correlation_id() -> String {
+    const ALPHANUM: &[u8; 62] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789";
+    rand::random::<[u8; 6]>()
+        .into_iter()
+        .map(|b| ALPHANUM[(b as usize) % ALPHANUM.len()] as char)
+        .collect()
+}
+
 pub fn current_execution_unknown() -> bool {
     current().is_some_and(|c| c.execution_unknown())
 }
@@ -277,6 +292,23 @@ pub fn current_execution_unknown() -> bool {
 fn new_rid() -> String {
     let n: u32 = rand::random();
     format!("{n:08x}")
+}
+
+#[cfg(test)]
+mod tests {
+    use super::ReqCtx;
+
+    #[test]
+    fn correlation_id_is_six_alphanumeric_and_separate_from_request_ids() {
+        let ctx = ReqCtx::new();
+        let correlation = ctx.correlation_id();
+        assert_eq!(correlation.len(), 6);
+        assert!(correlation.bytes().all(|b| b.is_ascii_alphanumeric()));
+        assert_eq!(ctx.correlation_id(), correlation);
+        assert_eq!(ctx.internal_id().len(), 32);
+        assert_eq!(ctx.rid().len(), 8);
+        assert_ne!(correlation, ctx.rid());
+    }
 }
 
 /// 上游观察者：把 gate-upstream 的「已发送 / 状态码」写回请求上下文。

@@ -58,6 +58,7 @@ async fn request_settlements(
     let rows = state.db.list_unknown_request_settlements().await?;
     Ok(ok_json(&json!({"items": rows.into_iter().map(|r| json!({
         "request_id": r.request_id, "rid": r.rid, "key_id": r.key_id, "status": r.status,
+        "correlation_id": r.correlation_id,
         "service_day": r.day, "service_month": r.month, "reserved_anlas": r.anlas,
         "reserved_v5": r.v5, "reserved_legacy": r.legacy, "is_vibe": r.is_vibe
     })).collect::<Vec<_>>(), "csrf_token": csrf })))

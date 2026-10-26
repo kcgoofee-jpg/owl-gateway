@@ -41,9 +41,20 @@ async fn identical_short_rid_links_only_to_its_internal_request_and_owner() {
         )
         .await
         .unwrap();
-        db.dispatch_request_settlement(id, "2026-10-25", "2026-10", false, false, 1.0, 0, 1, 2.0)
-            .await
-            .unwrap();
+        db.dispatch_request_settlement(
+            id,
+            "ABC123",
+            "2026-10-25",
+            "2026-10",
+            false,
+            false,
+            1.0,
+            0,
+            1,
+            2.0,
+        )
+        .await
+        .unwrap();
         let success = Success {
             key_id,
             key_name: format!("owner-{key_id}"),
@@ -99,6 +110,7 @@ async fn recovery_commits_saved_success_once_and_retains_unknown_budget() {
     assert!(
         db.dispatch_request_settlement(
             "known",
+            "ABC123",
             "2026-10-26",
             "2026-10",
             false,
@@ -150,6 +162,7 @@ async fn recovery_commits_saved_success_once_and_retains_unknown_budget() {
     .unwrap();
     db.dispatch_request_settlement(
         "fault",
+        "ABC123",
         "2026-10-26",
         "2026-10",
         false,
@@ -216,6 +229,7 @@ async fn recovery_commits_saved_success_once_and_retains_unknown_budget() {
     .unwrap();
     db.dispatch_request_settlement(
         "unknown",
+        "ABC123",
         "2026-10-26",
         "2026-10",
         true,
@@ -396,6 +410,7 @@ async fn unknown_failure_usage_log_is_linked_by_internal_id_and_exposes_remainin
     .unwrap();
     db.dispatch_request_settlement(
         "internal-unknown",
+        "ABC123",
         "2026-10-25",
         "2026-10",
         false,

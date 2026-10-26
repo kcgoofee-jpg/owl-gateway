@@ -170,6 +170,7 @@ pub(super) async fn perform_generation(
     let (key, model) = (prep.key.clone(), prep.model.clone());
     let est0 = prep.est;
     let cb = Callbacks {
+        correlation_id: Some(ctx.correlation_id()),
         on_rate_limited: Some(on_429(state)),
         resolve_v5_cost: (est0.v5 > 0)
             .then(|| resolve_v5(state, &prep, billing.clone(), reserved.clone())),

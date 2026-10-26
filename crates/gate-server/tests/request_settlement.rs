@@ -34,6 +34,7 @@ async fn restart_commits_result_saved_without_replaying_upstream_post() {
         .db
         .dispatch_request_settlement(
             "saved-only",
+            "ABC123",
             &e.state.day(),
             &e.state.month(),
             false,

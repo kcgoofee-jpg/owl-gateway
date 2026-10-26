@@ -54,6 +54,7 @@ export type UsageLog = {
   dur_ms: number;
   up_status: number;
   rid: string;
+  correlation_id?: string;
   /** 来源 IP（原文）；保留期外是空串 */
   src: string;
   /** User-Agent 原文；保留期外是空串 */

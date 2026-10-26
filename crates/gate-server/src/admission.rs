@@ -468,7 +468,10 @@ impl Reserved {
     }
 
     /// Recheck current quota and atomically move the reservation into the dispatch period.
-    pub async fn prepare_dispatch(&self) -> Result<(String, String), ApiError> {
+    pub async fn prepare_dispatch(
+        &self,
+        correlation_id: &str,
+    ) -> Result<(String, String), ApiError> {
         let mut b = self.state.budget.lock().await;
         let Some(r) = b.reservations.get(&self.id).cloned() else {
             return Err(InternalError("请求额度预留已丢失，未发送上游请求。".into()).into());
@@ -485,6 +488,7 @@ impl Reserved {
             .db
             .dispatch_request_settlement(
                 &self.request_id,
+                correlation_id,
                 &day,
                 &month,
                 self.key.exclude_global_v5(),

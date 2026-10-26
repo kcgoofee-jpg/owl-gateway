@@ -2783,6 +2783,7 @@ async fn member_image_download_is_scoped_to_session_key_even_when_rid_collides()
             .db
             .dispatch_request_settlement(
                 request_id,
+                "ABC123",
                 &e.state.day(),
                 &e.state.month(),
                 false,

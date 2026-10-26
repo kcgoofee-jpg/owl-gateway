@@ -263,6 +263,7 @@ async fn perform_stream(
     let d = dispatched.clone();
     let durable_dispatch = on_dispatch(state, ctx, reserved.clone());
     let cb = Callbacks {
+        correlation_id: Some(ctx.correlation_id()),
         on_rate_limited: Some(on_429(state)),
         resolve_v5_cost: (est0.v5 > 0)
             .then(|| resolve_v5(state, &prep, billing.clone(), reserved.clone())),

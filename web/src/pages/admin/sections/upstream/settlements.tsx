@@ -9,6 +9,7 @@ type Settlement = {
   request_id: string;
   rid: string;
   key_id: number;
+  correlation_id: string;
   status: string;
   service_day: string;
   service_month: string;
@@ -63,6 +64,7 @@ export default function SettlementCard() {
                 <strong>RID {item.rid}</strong> · Key {item.key_id} · {item.service_day} /{" "}
                 {item.service_month}
               </p>
+              {item.correlation_id && <p class="muted small">NovelAI 排障号：{item.correlation_id}</p>}
               <p class="muted small">
                 预留 {item.reserved_anlas} Anlas · V5 {item.reserved_v5} · 免费图 {item.reserved_legacy}
                 {item.is_vibe ? " · Vibe" : ""}

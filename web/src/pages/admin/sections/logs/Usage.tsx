@@ -170,6 +170,7 @@ function More(props: { l: UsageLog }) {
     <dl class="lg-kv">
       <dt>编号</dt>
       <dd>{l.rid ? <CopyField value={l.rid} label="编号" /> : <span class="muted">—</span>}</dd>
+      {l.correlation_id && <><dt>NovelAI 排障号</dt><dd><CopyField value={l.correlation_id} label="排障号" /></dd></>}
       <dt>上游账号</dt>
       <dd class="mono">{l.token_id || <span class="muted">—</span>}</dd>
       <dt>UA 原文</dt>

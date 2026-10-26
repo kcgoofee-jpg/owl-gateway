@@ -185,7 +185,7 @@ pub(super) fn on_dispatch(
     Box::new(move || {
         let (_s, c, reserved) = (s.clone(), c.clone(), reserved.clone());
         Box::pin(async move {
-            match reserved.prepare_dispatch().await {
+            match reserved.prepare_dispatch(&c.correlation_id()).await {
                 Ok((day, _month)) => {
                     c.set_settlement_day(day);
                     Ok(())

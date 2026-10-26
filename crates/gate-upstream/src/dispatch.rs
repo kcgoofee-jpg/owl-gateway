@@ -496,6 +496,9 @@ impl<H: Hooks> NaiClient<H> {
                 o.json,
                 o.accept,
             );
+            if let Some(correlation_id) = cb.correlation_id.as_deref() {
+                req = req.header("x-correlation-id", correlation_id);
+            }
             if o.image_lane {
                 // 生图 / 图片工具是非幂等 POST：上游 3xx 一律不跟随。307/308 会把请求体重发到新地址
                 // （等于一次成员请求变成多次上游请求，且可能重复计费、绕过本地的节奏与计数）。
@@ -896,7 +899,7 @@ impl<H: Hooks> NaiClient<H> {
             // 上游回「并发锁」时在同一账号上再发（见 retry_after_lock）；其余 429 / 409 在这里就结束
             let mut locks: u32 = 0;
             let (resp, status) = loop {
-                let req = inner
+                let mut req = inner
                     .http
                     .build(
                         token.profile_index(),
@@ -908,6 +911,9 @@ impl<H: Hooks> NaiClient<H> {
                     )
                     // 流式生图同样是非幂等 POST：3xx 不跟随（避免把请求体重发到新地址）。
                     .redirect(wreq::redirect::Policy::none());
+                if let Some(correlation_id) = cb.correlation_id.as_deref() {
+                    req = req.header("x-correlation-id", correlation_id);
+                }
                 // 与 set_admin_enabled 串行（只在检查启停时持锁，请求本身不持锁）
                 drop(token.dispatch_lock.lock().await);
                 if !token.with(|f| f.admin_enabled) {

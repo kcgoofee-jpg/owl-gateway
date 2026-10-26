@@ -55,6 +55,7 @@ pub struct RequestSettlement {
     pub v5: i64,
     pub legacy: i64,
     pub result_json: Option<String>,
+    pub correlation_id: String,
 }
 
 /// 一条拒绝 / 失败日志（`add_log`）。
@@ -310,6 +311,7 @@ impl Db {
     pub async fn dispatch_request_settlement(
         &self,
         request_id: &str,
+        correlation_id: &str,
         day: &str,
         month: &str,
         exclude_global_v5: bool,
@@ -319,9 +321,14 @@ impl Db {
         legacy: i64,
         now: f64,
     ) -> Result<bool> {
-        let (request_id, day, month) = (request_id.to_owned(), day.to_owned(), month.to_owned());
-        self.write(move |tx| Ok(tx.execute("UPDATE request_settlements SET status='dispatched',day=?,month=?,exclude_global_v5=?,anlas=?,v5=?,legacy=?,is_vibe=?,dispatched_at=CASE WHEN dispatched_at IS NULL THEN ? ELSE dispatched_at END,updated_at=? WHERE request_id=? AND status IN ('reserved','dispatched')",
-            params![day, month, exclude_global_v5, anlas, v5, legacy, is_vibe, now, now, request_id])? == 1)).await
+        let (request_id, correlation_id, day, month) = (
+            request_id.to_owned(),
+            correlation_id.to_owned(),
+            day.to_owned(),
+            month.to_owned(),
+        );
+        self.write(move |tx| Ok(tx.execute("UPDATE request_settlements SET status='dispatched',correlation_id=?,day=?,month=?,exclude_global_v5=?,anlas=?,v5=?,legacy=?,is_vibe=?,dispatched_at=CASE WHEN dispatched_at IS NULL THEN ? ELSE dispatched_at END,updated_at=? WHERE request_id=? AND status IN ('reserved','dispatched')",
+            params![correlation_id, day, month, exclude_global_v5, anlas, v5, legacy, is_vibe, now, now, request_id])? == 1)).await
     }
 
     #[allow(clippy::too_many_arguments)]
@@ -542,18 +549,18 @@ impl Db {
         self.write(move |tx| {
             tx.execute("UPDATE request_settlements SET status='released',updated_at=? WHERE status='reserved'", [now])?;
             tx.execute("UPDATE request_settlements SET status='uncertain',updated_at=? WHERE status='dispatched'", [now])?;
-            let mut stmt = tx.prepare("SELECT request_id,rid,key_id,status,day,month,exclude_global_v5,anlas,v5,legacy,is_vibe,result_json FROM request_settlements WHERE status IN ('uncertain','result_saved') ORDER BY request_id")?;
+            let mut stmt = tx.prepare("SELECT request_id,rid,key_id,status,day,month,exclude_global_v5,anlas,v5,legacy,is_vibe,result_json,correlation_id FROM request_settlements WHERE status IN ('uncertain','result_saved') ORDER BY request_id")?;
             stmt.query_map([], |r| Ok(RequestSettlement {
                 request_id:r.get(0)?, rid:r.get(1)?, key_id:r.get(2)?, status:r.get(3)?, day:r.get(4)?, month:r.get(5)?,
-                exclude_global_v5:r.get::<_,i64>(6)? != 0, anlas:r.get(7)?, v5:r.get(8)?, legacy:r.get(9)?, is_vibe:r.get::<_,i64>(10)? != 0, result_json:r.get(11)?
+                exclude_global_v5:r.get::<_,i64>(6)? != 0, anlas:r.get(7)?, v5:r.get(8)?, legacy:r.get(9)?, is_vibe:r.get::<_,i64>(10)? != 0, result_json:r.get(11)?, correlation_id:r.get(12)?
             }))?.collect()
         }).await
     }
 
     pub async fn list_unknown_request_settlements(&self) -> Result<Vec<RequestSettlement>> {
         self.read(|c| {
-            let mut stmt=c.prepare("SELECT request_id,rid,key_id,status,day,month,exclude_global_v5,anlas,v5,legacy,is_vibe,result_json FROM request_settlements WHERE status='uncertain' ORDER BY updated_at")?;
-            stmt.query_map([], |r| Ok(RequestSettlement { request_id:r.get(0)?, rid:r.get(1)?, key_id:r.get(2)?, status:r.get(3)?, day:r.get(4)?, month:r.get(5)?, exclude_global_v5:r.get::<_,i64>(6)? != 0, anlas:r.get(7)?, v5:r.get(8)?, legacy:r.get(9)?, is_vibe:r.get::<_,i64>(10)? != 0, result_json:r.get(11)? }))?.collect()
+            let mut stmt=c.prepare("SELECT request_id,rid,key_id,status,day,month,exclude_global_v5,anlas,v5,legacy,is_vibe,result_json,correlation_id FROM request_settlements WHERE status='uncertain' ORDER BY updated_at")?;
+            stmt.query_map([], |r| Ok(RequestSettlement { request_id:r.get(0)?, rid:r.get(1)?, key_id:r.get(2)?, status:r.get(3)?, day:r.get(4)?, month:r.get(5)?, exclude_global_v5:r.get::<_,i64>(6)? != 0, anlas:r.get(7)?, v5:r.get(8)?, legacy:r.get(9)?, is_vibe:r.get::<_,i64>(10)? != 0, result_json:r.get(11)?, correlation_id:r.get(12)? }))?.collect()
         }).await
     }
 
@@ -657,7 +664,7 @@ impl Db {
         args.push(SqlValue::Integer(offset));
         self.read(move |c| {
             let mut stmt = c.prepare(&format!(
-                "SELECT {LOG_COLUMNS} FROM usage_log{where_} ORDER BY id DESC LIMIT ? OFFSET ?"
+                "SELECT {LOG_COLUMNS}, COALESCE((SELECT s.correlation_id FROM usage_request_links u JOIN request_settlements s ON s.request_id=u.request_id WHERE u.usage_log_id=usage_log.id),'') AS correlation_id FROM usage_log{where_} ORDER BY id DESC LIMIT ? OFFSET ?"
             ))?;
             stmt.query_map(rusqlite::params_from_iter(args.iter()), value::row_json)?
                 .collect()
@@ -682,7 +689,7 @@ impl Db {
                 "SELECT l.id, l.rid, l.ts, l.kind, l.model, l.status, l.images, l.anlas, l.wait_ms, l.dur_ms, l.reason, l.detail, \
                  (EXISTS(SELECT 1 FROM audit_request_links al JOIN generation_audit a ON a.id=al.audit_id WHERE al.request_id=u.request_id AND a.key_id=l.key_id AND a.status='ok' AND (a.image IS NOT NULL OR a.image_file IS NOT NULL)) = 1) AS image_available, \
                  COALESCE(s.delivery_state,'unknown') AS delivery_state, s.status AS settlement_status, \
-                 COALESCE(s.anlas,0) AS remaining_anlas, COALESCE(s.v5,0) AS remaining_v5, COALESCE(s.legacy,0) AS remaining_legacy, u.request_id \
+                 COALESCE(s.anlas,0) AS remaining_anlas, COALESCE(s.v5,0) AS remaining_v5, COALESCE(s.legacy,0) AS remaining_legacy, u.request_id, COALESCE(s.correlation_id,'') AS correlation_id \
                  FROM usage_log l LEFT JOIN usage_request_links u ON u.usage_log_id=l.id LEFT JOIN request_settlements s ON s.request_id=u.request_id \
                  WHERE l.key_id=?1 AND l.ts>=?2 AND (?3=0 OR l.id<?3) \
                  AND (?4='' OR l.status=?4) ORDER BY l.id DESC LIMIT ?5",
