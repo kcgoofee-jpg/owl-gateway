@@ -1797,7 +1797,7 @@ async fn upstream_token_body_is_limited_to_4k() {
 // ------------------------------------------------------------------ Anlas 核对
 
 async fn csrf(api: &Admin) -> String {
-    api.get_ok("/reconciliation").await["csrf_token"]
+    api.get_ok("/upstream").await["csrf_token"]
         .as_str()
         .unwrap()
         .to_string()
@@ -1807,23 +1807,19 @@ async fn csrf(api: &Admin) -> String {
 async fn reconciliation_requests_are_guarded() {
     let e = setup(&[]).await;
     let api = Admin::login_bare(&e.state).await;
-    let (s, h, t) = api.raw("GET", "/reconciliation", None, &[]).await.parts();
+    let (s, h, body) = api.raw("GET", "/upstream", None, &[]).await.parts();
     assert_eq!(s, 200);
     assert_eq!(h["cache-control"], "no-store");
-    let v: Value = serde_json::from_str(&t).unwrap();
+    let v: Value = serde_json::from_str(&body).unwrap();
     let token = v["csrf_token"].as_str().unwrap().to_string();
     assert_eq!(
         (
-            v["history"].clone(),
-            v["retry_after"].clone(),
-            v["running"].clone(),
+            v["reconciliation"]["history"].clone(),
+            v["reconciliation"]["retry_after"].clone(),
+            v["reconciliation"]["running"].clone(),
             token.len()
         ),
         (json!([]), json!(0), json!(false), 64)
-    );
-    assert!(
-        t.rfind("csrf_token").unwrap() > t.find("running").unwrap(),
-        "键顺序：history, retry_after, running, csrf_token"
     );
     // 同一会话令牌稳定；换一个会话就变
     assert_eq!(csrf(&api).await, token);
@@ -1953,7 +1949,7 @@ async fn reconciliation_requests_are_guarded() {
         "校验没过之前不能去查官方"
     );
     assert_eq!(
-        api.get_ok("/reconciliation").await["retry_after"],
+        api.get_ok("/upstream").await["reconciliation"]["retry_after"],
         0,
         "也没有写冷却"
     );
@@ -2139,9 +2135,16 @@ async fn reconciliation_compares_balances() {
             (503, r#"{"detail":"官方余额未能完整读取；上次结果已保留"}"#),
             "{why}"
         );
-        let st = api.get_ok("/reconciliation").await;
-        assert_eq!(st["history"].as_array().unwrap().len(), 2, "{why}");
-        assert!(st["retry_after"].as_i64().unwrap() > 0, "{why}");
+        let st = api.get_ok("/upstream").await;
+        assert_eq!(
+            st["reconciliation"]["history"].as_array().unwrap().len(),
+            2,
+            "{why}"
+        );
+        assert!(
+            st["reconciliation"]["retry_after"].as_i64().unwrap() > 0,
+            "{why}"
+        );
     }
 
     // 401 仍使用通用错误文案，但会隔离失效账号；放在最后，避免改变后续错误场景的前置条件。
@@ -2163,7 +2166,7 @@ async fn reconciliation_compares_balances() {
         (503, r#"{"detail":"官方余额未能完整读取；上次结果已保留"}"#)
     );
     assert!(
-        api.get_ok("/reconciliation").await["retry_after"]
+        api.get_ok("/upstream").await["reconciliation"]["retry_after"]
             .as_i64()
             .unwrap()
             > 0
@@ -2198,7 +2201,7 @@ async fn reconciliation_official_rate_limit_is_remembered() {
             t,
             r#"{"detail":"官方查询限流，请稍后重试；上次结果已保留"}"#
         );
-        let st = api.get_ok("/reconciliation").await;
+        let st = api.get_ok("/upstream").await["reconciliation"].clone();
         assert!(
             (want - 2..=want).contains(&st["retry_after"].as_i64().unwrap()),
             "{header}: {st}"
@@ -2228,7 +2231,10 @@ async fn reconciliation_refuses_when_account_is_unusable() {
         )
     );
     assert!(e.mock.requests_to(SUBSCRIPTION_OK).is_empty());
-    assert_eq!(api.get_ok("/reconciliation").await["retry_after"], 0);
+    assert_eq!(
+        api.get_ok("/upstream").await["reconciliation"]["retry_after"],
+        0
+    );
 }
 
 #[tokio::test]
@@ -2371,12 +2377,12 @@ async fn server_status_reports_alerts_and_audit() {
 async fn allowance_snapshot_is_read_only() {
     let e = setup(&[]).await;
     let api = Admin::login_bare(&e.state).await;
+    let page = api.get_ok("/upstream").await;
+    assert_eq!(page["threshold"], 20);
+    // V5 官方余量是缓存投影：还没出过图时全部未知，行挂在账号上
     assert_eq!(
-        api.text("GET", "/allowance", None).await,
-        (
-            200,
-            r#"{"threshold":20,"accounts":[{"account":1,"percent":null,"time_until_next_percent_seconds":null,"current_response_recharge_per_day_estimate":null,"historical_sample_based_recharge_per_day_estimate":null,"recharge_per_day":null,"active":null,"tier":null,"expires_at":null,"is_grace_period":null,"account_type":null,"purchased_percent":null,"fixed_anlas":null,"purchased_anlas":null,"is_negative":null,"checked_at":null,"low":false,"uncertain":true,"error":null,"stale":true}],"mode":"on_demand"}"#.into()
-        )
+        page["accounts"][0]["v5"],
+        json!({"account":1,"percent":null,"time_until_next_percent_seconds":null,"current_response_recharge_per_day_estimate":null,"historical_sample_based_recharge_per_day_estimate":null,"recharge_per_day":null,"active":null,"tier":null,"expires_at":null,"is_grace_period":null,"account_type":null,"purchased_percent":null,"fixed_anlas":null,"purchased_anlas":null,"is_negative":null,"checked_at":null,"low":false,"uncertain":true,"error":null,"stale":true})
     );
     // 查看额度不会去问 NovelAI（只有真实出图会刷新缓存）
     assert!(e.mock.requests_to(SUBSCRIPTION_OK).is_empty());
@@ -2386,7 +2392,7 @@ async fn allowance_snapshot_is_read_only() {
         .set_setting("v5_alert_threshold", "35")
         .await
         .unwrap();
-    assert_eq!(api.get_ok("/allowance").await["threshold"], 20);
+    assert_eq!(api.get_ok("/upstream").await["threshold"], 20);
 }
 
 #[tokio::test]

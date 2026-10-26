@@ -154,9 +154,8 @@ impl Naimei {
 
     /// 处理一条 INTERACTION_CREATE（斜杠命令）；其他类型忽略。
     pub async fn handle_interaction(self: &Arc<Self>, it: Interaction) {
-        match it.kind {
-            INTERACTION_APPLICATION_COMMAND => self.handle_command(&it).await,
-            _ => {}
+        if it.kind == INTERACTION_APPLICATION_COMMAND {
+            self.handle_command(&it).await;
         }
     }
 

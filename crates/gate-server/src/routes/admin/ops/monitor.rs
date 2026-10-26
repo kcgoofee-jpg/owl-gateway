@@ -14,7 +14,6 @@ pub(super) fn router() -> Router<AppState> {
     Router::new()
         .route("/admin/api/overview", get(overview))
         .route("/admin/api/status", get(server_status))
-        .route("/admin/api/allowance", get(allowance))
 }
 
 /// 上游令牌池（掩码后的 Token）。总览页 10-23 删除（站长：日志留全，要看什么让 Claude 查），这个接口只剩「上游」页用的两项。
@@ -42,16 +41,4 @@ async fn server_status(State(state): State<AppState>, _s: AdminSession) -> ApiRe
             "image_keep_hours": crate::audit::audit_image_keep_hours(&state.db).await?,
         },
     })))
-}
-
-/// V5 官方免费额度（只有真实出图会刷新缓存，这里只读）。
-async fn allowance(State(state): State<AppState>, _s: AdminSession) -> ApiResult {
-    let ids: Vec<String> = state
-        .nai
-        .tokens()
-        .await
-        .iter()
-        .map(|t| t.token_id.clone())
-        .collect();
-    Ok(ok_json(&state.allowance.snapshot(&ids).await?))
 }

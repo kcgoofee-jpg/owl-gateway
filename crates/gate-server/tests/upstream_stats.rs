@@ -1,4 +1,4 @@
-//! 每个上游账号的统计与 Anlas 推算：usage_log.token_id 的写入、`GET /admin/api/upstream-stats`、
+//! 每个上游账号的统计与 Anlas 推算：usage_log.token_id 的写入、「上游」页聚合读数里的每账号行、
 //! 重启后按账号补回每小时窗口。上游是本地假服务，数据全部合成。
 
 mod common;
@@ -60,11 +60,9 @@ async fn rejected_before_upstream_has_no_account() {
 #[tokio::test]
 async fn stats_endpoint_needs_admin() {
     let e = setup(&[]).await;
-    let (status, _, _) = Call::new("GET", "/admin/api/upstream-stats")
-        .send(&e.state)
-        .await;
+    let (status, _, _) = Call::new("GET", "/admin/api/upstream").send(&e.state).await;
     assert_eq!(status, 401);
-    let (status, _, _) = Call::new("GET", "/admin/api/upstream-stats")
+    let (status, _, _) = Call::new("GET", "/admin/api/upstream")
         .bearer(TOKEN)
         .send(&e.state)
         .await;
@@ -136,7 +134,7 @@ async fn per_account_stats_and_balance() {
         .unwrap();
 
     let admin = Admin::login_bare(&e.state).await;
-    let (status, v) = admin.json("GET", "/upstream-stats", None).await;
+    let (status, v) = admin.json("GET", "/upstream", None).await;
     assert_eq!(status, 200);
     let accts = v["accounts"].as_array().unwrap();
     assert_eq!(accts.len(), 2);
@@ -149,7 +147,6 @@ async fn per_account_stats_and_balance() {
     assert_eq!(fa["w1h"].get("p90_wait_ms"), None);
     assert_eq!(fb["w24h"]["ok"], 1);
     assert_eq!(fa["load_share_24h"], 75);
-    assert_eq!(v["unattributed_24h"], 1);
     // 余额：a 用了 30、b 用了 10；老行 40 不归属 → 近似
     assert_eq!(fa["balance"]["fixed"], 970.0);
     assert_eq!(fb["balance"]["fixed"], 990.0);
@@ -182,7 +179,7 @@ async fn single_account_counts_untagged_rows_and_rolled_cycle() {
         .await
         .unwrap();
     let admin = Admin::login_bare(&e.state).await;
-    let (_, v) = admin.json("GET", "/upstream-stats", None).await;
+    let (_, v) = admin.json("GET", "/upstream", None).await;
     let bal = &v["accounts"][0]["balance"];
     assert_eq!(bal["cycle_rolled"], true);
     assert_eq!(bal["balance"], Value::Null);

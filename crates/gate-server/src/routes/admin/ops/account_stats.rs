@@ -17,9 +17,73 @@ use serde_json::{Value, json};
 
 pub(super) fn router() -> Router<AppState> {
     Router::new()
-        .route("/admin/api/upstream-stats", get(upstream_stats))
         .route("/admin/api/sitepaid-hints", get(sitepaid_hints))
         .route("/admin/api/sitepaid-hints/dismiss", post(sitepaid_dismiss))
+}
+
+/// 每个上游账号一行的本站观测：1 小时 / 24 小时请求窗口、负载与余额占比、
+/// 由对账快照推算的 Anlas 余额（`balance`）。顺序与传入的 `pool` 一致；
+/// 「上游」页的聚合接口把它和令牌池状态、官方读数按行合并。
+pub(super) async fn account_rows(
+    state: &AppState,
+    pool: &[Value],
+    now: f64,
+) -> Result<Vec<Value>, ApiError> {
+    let ids: Vec<String> = pool
+        .iter()
+        .map(|p| p["token_id"].as_str().unwrap_or_default().to_string())
+        .collect();
+    let single = ids.len() == 1;
+
+    let rows_24h = state.db.account_log_rows(now - DAY).await?;
+    let ok_24h_total = rows_24h
+        .iter()
+        .filter(|r| r.token_id.is_some() && r.status == "ok")
+        .count() as f64;
+
+    // 最近一次真实核对：每个账号取最新一份含它的快照
+    let history = state.db.reconciliation_history(20).await?;
+    let used_3d = state.db.anlas_by_token(0, now - 3.0 * DAY).await?;
+
+    let mut accounts: Vec<Value> = Vec::new();
+    let mut balances: Vec<Option<f64>> = Vec::new();
+    for (i, _p) in pool.iter().enumerate() {
+        let id = ids[i].as_str();
+        let all_24h: Vec<&AccountLogRow> = rows_24h
+            .iter()
+            .filter(|r| r.token_id.as_deref() == Some(id))
+            .collect();
+        let last_1h: Vec<&AccountLogRow> = all_24h
+            .iter()
+            .copied()
+            .filter(|r| r.ts > now - HOUR)
+            .collect();
+        let ok_24h = all_24h.iter().filter(|r| r.status == "ok").count() as f64;
+
+        let (balance, est) =
+            match account_estimate(state, &history, &used_3d, id, single, now).await? {
+                None => (Value::Null, None),
+                Some((e, un)) => (estimate_json(&e, un), Some(e)),
+            };
+        balances.push(est.as_ref().and_then(|e| e.balance));
+        accounts.push(json!({
+            "token_id": id,
+            "w1h": window_stats(&last_1h),
+            "w24h": window_stats(&all_24h),
+            "load_share_24h": pct(ok_24h, ok_24h_total),
+            "balance": balance,
+        }));
+    }
+    // 余额占比：只在每个账号都有可用推算时才给
+    let total_balance: f64 = balances.iter().flatten().sum();
+    let all_known = !balances.is_empty() && balances.iter().all(Option::is_some);
+    for (a, b) in accounts.iter_mut().zip(&balances) {
+        a["balance_share"] = match (all_known, b) {
+            (true, Some(b)) => pct(*b, total_balance).map_or(Value::Null, |v| json!(v)),
+            _ => Value::Null,
+        };
+    }
+    Ok(accounts)
 }
 
 const HOUR: f64 = 3600.0;
@@ -113,75 +177,6 @@ async fn account_estimate(
     let e = anlas_estimate::estimate(now, acct, usage);
     let un = if single { 0.0 } else { untagged_after };
     Ok(Some((e, un)))
-}
-
-async fn upstream_stats(State(state): State<AppState>, _s: AdminSession) -> ApiResult {
-    let now = state.now();
-    let pool = pool_status(&state).await?;
-    let ids: Vec<String> = pool
-        .iter()
-        .map(|p| p["token_id"].as_str().unwrap_or_default().to_string())
-        .collect();
-    let single = ids.len() == 1;
-
-    let rows_24h = state.db.account_log_rows(now - DAY).await?;
-    let ok_24h_total = rows_24h
-        .iter()
-        .filter(|r| r.token_id.is_some() && r.status == "ok")
-        .count() as f64;
-    let unattributed_24h = rows_24h.iter().filter(|r| r.token_id.is_none()).count();
-
-    // 最近一次真实核对：每个账号取最新一份含它的快照
-    let history = state.db.reconciliation_history(20).await?;
-    let used_3d = state.db.anlas_by_token(0, now - 3.0 * DAY).await?;
-
-    let mut accounts: Vec<Value> = Vec::new();
-    let mut balances: Vec<Option<f64>> = Vec::new();
-    for (i, p) in pool.iter().enumerate() {
-        let id = ids[i].as_str();
-        let all_24h: Vec<&AccountLogRow> = rows_24h
-            .iter()
-            .filter(|r| r.token_id.as_deref() == Some(id))
-            .collect();
-        let last_1h: Vec<&AccountLogRow> = all_24h
-            .iter()
-            .copied()
-            .filter(|r| r.ts > now - HOUR)
-            .collect();
-        let ok_24h = all_24h.iter().filter(|r| r.status == "ok").count() as f64;
-
-        let (balance, est) =
-            match account_estimate(&state, &history, &used_3d, id, single, now).await? {
-                None => (Value::Null, None),
-                Some((e, un)) => (estimate_json(&e, un), Some(e)),
-            };
-        balances.push(est.as_ref().and_then(|e| e.balance));
-        accounts.push(json!({
-            "token_id": id,
-            "position": p["position"],
-            "usable": p["usable"],
-            "full": p["full"],
-            "images_today": p["images_today"],
-            "w1h": window_stats(&last_1h),
-            "w24h": window_stats(&all_24h),
-            "load_share_24h": pct(ok_24h, ok_24h_total),
-            "balance": balance,
-        }));
-    }
-    // 余额占比：只在每个账号都有可用推算时才给
-    let total_balance: f64 = balances.iter().flatten().sum();
-    let all_known = !balances.is_empty() && balances.iter().all(Option::is_some);
-    for (a, b) in accounts.iter_mut().zip(&balances) {
-        a["balance_share"] = match (all_known, b) {
-            (true, Some(b)) => pct(*b, total_balance).map_or(Value::Null, |v| json!(v)),
-            _ => Value::Null,
-        };
-    }
-    Ok(ok_json(&json!({
-        "generated_at": pyval::float(now),
-        "accounts": accounts,
-        "unattributed_24h": unattributed_24h,
-    })))
 }
 
 // ------------------------------------------------------------------ 站付 V5 到期建议

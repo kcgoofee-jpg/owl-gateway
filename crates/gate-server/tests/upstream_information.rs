@@ -4,19 +4,25 @@ use common::*;
 use gate_testkit::Reply;
 use serde_json::json;
 
-const PATH: &str = "/admin/api/upstream-information";
+const PAGE: &str = "/admin/api/upstream";
+const PATH: &str = "/admin/api/upstream/refresh-info";
 const CACHE_KEY: &str = "upstream_account_information_projection";
+
+/// 聚合页里每账号的官方信息行（`info`）。
+async fn cached_info(api: &Admin) -> serde_json::Value {
+    api.get_ok(PAGE).await["accounts"][0]["info"].clone()
+}
 
 #[tokio::test]
 async fn information_status_is_admin_only_and_get_never_queries_upstream() {
     let e = setup(&[]).await;
-    let (status, _, _) = Call::new("GET", PATH).send(&e.state).await;
+    let (status, _, _) = Call::new("POST", PATH).send(&e.state).await;
     assert_eq!(status.as_u16(), 401);
 
     let api = Admin::login(&e.state).await;
-    let data = api.get_ok(PATH).await;
-    assert_eq!(data["accounts"][0]["ban_status"], serde_json::Value::Null);
-    assert_eq!(data["accounts"][0]["stale"], true);
+    let data = cached_info(&api).await;
+    assert_eq!(data["ban_status"], serde_json::Value::Null);
+    assert_eq!(data["stale"], true);
     assert!(e.mock.requests_to("/user/information").is_empty());
 
     let bare = Admin::login_bare(&e.state).await;
@@ -29,8 +35,10 @@ async fn information_status_is_admin_only_and_get_never_queries_upstream() {
 async fn manual_refresh_stores_only_projection_and_failure_preserves_last_success() {
     let e = setup(&[]).await;
     let api = Admin::login(&e.state).await;
-    let before = api.get_ok(PATH).await;
-    let csrf = before["csrf_token"].as_str().unwrap();
+    let csrf = api.get_ok(PAGE).await["csrf_info"]
+        .as_str()
+        .unwrap()
+        .to_string();
     let info = json!({
         "banStatus": "banned",
         "banMessage": "synthetic moderation reason",
@@ -45,7 +53,12 @@ async fn manual_refresh_stores_only_projection_and_failure_preserves_last_succes
     });
     e.mock.push("/user/information", Reply::json(200, &info));
     let refreshed = api
-        .raw("POST", PATH, Some(json!({})), &[("x-nai-admin-csrf", csrf)])
+        .raw(
+            "POST",
+            PATH,
+            Some(json!({})),
+            &[("x-nai-admin-csrf", csrf.as_str())],
+        )
         .await;
     assert_eq!(refreshed.status, 200, "{}", refreshed.text());
     let refreshed = refreshed.json();
@@ -62,8 +75,9 @@ async fn manual_refresh_stores_only_projection_and_failure_preserves_last_succes
     assert!(!stored.contains("paymentProcessorData"));
     assert!(!stored.contains("synthetic-keystore"));
 
-    // GET remains a cached read and does not consume another scripted upstream response.
-    api.get_ok(PATH).await;
+    // 页面读数仍是缓存投影，不再消耗剧本好的上游响应。
+    let shown = cached_info(&api).await;
+    assert_eq!(shown["ban_status"], "banned");
     assert_eq!(e.mock.requests_to("/user/information").len(), 1);
 
     // Move the persisted global cooldown into the past, then script a failed refresh.
@@ -75,7 +89,12 @@ async fn manual_refresh_stores_only_projection_and_failure_preserves_last_succes
         Reply::status(503, "sensitive upstream detail"),
     );
     let refreshed = api
-        .raw("POST", PATH, Some(json!({})), &[("x-nai-admin-csrf", csrf)])
+        .raw(
+            "POST",
+            PATH,
+            Some(json!({})),
+            &[("x-nai-admin-csrf", csrf.as_str())],
+        )
         .await;
     assert_eq!(refreshed.status, 200, "{}", refreshed.text());
     let result = refreshed.json();
@@ -93,7 +112,10 @@ async fn manual_refresh_stores_only_projection_and_failure_preserves_last_succes
 async fn manual_refresh_is_csrf_protected_and_cooled_down() {
     let e = setup(&[]).await;
     let api = Admin::login(&e.state).await;
-    let state = api.get_ok(PATH).await;
+    let csrf = api.get_ok(PAGE).await["csrf_info"]
+        .as_str()
+        .unwrap()
+        .to_string();
     api.fails(
         "POST",
         PATH,
@@ -102,7 +124,6 @@ async fn manual_refresh_is_csrf_protected_and_cooled_down() {
         "会话校验失败，请刷新后台后重试",
     )
     .await;
-    let csrf = state["csrf_token"].as_str().unwrap();
     e.mock.push(
         "/user/information",
         Reply::json(
@@ -116,11 +137,21 @@ async fn manual_refresh_is_csrf_protected_and_cooled_down() {
         ),
     );
     let first = api
-        .raw("POST", PATH, Some(json!({})), &[("x-nai-admin-csrf", csrf)])
+        .raw(
+            "POST",
+            PATH,
+            Some(json!({})),
+            &[("x-nai-admin-csrf", csrf.as_str())],
+        )
         .await;
     assert_eq!(first.status, 200, "{}", first.text());
     let second = api
-        .raw("POST", PATH, Some(json!({})), &[("x-nai-admin-csrf", csrf)])
+        .raw(
+            "POST",
+            PATH,
+            Some(json!({})),
+            &[("x-nai-admin-csrf", csrf.as_str())],
+        )
         .await;
     assert_eq!(second.status, 429);
     assert_eq!(e.mock.requests_to("/user/information").len(), 1);

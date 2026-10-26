@@ -1,6 +1,11 @@
-//! 上游 Token 的增删改（后台「接管」后令牌池以 `data/upstream_tokens.json` 为准）与 Anlas 核对。
+//! 后台「上游」页的全部接口。
 //!
-//! 上游 Token 的变更都是敏感操作：完整 Token 永远不出现在响应、日志和操作记录里（响应里只有打码版本），
+//! 读数只有一个聚合接口 [`page`]（`GET /admin/api/upstream`）：每个上游账号一行，合并
+//! 令牌池状态、官方读数（`/user/subscription` 的 V5 余量缓存、`/user/information` 的账号状态缓存）、
+//! 本站观测（请求窗口、今日张数）和 Anlas 核对推算，外加核对历史、未知预留和两把会话 CSRF。
+//! 页面一次取全，手动刷新官方信息（`POST /admin/api/upstream/refresh-info`）和核对（`POST /admin/api/reconciliation`）是仅有的两个会碰上游的动作。
+//!
+//! 上游 Token 的增删改都是敏感操作：完整 Token 永远不出现在响应、日志和操作记录里（响应里只有打码版本），
 //! 每次变更都会私信站长（「如果这不是你操作的，请立刻更换后台密码」）。
 
 use super::super::BODY_LIMIT;
@@ -24,6 +29,7 @@ const NOT_FOUND: &str = "上游 Token 不存在";
 
 pub(super) fn router() -> Router<AppState> {
     Router::new()
+        .route("/admin/api/upstream", get(page))
         .route("/admin/api/upstream-tokens", post(add_token))
         .route(
             "/admin/api/upstream-tokens/{token_id}",
@@ -37,31 +43,95 @@ pub(super) fn router() -> Router<AppState> {
             "/admin/api/upstream-tokens/{token_id}/enabled",
             put(set_enabled),
         )
-        .route(
-            "/admin/api/reconciliation",
-            get(reconciliation_status).post(reconcile),
-        )
-        .route("/admin/api/request-settlements", get(request_settlements))
+        .route("/admin/api/reconciliation", post(reconcile))
         .route(
             "/admin/api/request-settlements/{request_id}/release",
             post(release_request_settlement),
         )
 }
 
-async fn request_settlements(
-    State(state): State<AppState>,
-    _s: AdminSession,
-    req: Request,
-) -> ApiResult {
+/// 「上游」页的一次性读数：账号行 + 核对 + 未知预留 + 冷却 + 会话 CSRF。
+/// 除 `refresh-info` / `reconciliation` 两个动作外，页面不需要再发第二个请求。
+async fn page(State(state): State<AppState>, _s: AdminSession, req: Request) -> ApiResult {
     let (parts, _) = req.into_parts();
-    let csrf = csrf_token(&state, &session_cookie(&parts));
-    let rows = state.db.list_unknown_request_settlements().await?;
-    Ok(ok_json(&json!({"items": rows.into_iter().map(|r| json!({
-        "request_id": r.request_id, "rid": r.rid, "key_id": r.key_id, "status": r.status,
-        "correlation_id": r.correlation_id,
-        "service_day": r.day, "service_month": r.month, "reserved_anlas": r.anlas,
-        "reserved_v5": r.v5, "reserved_legacy": r.legacy, "is_vibe": r.is_vibe
-    })).collect::<Vec<_>>(), "csrf_token": csrf })))
+    let now = state.now();
+    let pool = pool_status(&state).await?;
+    let stats = super::account_stats::account_rows(&state, &pool, now).await?;
+    let ids: Vec<String> = pool
+        .iter()
+        .map(|p| p["token_id"].as_str().unwrap_or_default().to_string())
+        .collect();
+    let allowance = state.allowance.snapshot(&ids).await?;
+    let allowance_rows = allowance["accounts"]
+        .as_array()
+        .cloned()
+        .unwrap_or_default();
+    let info = super::upstream_information::cached(&state).await?;
+    let info_refresh = json!({
+        "last_attempt_at": info["last_attempt_at"],
+        "cooldown_seconds": info["cooldown_seconds"],
+        "retry_after": info["retry_after"],
+    });
+    let info_rows = info["accounts"].as_array().cloned().unwrap_or_default();
+    let info_by_id: Map<String, Value> = info_rows
+        .iter()
+        .filter_map(|r| r["token_id"].as_str().map(|id| (id.to_string(), r.clone())))
+        .collect();
+    let stats_by_id: Map<String, Value> = stats
+        .iter()
+        .filter_map(|r| r["token_id"].as_str().map(|id| (id.to_string(), r.clone())))
+        .collect();
+
+    let mut accounts = Vec::with_capacity(pool.len());
+    for (i, p) in pool.iter().enumerate() {
+        let mut row = p.clone();
+        if let Some(id) = p["token_id"].as_str() {
+            if let Some(st) = stats_by_id.get(id) {
+                for key in ["w1h", "w24h", "load_share_24h", "balance_share", "balance"] {
+                    row[key] = st[key].clone();
+                }
+            }
+            // V5 官方余量（/user/subscription 的缓存），行序与 pool 一致
+            row["v5"] = allowance_rows.get(i).cloned().unwrap_or(Value::Null);
+            // 账号状态（/user/information 的缓存）
+            row["info"] = info_by_id.get(id).cloned().unwrap_or(Value::Null);
+        }
+        accounts.push(row);
+    }
+
+    let recon = match reconciliation::status(&state).await {
+        Ok(Value::Object(m)) => m,
+        Ok(_) => Map::new(),
+        Err(e) => return run_error(e),
+    };
+    let session = session_cookie(&parts);
+    Ok(ok_json(&json!({
+        "generated_at": pyval::float(now),
+        "pool_configured": state.nai.configured().await,
+        "accounts": accounts,
+        "threshold": allowance["threshold"],
+        "reconciliation": {
+            "history": recon.get("history").cloned().unwrap_or(json!([])),
+            "running": recon.get("running").cloned().unwrap_or(json!(false)),
+            "retry_after": recon.get("retry_after").cloned().unwrap_or(json!(0)),
+        },
+        "settlements": state
+            .db
+            .list_unknown_request_settlements()
+            .await?
+            .into_iter()
+            .map(|r| json!({
+                "request_id": r.request_id, "rid": r.rid, "key_id": r.key_id, "status": r.status,
+                "correlation_id": r.correlation_id,
+                "service_day": r.day, "service_month": r.month, "reserved_anlas": r.anlas,
+                "reserved_v5": r.v5, "reserved_legacy": r.legacy, "is_vibe": r.is_vibe
+            }))
+            .collect::<Vec<_>>(),
+        "info_refresh": info_refresh,
+        // 会话绑定：核对与释放预留用同一把；手动查官方信息是另一把
+        "csrf_token": csrf_token(&state, &session),
+        "csrf_info": super::upstream_information::scoped_csrf_public(&state, &session),
+    })))
 }
 
 async fn release_request_settlement(
@@ -396,24 +466,6 @@ fn run_error(e: RunError) -> ApiResult {
             Ok(resp)
         }
     }
-}
-
-async fn reconciliation_status(
-    State(state): State<AppState>,
-    _s: AdminSession,
-    req: Request,
-) -> ApiResult {
-    let (parts, _) = req.into_parts();
-    let mut out = match reconciliation::status(&state).await {
-        Ok(Value::Object(m)) => m,
-        Ok(_) => Map::new(),
-        Err(e) => return run_error(e),
-    };
-    out.insert(
-        "csrf_token".into(),
-        Value::String(csrf_token(&state, &session_cookie(&parts))),
-    );
-    Ok(ok_json(&Value::Object(out)))
 }
 
 async fn reconcile(State(state): State<AppState>, _s: AdminSession, req: Request) -> ApiResult {

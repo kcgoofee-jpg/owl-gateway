@@ -9,7 +9,7 @@ use axum::Router;
 use axum::extract::{Request, State};
 use axum::http::{HeaderMap, header};
 use axum::response::IntoResponse;
-use axum::routing::get;
+use axum::routing::post;
 use gate_upstream::client::Token;
 use serde_json::{Map, Value, json};
 use std::time::Duration;
@@ -20,14 +20,15 @@ const STALE_SECONDS: f64 = 24.0 * 60.0 * 60.0;
 const BODY_LIMIT: usize = 64 * 1024;
 
 pub(super) fn router() -> Router<AppState> {
-    Router::new().route("/admin/api/upstream-information", get(status).post(refresh))
+    Router::new().route("/admin/api/upstream/refresh-info", post(refresh))
 }
 
-pub(in crate::routes::admin) fn scoped_csrf(
-    state: &AppState,
-    scope: &str,
-    session: &str,
-) -> String {
+/// 「上游」页聚合接口用的：手动查官方信息那把会话 CSRF（刷新动作的 scope 固定）。
+pub(super) fn scoped_csrf_public(state: &AppState, session: &str) -> String {
+    scoped_csrf(state, "upstream-information", session)
+}
+
+fn scoped_csrf(state: &AppState, scope: &str, session: &str) -> String {
     let key = crate::session::admin_key_from(
         &state.secret_key,
         &crate::session::admin_pw_material(state),
@@ -35,7 +36,7 @@ pub(in crate::routes::admin) fn scoped_csrf(
     crate::session::hmac_hex(&key, &format!("{scope}:{session}"))
 }
 
-pub(in crate::routes::admin) fn origin_ok(headers: &HeaderMap) -> bool {
+fn origin_ok(headers: &HeaderMap) -> bool {
     let Some(origin) = headers.get(header::ORIGIN).and_then(|v| v.to_str().ok()) else {
         return false;
     };
@@ -83,6 +84,7 @@ fn project(cache: &Value, tokens: &[std::sync::Arc<Token>], now: f64) -> Value {
                 .and_then(|r| r.get("last_success"))
                 .and_then(Value::as_f64);
             let mut output = Map::new();
+            output.insert("token_id".into(), json!(token.token_id));
             output.insert("account".into(), json!(index + 1));
             for key in [
                 "ban_status",
@@ -117,17 +119,12 @@ fn project(cache: &Value, tokens: &[std::sync::Arc<Token>], now: f64) -> Value {
     })
 }
 
-async fn status(State(state): State<AppState>, _session: AdminSession, req: Request) -> ApiResult {
-    let (parts, _) = req.into_parts();
-    let cache = read_cache(&state).await?;
+/// 只读缓存投影（无 CSRF）：`accounts` 每行带 `token_id`，行序跟随令牌池；
+/// 顶层是手动查询的冷却状态。给「上游」页的聚合接口按 `token_id` 合并用。
+pub(super) async fn cached(state: &AppState) -> Result<Value, crate::error::ApiError> {
+    let cache = read_cache(state).await?;
     let tokens = state.nai.tokens().await;
-    let mut out = project(&cache, &tokens, state.now());
-    out["csrf_token"] = json!(scoped_csrf(
-        &state,
-        "upstream-information",
-        &cookie(&parts.headers, ADMIN_COOKIE).unwrap_or_default()
-    ));
-    Ok(ok_json(&out))
+    Ok(project(&cache, &tokens, state.now()))
 }
 
 fn information_error(status: Option<u16>, parse_error: bool) -> &'static str {

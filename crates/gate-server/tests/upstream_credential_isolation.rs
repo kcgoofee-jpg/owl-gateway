@@ -239,8 +239,10 @@ async fn information_401_persists_isolation_without_treating_other_errors_as_401
     let e = setup(&[]).await;
     let id = e.state.nai.tokens().await[0].token_id.clone();
     let admin = Admin::login(&e.state).await;
-    let status = admin.get_ok("/admin/api/upstream-information").await;
-    let csrf = status["csrf_token"].as_str().unwrap();
+    let csrf = admin.get_ok("/admin/api/upstream").await["csrf_info"]
+        .as_str()
+        .unwrap()
+        .to_string();
     e.mock.push(
         "/user/information",
         Reply::status(401, "synthetic unauthorized"),
@@ -248,9 +250,9 @@ async fn information_401_persists_isolation_without_treating_other_errors_as_401
     let refreshed = admin
         .raw(
             "POST",
-            "/admin/api/upstream-information",
+            "/admin/api/upstream/refresh-info",
             Some(json!({})),
-            &[("x-nai-admin-csrf", csrf)],
+            &[("x-nai-admin-csrf", csrf.as_str())],
         )
         .await;
     assert_eq!(refreshed.status, 200, "{}", refreshed.text());
@@ -267,14 +269,16 @@ async fn information_401_persists_isolation_without_treating_other_errors_as_401
         Reply::status(503, "synthetic unavailable"),
     );
     let admin = Admin::login(&normal.state).await;
-    let state = admin.get_ok("/admin/api/upstream-information").await;
-    let csrf = state["csrf_token"].as_str().unwrap();
+    let csrf = admin.get_ok("/admin/api/upstream").await["csrf_info"]
+        .as_str()
+        .unwrap()
+        .to_string();
     admin
         .raw(
             "POST",
-            "/admin/api/upstream-information",
+            "/admin/api/upstream/refresh-info",
             Some(json!({})),
-            &[("x-nai-admin-csrf", csrf)],
+            &[("x-nai-admin-csrf", csrf.as_str())],
         )
         .await;
     assert!(!disabled(&normal.state, &normal_id).await);

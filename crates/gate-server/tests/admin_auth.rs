@@ -47,7 +47,7 @@ const ENDPOINTS: &[(&str, &str)] = &[
     ("PUT", "/settings"),
     ("GET", "/runtime-limits"),
     ("PUT", "/runtime-limits"),
-    ("GET", "/allowance"),
+    ("GET", "/upstream"),
     ("POST", "/upstream-tokens"),
     ("PUT", "/upstream-tokens/token-x"),
     ("DELETE", "/upstream-tokens/token-x"),
@@ -62,9 +62,7 @@ const ENDPOINTS: &[(&str, &str)] = &[
     ("GET", "/guard"),
     ("PUT", "/guard"),
     ("GET", "/discord-bot"),
-    ("GET", "/upstream-stats"),
     ("GET", "/sitepaid-hints"),
-    ("GET", "/reconciliation"),
     ("POST", "/reconciliation"),
 ];
 
