@@ -1,5 +1,5 @@
 mod common;
-use common::{Call, TOKEN, settle, setup};
+use common::{Admin, Call, TOKEN, settle, setup};
 use gate_db::repo::usage::LogFilter;
 use gate_db::repo::usage::Success;
 use gate_testkit::Reply;
@@ -135,11 +135,49 @@ async fn success_and_known_rejection_release_live_budget_once() {
 #[tokio::test]
 async fn unknown_result_stays_in_live_budget_and_is_restored_after_restart() {
     let e = setup(&[]).await;
+    let admin = Admin::login(&e.state).await;
+    let quota = |images| {
+        json!({
+            "images": images,
+            "v5": {"mode":"limit", "value":10},
+            "daily_anlas": {"mode":"inherit"},
+            "monthly_anlas": {"mode":"unlimited"}
+        })
+    };
+    let unlimited = admin
+        .patch(
+            "/keys/1",
+            json!({"quota_limits": quota(json!({"mode":"unlimited"}))}),
+        )
+        .await;
+    assert_eq!(unlimited.status, 200, "{}", unlimited.text());
     e.state
         .db
         .run_script(vec!["UPDATE api_keys SET daily_images=1 WHERE id=1".into()])
         .await
         .unwrap();
+    let (_, _, subscription) = Call::new("GET", "/user/subscription")
+        .bearer(TOKEN)
+        .send(&e.state)
+        .await;
+    let subscription: Value = serde_json::from_slice(&subscription).unwrap();
+    assert_eq!(subscription["naiGate"]["v45Unlimited"], true);
+
+    let limited = admin
+        .patch(
+            "/keys/1",
+            json!({"quota_limits": quota(json!({"mode":"limit", "value":1}))}),
+        )
+        .await;
+    assert_eq!(limited.status, 200, "{}", limited.text());
+    let (_, _, subscription) = Call::new("GET", "/user/subscription")
+        .bearer(TOKEN)
+        .send(&e.state)
+        .await;
+    let subscription: Value = serde_json::from_slice(&subscription).unwrap();
+    assert_eq!(subscription["naiGate"]["v45Unlimited"], false);
+    assert_eq!(subscription["naiGate"]["v45DailyLimit"], 1);
+
     e.mock
         .push("/ai/generate-image", Reply::status(500, "upstream failure"));
     let _ = Call::new("POST", "/ai/generate-image")
