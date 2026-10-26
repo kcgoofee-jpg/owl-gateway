@@ -8,6 +8,8 @@
 
 ### 成员可感知
 
+- **The 智绘姬 guide warns off the plugin's cloud queue (10-27).** Leaving st-chatu8's 「队列服务地址」 empty while the cloud queue is enabled sends requests to a queue endpoint this site doesn't have — every attempt returns 404 and nothing is generated or billed (a member lost a whole vibe-encode session to this). The guide now says to keep 云端队列 off — this site queues on its own — or to fill the queue address exactly as the plugin's author documents it.
+
 - **The homepage legend reports what actually happened, not what is left (10-27).** The two legend items under the shared arc now read V4.5 已出 / V5 已出 with today's generated counts since the 07:00 reset (the arc splits the day's images V4.5-then-V5). The remaining-allowance math behind the old 「剩余」 display (site daily cap sums, V5 pause/access-policy captions, upstream-exhausted hints) is gone from the board; caps and pauses still speak for themselves in the rejection reason when a request is refused. Queue status is one number: members not drawing see the current queue depth (排队 N 张), a waiting image shows 您排在 X/Y 位, and the position estimates (`eta`, site interval, upstream start times) behind the old 「你的图排第 N 位」 are deleted from `/public/live`.
 - **My-requests rows breathe (10-27).** The headline row keeps time, model and the result badge; the delivery badge only appears when something is wrong (传输中断 / 传输中). 「服务端传输完成（未确认客户端收到）」 is gone — the server cannot confirm client receipt (that would need a client-side ack that doesn't exist), and the member can see whether their own image arrived. The request id, NovelAI support id and the queue/generation timings merge into one muted line under the row.
 
