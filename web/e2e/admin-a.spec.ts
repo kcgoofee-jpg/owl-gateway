@@ -193,6 +193,7 @@ test.describe("已登录", () => {
     const dlg = page.getByRole("dialog", { name: /编辑：/ });
     await expect(dlg).toBeVisible();
     await dlg.getByRole("radio", { name: /^单独设/ }).check();
+    await dlg.getByLabel("每日 V4.5 额度模式").selectOption("limit");
     const images = dlg.getByLabel("每日 V4.5 及以下免费图张数");
     await images.fill("");
     await dlg.getByRole("button", { name: "保存" }).click();
@@ -204,10 +205,23 @@ test.describe("已登录", () => {
     await dlg.getByRole("spinbutton", { name: /^每日 Anlas 上限/ }).fill("0");
     await dlg.getByRole("spinbutton", { name: /^每月 Anlas 上限/ }).fill("0");
     await dlg.getByRole("checkbox", { name: /^允许消耗 Anlas/ }).check();
+    const saveResponse = page.waitForResponse(
+      (response) =>
+        /\/admin\/api\/keys\/\d+$/.test(new URL(response.url()).pathname) &&
+        response.request().method() === "PATCH",
+    );
     await dlg.getByRole("button", { name: "保存" }).click();
-    await expect(dlg.getByRole("alert").filter({ hasText: /至少要有一个大于 0/ })).toBeVisible();
+    const saved = await saveResponse;
+    expect(saved.status()).toBe(200);
+    const quotas = (await saved.json()).key.quota_limits;
+    expect(quotas.daily_anlas).toEqual({ mode: "limit", value: 0 });
+    expect(quotas.monthly_anlas).toEqual({ mode: "limit", value: 0 });
+    await expect(dlg).toBeHidden();
     expect(await seriousViolations(page), "key-dialog").toEqual([]);
-    // 有未保存的修改：取消时先确认
+    // 已保存后再编辑一项：取消时先确认放弃。
+    await page.getByRole("button", { name: "全部设置…" }).click();
+    await expect(dlg).toBeVisible();
+    await dlg.getByLabel("每日 V4.5 及以下免费图张数").fill("120");
     await dlg.getByRole("button", { name: "取消" }).click();
     await expect(page.getByText("有未保存的修改，确定放弃吗？")).toBeVisible();
     await page.getByRole("button", { name: "放弃修改" }).click();

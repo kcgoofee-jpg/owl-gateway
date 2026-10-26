@@ -325,17 +325,18 @@ test.describe("登录成员", () => {
     await patch(page, ME, (b) => ({ ...b, survey_done: true }));
   });
 
-  test("首屏是额度圆环：V4.5 / V5 / Anlas，环里是今天剩余，下面「类型 总量」；不显示「我今天的额度」", async ({
-    page,
-  }) => {
+  test("额度圆环只显示个人可用额度；公共状态仍显示 V5 用量", async ({ page }) => {
     const errors = watchConsole(page, "/public/live/stream");
     await page.goto("/");
     const quota = page.locator(".lp-quota");
     const box = await quota.boundingBox();
     expect(box && box.y < 300).toBe(true);
     await expect(quota).not.toContainText("点重置");
-    await expect(quota.locator(".ring-item")).toHaveCount(3);
-    await expect(quota.locator(".ring-label b")).toHaveText(["V4.5", "V5", "Anlas"]);
+    await expect(quota.locator(".ring-item")).toHaveCount(2);
+    await expect(quota.locator(".ring-label b")).toHaveText(["V4.5", "Anlas"]);
+    await expect(page.getByRole("region", { name: "当前状态" }).locator(".lp-meter").nth(1)).toContainText(
+      "V5",
+    );
     // 环下面只有类型名（18px / 600，字号四档制的标题档），不再显示每天总量；类型名和圆环水平居中对齐
     const label = quota.locator(".ring-label").first();
     expect(

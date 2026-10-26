@@ -153,6 +153,7 @@ function QuotaModesCard(props: {
               <span>{spec.label}</span>
               <select
                 class="select"
+                aria-label={`${spec.label} 模式`}
                 value={mode.mode}
                 onChange={(e) =>
                   setMode(
@@ -173,6 +174,7 @@ function QuotaModesCard(props: {
                     type="number"
                     min="0"
                     step={name === "global_monthly_anlas" ? "any" : 1}
+                    aria-label={`${spec.label} 限额`}
                     value={mode.value}
                     onInput={(e) => setMode(name, { mode: "limit", value: Number(e.currentTarget.value) })}
                   />

@@ -147,7 +147,10 @@ test("额度与保护：改一项运行限制并保存（不合法时不能保�
 
 test("额度与保护：全是手动表单 + 只读记录；没有算法说明", async ({ page }) => {
   await visit(page, "limits", "额度与保护");
-  await expect(page.getByLabel("V4.5 每人每天", { exact: false })).toHaveValue("150");
+  const imagesMode = page.getByLabel("V4.5 每人每天 模式");
+  const imagesLimit = page.getByLabel("V4.5 每人每天 限额");
+  await expect(imagesMode).toHaveValue("limit");
+  await expect(imagesLimit).toHaveValue("150");
   await expect(page.getByLabel("单号每天上限", { exact: false })).toHaveValue("2400");
   await expect(page.getByLabel("每人排队", { exact: false })).toHaveValue("2");
   await expect(page.getByLabel("V5 Full 转为 Medium").locator("option")).toHaveCount(2);
@@ -165,12 +168,46 @@ test("额度与保护：全是手动表单 + 只读记录；没有算法说明",
   // 429 冷却是全站的（那个账号另按上游要求单独冷却），说明要说准
   await expect(page.getByText("上游返回 429 后，全站暂停出图多久", { exact: false })).toBeVisible();
   // 改 V4.5 每人每天并还原
-  const field = page.getByLabel("V4.5 每人每天", { exact: false });
-  await field.fill("120");
-  await page.getByRole("button", { name: "保存额度" }).click();
-  await expect(page.getByText("额度已保存并同步").first()).toBeVisible();
-  await field.fill("150");
-  await page.getByRole("button", { name: "保存额度" }).click();
+  await imagesLimit.fill("120");
+  const saveQuota = page.getByRole("button", { name: "保存额度模式" }).first();
+  const save120 = page.waitForResponse(
+    (response) =>
+      response.url().endsWith("/admin/api/settings") &&
+      response.request().method() === "PUT" &&
+      response.status() === 200,
+  );
+  await saveQuota.click();
+  const saved120 = await save120;
+  expect((await saved120.json()).register_daily_images).toBe(120);
+  const readback120 = await page.evaluate(async () => {
+    const [settings, modes] = await Promise.all([
+      fetch("/admin/api/settings").then((r) => r.json()),
+      fetch("/admin/api/quota-modes").then((r) => r.json()),
+    ]);
+    return { legacyProjection: settings.register_daily_images, mode: modes.register_daily_images };
+  });
+  expect(readback120).toEqual({ legacyProjection: 120, mode: { mode: "limit", value: 120 } });
+  await expect(saveQuota).toBeDisabled();
+
+  await imagesLimit.fill("150");
+  const restore150 = page.waitForResponse(
+    (response) =>
+      response.url().endsWith("/admin/api/settings") &&
+      response.request().method() === "PUT" &&
+      response.status() === 200,
+  );
+  await saveQuota.click();
+  const restored = await restore150;
+  expect((await restored.json()).register_daily_images).toBe(150);
+  const readback150 = await page.evaluate(async () => {
+    const [settings, modes] = await Promise.all([
+      fetch("/admin/api/settings").then((r) => r.json()),
+      fetch("/admin/api/quota-modes").then((r) => r.json()),
+    ]);
+    return { legacyProjection: settings.register_daily_images, mode: modes.register_daily_images };
+  });
+  expect(readback150).toEqual({ legacyProjection: 150, mode: { mode: "limit", value: 150 } });
+  await expect(saveQuota).toBeDisabled();
 });
 
 test("来信：问卷 / 文字反馈两个 tab；旧地址换到对应子页；没有 Discord 分区", async ({ page }) => {
