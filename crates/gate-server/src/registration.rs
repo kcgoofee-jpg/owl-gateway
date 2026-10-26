@@ -175,7 +175,7 @@ pub struct Welcome<'a> {
 
 /// 领取成功的欢迎语：Key + 一步步配置教程 + 规则。控制在 Discord 2000 字以内。
 ///
-/// 额度是全站共用的池子、先到先得，每人的数字只是上限。
+/// 额度由全站共享额度池提供；每人的数字是个人上限。
 pub fn welcome_message(w: &Welcome) -> String {
     let site = w.site.trim_end_matches('/');
     let mut cap = if w.daily_images == 0 {
@@ -187,7 +187,7 @@ pub fn welcome_message(w: &Welcome) -> String {
         cap.push_str(&format!("；V5 {} 张", w.daily_v5));
     }
     let mut rules = vec![format!(
-        "• 每日额度：每人每天最多 {cap}，全站共用、先到先得；每天 {} 点重置",
+        "• 每日额度：每人每天最多 {cap}，全站共用额度池；每天 {} 点重置",
         w.reset_hour
     )];
     if !w.opened.is_empty() {
@@ -1351,9 +1351,7 @@ mod tests {
         assert!(!t.contains("https://site.test/"), "{t}");
         // 每日 7 点重置，没有「保底」「次日自动恢复」「有效期」
         assert!(
-            t.contains(
-                "• 每日额度：每人每天最多 V4.5 及以下 30 张，全站共用、先到先得；每天 7 点重置"
-            ),
+            t.contains("• 每日额度：每人每天最多 V4.5 及以下 30 张，全站共用额度池；每天 7 点重置"),
             "{t}"
         );
         for gone in ["保底", "次日自动恢复", "有效期", "全站空闲"] {
@@ -1373,7 +1371,7 @@ mod tests {
     fn welcome_text_covers_v5_sizes_and_unlimited() {
         let t = welcome_message(&welcome(0, 3));
         assert!(
-            t.contains("每人每天最多 V4.5 及以下不限张数；V5 3 张，全站共用、先到先得"),
+            t.contains("每人每天最多 V4.5 及以下不限张数；V5 3 张，全站共用额度池"),
             "{t}"
         );
         assert!(

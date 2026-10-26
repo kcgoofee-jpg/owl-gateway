@@ -459,12 +459,18 @@ async fn token_disabled_during_slot_wait_is_not_used_for_nonstream_or_stream_pos
     .unwrap();
     quarantine(&c, &up, T1, &t2_id).await;
     drop(held);
+    let mut local_refusal = false;
     match task.await.unwrap() {
         Ok(stream) => stream.finish().await,
-        Err(err) => assert_eq!(
-            err.status, 503,
-            "only a known local refusal is allowed: {err:?}"
-        ),
+        Err(err) => {
+            assert_eq!(
+                err.status, 503,
+                "only a known local refusal is allowed: {err:?}"
+            );
+            assert!(err.local, "must not be reported as an upstream failure");
+            assert!(!err.billing_uncertain);
+            local_refusal = true;
+        }
     }
     let posts = up.requests_to("/ai/generate-image-stream");
     assert!(
@@ -475,6 +481,7 @@ async fn token_disabled_during_slot_wait_is_not_used_for_nonstream_or_stream_pos
     );
     if posts.is_empty() {
         // No replacement was selected in time; it must be a known local refusal.
+        assert!(local_refusal);
         assert_eq!(t1.fields().pending_v5, 0);
     } else {
         assert_eq!(posts.len(), 1);

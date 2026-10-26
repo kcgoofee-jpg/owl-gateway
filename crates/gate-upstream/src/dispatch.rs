@@ -928,9 +928,10 @@ impl<H: Hooks> NaiClient<H> {
                 // still have not persisted dispatch or sent anything, so refuse locally.
                 if !token.usable(hooks.now()) {
                     fl.finish().await;
-                    return Err(UpstreamError::new(
+                    return Err(UpstreamError::local(
                         503,
                         "所选上游账号状态已变化，本次请求尚未发送；请稍后重试。",
+                        "",
                     ));
                 }
                 if let Some(on) = cb.on_dispatch.as_ref()
