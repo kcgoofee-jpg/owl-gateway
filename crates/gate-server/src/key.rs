@@ -8,6 +8,37 @@ use serde_json::Value;
 pub struct Key(pub Value);
 
 impl Key {
+    pub fn try_quota_limits(&self) -> Result<gate_core::quota_limits::MemberLimits, String> {
+        let stored = self.get("quota_limits");
+        if stored.is_null() {
+            return Ok(gate_core::quota_limits::MemberLimits::legacy(
+                self.int("daily_images"),
+                self.int("daily_v5"),
+                self.float("daily_anlas"),
+                self.float("monthly_anlas"),
+                self.int("quota_auto"),
+            ));
+        }
+        let parsed = match stored {
+            Value::String(raw) => serde_json::from_str::<Value>(raw)
+                .map_err(|_| "invalid quota_limits JSON".to_string())?,
+            Value::Object(_) => stored.clone(),
+            _ => return Err("quota_limits must be an object or JSON object string".into()),
+        };
+        gate_core::quota_limits::MemberLimits::from_value(&parsed)
+            .ok_or_else(|| "quota_limits contains invalid modes or values".to_string())
+    }
+
+    pub fn quota_limits(&self) -> gate_core::quota_limits::MemberLimits {
+        self.try_quota_limits()
+            .unwrap_or(gate_core::quota_limits::MemberLimits {
+                images: gate_core::quota_limits::Limit::Limit(0.0),
+                v5: gate_core::quota_limits::Limit::Limit(0.0),
+                daily_anlas: gate_core::quota_limits::Limit::Limit(0.0),
+                monthly_anlas: gate_core::quota_limits::Limit::Limit(0.0),
+            })
+    }
+
     pub fn get(&self, name: &str) -> &Value {
         self.0.get(name).unwrap_or(&Value::Null)
     }

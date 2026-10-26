@@ -409,7 +409,15 @@ fn sanitize_replaces_keys_and_drops_secrets_and_content() {
         .unwrap()
         .collect::<Result<_, _>>()
         .unwrap();
-    assert_eq!(keys, ["guard_account_daily_cap", "register_open"]);
+    assert_eq!(
+        keys,
+        [
+            "guard_account_daily_cap",
+            "quota_modes_v1",
+            "quota_modes_v2_migrated",
+            "register_open"
+        ]
+    );
 
     // 报错堆栈、提示词、缩略图、头像
     assert_eq!(

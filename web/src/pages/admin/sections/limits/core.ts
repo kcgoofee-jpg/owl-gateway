@@ -11,12 +11,24 @@ export type Settings = {
   member_daily_anlas: number;
   global_daily_anlas: number;
   global_monthly_anlas: number;
+  quota_modes: GlobalQuotaModes;
   v5_medium_mode: string;
   v5_medium_state?: { active: boolean };
   v5_access_mode: "legacy" | "closed" | "restricted" | "everyone";
   v5_authorized_discord_ids: string[];
   gateway_owner_discord_ids: string[];
   gateway_admin_discord_ids: string[];
+};
+
+export type QuotaMode = { mode: "unlimited" } | { mode: "limit"; value: number };
+export type GlobalQuotaModes = {
+  register_daily_images: QuotaMode;
+  register_daily_v5: QuotaMode;
+  global_daily_v5: QuotaMode;
+  global_daily_anlas: QuotaMode;
+  member_daily_anlas: QuotaMode;
+  global_monthly_anlas: QuotaMode;
+  public_vibe_enabled: boolean;
 };
 
 /** /admin/api/settings 的数字字段（范围与后端 put_settings 一致），全部手动 */

@@ -161,9 +161,11 @@ pub struct Welcome<'a> {
     pub site: &'a str,
     /// 每人每天最多出几张 V4.5 及以下的图，0 = 不限。
     pub daily_images: i64,
-    /// 这把 Key 能不能用 V5（后台「可用模型」选了「含 V5」）。
+    /// 当前有效 V4.5 额度不是显式的零限额。
+    pub images_available: bool,
+    /// 当前成员是否实际可以用 V5（权限、全局暂停和有效额度都通过）。
     pub v5: bool,
-    /// 每人每天最多出几张 V5，0 = 没有单独的个人上限。
+    /// 每人每天最多出几张 V5；仅在 `v5` 可用时用于显示，Unlimited 以 0 表示。
     pub daily_v5: i64,
     /// 每天几点重置（服务日起点）。
     pub reset_hour: i64,
@@ -173,12 +175,28 @@ pub struct Welcome<'a> {
     pub opened: &'a str,
 }
 
+fn welcome_v5_available(
+    image_scope: &str,
+    policy_allowed: bool,
+    paused: bool,
+    member_limit: Option<f64>,
+    global_limit: Option<f64>,
+) -> bool {
+    image_scope == "all"
+        && policy_allowed
+        && !paused
+        && member_limit != Some(0.0)
+        && global_limit != Some(0.0)
+}
+
 /// 领取成功的欢迎语：Key + 一步步配置教程 + 规则。控制在 Discord 2000 字以内。
 ///
 /// 额度由全站共享额度池提供；每人的数字是个人上限。
 pub fn welcome_message(w: &Welcome) -> String {
     let site = w.site.trim_end_matches('/');
-    let mut cap = if w.daily_images == 0 {
+    let mut cap = if !w.images_available {
+        "V4.5 及以下当前不可用".to_string()
+    } else if w.daily_images == 0 {
         "V4.5 及以下不限张数".to_string()
     } else {
         format!("V4.5 及以下 {} 张", w.daily_images)
@@ -1165,6 +1183,16 @@ impl RegistrationService {
                         .as_ref()
                         .and_then(|f| features::dump(Some(f.iter()))),
                     discord_id: Some(user_id.to_string()),
+                    quota_limits: Some(
+                        serde_json::to_string(&gate_core::quota_limits::MemberLimits::legacy(
+                            cfg.daily_images,
+                            cfg.daily_v5,
+                            0.0,
+                            0.0,
+                            1,
+                        ))
+                        .expect("valid default quota modes"),
+                    ),
                 },
                 created,
             )
@@ -1209,12 +1237,29 @@ impl RegistrationService {
                 .join("、"),
             None => "全部已开放功能".to_string(),
         };
+        let access = crate::v5_access::configuration_for(&self.db).await?;
+        let access = access.evaluate(Some(user_id));
+        let quota_modes = crate::ops::global_quota_modes(&self.db).await?;
+        let member_v5 = quota_modes.register_daily_v5.resolve(None);
+        let global_v5 = quota_modes.global_daily_v5.resolve(None);
+        let member_images = quota_modes.register_daily_images.resolve(None);
+        let v5 = welcome_v5_available(
+            &cfg.image_scope,
+            access.decision.allowed,
+            access.paused,
+            member_v5,
+            global_v5,
+        );
+        let images_available = member_images != Some(0.0);
+        let daily_images = member_images.unwrap_or(0.0).trunc() as i64;
+        let daily_v5 = member_v5.unwrap_or(0.0).trunc() as i64;
         let message = welcome_message(&Welcome {
             key: &key,
             site: &self.cfg.site_url,
-            daily_images: cfg.daily_images,
-            v5: cfg.image_scope == "all",
-            daily_v5: cfg.daily_v5,
+            daily_images,
+            images_available,
+            v5,
+            daily_v5,
             reset_hour: gate_core::clock::DAY_RESET_HOUR,
             idle_days: self.env.key_inactivity_delete_days,
             opened: &opened,
@@ -1292,6 +1337,16 @@ mod tests {
     use super::*;
 
     #[test]
+    fn welcome_v5_requires_scope_policy_pause_and_nonzero_effective_quotas() {
+        assert!(welcome_v5_available("all", true, false, None, None));
+        assert!(!welcome_v5_available("all", false, false, None, None));
+        assert!(!welcome_v5_available("all", true, true, None, None));
+        assert!(!welcome_v5_available("legacy", true, false, None, None));
+        assert!(!welcome_v5_available("all", true, false, Some(0.0), None));
+        assert!(!welcome_v5_available("all", true, false, None, Some(0.0)));
+    }
+
+    #[test]
     fn label_and_clip() {
         let u = DiscordUser {
             id: "900000000000000001".into(),
@@ -1331,6 +1386,7 @@ mod tests {
             key: "nai-x",
             site: "https://site.test/",
             daily_images,
+            images_available: true,
             v5: daily_v5 != 0,
             daily_v5,
             reset_hour: 7,
@@ -1400,6 +1456,16 @@ mod tests {
             !t.contains("自动回收") && !t.contains("• 已开通功能："),
             "{t}"
         );
+    }
+
+    #[test]
+    fn welcome_does_not_show_explicit_zero_image_quota_as_unlimited() {
+        let t = welcome_message(&Welcome {
+            images_available: false,
+            ..welcome(0, 0)
+        });
+        assert!(t.contains("V4.5 及以下当前不可用"), "{t}");
+        assert!(!t.contains("V4.5 及以下不限张数"), "{t}");
     }
 
     #[test]

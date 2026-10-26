@@ -55,7 +55,7 @@ async fn v45_limit_is_the_manual_number_for_new_and_old_members() {
         let k = key_row(&e, id).await;
         assert_eq!(
             (&k["daily_images"], &k["daily_v5"], &k["image_model_scope"]),
-            (&json!(150), &json!(0), &json!("all")),
+            (&json!(150), &json!(0), &json!("legacy")),
             "Key {id}"
         );
     }
@@ -120,13 +120,13 @@ async fn v45_limit_is_the_manual_number_for_new_and_old_members() {
 async fn manual_v5_pause_refuses_and_shows_zero_everywhere() {
     let _clock = clock(Some(NOON)).await;
     let e = setup(&[]).await;
-    member_key(&e.state, 900, &[("image_model_scope", json!("'all'"))]).await;
+    member_key(&e.state, 900, &[("image_model_scope", json!("all"))]).await;
     // 第二把 Key（不计全站 V5 池）：V5 暂停对每把 Key 都生效
     member_key(
         &e.state,
         901,
         &[
-            ("image_model_scope", json!("'all'")),
+            ("image_model_scope", json!("all")),
             ("exclude_global_v5", json!(1)),
         ],
     )
@@ -134,7 +134,17 @@ async fn manual_v5_pause_refuses_and_shows_zero_everywhere() {
     // 全站和个人都不限：平时订阅信息是「不限」
     set_setting(&e, "global_daily_v5", "0").await;
     set_setting(&e, "register_daily_v5", "0").await;
+    set_setting(&e, "quota_modes_v1", r#"{"register_daily_images":{"mode":"unlimited"},"register_daily_v5":{"mode":"unlimited"},"global_daily_v5":{"mode":"unlimited"},"global_daily_anlas":{"mode":"unlimited"},"member_daily_anlas":{"mode":"unlimited"},"global_monthly_anlas":{"mode":"unlimited"},"public_vibe_enabled":false}"#).await;
     quota(&e).await;
+    assert_eq!(
+        e.state
+            .db
+            .get_key_by_token("nai-synthetic-0900")
+            .await
+            .unwrap()
+            .unwrap()["image_model_scope"],
+        "all"
+    );
     let sub = |e: &Env| {
         let state = e.state.clone();
         async move {

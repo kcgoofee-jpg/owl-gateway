@@ -22,6 +22,7 @@ use serde_json::{Value, json};
 pub(super) fn router() -> Router<AppState> {
     Router::new()
         .route("/admin/api/settings", get(get_settings).put(put_settings))
+        .route("/admin/api/quota-modes", get(get_quota_modes))
         .route(
             "/admin/api/runtime-limits",
             get(get_runtime_limits).put(put_runtime_limits),
@@ -56,9 +57,56 @@ async fn get_settings(State(state): State<AppState>, _s: AdminSession) -> ApiRes
     })))
 }
 
+async fn get_quota_modes(State(state): State<AppState>, _s: AdminSession) -> ApiResult {
+    Ok(ok_json(&json!(
+        crate::ops::global_quota_modes(&state.db).await?
+    )))
+}
+
 async fn put_settings(State(state): State<AppState>, _s: AdminSession, req: Request) -> ApiResult {
     let (parts, body) = req.into_parts();
     let body = read_json_body(&parts.headers, body, BODY_LIMIT).await?;
+    if body.contains_key("quota_modes")
+        && [
+            GLOBAL_MONTHLY_ANLAS.key,
+            GLOBAL_DAILY_V5.key,
+            GLOBAL_DAILY_ANLAS.key,
+            MEMBER_DAILY_ANLAS.key,
+            REGISTER_DAILY_IMAGES.key,
+            REGISTER_DAILY_V5.key,
+        ]
+        .iter()
+        .any(|key| body.contains_key(*key))
+    {
+        return Err(HttpError::new(422, "quota_modes 不能与旧数字额度字段同时提交").into());
+    }
+    let quota_modes = match body.get("quota_modes") {
+        None => None,
+        Some(v) => {
+            let value = gate_core::quota_limits::GlobalLimits::from_value(v)
+                .ok_or_else(|| HttpError::new(422, "quota_modes 格式无效"))?;
+            let fields = [
+                (value.register_daily_images, 100_000.0),
+                (value.register_daily_v5, 100_000.0),
+                (value.global_daily_v5, 100_000.0),
+                (value.global_daily_anlas, 100_000.0),
+                (value.member_daily_anlas, 100_000.0),
+                (value.global_monthly_anlas, 1_000_000.0),
+            ];
+            if fields.iter().any(|(mode, max)| match mode {
+                gate_core::quota_limits::Limit::Inherit => true,
+                gate_core::quota_limits::Limit::Unlimited => false,
+                gate_core::quota_limits::Limit::Limit(n) => !n.is_finite() || *n < 0.0 || *n > *max,
+            }) {
+                return Err(HttpError::new(
+                    422,
+                    "quota_modes 中的限额无效；全局额度不支持 inherit，限额须非负",
+                )
+                .into());
+            }
+            Some(value)
+        }
+    };
     let policy_keys = [
         crate::v5_access::MODE_KEY,
         crate::v5_access::SUBJECTS_KEY,
@@ -194,6 +242,7 @@ async fn put_settings(State(state): State<AppState>, _s: AdminSession, req: Requ
         REGISTER_DAILY_IMAGES.key,
         REGISTER_DAILY_V5.key,
         V5_PAUSED.key,
+        "quota_modes",
     ]
     .iter()
     .any(|k| body.contains_key(*k));
@@ -223,6 +272,88 @@ async fn put_settings(State(state): State<AppState>, _s: AdminSession, req: Requ
             state.db.set_setting(spec.key, &text).await?;
         }
     }
+    if quota_modes.is_some()
+        || [
+            GLOBAL_MONTHLY_ANLAS.key,
+            GLOBAL_DAILY_V5.key,
+            GLOBAL_DAILY_ANLAS.key,
+            MEMBER_DAILY_ANLAS.key,
+            REGISTER_DAILY_IMAGES.key,
+            REGISTER_DAILY_V5.key,
+        ]
+        .iter()
+        .any(|key| body.contains_key(*key))
+    {
+        let mut modes = quota_modes.unwrap_or(crate::ops::global_quota_modes(&state.db).await?);
+        let legacy = |v: &Value| {
+            let n = pyval::number_like(v).unwrap_or(0.0);
+            if n <= 0.0 {
+                gate_core::quota_limits::Limit::Unlimited
+            } else {
+                gate_core::quota_limits::Limit::Limit(n)
+            }
+        };
+        if quota_modes.is_none() {
+            if body.contains_key(REGISTER_DAILY_IMAGES.key) {
+                modes.register_daily_images = legacy(&v45);
+            }
+            if body.contains_key(REGISTER_DAILY_V5.key) {
+                modes.register_daily_v5 = legacy(&v5_each);
+            }
+            if body.contains_key(GLOBAL_DAILY_V5.key) {
+                modes.global_daily_v5 = legacy(&daily_v5);
+            }
+            if body.contains_key(GLOBAL_DAILY_ANLAS.key) {
+                modes.global_daily_anlas = legacy(&daily_anlas);
+                modes.public_vibe_enabled = pyval::number_like(&daily_anlas).unwrap_or(0.0) > 0.0;
+            }
+            if body.contains_key(MEMBER_DAILY_ANLAS.key) {
+                modes.member_daily_anlas = legacy(&member);
+            }
+            if body.contains_key(GLOBAL_MONTHLY_ANLAS.key) {
+                modes.global_monthly_anlas = legacy(&monthly);
+            }
+        }
+        let raw = serde_json::to_string(&modes).map_err(|e| InternalError(e.to_string()))?;
+        state
+            .db
+            .set_settings_bulk(&[
+                ("quota_modes_v1".into(), raw),
+                (
+                    "public_vibe_enabled".into(),
+                    if modes.public_vibe_enabled { "1" } else { "0" }.into(),
+                ),
+            ])
+            .await?;
+    }
+    if let Some(modes) = quota_modes {
+        use gate_core::quota_limits::Limit;
+        let numeric = |mode: Limit| match mode {
+            Limit::Limit(n) => pyval::float(n),
+            Limit::Unlimited => json!(0),
+            Limit::Inherit => Value::Null,
+        };
+        let projected = [
+            (&REGISTER_DAILY_IMAGES, numeric(modes.register_daily_images)),
+            (&REGISTER_DAILY_V5, numeric(modes.register_daily_v5)),
+            (&GLOBAL_DAILY_V5, numeric(modes.global_daily_v5)),
+            (&GLOBAL_DAILY_ANLAS, numeric(modes.global_daily_anlas)),
+            (&MEMBER_DAILY_ANLAS, numeric(modes.member_daily_anlas)),
+            (&GLOBAL_MONTHLY_ANLAS, numeric(modes.global_monthly_anlas)),
+        ];
+        let mut writes = Vec::new();
+        for (spec, value) in projected {
+            let encoded = site_flags::encode(spec, &value).map_err(|e| HttpError::new(422, e.0))?;
+            writes.push((spec.key.to_string(), encoded));
+        }
+        let raw = serde_json::to_string(&modes).map_err(|e| InternalError(e.to_string()))?;
+        writes.push(("quota_modes_v1".to_string(), raw));
+        writes.push((
+            "public_vibe_enabled".to_string(),
+            if modes.public_vibe_enabled { "1" } else { "0" }.to_string(),
+        ));
+        state.db.set_settings_bulk(&writes).await?;
+    }
     if body.contains_key(V5_MEDIUM_MODE.key) {
         state
             .db
@@ -236,14 +367,25 @@ async fn put_settings(State(state): State<AppState>, _s: AdminSession, req: Requ
             .as_str()
             .to_string(),
     );
+    let stored_modes = crate::ops::global_quota_modes(&state.db).await?;
+    let project_int = |mode: gate_core::quota_limits::Limit| match mode {
+        gate_core::quota_limits::Limit::Limit(n) => json!(n.trunc() as i64),
+        gate_core::quota_limits::Limit::Unlimited => json!(0),
+        gate_core::quota_limits::Limit::Inherit => Value::Null,
+    };
+    let project_float = |mode: gate_core::quota_limits::Limit| match mode {
+        gate_core::quota_limits::Limit::Limit(n) => pyval::float(n),
+        gate_core::quota_limits::Limit::Unlimited => json!(0.0),
+        gate_core::quota_limits::Limit::Inherit => Value::Null,
+    };
     let out = json!({
         "ok": true,
-        "global_monthly_anlas": monthly,
-        "global_daily_v5": daily_v5,
-        "global_daily_anlas": daily_anlas,
-        "member_daily_anlas": member,
-        "register_daily_images": v45,
-        "register_daily_v5": v5_each,
+        "global_monthly_anlas": project_float(stored_modes.global_monthly_anlas),
+        "global_daily_v5": project_int(stored_modes.global_daily_v5),
+        "global_daily_anlas": project_int(stored_modes.global_daily_anlas),
+        "member_daily_anlas": project_int(stored_modes.member_daily_anlas),
+        "register_daily_images": project_int(stored_modes.register_daily_images),
+        "register_daily_v5": project_int(stored_modes.register_daily_v5),
         "v5_paused": paused,
         "v5_access_mode": policy_mode_out,
         "v5_medium_mode": medium_text,

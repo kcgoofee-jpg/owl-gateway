@@ -365,13 +365,7 @@ async fn stream_disconnect_after_final_keeps_single_image_charge_and_marks_inter
 #[tokio::test]
 async fn no_per_member_pacing_below_the_daily_cap() {
     let e = setup(&[]).await;
-    e.state
-        .db
-        .run_script(vec![
-            "UPDATE api_keys SET daily_images=200, quota_auto=1 WHERE id=1".into(),
-        ])
-        .await
-        .unwrap();
+    e.state.db.set_setting("quota_modes_v1", r#"{"register_daily_images":{"mode":"limit","value":200},"register_daily_v5":{"mode":"unlimited"},"global_daily_v5":{"mode":"unlimited"},"global_daily_anlas":{"mode":"unlimited"},"member_daily_anlas":{"mode":"unlimited"},"global_monthly_anlas":{"mode":"unlimited"},"public_vibe_enabled":false}"#).await.unwrap();
     let used = |n: i64| Success {
         key_id: 1,
         kind: "image".into(),
@@ -413,6 +407,193 @@ async fn no_per_member_pacing_below_the_daily_cap() {
     let text = String::from_utf8_lossy(&body);
     assert!(text.contains("今日 V4.5 额度已用完，每天 200 张"), "{text}");
     assert!(!text.contains("每小时自动恢复"), "{text}");
+}
+
+#[tokio::test]
+async fn explicit_member_limit_zero_rejects_generation_before_upstream() {
+    let e = setup(&[]).await;
+    e.state.db.run_script(vec![
+        r#"UPDATE api_keys SET quota_limits='{"images":{"mode":"limit","value":0},"v5":{"mode":"unlimited"},"daily_anlas":{"mode":"inherit"},"monthly_anlas":{"mode":"unlimited"}}' WHERE id=1"#.into(),
+    ]).await.unwrap();
+    let (status, _, body) = call(
+        &e.state,
+        "POST",
+        "/ai/generate-image",
+        Some(TOKEN),
+        Some(image_body("nai-diffusion-4-5-full", 1)),
+    )
+    .await;
+    assert_eq!(status, 403, "{}", String::from_utf8_lossy(&body));
+    assert!(err_message(&body).contains("今日 V4.5 额度已用完"));
+    assert!(e.mock.requests_to("/ai/generate-image").is_empty());
+}
+
+#[tokio::test]
+async fn explicit_global_v5_limit_zero_rejects_generation_before_upstream() {
+    let e = setup(&[]).await;
+    e.state.db.set_setting("quota_modes_v1", r#"{"register_daily_images":{"mode":"unlimited"},"register_daily_v5":{"mode":"unlimited"},"global_daily_v5":{"mode":"limit","value":0},"global_daily_anlas":{"mode":"unlimited"},"member_daily_anlas":{"mode":"unlimited"},"global_monthly_anlas":{"mode":"unlimited"},"public_vibe_enabled":false}"#).await.unwrap();
+    e.state
+        .db
+        .run_script(vec![
+            "UPDATE api_keys SET image_model_scope='all' WHERE id=1".into(),
+        ])
+        .await
+        .unwrap();
+    let (status, _, body) = call(
+        &e.state,
+        "POST",
+        "/ai/generate-image",
+        Some(TOKEN),
+        Some(image_body("nai-diffusion-5-full", 1)),
+    )
+    .await;
+    assert_eq!(status, 403, "{}", String::from_utf8_lossy(&body));
+    assert!(
+        err_message(&body).contains("全站今日 V5 额度已用完"),
+        "{}",
+        String::from_utf8_lossy(&body)
+    );
+    assert!(e.mock.requests_to("/ai/generate-image").is_empty());
+}
+
+fn vibe_payload() -> Value {
+    use base64::Engine;
+    let image = image::GrayImage::from_fn(64, 64, |x, y| image::Luma([((x * 4) ^ y) as u8]));
+    let mut png = std::io::Cursor::new(Vec::new());
+    image.write_to(&mut png, image::ImageFormat::Png).unwrap();
+    json!({
+        "image": base64::engine::general_purpose::STANDARD.encode(png.into_inner()),
+        "model": "nai-diffusion-4-5-full",
+        "informationExtracted": 0.5
+    })
+}
+
+async fn configure_public_vibe(e: &common::Env, enabled: bool, pool: Value, allow_anlas: bool) {
+    e.state
+        .db
+        .set_setting(
+            "features_global",
+            r#"{"image":true,"upscale":true,"augment":true,"vibe":true,"tags":true}"#,
+        )
+        .await
+        .unwrap();
+    e.state
+        .db
+        .set_setting(
+            "quota_modes_v1",
+            &json!({
+                "register_daily_images":{"mode":"unlimited"},
+                "register_daily_v5":{"mode":"unlimited"},
+                "global_daily_v5":{"mode":"unlimited"},
+                "global_daily_anlas":pool,
+                "member_daily_anlas":{"mode":"unlimited"},
+                "global_monthly_anlas":{"mode":"unlimited"},
+                "public_vibe_enabled":enabled
+            })
+            .to_string(),
+        )
+        .await
+        .unwrap();
+    e.state
+        .db
+        .run_script(vec![format!(
+            "UPDATE api_keys SET allow_anlas={} WHERE id=1",
+            i32::from(allow_anlas)
+        )])
+        .await
+        .unwrap();
+}
+
+fn encoded_vibe_reply() -> Reply {
+    Reply::Status {
+        status: 200,
+        headers: vec![("content-type".into(), "application/octet-stream".into())],
+        body: bytes::Bytes::from_static(b"encoded-vibe"),
+    }
+}
+
+#[tokio::test]
+async fn public_vibe_uses_canonical_flag_and_anlas_pool_at_the_real_route() {
+    let e = setup(&[]).await;
+    configure_public_vibe(&e, true, json!({"mode":"unlimited"}), false).await;
+    e.mock.push("/ai/encode-vibe", encoded_vibe_reply());
+    let (status, _, body) = call(
+        &e.state,
+        "POST",
+        "/ai/encode-vibe",
+        Some(TOKEN),
+        Some(vibe_payload()),
+    )
+    .await;
+    assert_eq!(status, 200, "{}", String::from_utf8_lossy(&body));
+    assert_eq!(e.mock.requests_to("/ai/encode-vibe").len(), 1);
+
+    let e = setup(&[]).await;
+    configure_public_vibe(&e, true, json!({"mode":"limit","value":0}), false).await;
+    e.mock.push("/ai/encode-vibe", encoded_vibe_reply());
+    let (status, _, body) = call(
+        &e.state,
+        "POST",
+        "/ai/encode-vibe",
+        Some(TOKEN),
+        Some(vibe_payload()),
+    )
+    .await;
+    assert_eq!(status, 403, "{}", String::from_utf8_lossy(&body));
+    assert!(err_message(&body).contains("全站今日 Vibe 额度已用完"));
+    assert!(e.mock.requests_to("/ai/encode-vibe").is_empty());
+
+    let e = setup(&[]).await;
+    configure_public_vibe(&e, false, json!({"mode":"unlimited"}), false).await;
+    e.mock.push("/ai/encode-vibe", encoded_vibe_reply());
+    let (status, _, body) = call(
+        &e.state,
+        "POST",
+        "/ai/encode-vibe",
+        Some(TOKEN),
+        Some(vibe_payload()),
+    )
+    .await;
+    assert_eq!(status, 403, "{}", String::from_utf8_lossy(&body));
+    assert!(
+        err_message(&body).contains("本站未开放"),
+        "{}",
+        String::from_utf8_lossy(&body)
+    );
+    assert!(e.mock.requests_to("/ai/encode-vibe").is_empty());
+
+    // Explicit Anlas access remains independent of the free public-Vibe switch.
+    let e = setup(&[]).await;
+    configure_public_vibe(&e, false, json!({"mode":"unlimited"}), true).await;
+    e.mock.push("/ai/encode-vibe", encoded_vibe_reply());
+    let (status, _, body) = call(
+        &e.state,
+        "POST",
+        "/ai/encode-vibe",
+        Some(TOKEN),
+        Some(vibe_payload()),
+    )
+    .await;
+    assert_eq!(status, 200, "{}", String::from_utf8_lossy(&body));
+    assert_eq!(e.mock.requests_to("/ai/encode-vibe").len(), 1);
+}
+
+#[tokio::test]
+async fn malformed_canonical_quota_fails_closed_instead_of_legacy_zero_unlimited() {
+    let e = setup(&[]).await;
+    e.state.db.run_script(vec![
+        r#"UPDATE api_keys SET daily_images=0, quota_auto=-1, quota_limits='{"images":{"mode":"limit","value":-1},"v5":{"mode":"unlimited"},"daily_anlas":{"mode":"inherit"},"monthly_anlas":{"mode":"unlimited"}}' WHERE id=1"#.into(),
+    ]).await.unwrap();
+    let (status, _, body) = call(
+        &e.state,
+        "POST",
+        "/ai/generate-image",
+        Some(TOKEN),
+        Some(image_body("nai-diffusion-4-5-full", 1)),
+    )
+    .await;
+    assert_eq!(status, 500, "{}", String::from_utf8_lossy(&body));
+    assert!(e.mock.requests_to("/ai/generate-image").is_empty());
 }
 
 /// 每把 Key 的限速只剩排队与 RPM 两层：
@@ -522,7 +703,7 @@ async fn one_image_per_key_at_a_time_without_per_key_interval() {
 #[tokio::test]
 async fn no_v5_refill_with_anlas() {
     let e = setup(&[]).await;
-    e.state.db.run_script(vec!["UPDATE api_keys SET anlas_auto=1, allow_anlas=1, daily_v5=1, image_model_scope='all' WHERE id=1".into()]).await.unwrap();
+    e.state.db.run_script(vec![r#"UPDATE api_keys SET allow_anlas=1, quota_auto=-1, quota_limits='{"images":{"mode":"unlimited"},"v5":{"mode":"limit","value":1},"daily_anlas":{"mode":"limit","value":500},"monthly_anlas":{"mode":"unlimited"}}', image_model_scope='all' WHERE id=1"#.into()]).await.unwrap();
     e.state
         .db
         .set_setting("quota_algo_last", r#"{"v5": {"percent": 0}}"#)
@@ -757,7 +938,7 @@ async fn second_v5_is_refused_at_once_when_the_first_holds_the_last_slot() {
     e.state
         .db
         .run_script(vec![
-            "UPDATE api_keys SET image_model_scope='all', daily_v5=2 WHERE id=1".into(),
+            r#"UPDATE api_keys SET image_model_scope='all', daily_v5=2, quota_auto=-1, quota_limits='{"images":{"mode":"unlimited"},"v5":{"mode":"limit","value":2},"daily_anlas":{"mode":"inherit"},"monthly_anlas":{"mode":"unlimited"}}' WHERE id=1"#.into(),
         ])
         .await
         .unwrap();

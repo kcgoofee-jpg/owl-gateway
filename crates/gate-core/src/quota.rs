@@ -10,7 +10,7 @@
 //!   `quota_account_cap_auto`）。库里的旧行不删，只是不再读写。
 //!
 //! [`sync`]：额度同步任务每轮（以及后台改了额度时）调一次：成员 Key 的值和手动值不一样才写，文案变了才写。
-//! [`Effect::UpdateKeys`] 的执行：`UPDATE api_keys SET daily_images=?, daily_v5=?, image_model_scope='all'
+//! [`Effect::UpdateKeys`] 的执行：`UPDATE api_keys SET daily_images=?, daily_v5=?`
 //! WHERE quota_auto=1`。后台手动设过额度的 Key（`quota_auto=-1`）不动。
 
 use crate::pyext::PyErr;
@@ -178,11 +178,7 @@ pub fn sync(
     let mut out = Vec::new();
     let changed = keys
         .iter()
-        .filter(|k| {
-            k.daily_images != m.daily_images
-                || k.daily_v5 != m.daily_v5
-                || k.image_model_scope != "all"
-        })
+        .filter(|k| k.daily_images != m.daily_images || k.daily_v5 != m.daily_v5)
         .count();
     if changed > 0 {
         out.push(Effect::UpdateKeys {
@@ -366,7 +362,14 @@ mod tests {
         let m = manual();
         let note = quota_notice(&m, 7);
         // 新号老号都一样：只要和手动值不同就改（新号爬坡已删）
-        let (fx, n) = sync(&m, &[key(150, 0), key(75, 0), key(175, 3)], None, 7);
+        let mut restricted = key(150, 0);
+        restricted.image_model_scope = "legacy".into();
+        let (fx, n) = sync(
+            &m,
+            &[key(150, 0), restricted, key(75, 0), key(175, 3)],
+            None,
+            7,
+        );
         assert_eq!(n, 2);
         assert_eq!(
             fx,

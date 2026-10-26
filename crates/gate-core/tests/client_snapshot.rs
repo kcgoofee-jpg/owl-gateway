@@ -21,6 +21,14 @@ fn subscription_payload_snapshot() {
             global_v5_total: d["global_v5_total"].as_i64()?,
             v5_paused: false,
             v5_access_allowed: true,
+            global_quota_modes: gate_core::quota_limits::GlobalLimits::from_legacy([
+                150.0,
+                0.0,
+                d["global_v5_limit"].as_i64()? as f64,
+                200.0,
+                50.0,
+                10000.0,
+            ]),
         };
         let got = subscription_payload(c.get("key")?, as_f64(c.get("now")?)?, &data);
         tally.add("all");
@@ -34,6 +42,7 @@ fn subscription_payload_snapshot() {
                 tally.add("bad_number");
                 json!({"err": "BadNumber", "key": k})
             }
+            Err(SubscriptionError::BadQuotaModes) => json!({"err": "BadQuotaModes"}),
         })
     });
     tally.assert_at_least(&[("all", 30), ("missing", 2)]);

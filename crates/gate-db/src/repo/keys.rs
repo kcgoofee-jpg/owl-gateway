@@ -45,10 +45,12 @@ pub struct NewKey {
     pub features: Option<String>,
     #[serde(default)]
     pub discord_id: Option<String>,
+    #[serde(default)]
+    pub quota_limits: Option<String>,
 }
 
 /// `update_key` 允许改的列（顺序无关，只是白名单）。
-const UPDATE_ALLOWED: [&str; 14] = [
+const UPDATE_ALLOWED: [&str; 15] = [
     "name",
     "enabled",
     "daily_images",
@@ -63,6 +65,7 @@ const UPDATE_ALLOWED: [&str; 14] = [
     "image_model_scope",
     "expires_at",
     "features",
+    "quota_limits",
 ];
 const UPDATE_FLAGS: [&str; 4] = [
     "enabled",
@@ -80,8 +83,8 @@ impl Db {
                 "INSERT INTO api_keys \
                  (name, token, enabled, daily_images, daily_anlas, daily_v5, monthly_anlas, \
                  daily_text_tokens, rpm, allow_anlas, allow_img2img, exclude_global_v5, image_model_scope, expires_at, created_at, features, \
-                 discord_id) \
-                 VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+                 discord_id, quota_limits) \
+                 VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
                 params![
                     f.name,
                     f.token,
@@ -100,6 +103,7 @@ impl Db {
                     now,
                     f.features,
                     f.discord_id,
+                    f.quota_limits,
                 ],
             )?;
             let id = tx.last_insert_rowid();
@@ -167,7 +171,13 @@ impl Db {
             if UPDATE_FLAGS.contains(&k.as_str()) {
                 vals.push(SqlValue::Integer(i64::from(pyval::truthy(v))));
             } else {
-                vals.push(json_to_sql(v)?);
+                if k == "quota_limits" && (v.is_object() || v.is_array()) {
+                    vals.push(SqlValue::Text(
+                        serde_json::to_string(v).map_err(|e| DbError::Invalid(e.to_string()))?,
+                    ));
+                } else {
+                    vals.push(json_to_sql(v)?);
+                }
             }
         }
         if sets.is_empty() {

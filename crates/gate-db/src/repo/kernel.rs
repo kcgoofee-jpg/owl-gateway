@@ -78,8 +78,7 @@ impl Db {
     pub async fn quota_apply_to_keys(&self, daily_images: i64, daily_v5: i64) -> Result<()> {
         self.write(move |tx| {
             tx.execute(
-                "UPDATE api_keys SET daily_images=?, daily_v5=?, image_model_scope='all' \
-                 WHERE quota_auto=1",
+                "UPDATE api_keys SET daily_images=?, daily_v5=? WHERE quota_auto=1",
                 params![daily_images, daily_v5],
             )?;
             Ok(())

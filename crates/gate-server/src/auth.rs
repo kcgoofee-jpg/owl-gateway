@@ -8,7 +8,7 @@ use axum::extract::ConnectInfo;
 use axum::http::HeaderMap;
 use axum::http::request::Parts;
 use gate_core::reasons;
-use gate_core::site_flags::{self, Spec};
+use gate_core::site_flags::Spec;
 use serde_json::Value;
 use std::collections::{HashMap, HashSet};
 use std::net::{IpAddr, SocketAddr};
@@ -336,8 +336,13 @@ pub async fn require_feature(state: &AppState, key: &Key, name: &str) -> Result<
     use gate_core::features::{GLOBAL_KEY, VibeAnlas, check_decision, needs_vibe_site_flags};
     let global = state.db.get_setting(GLOBAL_KEY).await?;
     let vibe = if needs_vibe_site_flags(global.as_deref(), &key.0, name) {
+        let public_vibe_enabled = crate::ops::global_quota_modes(&state.db)
+            .await?
+            .public_vibe_enabled;
         Some(VibeAnlas {
-            daily_cap: site_flag_f64(state, &site_flags::GLOBAL_DAILY_ANLAS).await? as i64,
+            // Feature gating checks whether free Vibe is open; admission checks the canonical
+            // Anlas pool mode and usage. Legacy numeric zero can represent an unlimited pool.
+            daily_cap: i64::from(public_vibe_enabled),
         })
     } else {
         None

@@ -73,6 +73,27 @@ pub async fn global_daily_v5(db: &Db) -> Result<i64, DbError> {
     crate::audit::site_int(db, &GLOBAL_DAILY_V5).await
 }
 
+/// Canonical site quota modes. The numeric site flags are compatibility projections only.
+pub async fn global_quota_modes(db: &Db) -> Result<gate_core::quota_limits::GlobalLimits, DbError> {
+    if let Some(raw) = db.get_setting("quota_modes_v1").await? {
+        let value: Value = serde_json::from_str(&raw)
+            .map_err(|e| DbError::Invalid(format!("quota_modes_v1 JSON invalid: {e}")))?;
+        return gate_core::quota_limits::GlobalLimits::from_value(&value)
+            .ok_or_else(|| DbError::Invalid("quota_modes_v1 contains invalid mode/value".into()));
+    }
+    let get = |spec: &'static gate_core::site_flags::Spec| async move {
+        crate::audit::site_f64(db, spec).await
+    };
+    Ok(gate_core::quota_limits::GlobalLimits::from_legacy([
+        get(&gate_core::site_flags::REGISTER_DAILY_IMAGES).await?,
+        get(&gate_core::site_flags::REGISTER_DAILY_V5).await?,
+        get(&gate_core::site_flags::GLOBAL_DAILY_V5).await?,
+        get(&gate_core::site_flags::GLOBAL_DAILY_ANLAS).await?,
+        get(&gate_core::site_flags::MEMBER_DAILY_ANLAS).await?,
+        get(&gate_core::site_flags::GLOBAL_MONTHLY_ANLAS).await?,
+    ]))
+}
+
 // ------------------------------------------------------------------ 注册设置
 
 /// 生效的注册设置：数据库里保存的优先，其次是 [`crate::defaults`] 里的常量。

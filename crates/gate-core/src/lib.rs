@@ -22,6 +22,7 @@ pub mod pyext;
 pub mod pyjson;
 pub mod pyval;
 pub mod quota;
+pub mod quota_limits;
 pub mod reasons;
 pub mod site_flags;
 pub mod snowflake;

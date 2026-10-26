@@ -14,7 +14,7 @@ import {
   userTags,
 } from "./logic";
 import { Seg } from "./shared";
-import { type MemberRow, ROLE_LABEL, type Role } from "./types";
+import { type KeyRow, type MemberRow, ROLE_LABEL, type Role } from "./types";
 
 export type DetailActions = {
   edit: (m: MemberRow, manual?: boolean) => void;
@@ -40,7 +40,6 @@ const ISSUE_BTN: Record<IssueAction["kind"], string> = {
 };
 
 const mask = (t: string): string => `${t.slice(0, 8)}····${t.slice(-4)}`;
-const inf = (n: number): string | number => (n > 0 ? n : "不限");
 
 function IssueList(props: { m: MemberRow; issues: Issue[]; act: DetailActions }) {
   const serious = props.issues.some((x) => x.level !== "info");
@@ -95,9 +94,17 @@ export function MemberDetail(props: { m: MemberRow; now: number; act: DetailActi
   const quotaSource = k.quota_auto ? "auto" : "manual";
   // 今天的 V4.5 / V5 用量在列表行里已经有了，这里只补行里没有的 Anlas
   const anlasUsed = Math.round(u.anlas || 0);
+  const limitText = (mode: NonNullable<KeyRow["quota_limits"]>["images"]): string => {
+    if (mode.mode === "inherit") return "继承统一额度";
+    if (mode.mode === "unlimited") return "不限";
+    return `限 ${mode.value}`;
+  };
+  const limitsValid = k.quota_limits_valid !== false;
   const anlas = !k.allow_anlas
     ? "关闭"
-    : `今天 ${usedOf(anlasUsed, k.daily_anlas > 0 ? Math.round(k.daily_anlas) : 0)}`;
+    : !limitsValid
+      ? "额度配置损坏"
+      : `今天 ${usedOf(anlasUsed, k.quota_limits?.daily_anlas.mode === "limit" ? Math.round(k.quota_limits.daily_anlas.value) : 0)} · ${limitText(k.quota_limits?.daily_anlas ?? { mode: "inherit" })}`;
   const feats = k.features ?? null;
 
   return (
@@ -143,8 +150,12 @@ export function MemberDetail(props: { m: MemberRow; now: number; act: DetailActi
             </dd>
             <dt>每天</dt>
             <dd>
-              V4.5 {inf(k.daily_images)}
-              {k.image_model_scope === "all" ? ` · V5 ${inf(k.daily_v5)}` : " · 不能用 V5"}
+              {!limitsValid
+                ? "额度配置损坏"
+                : `V4.5 ${limitText(k.quota_limits?.images ?? { mode: "unlimited" })}`}
+              {k.image_model_scope === "all"
+                ? ` · V5 ${limitText(k.quota_limits?.v5 ?? { mode: "unlimited" })}`
+                : " · 不能用 V5"}
             </dd>
             {m.reset_today && m.reset_today.count > 0 && (
               <>

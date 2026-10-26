@@ -2534,12 +2534,18 @@ async fn public_me_matches_legacy_and_coupons_work() {
     assert_eq!(me.2["survey_done"], false);
     assert_eq!(me.2["name"], "Alice (@alice)");
     assert_eq!(
+        me.2["subject_roles"],
+        json!({"owner": false, "admin": false})
+    );
+    assert_eq!(
         me.2["discord"],
         json!({"id": MEMBER, "username": "alice", "display_name": "Alice", "avatar": "a1b2"})
     );
     assert_eq!(
         me.2["today"],
         json!({"images": 0, "v5": 0, "legacy": 0, "daily_images": 150, "daily_v5": 0,
+               "quota_limits": {"images": {"mode": "inherit"}, "v5": {"mode": "inherit"}, "daily_anlas": {"mode": "inherit"}, "monthly_anlas": {"mode": "unlimited"}},
+               "quota_limits_valid": true,
                "site_v5_left": 150, "site_v5_cap": 150, "upstream_v5_free": true, "v5_paused": false,
                "v5_access_allowed": true, "v5_access_reason": "legacy policy", "anlas": 0,
                "daily_anlas": 50, "reset_hour": 7})
@@ -3478,6 +3484,18 @@ async fn registration_settings_ops_match_legacy() {
         .set_setting("register_daily_v5", "0")
         .await
         .unwrap();
+    let mut quota_modes = serde_json::to_value(
+        gate_server::ops::global_quota_modes(&e.state.db)
+            .await
+            .unwrap(),
+    )
+    .unwrap();
+    quota_modes["register_daily_images"] = json!({"mode": "limit", "value": 100});
+    e.state
+        .db
+        .set_setting("quota_modes_v1", &quota_modes.to_string())
+        .await
+        .unwrap();
     // 记录开关：提示词记录 5 天
     let audit = gate_server::ops::set_audit(
         &e.state,
@@ -3503,7 +3521,8 @@ async fn registration_settings_ops_match_legacy() {
     assert!(
         message.contains(
             "• 每日额度：每人每天最多 V4.5 及以下 100 张，全站共用额度池；每天 7 点重置\n"
-        )
+        ),
+        "{message}"
     );
     assert!(message.contains("• 已开通功能：全部已开放功能\n"));
     assert!(message.contains(&format!("`{key}`")));

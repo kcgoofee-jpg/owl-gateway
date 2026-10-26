@@ -178,6 +178,8 @@ fn key_json(row: &Value, c: &Counter, generated: i64, role: Option<&str>) -> Val
         "daily_anlas": jget(row, "daily_anlas"),
         "daily_v5": jget(row, "daily_v5"),
         "monthly_anlas": jget(row, "monthly_anlas"),
+        "quota_limits": crate::key::Key(row.clone()).quota_limits(),
+        "quota_limits_valid": crate::key::Key(row.clone()).try_quota_limits().is_ok(),
         "rpm": jget(row, "rpm"),
         "allow_anlas": jflag(row, "allow_anlas"),
         "allow_img2img": jflag(row, "allow_img2img"),
@@ -293,6 +295,16 @@ async fn create_invite_key(State(state): State<AppState>, _s: AdminSession) -> R
         expires_at: (expires_days > 0).then_some(now + expires_days as f64 * 86400.0),
         features: features::dump(features_list),
         discord_id: None,
+        quota_limits: Some(
+            serde_json::to_string(&gate_core::quota_limits::MemberLimits::legacy(
+                daily_images,
+                daily_v5,
+                0.0,
+                0.0,
+                1,
+            ))
+            .expect("valid invite quota modes"),
+        ),
     };
     let row = st.db.create_key(&new, now).await?;
     let id = row.get("id").and_then(Value::as_i64).unwrap_or(0);
@@ -365,7 +377,11 @@ async fn create_key(State(state): State<AppState>, _s: AdminSession, req: Reques
     let truthy = |name: &str| body.get(name).is_some_and(pyval::truthy);
     // 配额检查只认 > 0 的上限：allow_anlas 开着而日 / 月上限都是 0 = 个人 Anlas 完全无上限，
     // 可无限烧共享账号的付费点数（422 文案写「0 = 不限」，但实际 0 + 0 会被拒——历史如此，文案不动）
-    if truthy("allow_anlas") && daily_anlas <= 0.0 && monthly_anlas <= 0.0 {
+    if truthy("allow_anlas")
+        && !body.contains_key("quota_limits")
+        && daily_anlas <= 0.0
+        && monthly_anlas <= 0.0
+    {
         return Err(http(422, ANLAS_CAP));
     }
     let role = match body.get("role") {
@@ -383,6 +399,33 @@ async fn create_key(State(state): State<AppState>, _s: AdminSession, req: Reques
             n
         }
     };
+    let quota_limits = body.get("quota_limits").map(|v| {
+        let limits = gate_core::quota_limits::MemberLimits::from_value(v)
+            .ok_or_else(|| http(422, "quota_limits 必须包含 images/v5/daily_anlas/monthly_anlas 四项额度模式"))?;
+        if [limits.images, limits.v5, limits.daily_anlas, limits.monthly_anlas]
+            .iter()
+            .any(|mode| matches!(mode, gate_core::quota_limits::Limit::Limit(n) if !n.is_finite() || *n < 0.0 || *n > 1_000_000.0))
+        {
+            return Err(http(422, "quota_limits 限额必须在有效范围内"));
+        }
+        serde_json::to_string(v).map_err(|e| http(422, &format!("quota_limits 无效：{e}")))
+    }).transpose()?.unwrap_or_else(|| serde_json::to_string(
+        &gate_core::quota_limits::MemberLimits::legacy(daily_images, daily_v5, daily_anlas, monthly_anlas, -1)
+    ).expect("valid manual quota modes"));
+    if truthy("allow_anlas")
+        && let Some(v) = body.get("quota_limits")
+    {
+        let limits = gate_core::quota_limits::MemberLimits::from_value(v).expect("validated above");
+        if matches!(
+            limits.daily_anlas,
+            gate_core::quota_limits::Limit::Unlimited
+        ) && matches!(
+            limits.monthly_anlas,
+            gate_core::quota_limits::Limit::Unlimited
+        ) {
+            return Err(http(422, ANLAS_CAP));
+        }
+    }
     let new = NewKey {
         name,
         token: gen_key(),
@@ -401,6 +444,7 @@ async fn create_key(State(state): State<AppState>, _s: AdminSession, req: Reques
         expires_at,
         features: new_key_features(st, &body).await?,
         discord_id: None,
+        quota_limits: Some(quota_limits),
     };
     let row = st.db.create_key(&new, now).await?;
     let id = row.get("id").and_then(Value::as_i64).unwrap_or(0);
@@ -472,6 +516,17 @@ async fn patch_key(
             }
         }
     }
+    if body.contains_key("quota_limits")
+        && (quota_s == Some("auto")
+            || ["daily_images", "daily_v5", "daily_anlas", "monthly_anlas"]
+                .iter()
+                .any(|k| body.contains_key(*k)))
+    {
+        return Err(http(
+            422,
+            "quota_limits 不能与旧数值额度或 quota 字段同时提交",
+        ));
+    }
     let mut fields: Map<String, Value> = Map::new();
     if let Some(v) = body.get("name") {
         let n = pyc::take_chars(
@@ -513,6 +568,43 @@ async fn patch_key(
         fields.insert(
             "monthly_anlas".into(),
             pyval::float(strict_float(v, 0.0, 100_000.0, "monthly_anlas")?),
+        );
+    }
+    if let Some(v) = body.get("quota_limits") {
+        let modes = gate_core::quota_limits::MemberLimits::from_value(v).ok_or_else(|| {
+            http(
+                422,
+                "quota_limits 必须包含 images/v5/daily_anlas/monthly_anlas 四项额度模式",
+            )
+        })?;
+        fields.insert("quota_limits".into(), v.clone());
+        // Keep legacy numeric columns as a compatibility projection. Canonical modes remain
+        // authoritative; inherited values project the current site default for old readers.
+        let global = crate::ops::global_quota_modes(&st.db).await?;
+        let projected = |mode: gate_core::quota_limits::Limit, inherited: Option<f64>| {
+            mode.resolve(inherited).unwrap_or(0.0)
+        };
+        fields.insert(
+            "daily_images".into(),
+            json!(projected(
+                modes.images,
+                global.register_daily_images.resolve(None)
+            )),
+        );
+        fields.insert(
+            "daily_v5".into(),
+            json!(projected(modes.v5, global.register_daily_v5.resolve(None))),
+        );
+        fields.insert(
+            "daily_anlas".into(),
+            json!(projected(
+                modes.daily_anlas,
+                global.member_daily_anlas.resolve(None)
+            )),
+        );
+        fields.insert(
+            "monthly_anlas".into(),
+            json!(projected(modes.monthly_anlas, None)),
         );
     }
     if let Some(v) = body.get("rpm") {
@@ -579,11 +671,49 @@ async fn patch_key(
             .unwrap_or(Value::Null)
     };
     let le0 = |v: Value| pyval::number_like(&v).is_some_and(|x| x <= 0.0);
-    if pyval::truthy(&pick("allow_anlas")) && le0(pick("daily_anlas")) && le0(pick("monthly_anlas"))
+    if pyval::truthy(&pick("allow_anlas"))
+        && !body.contains_key("quota_limits")
+        && le0(pick("daily_anlas"))
+        && le0(pick("monthly_anlas"))
     {
         return Err(http(422, ANLAS_CAP));
     }
+    if !body.contains_key("quota_limits") {
+        let quota_fields_changed = [
+            "daily_images",
+            "daily_v5",
+            "daily_anlas",
+            "monthly_anlas",
+            "image_model_scope",
+        ]
+        .iter()
+        .any(|k| fields.contains_key(*k));
+        let auto = if quota_s == Some("auto") {
+            1
+        } else if quota_s == Some("manual") || quota_fields_changed {
+            -1
+        } else {
+            pyval::int_like(before.get("quota_auto").unwrap_or(&Value::Null)).unwrap_or(1)
+        };
+        let number = |name: &str| {
+            fields
+                .get(name)
+                .or_else(|| before.get(name))
+                .cloned()
+                .unwrap_or(Value::Null)
+        };
+        let images = pyval::int_like(&number("daily_images")).unwrap_or(0);
+        let v5 = pyval::int_like(&number("daily_v5")).unwrap_or(0);
+        let daily_anlas = pyval::number_like(&number("daily_anlas")).unwrap_or(0.0);
+        let monthly = pyval::number_like(&number("monthly_anlas")).unwrap_or(0.0);
+        let modes =
+            gate_core::quota_limits::MemberLimits::legacy(images, v5, daily_anlas, monthly, auto);
+        fields.insert("quota_limits".into(), json!(modes));
+    }
     st.db.update_key(key_id, &fields).await?;
+    if body.contains_key("quota_limits") && quota_s.is_none() {
+        st.db.set_quota_auto(key_id, -1).await?;
+    }
     let quota_mode_auto = quota_s == Some("auto");
     if quota_s == Some("manual") {
         st.db.set_quota_auto(key_id, -1).await?;
@@ -1237,6 +1367,14 @@ async fn members(State(state): State<AppState>, _s: AdminSession, q: AdminQuery)
         put("expires_at", jget(&row, "expires_at"));
         put("daily_images", jget(&row, "daily_images"));
         put("daily_v5", jget(&row, "daily_v5"));
+        put(
+            "quota_limits",
+            json!(crate::key::Key(row.clone()).quota_limits()),
+        );
+        put(
+            "quota_limits_valid",
+            json!(crate::key::Key(row.clone()).try_quota_limits().is_ok()),
+        );
         put("allow_anlas", json!(jflag(&row, "allow_anlas")));
         put("daily_anlas", jget(&row, "daily_anlas"));
         put("image_model_scope", jget(&row, "image_model_scope"));

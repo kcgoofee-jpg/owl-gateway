@@ -17,6 +17,13 @@ const key: KeyRow = {
   exclude_global_v5: false,
   image_model_scope: "all",
   quota_auto: false,
+  quota_limits: {
+    images: { mode: "limit", value: 100 },
+    v5: { mode: "limit", value: 5 },
+    daily_anlas: { mode: "inherit" },
+    monthly_anlas: { mode: "unlimited" },
+  },
+  quota_limits_valid: true,
   role: "regular",
   features: null,
   expires_at: null,
@@ -67,13 +74,14 @@ describe("createDefaults", () => {
 });
 
 describe("buildBody", () => {
-  it("手动模式：默认值能通过，0 视为不限", () => {
+  it("手动模式显式区分限制0与不限", () => {
     const f = { ...defaults(), name: " 张三 ", daily_images: "0", daily_v5: "0" };
     const r = buildBody(f);
     expect(r.ok).toBe(true);
     if (r.ok) {
       expect(r.body.name).toBe("张三");
-      expect(r.body.daily_images).toBe(0);
+      expect(r.body.quota_limits).toMatchObject({ images: { mode: "limit", value: 0 } });
+      expect(r.body).not.toHaveProperty("daily_images");
       expect(r.body.features).toEqual(["image"]);
       expect(createPayload(r.body)).not.toHaveProperty("quota");
     }
@@ -82,6 +90,8 @@ describe("buildBody", () => {
   it("空值、负数、小数、越界都被拒绝，并指出是哪个字段", () => {
     const f = {
       ...defaults(),
+      daily_anlas_mode: "limit" as const,
+      monthly_anlas_mode: "limit" as const,
       daily_images: "",
       daily_v5: "-1",
       daily_anlas: "abc",
@@ -109,12 +119,19 @@ describe("buildBody", () => {
     expect(r.ok && [r.body.rpm, r.body.expires_days]).toEqual([20, 0]);
   });
 
-  it("开通 Anlas 时日 / 月上限不能都是 0", () => {
-    const f = { ...defaults(), allow_anlas: true, daily_anlas: "0", monthly_anlas: "0" };
+  it("开通 Anlas 时日 / 月额度不能都不限", () => {
+    const f = {
+      ...defaults(),
+      allow_anlas: true,
+      daily_anlas_mode: "unlimited" as const,
+      monthly_anlas_mode: "unlimited" as const,
+      daily_anlas: "0",
+      monthly_anlas: "0",
+    };
     const r = buildBody(f);
     expect(r.ok).toBe(false);
-    if (!r.ok) expect(r.errors.allow_anlas).toContain("至少要有一个大于 0");
-    expect(buildBody({ ...f, monthly_anlas: "10" }).ok).toBe(true);
+    if (!r.ok) expect(r.errors.allow_anlas).toContain("不能都选择不限");
+    expect(buildBody({ ...f, monthly_anlas: "10", monthly_anlas_mode: "limit" }).ok).toBe(true);
   });
 
   it("功能：仅选中模式必须至少选一个；「全部」发 null", () => {

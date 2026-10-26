@@ -349,6 +349,31 @@ async fn global_daily_anlas_pool_is_editable() {
     );
 }
 
+#[tokio::test]
+async fn canonical_global_limit_zero_round_trips_without_legacy_widening() {
+    let e = setup(&[]).await;
+    let api = Admin::login_bare(&e.state).await;
+    let modes = json!({
+        "register_daily_images": {"mode":"unlimited"},
+        "register_daily_v5": {"mode":"unlimited"},
+        "global_daily_v5": {"mode":"limit", "value":0.0},
+        "global_daily_anlas": {"mode":"unlimited"},
+        "member_daily_anlas": {"mode":"unlimited"},
+        "global_monthly_anlas": {"mode":"unlimited"},
+        "public_vibe_enabled": false
+    });
+    let (status, _) = api
+        .json("PUT", "/settings", Some(json!({"quota_modes": modes})))
+        .await;
+    assert_eq!(status, 200);
+    let (status, saved) = api.json("GET", "/quota-modes", None).await;
+    assert_eq!(status, 200);
+    assert_eq!(saved, modes);
+    assert_eq!(settings(&e).await["global_daily_v5"], "0");
+    let shown = api.json("GET", "/settings", None).await.1;
+    assert_eq!(shown["global_daily_v5"], json!(0));
+}
+
 // ------------------------------------------------------------------ 排队与冷却
 
 #[tokio::test]

@@ -93,6 +93,8 @@ async fn keys_list_shape_roles_and_counters() {
             "daily_anlas",
             "daily_v5",
             "monthly_anlas",
+            "quota_limits",
+            "quota_limits_valid",
             "rpm",
             "allow_anlas",
             "allow_img2img",
@@ -570,6 +572,31 @@ async fn patch_key_updates_fields_and_quota_ownership() {
     assert!(acts.iter().any(|(act, _, d, ok)| act == "修改 Key"
         && d == "失败（422）：quota 只能是 auto（算法）或 manual（手动）"
         && !ok));
+}
+
+#[tokio::test]
+async fn explicit_quota_modes_round_trip_with_limit_zero() {
+    let (e, a) = ready().await;
+    let value = json!({
+        "images": {"mode":"limit", "value":0},
+        "v5": {"mode":"unlimited"},
+        "daily_anlas": {"mode":"limit", "value":0},
+        "monthly_anlas": {"mode":"unlimited"}
+    });
+    let r = a
+        .patch(&format!("{A}/keys/1"), json!({"quota_limits": value}))
+        .await;
+    assert_eq!(r.status, 200, "{}", r.text());
+    assert_eq!(r.json()["key"]["quota_limits"]["images"]["mode"], "limit");
+    assert_eq!(r.json()["key"]["quota_limits"]["images"]["value"], 0.0);
+    let stored = e.state.db.get_key(1).await.unwrap().unwrap();
+    assert_eq!(
+        stored["quota_limits"]
+            .as_str()
+            .unwrap()
+            .contains("\"value\":0"),
+        true
+    );
 }
 
 #[tokio::test]
@@ -1235,6 +1262,8 @@ async fn members_view_shape_and_dropped_fields() {
             "expires_at",
             "daily_images",
             "daily_v5",
+            "quota_limits",
+            "quota_limits_valid",
             "allow_anlas",
             "daily_anlas",
             "image_model_scope",

@@ -1,12 +1,13 @@
 /** 额度与保护：每个数都是站长手动设的（10-23 起没有自动额度算法）；最后一张「记录」只显示。 */
 import { useEffect, useMemo, useRef, useState } from "preact/hooks";
 import { fullTime, withUnit } from "../../../lib/format";
-import { Card } from "../../../ui";
+import { Button, Card } from "../../../ui";
 import { act, useAdmin } from "../Admin";
 import { CardPending, SectionHead, TableWrap, useBusy } from "./_kit";
 import {
   agoText,
   dash,
+  type GlobalQuotaModes,
   type Guard,
   guardSpecs,
   QUOTA_SPECS,
@@ -60,15 +61,15 @@ function FormCard(props: {
   );
 }
 
-/** V5 暂停时这两项不起作用：输入框变灰并注明 */
-const V5_PAUSED_FIELDS: Record<string, string> = {
-  register_daily_v5: "V5 已暂停",
-  global_daily_v5: "V5 已暂停",
-};
-
 function QuotaCard() {
   const { data, error, loading } = useAdmin<Settings>("/admin/api/settings");
-  if (!data) return <CardPending title="额度" loading={loading} error={error} />;
+  const {
+    data: modes,
+    error: modesError,
+    loading: modesLoading,
+  } = useAdmin<GlobalQuotaModes>("/admin/api/quota-modes");
+  if (!data || !modes)
+    return <CardPending title="额度" loading={loading || modesLoading} error={error || modesError} />;
   const setPaused = (on: boolean) =>
     act("PUT", "/admin/api/settings", { v5_paused: on }, on ? "V5 已暂停" : "V5 已恢复");
   return (
@@ -86,26 +87,17 @@ function QuotaCard() {
         />
       </Card>
       <AccessPolicyCard />
-      <FormCard
+      <QuotaModesCard
         title="成员统一额度"
-        sub="保存后生效。图片额度同步至采用统一额度的 Key；独立额度保留。"
-        url="/admin/api/settings"
-        specs={Object.fromEntries(
-          Object.entries(QUOTA_SPECS).filter(([k]) => k !== "v5_medium_mode" && !k.startsWith("global_")),
-        )}
-        server={data as unknown as Record<string, unknown>}
+        data={modes}
+        names={["register_daily_images", "register_daily_v5", "member_daily_anlas"]}
         done="额度已保存并同步"
-        saveLabel="保存额度"
-        {...(data.v5_paused ? { disabled: V5_PAUSED_FIELDS } : {})}
       />
-      <FormCard
+      <QuotaModesCard
         title="全站预算"
-        url="/admin/api/settings"
-        specs={Object.fromEntries(Object.entries(QUOTA_SPECS).filter(([k]) => k.startsWith("global_")))}
-        server={data as unknown as Record<string, unknown>}
+        data={modes}
+        names={["global_daily_v5", "global_daily_anlas", "global_monthly_anlas"]}
         done="全站预算已保存"
-        saveLabel="保存全站预算"
-        {...(data.v5_paused ? { disabled: V5_PAUSED_FIELDS } : {})}
       />
       <FormCard
         title="模型转换"
@@ -116,6 +108,95 @@ function QuotaCard() {
         saveLabel="保存模型转换"
       />
     </>
+  );
+}
+
+const MODE_LABELS: Record<
+  keyof Omit<GlobalQuotaModes, "public_vibe_enabled">,
+  { label: string; unit: string }
+> = {
+  register_daily_images: { label: "V4.5 每人每天", unit: "张" },
+  register_daily_v5: { label: "V5 每人每天", unit: "张" },
+  global_daily_v5: { label: "V5 全站每天", unit: "张" },
+  global_daily_anlas: { label: "Anlas 全站每天付费池", unit: "Anlas" },
+  member_daily_anlas: { label: "Anlas 每人每天", unit: "Anlas" },
+  global_monthly_anlas: { label: "Anlas 全站每月", unit: "Anlas" },
+};
+
+function QuotaModesCard(props: {
+  title: string;
+  data: GlobalQuotaModes;
+  names: Array<keyof typeof MODE_LABELS>;
+  done: string;
+}) {
+  const [modes, setModes] = useState(props.data);
+  const [saving, setSaving] = useState(false);
+  useEffect(() => setModes(props.data), [props.data]);
+  const changed = JSON.stringify(modes) !== JSON.stringify(props.data);
+  const save = async () => {
+    setSaving(true);
+    const ok = await act("PUT", "/admin/api/settings", { quota_modes: modes }, props.done);
+    setSaving(false);
+    if (ok) setModes(modes);
+  };
+  const setMode = (name: keyof typeof MODE_LABELS, value: GlobalQuotaModes[keyof typeof MODE_LABELS]) => {
+    setModes((current) => ({ ...current, [name]: value }));
+  };
+  return (
+    <Card title={props.title}>
+      <div class="form-grid">
+        {props.names.map((name) => {
+          const mode = modes[name];
+          const spec = MODE_LABELS[name];
+          return (
+            <div class="field" key={name}>
+              <span>{spec.label}</span>
+              <select
+                class="select"
+                value={mode.mode}
+                onChange={(e) =>
+                  setMode(
+                    name,
+                    e.currentTarget.value === "limit"
+                      ? { mode: "limit", value: mode.mode === "limit" ? mode.value : 0 }
+                      : { mode: "unlimited" },
+                  )
+                }
+              >
+                <option value="limit">限制数量</option>
+                <option value="unlimited">不限</option>
+              </select>
+              {mode.mode === "limit" && (
+                <div class="field__control">
+                  <input
+                    class="input"
+                    type="number"
+                    min="0"
+                    step={name === "global_monthly_anlas" ? "any" : 1}
+                    value={mode.value}
+                    onInput={(e) => setMode(name, { mode: "limit", value: Number(e.currentTarget.value) })}
+                  />
+                  <small>{spec.unit}；限额可以设为 0，表示拒绝额度内请求</small>
+                </div>
+              )}
+            </div>
+          );
+        })}
+        {props.names.includes("global_daily_anlas") && (
+          <SwitchRow
+            title="公共 Vibe / 精确参考"
+            desc="该开关独立于付费 Anlas 全站日池；关闭时仅 allow_anlas 成员可使用。"
+            checked={modes.public_vibe_enabled}
+            onChange={(v) => setModes((current) => ({ ...current, public_vibe_enabled: v }))}
+          />
+        )}
+      </div>
+      <div class="savebar">
+        <Button type="button" variant="primary" disabled={!changed || saving} onClick={() => void save()}>
+          {saving ? "保存中…" : "保存额度模式"}
+        </Button>
+      </div>
+    </Card>
   );
 }
 

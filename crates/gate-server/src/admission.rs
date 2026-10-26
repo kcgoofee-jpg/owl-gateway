@@ -6,13 +6,11 @@
 //! 每把 Key 的限速只有两层：这里的排队（同时生成 1 张，每人最多同时排 `queue_per_member` 张，默认 2）
 //! 和每分钟次数（RPM，`auth::check_rpm`）。
 
-use crate::auth::site_flag_f64;
 use crate::error::{ApiError, GateError, InternalError};
 use crate::key::Key;
 use crate::reqctx::ReqCtx;
 use crate::state::{AppState, Reservation};
 use gate_core::reasons::{self, Reason};
-use gate_core::site_flags;
 use std::sync::Arc;
 use std::sync::atomic::Ordering;
 use std::time::Duration;
@@ -218,11 +216,19 @@ pub fn acquire_slots(state: &AppState) -> Slots {
 /// 每人每日 Anlas 上限（0 = 不限）：Key 手动设置的优先，否则全站默认 `member_daily_anlas`。
 /// 拦请求（这里）和展示（`live::member_anlas_cap`）共用。
 pub async fn member_anlas_cap_f64(state: &AppState, key: &Key) -> Result<f64, gate_db::DbError> {
-    let own = key.daily_anlas();
-    if own > 0.0 {
-        return Ok(own);
-    }
-    site_flag_f64(state, &site_flags::MEMBER_DAILY_ANLAS).await
+    let mode = key
+        .try_quota_limits()
+        .map_err(gate_db::DbError::Invalid)?
+        .daily_anlas;
+    let cap = match mode {
+        gate_core::quota_limits::Limit::Inherit => crate::ops::global_quota_modes(&state.db)
+            .await?
+            .member_daily_anlas
+            .resolve(None),
+        gate_core::quota_limits::Limit::Unlimited => None,
+        gate_core::quota_limits::Limit::Limit(n) => Some(n),
+    };
+    Ok(cap.unwrap_or(0.0))
 }
 
 /// 额度检查。调用方必须持有 `state.budget` 锁：检查和登记预留不可交错。
@@ -236,6 +242,9 @@ pub async fn quota_image_check(
     legacy_free_images: i64,
     exclude: Option<u64>,
 ) -> Result<(), ApiError> {
+    let quota_limits = key
+        .try_quota_limits()
+        .map_err(|e| InternalError(format!("invalid stored quota config: {e}")))?;
     let access = if est.v5 > 0 {
         Some(crate::v5_access::evaluate(state, Some(key.str("discord_id"))).await?)
     } else {
@@ -277,10 +286,17 @@ pub async fn quota_image_check(
         .iter()
         .filter(|r| r.key_id == key.id() && r.month == month)
         .collect();
-    let daily_images = key.daily_images();
-    if legacy_free_images != 0 && daily_images > 0 {
+    let daily_images = match quota_limits.images {
+        gate_core::quota_limits::Limit::Inherit => crate::ops::global_quota_modes(&state.db)
+            .await?
+            .register_daily_images
+            .resolve(None),
+        mode => mode.resolve(None),
+    };
+    if legacy_free_images != 0 && daily_images.is_some() {
+        let daily_images = daily_images.unwrap_or_default();
         let used_legacy = c.legacy_free_images + own.iter().map(|r| r.legacy).sum::<i64>();
-        if used_legacy + legacy_free_images > daily_images {
+        if (used_legacy + legacy_free_images) as f64 > daily_images {
             return Err(GateError::with_code(
                 403,
                 format!("今日 V4.5 额度已用完，每天 {daily_images} 张，未扣费。{reset}重置。"),
@@ -292,8 +308,17 @@ pub async fn quota_image_check(
     }
     if est.v5 > 0 {
         // V5 周额度是账户级共享资源，用全站日计数镜像
-        let daily_v5 = key.daily_v5();
-        if daily_v5 > 0 && c.v5 + own.iter().map(|r| r.v5).sum::<i64>() + est.v5 > daily_v5 {
+        let daily_v5 = match quota_limits.v5 {
+            gate_core::quota_limits::Limit::Inherit => crate::ops::global_quota_modes(&state.db)
+                .await?
+                .register_daily_v5
+                .resolve(None),
+            mode => mode.resolve(None),
+        };
+        if daily_v5.is_some_and(|limit| {
+            (c.v5 + own.iter().map(|r| r.v5).sum::<i64>() + est.v5) as f64 > limit
+        }) {
+            let daily_v5 = daily_v5.unwrap_or_default();
             return Err(GateError::with_code(
                 403,
                 format!(
@@ -303,8 +328,11 @@ pub async fn quota_image_check(
             )
             .into());
         }
-        let g = crate::ops::global_daily_v5(&state.db).await? as f64;
-        if g > 0.0 && !key.exclude_global_v5() {
+        let global_v5 = crate::ops::global_quota_modes(&state.db)
+            .await?
+            .global_daily_v5
+            .resolve(None);
+        if let Some(g) = global_v5.filter(|_| !key.exclude_global_v5()) {
             let total = state.db.day_v5_total(&day).await?;
             let in_flight: i64 = pending
                 .iter()
@@ -325,7 +353,8 @@ pub async fn quota_image_check(
         }
     }
     if est.anlas > 0.0 {
-        let vibe_cap = site_flag_f64(state, &site_flags::GLOBAL_DAILY_ANLAS).await?;
+        let global_modes = crate::ops::global_quota_modes(&state.db).await?;
+        let vibe_cap = global_modes.global_daily_anlas.resolve(None);
         let global_day_in_flight = || {
             pending
                 .iter()
@@ -333,13 +362,13 @@ pub async fn quota_image_check(
                 .map(|r| r.anlas)
                 .sum::<f64>()
         };
-        let pool_check = |used: f64, label: &str| -> Result<(), ApiError> {
-            if used + global_day_in_flight() + est.anlas > vibe_cap {
+        let pool_check = |used: f64, label: &str, cap: f64| -> Result<(), ApiError> {
+            if used + global_day_in_flight() + est.anlas > cap {
                 return Err(GateError::with_code(
                     403,
                     format!(
                         "全站今日 {label} 额度已用完，每天 {} Anlas，未扣费。{reset}重置。",
-                        vibe_cap.trunc() as i64
+                        cap.trunc() as i64
                     ),
                     reasons::SITE_QUOTA,
                 )
@@ -348,7 +377,7 @@ pub async fn quota_image_check(
             Ok(())
         };
         if est.is_vibe && !key.allow_anlas() {
-            if vibe_cap <= 0.0 {
+            if !global_modes.public_vibe_enabled {
                 return Err(GateError::with_code(
                     403,
                     "Vibe 和精确参考需要消耗 Anlas，本站未开放，未扣费。请在客户端中去掉参考图。",
@@ -356,7 +385,9 @@ pub async fn quota_image_check(
                 )
                 .into());
             }
-            pool_check(state.db.day_anlas_total(&day).await?, "Vibe")?;
+            if let Some(cap) = vibe_cap {
+                pool_check(state.db.day_anlas_total(&day).await?, "Vibe", cap)?;
+            }
         } else if !key.allow_anlas() {
             return Err(GateError::with_code(
                 403,
@@ -364,14 +395,23 @@ pub async fn quota_image_check(
                 reasons::MEMBER_QUOTA,
             )
             .into());
-        } else if vibe_cap > 0.0 {
-            pool_check(state.db.day_anlas_total(&day).await?, "Anlas")?;
+        } else if let Some(cap) = vibe_cap {
+            pool_check(state.db.day_anlas_total(&day).await?, "Anlas", cap)?;
         }
         // 每人每日 Anlas 上限：没手动设置的 Key 落到全站默认 member_daily_anlas
         let own_anlas = || own.iter().map(|r| r.anlas).sum::<f64>();
         let own_month_anlas = || own_month.iter().map(|r| r.anlas).sum::<f64>();
-        let member_cap = member_anlas_cap_f64(state, key).await?;
-        if member_cap > 0.0 && c.anlas + own_anlas() + est.anlas > member_cap {
+        let member_mode = quota_limits.daily_anlas;
+        let member_cap = match member_mode {
+            gate_core::quota_limits::Limit::Inherit => crate::ops::global_quota_modes(&state.db)
+                .await?
+                .member_daily_anlas
+                .resolve(None),
+            gate_core::quota_limits::Limit::Unlimited => None,
+            gate_core::quota_limits::Limit::Limit(value) => Some(value),
+        };
+        if member_cap.is_some_and(|cap| c.anlas + own_anlas() + est.anlas > cap) {
+            let member_cap = member_cap.unwrap_or_default();
             return Err(GateError::with_code(
                 403,
                 format!(
@@ -384,8 +424,9 @@ pub async fn quota_image_check(
         }
         let month = state.month();
         let used = state.db.month_anlas(key.id(), &month).await?;
-        let monthly = key.monthly_anlas();
-        if monthly > 0.0 && used + own_month_anlas() + est.anlas > monthly {
+        let monthly = quota_limits.monthly_anlas.resolve(None);
+        if monthly.is_some_and(|cap| used + own_month_anlas() + est.anlas > cap) {
+            let monthly = monthly.unwrap_or_default();
             return Err(GateError::with_code(
                 403,
                 format!(
@@ -395,8 +436,7 @@ pub async fn quota_image_check(
             )
             .into());
         }
-        let budget_cap = site_flag_f64(state, &site_flags::GLOBAL_MONTHLY_ANLAS).await?;
-        if budget_cap > 0.0 {
+        if let Some(budget_cap) = global_modes.global_monthly_anlas.resolve(None) {
             let all_used = state.db.month_anlas_all(&month).await?;
             let global_month_in_flight: f64 = pending
                 .iter()

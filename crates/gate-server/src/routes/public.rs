@@ -711,6 +711,7 @@ async fn subscription(state: &AppState, key: &Key) -> Result<Value, InternalErro
         global_v5_total: state.db.day_v5_total(&day).await?,
         v5_paused: access.paused,
         v5_access_allowed: access.decision.allowed,
+        global_quota_modes: crate::ops::global_quota_modes(&state.db).await?,
     };
     gate_core::client_views::subscription_payload(&key.0, state.now(), &data)
         .map_err(|e| InternalError(e.to_string()))
@@ -956,6 +957,8 @@ pub(super) async fn me_payload(
         json!({
             "images": c.images, "v5": c.v5, "legacy": c.legacy_free_images,
             "daily_images": key.get("daily_images"), "daily_v5": key.get("daily_v5"),
+            "quota_limits": key.quota_limits(),
+            "quota_limits_valid": key.try_quota_limits().is_ok(),
             "site_v5_left": site_v5_left, "site_v5_cap": site_v5_cap,
             "upstream_v5_free": live::upstream_v5_free(state).await && !v5_access.paused,
             "v5_paused": v5_access.paused,

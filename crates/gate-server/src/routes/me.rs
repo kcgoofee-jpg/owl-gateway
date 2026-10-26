@@ -61,6 +61,8 @@ async fn v1_me(State(state): State<AppState>, req: Request) -> ApiResult {
             "image_model_scope": key.get("image_model_scope"),
             "anlas_month": pyc::round(anlas_month, 2),
             "monthly_anlas": key.get("monthly_anlas"),
+            "quota_limits": key.quota_limits(),
+            "quota_limits_valid": key.try_quota_limits().is_ok(),
             "text_tokens": c.text_tokens,
             "daily_text_tokens": key.get("daily_text_tokens"),
             "requests": c.requests,

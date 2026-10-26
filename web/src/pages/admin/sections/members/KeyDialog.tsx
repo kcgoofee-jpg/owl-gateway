@@ -53,6 +53,7 @@ function NumField(props: {
   min?: number;
   step?: number | "any";
   placeholder?: string | undefined;
+  disabled?: boolean;
 }) {
   return (
     <Field
@@ -73,6 +74,7 @@ function NumField(props: {
         inputMode="decimal"
         min={props.min ?? 0}
         step={props.step ?? 1}
+        disabled={props.disabled}
         value={props.value}
         placeholder={props.placeholder}
         aria-invalid={props.error ? true : undefined}
@@ -287,35 +289,98 @@ export function KeyDialog(props: Props) {
                 </select>
               </Field>
               <div class="xa-form__grid">
+                <Field label="每日 V4.5 额度模式">
+                  <select
+                    class="select"
+                    value={f.images_mode}
+                    onChange={(e) => set("images_mode", e.currentTarget.value as KeyForm["images_mode"])}
+                  >
+                    <option value="inherit">继承统一默认</option>
+                    <option value="unlimited">不限</option>
+                    <option value="limit">限制数量</option>
+                  </select>
+                </Field>
                 <NumField
                   label="每日 V4.5 及以下免费图张数"
-                  hint="0 = 不限"
+                  hint={f.images_mode === "limit" ? "允许设为 0，表示拒绝全部请求" : "仅在限制数量模式生效"}
                   value={f.daily_images}
                   error={errors.daily_images}
                   onInput={(v) => set("daily_images", v)}
+                  disabled={f.images_mode !== "limit"}
                 />
+                <Field label="每日 V5 额度模式">
+                  <select
+                    class="select"
+                    value={f.v5_mode}
+                    onChange={(e) => set("v5_mode", e.currentTarget.value as KeyForm["v5_mode"])}
+                  >
+                    <option value="inherit">继承统一默认</option>
+                    <option value="unlimited">不限</option>
+                    <option value="limit">限制数量</option>
+                  </select>
+                </Field>
                 <NumField
                   label="每日 V5 张数"
-                  hint="0 = 不限（仍受全站 V5 总量约束）"
+                  hint={
+                    f.v5_mode === "limit"
+                      ? "允许设为 0，表示拒绝全部 V5 请求；仍受全站 V5 总量约束"
+                      : "仅在限制数量模式生效"
+                  }
                   value={f.daily_v5}
                   error={errors.daily_v5}
                   onInput={(v) => set("daily_v5", v)}
+                  disabled={f.v5_mode !== "limit"}
                 />
+                <Field label="每日 Anlas 额度模式">
+                  <select
+                    class="select"
+                    value={f.daily_anlas_mode}
+                    onChange={(e) =>
+                      set("daily_anlas_mode", e.currentTarget.value as KeyForm["daily_anlas_mode"])
+                    }
+                  >
+                    <option value="inherit">继承每人默认</option>
+                    <option value="unlimited">不限</option>
+                    <option value="limit">限制额度</option>
+                  </select>
+                </Field>
                 <NumField
                   label="每日 Anlas 上限"
-                  hint="0 = 跟随全站「每人每日 Anlas 上限」"
+                  hint={
+                    f.daily_anlas_mode === "limit"
+                      ? "允许设为 0，表示不允许消耗 Anlas"
+                      : "仅在限制额度模式生效"
+                  }
                   value={f.daily_anlas}
                   error={errors.daily_anlas}
                   step="any"
                   onInput={(v) => set("daily_anlas", v)}
+                  disabled={f.daily_anlas_mode !== "limit"}
                 />
+                <Field label="每月 Anlas 额度模式">
+                  <select
+                    class="select"
+                    value={f.monthly_anlas_mode}
+                    onChange={(e) =>
+                      set("monthly_anlas_mode", e.currentTarget.value as KeyForm["monthly_anlas_mode"])
+                    }
+                  >
+                    <option value="unlimited">不限</option>
+                    <option value="limit">限制额度</option>
+                  </select>
+                </Field>
                 <NumField
                   label="每月 Anlas 上限"
-                  hint="0 = 不限"
+                  hint={
+                    f.monthly_anlas_mode === "limit"
+                      ? "允许设为 0，表示本月不允许消耗 Anlas"
+                      : "仅在限制额度模式生效"
+                  }
                   value={f.monthly_anlas}
                   error={errors.monthly_anlas}
                   step="any"
                   onInput={(v) => set("monthly_anlas", v)}
+                  disabled={f.monthly_anlas_mode !== "limit"}
                 />
               </div>
               <div class="xa-form__opts">

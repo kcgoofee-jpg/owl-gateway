@@ -5,7 +5,7 @@
 //!
 //! 表结构只增不减：已删除功能的死列 / 死表在 3.0 上线稳定后再单独迁移删除。
 
-use rusqlite::{Connection, ErrorCode};
+use rusqlite::{Connection, ErrorCode, OptionalExtension};
 
 const SCHEMA: &str = include_str!("sql/schema.sql");
 const STATUS_SCHEMA: &str = include_str!("sql/status_schema.sql");
@@ -88,6 +88,8 @@ pub const RUST_ADDED_COLUMNS: &[&str] = &[
     // 快照分账号记录（站长 10-24）：每个上游账号各写一行。旧行空串 = 早期写的全站聚合值，
     // 只留作历史，不再参与各账号的恢复速度估算。
     "ALTER TABLE upstream_snapshots ADD COLUMN token_id TEXT NOT NULL DEFAULT ''",
+    // Per-key canonical quota modes; appended last so compatibility column order remains stable.
+    "ALTER TABLE api_keys ADD COLUMN quota_limits TEXT",
 ];
 
 /// 3.0 新增的表（只增不减）。同 `RUST_ADDED_COLUMNS`：
@@ -281,6 +283,7 @@ pub fn run(conn: &mut Connection) -> rusqlite::Result<()> {
             Err(e) => return Err(e),
         }
     }
+    migrate_explicit_quotas(conn)?;
     for ddl in RUST_ADDED_TABLES {
         conn.execute(ddl, [])?;
     }
@@ -313,4 +316,135 @@ pub fn run(conn: &mut Connection) -> rusqlite::Result<()> {
     conn.execute_batch(STATUS_SCHEMA)?;
     conn.pragma_update(None, "user_version", SCHEMA_VERSION)?;
     Ok(())
+}
+
+/// Convert legacy numeric limits once. Compatibility columns remain readable by older projections;
+/// canonical mode data is persisted separately and never inferred again after the marker is written.
+fn migrate_explicit_quotas(conn: &mut Connection) -> rusqlite::Result<()> {
+    let marker = "quota_modes_v2_migrated";
+    let done: bool = conn.query_row(
+        "SELECT EXISTS(SELECT 1 FROM site_settings WHERE key=?)",
+        [marker],
+        |r| r.get(0),
+    )?;
+    if done {
+        return Ok(());
+    }
+    let tx = conn.transaction()?;
+    let mut stmt = tx.prepare(
+        "SELECT id, quota_auto, daily_images, daily_v5, daily_anlas, monthly_anlas FROM api_keys",
+    )?;
+    let rows = stmt
+        .query_map([], |r| {
+            Ok((
+                r.get::<_, i64>(0)?,
+                r.get::<_, i64>(1)?,
+                r.get::<_, i64>(2)?,
+                r.get::<_, i64>(3)?,
+                r.get::<_, f64>(4)?,
+                r.get::<_, f64>(5)?,
+            ))
+        })?
+        .collect::<rusqlite::Result<Vec<_>>>()?;
+    drop(stmt);
+    for (id, auto, images, v5, daily_anlas, monthly) in rows {
+        let limits =
+            gate_core::quota_limits::MemberLimits::legacy(images, v5, daily_anlas, monthly, auto);
+        let value = serde_json::to_string(&limits)
+            .map_err(|e| rusqlite::Error::ToSqlConversionFailure(Box::new(e)))?;
+        tx.execute(
+            "UPDATE api_keys SET quota_limits=? WHERE id=?",
+            rusqlite::params![value, id],
+        )?;
+    }
+    let read_setting = |key: &str, default: f64| -> rusqlite::Result<f64> {
+        let raw: Option<String> = tx
+            .query_row("SELECT value FROM site_settings WHERE key=?", [key], |r| {
+                r.get(0)
+            })
+            .optional()?;
+        Ok(raw.and_then(|s| s.parse::<f64>().ok()).unwrap_or(default))
+    };
+    let global = gate_core::quota_limits::GlobalLimits::from_legacy([
+        read_setting("register_daily_images", 150.0)?,
+        read_setting("register_daily_v5", 0.0)?,
+        read_setting("global_daily_v5", 150.0)?,
+        read_setting("global_daily_anlas", 200.0)?,
+        read_setting("member_daily_anlas", 50.0)?,
+        read_setting("global_monthly_anlas", 10000.0)?,
+    ]);
+    let global_json = serde_json::to_string(&global)
+        .map_err(|e| rusqlite::Error::ToSqlConversionFailure(Box::new(e)))?;
+    tx.execute(
+        "INSERT INTO site_settings(key,value) VALUES('quota_modes_v1',?) ON CONFLICT(key) DO NOTHING",
+        [global_json],
+    )?;
+    tx.execute(
+        "INSERT INTO site_settings(key,value) VALUES(?, '1')",
+        [marker],
+    )?;
+    tx.commit()
+}
+
+#[cfg(test)]
+mod quota_migration_tests {
+    use super::*;
+    use serde_json::Value;
+
+    #[test]
+    fn maps_legacy_zero_by_mode_once() {
+        let mut conn = Connection::open_in_memory().unwrap();
+        run(&mut conn).unwrap();
+        conn.execute(
+            "DELETE FROM site_settings WHERE key='quota_modes_v2_migrated'",
+            [],
+        )
+        .unwrap();
+        conn.execute("DELETE FROM site_settings WHERE key='quota_modes_v1'", [])
+            .unwrap();
+        conn.execute(
+            "INSERT INTO site_settings(key,value) VALUES('global_daily_anlas','0')",
+            [],
+        )
+        .unwrap();
+        conn.execute("INSERT INTO api_keys(name,token,created_at,quota_auto,daily_images,daily_v5,daily_anlas,monthly_anlas) VALUES('manual','synthetic',1,-1,0,0,0,0)", []).unwrap();
+        conn.execute("INSERT INTO api_keys(name,token,created_at,quota_auto,daily_images,daily_v5,daily_anlas,monthly_anlas) VALUES('managed','synthetic-2',1,1,0,0,0,20)", []).unwrap();
+        migrate_explicit_quotas(&mut conn).unwrap();
+        let read = |id| -> Value {
+            let raw: String = conn
+                .query_row("SELECT quota_limits FROM api_keys WHERE id=?", [id], |r| {
+                    r.get(0)
+                })
+                .unwrap();
+            serde_json::from_str(&raw).unwrap()
+        };
+        let manual = read(1);
+        assert_eq!(manual["images"]["mode"], "unlimited");
+        assert_eq!(manual["v5"]["mode"], "unlimited");
+        assert_eq!(manual["monthly_anlas"]["mode"], "unlimited");
+        assert_eq!(manual["daily_anlas"]["mode"], "inherit");
+        let managed = read(2);
+        assert_eq!(managed["images"]["mode"], "inherit");
+        assert_eq!(managed["v5"]["mode"], "inherit");
+        assert_eq!(managed["monthly_anlas"]["mode"], "limit");
+        let global_raw: String = conn
+            .query_row(
+                "SELECT value FROM site_settings WHERE key='quota_modes_v1'",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap();
+        let global: Value = serde_json::from_str(&global_raw).unwrap();
+        assert_eq!(global["global_daily_anlas"]["mode"], "unlimited");
+        assert_eq!(global["public_vibe_enabled"], false);
+        conn.execute("UPDATE api_keys SET quota_limits='{}' WHERE id=1", [])
+            .unwrap();
+        migrate_explicit_quotas(&mut conn).unwrap();
+        let after: String = conn
+            .query_row("SELECT quota_limits FROM api_keys WHERE id=1", [], |r| {
+                r.get(0)
+            })
+            .unwrap();
+        assert_eq!(after, "{}");
+    }
 }

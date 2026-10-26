@@ -70,7 +70,7 @@ fn me_json(
     features: &str,
 ) -> String {
     format!(
-        "{{\"name\":\"{name}\",\"generated_images_total\":0,\"today\":{{\"images\":0,\"daily_images\":100,\"legacy_free_images_today\":0,\"anlas_today\":0.0,\"daily_anlas\":0.0,\"v5_today\":0,\"daily_v5\":10,\"image_model_scope\":\"legacy\",\"anlas_month\":0.0,\"monthly_anlas\":0.0,\"text_tokens\":{tokens},\"daily_text_tokens\":{daily_text},\"requests\":{requests}}},\"expires_at\":null,\"inactivity_delete_days\":{delete_days},\"features\":{features}}}"
+        "{{\"name\":\"{name}\",\"generated_images_total\":0,\"today\":{{\"images\":0,\"daily_images\":100,\"legacy_free_images_today\":0,\"anlas_today\":0.0,\"daily_anlas\":0.0,\"v5_today\":0,\"daily_v5\":10,\"image_model_scope\":\"legacy\",\"anlas_month\":0.0,\"monthly_anlas\":0.0,\"quota_limits\":{{\"images\":{{\"mode\":\"inherit\"}},\"v5\":{{\"mode\":\"inherit\"}},\"daily_anlas\":{{\"mode\":\"inherit\"}},\"monthly_anlas\":{{\"mode\":\"unlimited\"}}}},\"quota_limits_valid\":true,\"text_tokens\":{tokens},\"daily_text_tokens\":{daily_text},\"requests\":{requests}}},\"expires_at\":null,\"inactivity_delete_days\":{delete_days},\"features\":{features}}}"
     )
 }
 

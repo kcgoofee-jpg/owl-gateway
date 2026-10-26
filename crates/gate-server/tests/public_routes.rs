@@ -675,8 +675,11 @@ async fn user_compat_routes_require_key_and_keep_panel_schema() {
         assert_eq!(
             v["naiGate"],
             json!({
-                "imageModelScope": "legacy", "anlasEnabled": false, "anlasLeft": 0, "anlasMonthlyLimit": 0,
-                "v5LeftToday": 10, "v5DailyLimit": 10, "v5Unlimited": false, "v5Paused": false, "v5Allowed": true, "account": null
+                "imageModelScope": "legacy",
+                "quotaLimits": {"images": {"mode": "inherit"}, "v5": {"mode": "inherit"}, "daily_anlas": {"mode": "inherit"}, "monthly_anlas": {"mode": "unlimited"}},
+                "v45DailyLimit": 150, "v45Unlimited": false, "dailyAnlasLimit": 50.0, "dailyAnlasUnlimited": false,
+                "anlasEnabled": false, "anlasLeft": 0, "anlasMonthlyLimit": 0, "anlasUnlimited": true,
+                "v5LeftToday": 150, "v5DailyLimit": 150, "v5Unlimited": false, "v5Paused": false, "v5Allowed": true, "account": null
             })
         );
     }
@@ -684,7 +687,7 @@ async fn user_compat_routes_require_key_and_keep_panel_schema() {
     // 用掉的 V5 体现在 v5LeftToday 里
     common::add_usage(&e.state.db, 1, &e.state.day(), 3, 0.0).await;
     let (_, body) = get("/user/subscription").await;
-    assert_eq!(json_of(&body)["naiGate"]["v5LeftToday"], 7);
+    assert_eq!(json_of(&body)["naiGate"]["v5LeftToday"], 147);
 
     for path in ["/user/data", "/ai/user/data"] {
         let (status, body) = get(path).await;
@@ -1597,6 +1600,8 @@ async fn landing_boot_for_member_with_key() {
         me["today"],
         json!({
             "images": 0, "v5": 0, "legacy": 0, "daily_images": 100, "daily_v5": 10,
+            "quota_limits": {"images": {"mode": "inherit"}, "v5": {"mode": "inherit"}, "daily_anlas": {"mode": "inherit"}, "monthly_anlas": {"mode": "unlimited"}},
+            "quota_limits_valid": true,
             "site_v5_left": 150, "site_v5_cap": 150, "upstream_v5_free": true, "v5_paused": false,
             "v5_access_allowed": true, "v5_access_reason": "legacy policy",
             "anlas": 0, "daily_anlas": 50, "reset_hour": 7

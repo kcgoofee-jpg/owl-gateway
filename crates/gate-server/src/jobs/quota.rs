@@ -6,25 +6,26 @@
 
 use super::JobError;
 use crate::action_log::log_action;
-use crate::audit::{site_bool, site_int};
+use crate::audit::site_bool;
 use crate::error::ApiError;
 use crate::state::AppState;
 use gate_core::quota::{self, AccountAllowance, Effect, Manual};
-use gate_core::site_flags::{
-    GLOBAL_DAILY_V5, MEMBER_DAILY_ANLAS, REGISTER_DAILY_IMAGES, REGISTER_DAILY_V5, V5_PAUSED,
-};
+use gate_core::site_flags::V5_PAUSED;
 use serde_json::{Value, json};
 use std::time::Instant;
 
 /// 站长手动定的额度（没设过用登记表的默认值）。
 pub async fn manual(state: &AppState) -> Result<Manual, gate_db::DbError> {
     let db = &state.db;
+    let modes = crate::ops::global_quota_modes(db).await?;
+    let count =
+        |mode: gate_core::quota_limits::Limit| mode.resolve(None).unwrap_or(0.0).trunc() as i64;
     Ok(Manual {
-        daily_images: site_int(db, &REGISTER_DAILY_IMAGES).await?,
-        daily_v5: site_int(db, &REGISTER_DAILY_V5).await?,
-        global_v5: site_int(db, &GLOBAL_DAILY_V5).await?,
+        daily_images: count(modes.register_daily_images),
+        daily_v5: count(modes.register_daily_v5),
+        global_v5: count(modes.global_daily_v5),
         v5_paused: site_bool(db, &V5_PAUSED).await?,
-        member_anlas: site_int(db, &MEMBER_DAILY_ANLAS).await?,
+        member_anlas: count(modes.member_daily_anlas),
     })
 }
 

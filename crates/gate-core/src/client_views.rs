@@ -24,6 +24,7 @@ pub struct SubscriptionData {
     pub global_v5_total: i64,
     pub v5_paused: bool,
     pub v5_access_allowed: bool,
+    pub global_quota_modes: crate::quota_limits::GlobalLimits,
 }
 
 /// Key 行缺字段或类型不对（线上 Key 行总是完整的，这只在数据损坏时出现）。
@@ -33,6 +34,8 @@ pub enum SubscriptionError {
     MissingKey(&'static str),
     #[error("Key 字段 {0} 的类型不是数字")]
     BadNumber(&'static str),
+    #[error("Key 额度模式无效")]
+    BadQuotaModes,
 }
 
 fn field<'a>(key: &'a Value, name: &'static str) -> Result<&'a Value, SubscriptionError> {
@@ -67,26 +70,76 @@ pub fn subscription_payload(
     now: f64,
     data: &SubscriptionData,
 ) -> Result<Value, SubscriptionError> {
+    let quota_limits = {
+        let stored = key.get("quota_limits");
+        let value = match stored {
+            None | Some(Value::Null) => None,
+            Some(Value::String(raw)) => Some(
+                serde_json::from_str::<Value>(raw).map_err(|_| SubscriptionError::BadQuotaModes)?,
+            ),
+            Some(Value::Object(_)) => Some(stored.cloned().unwrap_or(Value::Null)),
+            _ => return Err(SubscriptionError::BadQuotaModes),
+        };
+        match value {
+            Some(value) => crate::quota_limits::MemberLimits::from_value(&value)
+                .ok_or(SubscriptionError::BadQuotaModes)?,
+            None => {
+                // Keep the legacy projection's required-field checks and their precedence for
+                // pre-migration Key rows. Optional quota metadata was never required by this view.
+                let _ = field(key, "allow_anlas")?;
+                let monthly_anlas = float_or_zero(field(key, "monthly_anlas")?, "monthly_anlas")?;
+                let daily_v5 = int_or_zero(field(key, "daily_v5")?, "daily_v5")?;
+                let _ = field(key, "expires_at")?;
+                let _ = field(key, "image_model_scope")?;
+                let null = Value::Null;
+                let get = |name| key.get(name).unwrap_or(&null);
+                crate::quota_limits::MemberLimits::legacy(
+                    int_or_zero(get("daily_images"), "daily_images")?,
+                    daily_v5,
+                    float_or_zero(get("daily_anlas"), "daily_anlas")?,
+                    monthly_anlas,
+                    int_or_zero(get("quota_auto"), "quota_auto")?,
+                )
+            }
+        }
+    };
+    let images_limit = match quota_limits.images {
+        crate::quota_limits::Limit::Inherit => {
+            data.global_quota_modes.register_daily_images.resolve(None)
+        }
+        mode => mode.resolve(None),
+    };
+    let daily_anlas_limit = match quota_limits.daily_anlas {
+        crate::quota_limits::Limit::Inherit => {
+            data.global_quota_modes.member_daily_anlas.resolve(None)
+        }
+        mode => mode.resolve(None),
+    };
     let paid = pyval::truthy(field(key, "allow_anlas")?);
-    let monthly_limit = float_or_zero(field(key, "monthly_anlas")?, "monthly_anlas")?;
-    let anlas_left = if paid && monthly_limit > 0.0 {
-        ((monthly_limit - data.month_anlas_used).trunc() as i64).max(0)
+    let monthly_limit = quota_limits.monthly_anlas.resolve(None);
+    let anlas_left = if paid && monthly_limit.is_some() {
+        ((monthly_limit.unwrap_or_default() - data.month_anlas_used).trunc() as i64).max(0)
     } else {
         0
     };
 
     let mut limits: Vec<i64> = Vec::new();
     let mut remaining: Vec<i64> = Vec::new();
-    let daily_limit = int_or_zero(field(key, "daily_v5")?, "daily_v5")?;
-    if daily_limit > 0 {
-        limits.push(daily_limit);
-        remaining.push((daily_limit - data.daily_v5_used).max(0));
+    let daily_limit = match quota_limits.v5 {
+        crate::quota_limits::Limit::Inherit => {
+            data.global_quota_modes.register_daily_v5.resolve(None)
+        }
+        mode => mode.resolve(None),
+    };
+    if let Some(daily_limit) = daily_limit {
+        limits.push(daily_limit.trunc() as i64);
+        remaining.push(((daily_limit - data.daily_v5_used as f64).trunc() as i64).max(0));
     }
     if !key.get("exclude_global_v5").is_some_and(pyval::truthy) {
-        let global_limit = data.global_v5_limit;
-        if global_limit > 0 {
-            limits.push(global_limit);
-            remaining.push((global_limit - data.global_v5_total).max(0));
+        let global_limit = data.global_quota_modes.global_daily_v5.resolve(None);
+        if let Some(global_limit) = global_limit {
+            limits.push(global_limit.trunc() as i64);
+            remaining.push(((global_limit - data.global_v5_total as f64).trunc() as i64).max(0));
         }
     }
     // V5 暂停：网关会在本地拒掉 V5，客户端不能看到「不限」
@@ -134,9 +187,16 @@ pub fn subscription_payload(
         // 本地每日额度走 naiGate；官方电池用量不可用。
         "naiGate": {
             "imageModelScope": scope,
+            "quotaLimits": quota_limits,
+            "v45DailyLimit": images_limit.unwrap_or(0.0).trunc() as i64,
+            "v45Unlimited": images_limit.is_none(),
+            "dailyAnlasLimit": daily_anlas_limit.unwrap_or(0.0),
+            "dailyAnlasUnlimited": daily_anlas_limit.is_none(),
             "anlasEnabled": paid,
             "anlasLeft": anlas_left,
-            "anlasMonthlyLimit": monthly_limit.trunc() as i64,
+            "anlasMonthlyLimit": monthly_limit.unwrap_or(0.0).trunc() as i64,
+            "anlasUnlimited": monthly_limit.is_none(),
+            "quotaLimits": quota_limits,
             "v5LeftToday": v5_left,
             "v5DailyLimit": v5_limit,
             "v5Unlimited": limits.is_empty() && !paused && !access_closed,
@@ -166,6 +226,9 @@ mod tests {
             global_v5_total: 147,
             v5_paused: false,
             v5_access_allowed: true,
+            global_quota_modes: crate::quota_limits::GlobalLimits::from_legacy([
+                150.0, 0.0, 150.0, 200.0, 50.0, 10000.0,
+            ]),
         };
         let v = subscription_payload(&key(), 1.0e9, &data).unwrap();
         assert_eq!(v["naiGate"]["anlasLeft"], 80);
@@ -186,6 +249,9 @@ mod tests {
             global_v5_total: 0,
             v5_paused: false,
             v5_access_allowed: true,
+            global_quota_modes: crate::quota_limits::GlobalLimits::from_legacy([
+                150.0, 0.0, 0.0, 200.0, 50.0, 10000.0,
+            ]),
         };
         let open = subscription_payload(&k, 0.0, &data).unwrap();
         assert_eq!(open["naiGate"]["v5Unlimited"], true);
@@ -228,6 +294,9 @@ mod tests {
             global_v5_total: 0,
             v5_paused: false,
             v5_access_allowed: false,
+            global_quota_modes: crate::quota_limits::GlobalLimits::from_legacy([
+                150.0, 0.0, 0.0, 200.0, 50.0, 10000.0,
+            ]),
         };
         let result = subscription_payload(&k, 0.0, &d).unwrap();
         assert_eq!(result["naiGate"]["v5Unlimited"], false);

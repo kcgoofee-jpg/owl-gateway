@@ -30,8 +30,11 @@ fn ids(raw: Option<&String>) -> Vec<String> {
 }
 
 pub async fn configuration(state: &AppState) -> Result<Configuration, gate_db::DbError> {
-    let raw = state
-        .db
+    configuration_for(&state.db).await
+}
+
+pub async fn configuration_for(db: &gate_db::Db) -> Result<Configuration, gate_db::DbError> {
+    let raw = db
         .get_settings_bulk(&[MODE_KEY, SUBJECTS_KEY, OWNERS_KEY, ADMINS_KEY, "v5_paused"])
         .await?;
     Ok(Configuration {
