@@ -61,15 +61,12 @@ function ReconcileSummary({ recon, csrf }: { recon: Recon; csrf: string }) {
         <b class="small">Anlas 消耗核对</b>
         <span class="spacer" />
         <Button variant="primary" disabled={!canRun} onClick={() => void run()}>
-          {running ? "正在核对…" : wait > 0 ? `${wait} 秒后可再次查询` : "查询并核对"}
+          {running ? "正在核对…" : wait > 0 ? `${wait} 秒后核对` : "查询并核对"}
         </Button>
       </div>
-      <p class="muted small">
-        对比官方余额的减少量与本站记录的消耗。充值、续费或在别处使用账号也会影响余额；核对不改任何成员的额度。
-      </p>
-      {recon.running && <Notice>其他页面正在核对，稍后这里会自动出现结果。</Notice>}
+      {recon.running && <Notice>正在核对…</Notice>}
       {!latest ? (
-        <p class="muted small">还没有记录。点「查询并核对」获取当前余额，之后再次查询才会有对比。</p>
+        <p class="muted small">暂无核对记录。</p>
       ) : (
         <>
           <p class="muted small" role="status">
@@ -77,11 +74,11 @@ function ReconcileSummary({ recon, csrf }: { recon: Recon; csrf: string }) {
             {anlasText(latest.balance)} Anlas
           </p>
           {c?.reason ? (
-            <p>{RECON_REASONS[c.reason] ?? "已记下当前余额"}。下次查询时，会核对这期间用了多少 Anlas。</p>
+            <p>{RECON_REASONS[c.reason] ?? "已记录"}。</p>
           ) : c ? (
             <>
               <p class="muted small">
-                这次核对的时间段：{fullTime(c.since)} — {fullTime(latest.checked_at)}
+                核对区间：{fullTime(c.since)} — {fullTime(latest.checked_at)}
               </p>
               <div class="stats">
                 <Stat label="官方余额减少" value={`${anlasText(c.balance_decrease)}`} hint="Anlas" />
@@ -90,17 +87,11 @@ function ReconcileSummary({ recon, csrf }: { recon: Recon; csrf: string }) {
                   value={`${anlasText(c.recorded)}`}
                   hint={c.site_paid ? `Anlas · 含站付 V5 ${anlasText(c.site_paid)}` : "Anlas"}
                 />
-                <Stat label="相差" value={`${anlasText(c.difference)}`} hint="官方减少 − 本站记录" />
+                <Stat label="相差" value={`${anlasText(c.difference)}`} hint="Anlas" />
               </div>
-              <p>
-                {c.difference === 0
-                  ? "余额变化与本站记录一致。"
-                  : `官方余额减少了 ${anlasText(c.balance_decrease)} Anlas，比本站记录${(c.difference ?? 0) > 0 ? "多" : "少"} ${anlasText(Math.abs(c.difference ?? 0))} Anlas。`}
-              </p>
               {(c.unconfirmed_requests ?? 0) > 0 && (
                 <Notice tone="warn">
-                  有 {anlasText(c.unconfirmed_requests)} 笔失败请求可能产生费用，合计预估{" "}
-                  {anlasText(c.unconfirmed_anlas)} Anlas。
+                  待核对 {anlasText(c.unconfirmed_requests)} 笔 · 预估 {anlasText(c.unconfirmed_anlas)} Anlas
                 </Notice>
               )}
             </>
@@ -182,54 +173,51 @@ function Settlements({ items, csrf }: { items: Settlement[]; csrf: string }) {
 
   return (
     <div class="stack-sm">
-      <b class="small">待核对的未知预留</b>
-      <p class="muted small">
-        未知执行余量会持续占用额度，不会自动重发。只有核实剩余部分未执行后，才能释放该未知预留。
-      </p>
-      {items.length === 0 ? (
-        <p class="muted small">目前没有待核对请求。</p>
-      ) : (
-        items.map((item) => (
-          <article class="card card--inset" key={item.request_id}>
-            <p class="small">
-              <strong>RID {item.rid}</strong> · Key {item.key_id} · {item.service_day} / {item.service_month}
-            </p>
-            {item.correlation_id && <p class="muted small">NovelAI 排障号：{item.correlation_id}</p>}
-            <p class="muted small">
-              预留 {item.reserved_anlas} Anlas · V5 {item.reserved_v5} · 免费图 {item.reserved_legacy}
-              {item.is_vibe ? " · Vibe" : ""}
-            </p>
-            <Notice>
-              仅剩余执行结果未知。释放只解除尚未确认部分的预算预留，不撤销已确认成功部分的记账。原因会永久写入后台审计。
-            </Notice>
-            <label class="field">
-              <span>核对说明（至少 12 字）</span>
-              <textarea
-                rows={2}
-                value={reasons[item.request_id] ?? ""}
-                onInput={(e) => setReasons({ ...reasons, [item.request_id]: e.currentTarget.value })}
-              />
-            </label>
-            <label class="check-row">
-              <input
-                type="checkbox"
-                checked={confirmed[item.request_id] ?? false}
-                onChange={(e) => setConfirmed({ ...confirmed, [item.request_id]: e.currentTarget.checked })}
-              />
-              <span>我已核实尚未确认的剩余部分未在上游执行</span>
-            </label>
-            <Button
-              variant="danger"
-              disabled={
-                !confirmed[item.request_id] || (reasons[item.request_id] ?? "").trim().length < 12 || !!busy
-              }
-              onClick={() => void release(item)}
-            >
-              {busy === item.request_id ? "正在记录…" : "确认未知余量未执行并释放预留"}
-            </Button>
-          </article>
-        ))
-      )}
+      <details class="up-settlements">
+        <summary>待核对预留（{items.length}）</summary>
+        {items.length === 0 ? (
+          <p class="muted small">目前没有待核对请求。</p>
+        ) : (
+          items.map((item) => (
+            <article class="card card--inset" key={item.request_id}>
+              <p class="small">
+                <strong>RID {item.rid}</strong> · Key {item.key_id} · {item.service_day} /{" "}
+                {item.service_month}
+              </p>
+              {item.correlation_id && <p class="muted small">NovelAI 排障号：{item.correlation_id}</p>}
+              <p class="muted small">
+                预留 {item.reserved_anlas} Anlas · V5 {item.reserved_v5} · 免费图 {item.reserved_legacy}
+                {item.is_vibe ? " · Vibe" : ""}
+              </p>
+              <label class="field">
+                <span>核对说明（至少 12 字）</span>
+                <textarea
+                  rows={2}
+                  value={reasons[item.request_id] ?? ""}
+                  onInput={(e) => setReasons({ ...reasons, [item.request_id]: e.currentTarget.value })}
+                />
+              </label>
+              <label class="check-row">
+                <input
+                  type="checkbox"
+                  checked={confirmed[item.request_id] ?? false}
+                  onChange={(e) => setConfirmed({ ...confirmed, [item.request_id]: e.currentTarget.checked })}
+                />
+                <span>已核实剩余部分未执行</span>
+              </label>
+              <Button
+                variant="danger"
+                disabled={
+                  !confirmed[item.request_id] || (reasons[item.request_id] ?? "").trim().length < 12 || !!busy
+                }
+                onClick={() => void release(item)}
+              >
+                {busy === item.request_id ? "正在记录…" : "释放预留"}
+              </Button>
+            </article>
+          ))
+        )}
+      </details>
     </div>
   );
 }
@@ -242,10 +230,10 @@ export default function ReconcileCard(props: {
   error?: string | null;
 }) {
   if (!props.recon) {
-    return <CardPending title="核对与未知预留" loading={props.loading} error={props.error} />;
+    return <CardPending title="Anlas 核对" loading={props.loading} error={props.error} />;
   }
   return (
-    <Card title="核对与未知预留" sub="官方余额对账，以及上游结果未知、占着额度的请求。">
+    <Card title="Anlas 核对">
       <div class="stack">
         <ReconcileSummary recon={props.recon} csrf={props.csrf} />
         <Settlements items={props.settlements} csrf={props.csrf} />

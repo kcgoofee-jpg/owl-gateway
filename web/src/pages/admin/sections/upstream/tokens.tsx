@@ -79,11 +79,6 @@ export function TokenDialog(props: {
           void submit();
         }}
       >
-        {!add && (
-          <p class="muted small">
-            在 NovelAI 重置 Token 后，把新的粘贴到这里；这把 Token 的 V5 日限、启停、并发和今日计数会延续。
-          </p>
-        )}
         <div class="field">
           <label class="field__label" for={`${id}-t`}>
             NovelAI 持久 API Token
@@ -98,13 +93,8 @@ export function TokenDialog(props: {
             value={token}
             disabled={busyNow}
             aria-invalid={err ? "true" : undefined}
-            aria-describedby={`${id}-h`}
             onInput={(e) => setToken((e.target as HTMLInputElement).value)}
           />
-          <span class="field__hint" id={`${id}-h`}>
-            在 NovelAI 的 账号设置 → Get Persistent API Token 里获取。粘贴后不会显示，提交前会先向 NovelAI
-            验证。
-          </span>
           {err && (
             <span class="field__error" role="alert">
               {err}
@@ -119,7 +109,7 @@ export function TokenDialog(props: {
               disabled={busyNow}
               onChange={(e) => setAnlas((e.target as HTMLInputElement).checked)}
             />
-            <span>允许这把 Token 消耗 Anlas（付费点数）</span>
+            <span>允许消耗 Anlas</span>
           </label>
         )}
       </form>

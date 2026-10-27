@@ -3,22 +3,14 @@ import {
   type AnlasEstimate,
   ageText,
   anlasText,
+  answer,
   daysLeftText,
-  requestsText,
+  duration,
+  projectionText,
+  reading,
   tokenFormatProblem,
   tokenState,
-  type WindowStats,
 } from "./core";
-
-const win = (over: Partial<WindowStats> = {}): WindowStats => ({
-  ok: 0,
-  error: 0,
-  rejected: 0,
-  up_429: 0,
-  up_403: 0,
-  up_401: 0,
-  ...over,
-});
 
 describe("tokenState", () => {
   const base = { admin_enabled: true, disabled: false, blocked_for: 0, full: false };
@@ -41,7 +33,6 @@ describe("tokenFormatProblem", () => {
 
 describe("readings text", () => {
   it("窗口统计与 Anlas 文案", () => {
-    expect(requestsText(win({ ok: 3, error: 1, rejected: 2 }))).toBe("成功 3 · 出错 1 · 选号后被拒 2");
     expect(anlasText(null)).toBe("—");
     expect(anlasText(1234.567)).toBe("1,234.57");
   });
@@ -68,4 +59,15 @@ describe("readings text", () => {
     expect(ageText(0.2)).toBe("今天核对过");
     expect(ageText(3.4)).toBe("3 天前核对");
   });
+});
+
+it("读数保留零与否定值，缺失值留空", () => {
+  expect(reading(0, "%")).toBe("0%");
+  expect(reading(null)).toBe("—");
+  expect(answer(false, "是", "否")).toBe("否");
+  expect(answer(null, "是", "否")).toBe("—");
+  expect(duration(0)).toBe("0 秒");
+  expect(duration(null)).toBe("—");
+  expect(duration(3660)).toBe("1 小时 1 分钟");
+  expect(projectionText(null)).toBe("—");
 });

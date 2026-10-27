@@ -93,6 +93,18 @@ const DAY: f64 = 86400.0;
 fn window_stats(rows: &[&AccountLogRow]) -> Value {
     let count = |s: &str| rows.iter().filter(|r| r.status == s).count() as i64;
     let up = |code: i64| rows.iter().filter(|r| r.up_status == code).count() as i64;
+    let samples: Vec<_> = rows
+        .iter()
+        .filter(|r| {
+            r.status == "ok" && matches!(r.kind.as_str(), "image" | "image_stream") && r.dur_ms > 0
+        })
+        .collect();
+    let mut waits: Vec<_> = samples.iter().map(|r| r.wait_ms).collect();
+    waits.sort_unstable();
+    let average = |total: f64| (!samples.is_empty()).then(|| total / samples.len() as f64);
+    let avg_wait = average(samples.iter().map(|r| r.wait_ms as f64).sum());
+    let avg_dur = average(samples.iter().map(|r| r.dur_ms as f64).sum());
+    let p90_wait = (!waits.is_empty()).then(|| waits[(waits.len() * 9).div_ceil(10) - 1]);
     json!({
         "ok": count("ok"),
         "error": count("error"),
@@ -100,6 +112,10 @@ fn window_stats(rows: &[&AccountLogRow]) -> Value {
         "up_429": up(429),
         "up_403": up(403),
         "up_401": up(401),
+        "timing_samples": samples.len(),
+        "avg_wait_ms": avg_wait,
+        "p90_wait_ms": p90_wait,
+        "avg_dur_ms": avg_dur,
     })
 }
 

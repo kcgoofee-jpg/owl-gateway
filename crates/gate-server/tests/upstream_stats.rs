@@ -17,6 +17,7 @@ fn ok_row(token: Option<&str>, anlas: f64) -> Success {
         images: 1,
         anlas,
         wait_ms: 100,
+        dur_ms: 2000,
         token_id: token.map(str::to_string),
         ..Default::default()
     }
@@ -67,6 +68,13 @@ async fn stats_endpoint_needs_admin() {
         .send(&e.state)
         .await;
     assert_ne!(status, 200, "成员 Key 不能看");
+    let admin = Admin::login_bare(&e.state).await;
+    let (_, v) = admin.json("GET", "/upstream", None).await;
+    let w = &v["accounts"][0]["w1h"];
+    assert_eq!(w["timing_samples"], 0);
+    assert!(w["avg_wait_ms"].is_null());
+    assert!(w["p90_wait_ms"].is_null());
+    assert!(w["avg_dur_ms"].is_null());
 }
 
 #[tokio::test]
@@ -98,6 +106,8 @@ async fn per_account_stats_and_balance() {
     for i in 0..3 {
         let mut s = ok_row(Some(a), 10.0);
         s.rid = format!("a{i}");
+        s.wait_ms = i * 200;
+        s.dur_ms = (i + 1) * 1000;
         db.record_success(&s, now - 60.0).await.unwrap();
     }
     db.record_success(&ok_row(Some(b), 10.0), now - 60.0)
@@ -144,7 +154,10 @@ async fn per_account_stats_and_balance() {
     assert_eq!(fa["w1h"]["error"], 1);
     assert_eq!(fa["w1h"]["rejected"], 1);
     assert_eq!(fa["w1h"]["up_429"], 1);
-    assert_eq!(fa["w1h"].get("p90_wait_ms"), None);
+    assert_eq!(fa["w1h"]["timing_samples"], 3);
+    assert_eq!(fa["w1h"]["avg_wait_ms"], 200.0);
+    assert_eq!(fa["w1h"]["p90_wait_ms"], 400);
+    assert_eq!(fa["w1h"]["avg_dur_ms"], 2000.0);
     assert_eq!(fb["w24h"]["ok"], 1);
     assert_eq!(fa["load_share_24h"], 75);
     // 余额：a 用了 30、b 用了 10；老行 40 不归属 → 近似

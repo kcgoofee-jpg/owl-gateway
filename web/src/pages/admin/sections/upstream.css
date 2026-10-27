@@ -1,17 +1,6 @@
-/* 令牌池 */
-.token-grid {
+.up-account {
   display: grid;
-  gap: var(--sp-4);
-  grid-template-columns: repeat(auto-fit, minmax(min(100%, 360px), 1fr));
-}
-.token {
-  display: grid;
-  gap: var(--sp-3);
-  align-content: start;
-  padding: var(--sp-4);
-  border: 1px solid var(--border);
-  border-radius: var(--radius);
-  background: var(--surface);
+  gap: var(--sp-5);
   min-width: 0;
 }
 .token__head {
@@ -20,15 +9,152 @@
   align-items: center;
   gap: var(--sp-2);
 }
-.token__name {
-  font-weight: 650;
+.up-account__title {
+  margin: 0;
   font-size: var(--fs-md);
+}
+.token__name {
+  font-size: var(--fs-xs);
+  color: var(--muted);
   overflow-wrap: anywhere;
 }
+.up-highlights {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: var(--sp-4);
+  padding-bottom: var(--sp-4);
+  border-bottom: 1px solid var(--border);
+}
+.up-highlights > div {
+  display: grid;
+  align-content: start;
+  gap: var(--sp-2);
+  min-width: 0;
+}
+.up-highlights span,
+.up-highlights small {
+  color: var(--muted);
+  font-size: var(--fs-xs);
+}
+.up-highlights strong {
+  font-size: var(--fs-xl);
+  font-variant-numeric: tabular-nums;
+}
+.up-highlights small {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--sp-1) var(--sp-2);
+}
+.up-highlights small > span {
+  white-space: nowrap;
+}
+.up-sections {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: var(--sp-5) var(--sp-6);
+  align-items: start;
+}
+.up-block {
+  min-width: 0;
+}
+.up-block__head {
+  display: flex;
+  align-items: baseline;
+  flex-wrap: wrap;
+  justify-content: space-between;
+  gap: var(--sp-2);
+  margin-bottom: var(--sp-2);
+}
+.up-block__head h3 {
+  margin: 0;
+  font-size: var(--fs-sm);
+}
+.up-block__head time {
+  color: var(--muted);
+  font-size: var(--fs-xs);
+  white-space: nowrap;
+}
+.up-facts {
+  margin: 0;
+}
+.up-facts > div {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  gap: var(--sp-3);
+  padding: var(--sp-1) 0;
+  border-bottom: 1px solid var(--border);
+  font-size: var(--fs-xs);
+}
+.up-facts dt {
+  color: var(--muted);
+  flex-shrink: 0;
+}
+.up-facts dd {
+  margin: 0;
+  min-width: 0;
+  text-align: right;
+  overflow-wrap: anywhere;
+  text-wrap: pretty;
+  font-variant-numeric: tabular-nums;
+}
+.up-message {
+  margin: var(--sp-2) 0 0;
+  font-size: var(--fs-xs);
+  overflow-wrap: anywhere;
+  text-wrap: pretty;
+}
+.up-stats {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: var(--fs-xs);
+  font-variant-numeric: tabular-nums;
+}
+.up-stats th,
+.up-stats td {
+  padding: var(--sp-1) 0;
+  border-bottom: 1px solid var(--border);
+  text-align: right;
+  white-space: nowrap;
+}
+.up-stats th {
+  font-weight: 400;
+  color: var(--muted);
+}
+.up-stats th:first-child {
+  text-align: left;
+}
 .token__form {
-  padding-top: var(--sp-3);
-  border-top: 1px solid var(--border);
+  display: flex;
+  flex-wrap: wrap;
+  align-items: end;
+  gap: var(--sp-3);
+}
+.token__form .field {
+  max-width: 240px;
 }
 .token__form .savebar {
+  margin: 0;
+}
+@media (max-width: 760px) {
+  .up-sections {
+    grid-template-columns: minmax(0, 1fr);
+    gap: var(--sp-5);
+  }
+  .up-highlights {
+    gap: var(--sp-2);
+  }
+  .up-highlights strong {
+    font-size: var(--fs-lg);
+  }
+}
+
+.up-settlements > summary {
+  cursor: pointer;
+  font-size: var(--fs-xs);
+  color: var(--muted);
+  padding: var(--sp-2) 0;
+}
+.up-settlements > article {
   margin-top: var(--sp-3);
 }

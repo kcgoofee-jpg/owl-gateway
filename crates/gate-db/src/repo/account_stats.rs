@@ -9,6 +9,9 @@ pub struct AccountLogRow {
     pub token_id: Option<String>,
     pub status: String,
     pub up_status: i64,
+    pub kind: String,
+    pub wait_ms: i64,
+    pub dur_ms: i64,
 }
 
 impl Db {
@@ -16,7 +19,7 @@ impl Db {
     pub async fn account_log_rows(&self, since: f64) -> Result<Vec<AccountLogRow>> {
         self.read(move |c| {
             let mut stmt = c.prepare(
-                "SELECT ts, token_id, status, up_status FROM usage_log \
+                "SELECT ts, token_id, status, up_status, kind, wait_ms, dur_ms FROM usage_log \
                  WHERE ts>? AND (token_id IS NOT NULL OR (status='ok' AND kind LIKE 'image%'))",
             )?;
             stmt.query_map([since], |r| {
@@ -25,6 +28,9 @@ impl Db {
                     token_id: r.get::<_, Option<String>>(1)?.filter(|t| !t.is_empty()),
                     status: value::text_or(r, 2, "")?,
                     up_status: value::i64_or(r, 3, 0)?,
+                    kind: value::text_or(r, 4, "")?,
+                    wait_ms: value::i64_or(r, 5, 0)?.max(0),
+                    dur_ms: value::i64_or(r, 6, 0)?.max(0),
                 })
             })?
             .collect()

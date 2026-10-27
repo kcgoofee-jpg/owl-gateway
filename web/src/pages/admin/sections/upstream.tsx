@@ -49,7 +49,7 @@ function InfoRefresh({ data }: { data: UpstreamPage }) {
   };
   return (
     <Button disabled={running || retryAfter > 0} onClick={() => void refresh()}>
-      {running ? "正在查询…" : retryAfter > 0 ? `${retryAfter} 秒后可再次查询` : "查询官方信息"}
+      {running ? "正在查询…" : retryAfter > 0 ? `${retryAfter} 秒后刷新` : "查询官方信息"}
     </Button>
   );
 }
@@ -70,7 +70,6 @@ export default function Upstream() {
     <Sect>
       <SectionHead
         title="上游"
-        desc="NovelAI 账号池：官方读数、本站观测与核对"
         actions={
           <>
             {data && <InfoRefresh data={data} />}
@@ -83,17 +82,7 @@ export default function Upstream() {
       />
       {loading && !data && <Loading rows={3} />}
       {!data && error && <LoadError error={error} />}
-      {data && !data.pool_configured && (
-        <Notice tone="danger">
-          还没有配置上游 Token，现在所有出图请求都会失败。请点右上角「添加 Token」。
-        </Notice>
-      )}
-      {data && (
-        <Notice>
-          官方读数（V5 余量、订阅、封禁）来自两把 Key 能查到的接口的缓存，只有真实出图或手动查询会刷新；
-          推算余额来自 Anlas 核对。页面其他数据是本站自己的观测。
-        </Notice>
-      )}
+      {data && !data.pool_configured && <Notice tone="danger">尚未配置上游 Token。</Notice>}
       <div class="stack">
         {data?.accounts.map((a) => (
           <AccountCard
@@ -165,13 +154,6 @@ export default function Upstream() {
             <p>启用 {label(toggle)} 后，它重新接收请求。已失效（401）的 Token 需要替换才能恢复。</p>
           )}
         </ConfirmDialog>
-      )}
-      {data && data.accounts.length > 0 && (
-        <p class="muted small">
-          共 {data.accounts.length} 个账号，其中可用（启用且未失效）{usable.length} 个
-          {data.accounts.some((a) => a.disabled) && " · 有账号已失效（401），需替换 Token"}
-          {data.accounts.some((a) => a.full) && " · 有账号今日已满"}。
-        </p>
       )}
     </Sect>
   );

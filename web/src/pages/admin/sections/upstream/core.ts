@@ -49,6 +49,10 @@ export type WindowStats = {
   up_429: number;
   up_403: number;
   up_401: number;
+  timing_samples: number;
+  avg_wait_ms: number | null;
+  p90_wait_ms: number | null;
+  avg_dur_ms: number | null;
 };
 
 /** 由对账快照 + 之后的账本用量推算的 Anlas 余额。 */
@@ -133,7 +137,6 @@ export const TOKEN_SPECS: Record<string, FieldSpec> = {
     min: 0,
     max: 9999,
     unit: "张",
-    hint: "0 = 停用这把 Token 的免费 V5；上限 9999",
   },
 };
 
@@ -148,12 +151,6 @@ export function tokenFormatProblem(t: string): string | null {
 
 export const anlasText = (n: number | null | undefined): string =>
   n == null ? "—" : n.toLocaleString("zh-CN", { maximumFractionDigits: 2 });
-
-export const requestsText = (w: WindowStats): string =>
-  `成功 ${w.ok} · 出错 ${w.error} · 选号后被拒 ${w.rejected}`;
-
-export const upstreamErrorsText = (w: WindowStats): string =>
-  `429 × ${w.up_429} · 403 × ${w.up_403} · 401 × ${w.up_401}`;
 
 export const daysLeftText = (b: AnlasEstimate): string =>
   b.days_left == null ? "—" : b.days_left < 1 ? "不到 1 天" : `${Math.floor(b.days_left)} 天`;
@@ -182,11 +179,11 @@ export type ReconRecord = {
 export type Recon = { history: ReconRecord[]; retry_after: number; running: boolean };
 
 export const RECON_REASONS: Record<string, string> = {
-  first: "已记下当前余额",
-  accounts_changed: "账号列表有变化，已重新记录余额",
-  cycle_changed: "订阅周期已更新，已重新记录余额",
-  balance_increased: "余额增加了，已重新记录余额",
-  ledger_reset: "本站用量记录有变动，已重新记录余额",
+  first: "首次记录",
+  accounts_changed: "账号已变更",
+  cycle_changed: "订阅周期已更新",
+  balance_increased: "余额已增加",
+  ledger_reset: "账本已更新",
 };
 
 /** 待核对的未知请求：上游可能已执行但结果未知，占着额度等站长核对。 */
@@ -203,3 +200,24 @@ export type Settlement = {
   reserved_legacy: number;
   is_vibe: boolean;
 };
+
+export const reading = (n: number | null | undefined, suffix = ""): string =>
+  n == null || !Number.isFinite(n) ? "—" : `${anlasText(n)}${suffix}`;
+
+export function duration(seconds: number | null | undefined): string {
+  if (seconds == null || !Number.isFinite(seconds) || seconds < 0) return "—";
+  if (seconds < 60) return `${reading(seconds)} 秒`;
+  const minutes = Math.ceil(seconds / 60);
+  if (minutes < 60) return `${minutes} 分钟`;
+  return `${Math.floor(minutes / 60)} 小时${minutes % 60 ? ` ${minutes % 60} 分钟` : ""}`;
+}
+
+export const answer = (v: boolean | null | undefined, yes: string, no: string): string =>
+  v == null ? "—" : v ? yes : no;
+
+export function projectionText(b: AnlasEstimate | null): string {
+  if (!b || b.projection_value == null || b.cycle_rolled) return "—";
+  if (b.projection === "runs_out") return `约 ${reading(b.projection_value)} 天用完固定额度`;
+  if (b.projection === "waste") return `到期剩余约 ${anlasText(b.projection_value)} 固定 Anlas`;
+  return "—";
+}
