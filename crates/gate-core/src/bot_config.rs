@@ -19,13 +19,13 @@ pub const ONLINE_WINDOW: f64 = 180.0;
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
 pub enum BotConfigError {
     /// 库里的 JSON 坏了（不是合法 JSON）→ 500
-    #[error("ValueError: {0}")]
+    #[error("无法解析机器人状态: {0}")]
     BadJson(String),
     /// 库里的 JSON 类型不对（要对象）
-    #[error("AttributeError: {0}")]
+    #[error("机器人状态结构无效: {0}")]
     WrongType(String),
     /// 状态里的字段类型不对
-    #[error("TypeError: {0}")]
+    #[error("机器人状态字段无效: {0}")]
     Type(String),
 }
 
@@ -55,9 +55,7 @@ pub fn online(seen_at: Option<&Value>, now: f64) -> Result<bool, BotConfigError>
     }
     match values::number(seen) {
         Some(s) => Ok(now - s < ONLINE_WINDOW),
-        None => Err(BotConfigError::Type(
-            "unsupported operand type(s) for -: 'float' and ...".into(),
-        )),
+        None => Err(BotConfigError::Type("seen_at 必须是数字".into())),
     }
 }
 
@@ -71,9 +69,7 @@ pub fn snapshot(status_raw: Option<&str>, now: f64) -> Result<Value, BotConfigEr
     let parsed: Value =
         serde_json::from_str(text).map_err(|e| BotConfigError::BadJson(e.to_string()))?;
     let Value::Object(mut status) = parsed else {
-        return Err(BotConfigError::WrongType(
-            "object has no attribute 'get'".into(),
-        ));
+        return Err(BotConfigError::WrongType("必须是 JSON 对象".into()));
     };
     let is_online = online(status.get("seen_at"), now)?;
     status.insert("online".into(), Value::Bool(is_online));

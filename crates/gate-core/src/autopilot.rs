@@ -146,7 +146,7 @@ fn setting_float(raw: Option<&str>) -> Result<f64, DecideError> {
         None => Ok(0.0),
         Some("") => Ok(0.0),
         Some(s) => primitives::parse_float(s)
-            .ok_or_else(|| DecideError::Value(format!("could not convert string to float: {s:?}"))),
+            .ok_or_else(|| DecideError(format!("运行保护设置必须是有限数字: {s:?}"))),
     }
 }
 

@@ -16,7 +16,7 @@ use std::path::PathBuf;
 #[folder = "../../web/dist"]
 struct Dist;
 
-/// 首页 / 问卷的安全头（不含 'unsafe-inline'；保留 Discord CDN 头像源，
+/// 网页的安全头（不含 'unsafe-inline'；保留 Discord CDN 头像源，
 /// 并允许 NovelAI 静态图源）。
 /// 字体只允许同源：开屏标题的 Newsreader 子集是 `/_owl/` 下的文件，不从 Google Fonts 加载。
 pub const PUBLIC_CSP: &str = "default-src 'none'; script-src 'self'; style-src 'self'; font-src 'self'; connect-src 'self'; \

@@ -1,10 +1,8 @@
 //! 异常信号日志：把「不该发生」的错误按统一格式写一行结构化日志（`journalctl -u owl-gate | grep bug` 可查）。
 //!
-//! 来源：接口未捕获的错误（500）、上游 5xx、后台任务失败、记账写入失败、成员在图片返回前断开。
-//! 不记录 Key、提示词或 IP；永远不会让调用方出错或阻塞。
+//! 来源：接口未捕获的错误（500）、上游 5xx、后台任务失败和记账写入失败。
+//! 不记录 Key 凭据、提示词或 IP；同一异常的详细内容每 10 分钟最多输出一次。
 //!
-//! 10-27 起 Bug 追踪整个删除（`error_events` 表、后台「Bug 追踪」页、网页脚本报错上报、自动关闭任务）：
-//! [`Bugs::capture`] 只写日志、不落库，12 个捕获点原样保留，信号在 journald 里仍然可查。
 
 use gate_core::errors::should_print_stack;
 use std::collections::HashMap;
@@ -42,25 +40,38 @@ impl Bugs {
         }
     }
 
-    /// 兼容旧关停序列：以前等异步入库排空，现在日志是同步写的，无事可做。
-    pub async fn idle(&self) {}
-
-    /// 写一行结构化日志；返回特征码（旧版入库归并用，现在没有调用方消费返回值）。
-    pub fn capture(&self, r: Report<'_>) -> String {
+    /// 写一行结构化日志，定期输出详细信息。
+    pub fn capture(&self, r: Report<'_>) {
         let now = crate::time::now();
         let (ty, msg) = r.error.unwrap_or(("Error", r.title));
         let sig = format!("{ty}:{msg}:{}/{ty}", r.path);
         let level = if r.level.is_empty() { "error" } else { r.level };
-        let print_stack = r.error.is_some()
-            && should_print_stack(now, self.printed.lock().expect("bugs").get(&sig).copied());
-        self.printed.lock().expect("bugs").insert(sig.clone(), now);
+        let print_stack = if r.error.is_some() {
+            let mut printed = self.printed.lock().expect("bugs");
+            printed.retain(|_, last| now - *last <= 600.0);
+            let print = should_print_stack(now, printed.get(&sig).copied());
+            if print {
+                if printed.len() >= 1024
+                    && let Some(oldest) = printed
+                        .iter()
+                        .min_by(|a, b| a.1.total_cmp(b.1))
+                        .map(|(k, _)| k.clone())
+                {
+                    printed.remove(&oldest);
+                }
+                printed.insert(sig, now);
+            }
+            print
+        } else {
+            false
+        };
         let title = if r.title.is_empty() { msg } else { r.title };
         let tail = if print_stack && !r.detail.is_empty() {
             format!("\n{}", r.detail)
         } else {
             String::new()
         };
-        let record = |level| {
+        if level == "warn" {
             tracing::warn!(
                 target: "bug",
                 source = %r.source,
@@ -68,14 +79,106 @@ impl Bugs {
                 rid = %r.rid,
                 key_id = r.key_id,
                 stack = print_stack,
-                level,
                 "[bug] {title}: {ty}: {msg}{tail}"
             );
-        };
-        match level {
-            "warn" => record("warn"),
-            _ => record("error"),
+        } else {
+            tracing::error!(
+                target: "bug",
+                source = %r.source,
+                path = %r.path,
+                rid = %r.rid,
+                key_id = r.key_id,
+                stack = print_stack,
+                "[bug] {title}: {ty}: {msg}{tail}"
+            );
         }
-        sig
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn requested_levels_reach_the_logging_subscriber() {
+        #[derive(Clone)]
+        struct Buffer(std::sync::Arc<Mutex<Vec<u8>>>);
+        impl std::io::Write for Buffer {
+            fn write(&mut self, bytes: &[u8]) -> std::io::Result<usize> {
+                self.0.lock().unwrap().extend_from_slice(bytes);
+                Ok(bytes.len())
+            }
+            fn flush(&mut self) -> std::io::Result<()> {
+                Ok(())
+            }
+        }
+        let buffer = Buffer(Default::default());
+        let writer = buffer.clone();
+        let subscriber = tracing_subscriber::fmt()
+            .without_time()
+            .with_ansi(false)
+            .with_writer(move || writer.clone())
+            .finish();
+        tracing::subscriber::with_default(subscriber, || {
+            let bugs = Bugs::new();
+            bugs.capture(Report {
+                title: "error-marker",
+                ..Default::default()
+            });
+            bugs.capture(Report {
+                title: "warn-marker",
+                level: "warn",
+                ..Default::default()
+            });
+        });
+        let output = String::from_utf8(buffer.0.lock().unwrap().clone()).unwrap();
+        assert!(
+            output
+                .lines()
+                .any(|l| l.contains("ERROR") && l.contains("error-marker")),
+            "{output}"
+        );
+        assert!(
+            output
+                .lines()
+                .any(|l| l.contains("WARN") && l.contains("warn-marker")),
+            "{output}"
+        );
+    }
+
+    #[test]
+    fn repeated_errors_do_not_postpone_detailed_logging() {
+        let bugs = Bugs::new();
+        let report = Report {
+            error: Some(("Example", "failure")),
+            ..Default::default()
+        };
+        bugs.capture(report.clone());
+        let first = *bugs.printed.lock().unwrap().values().next().unwrap();
+        bugs.capture(report);
+        assert_eq!(
+            *bugs.printed.lock().unwrap().values().next().unwrap(),
+            first
+        );
+    }
+
+    #[test]
+    fn retained_signatures_are_bounded_and_expire() {
+        let bugs = Bugs::new();
+        let now = crate::time::now();
+        {
+            let mut printed = bugs.printed.lock().unwrap();
+            printed.insert("expired".into(), now - 601.0);
+            for i in 0..1024 {
+                printed.insert(i.to_string(), now - 1.0);
+            }
+        }
+        bugs.capture(Report {
+            error: Some(("Example", "new")),
+            ..Default::default()
+        });
+        let printed = bugs.printed.lock().unwrap();
+        assert_eq!(printed.len(), 1024);
+        assert!(!printed.contains_key("expired"));
     }
 }

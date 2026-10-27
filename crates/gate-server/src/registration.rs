@@ -240,7 +240,7 @@ pub fn welcome_message(w: &Welcome) -> String {
          2. 接口地址填 `{site}`（**不要**加 /v1）\n\
          3. API Key 填上面 `nai-` 开头的整串，保存后随便生成一张图试试\n\
          其他支持自定义 NovelAI 地址的客户端同样这样填。\n\n\
-         **不确定填对没有？** 在 {site} 用 Discord 登录，能看到自己的额度就说明 Key 正常。首次登录未提交使用体验问卷时，网站会自动打开问卷。\n\n\
+         **不确定填对没有？** 在 {site} 用 Discord 登录，能看到自己的额度就说明 Key 正常。\n\n\
          **规则**\n{rules}\n\n\
          **常用命令**：`/resetkey` Key 丢了或泄露时换新；额度在 {site} 登录后查看\n\
          遇到问题到 🛠️｜问题反馈 发截图（记得打码 Key）。",
@@ -865,7 +865,7 @@ impl RegistrationService {
             .as_ref()
             .and_then(|v| v.get("access_token"))
             .map(validation::text)
-            .ok_or_else(|| RegErr::Internal("KeyError: 'access_token'".into()))?;
+            .ok_or_else(|| RegErr::Internal("Discord OAuth 响应缺少 access_token".into()))?;
         let bearer = format!("Bearer {token}");
         let user = match self.discord(Method::GET, "/users/@me", &bearer, None).await {
             Ok(u) => u,
@@ -1064,7 +1064,7 @@ impl RegistrationService {
         Ok(Issued::Bound {
             key_id,
             message: "✅ 邀请 Key 已绑定到你的 Discord 账号，Key 不变，客户端里不用改。\
-                      登录网站后可在右上角账户菜单复制 Key、查看额度；首次登录会弹出使用体验问卷。Key 泄露可用 /resetkey 重置。"
+                      登录网站后可在右上角账户菜单复制 Key、查看额度；Key 泄露可用 /resetkey 重置。"
                 .into(),
         })
     }

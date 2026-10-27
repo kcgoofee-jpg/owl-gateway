@@ -300,7 +300,7 @@ html[data-theme="dark"] .icon-btn .ic-sun {
   font-weight: 650;
 }
 
-/* 页脚：站内入口（首页 / 问卷）与事件状态词说明 */
+/* 页脚：站内入口（首页）与事件状态词说明 */
 .sp-foot {
   display: grid;
   gap: var(--sp-2);

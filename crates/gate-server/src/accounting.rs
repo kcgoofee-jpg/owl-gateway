@@ -105,7 +105,7 @@ impl AppState {
     }
 
     /// 记一个 Bug（自动带上当前请求的编号和 Key）。
-    pub fn bug(&self, source: &str, error: Option<(&str, &str)>, ctx: &ReqCtx) -> String {
+    pub fn bug(&self, source: &str, error: Option<(&str, &str)>, ctx: &ReqCtx) {
         self.bugs.capture(Report {
             source,
             error,

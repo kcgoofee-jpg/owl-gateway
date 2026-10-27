@@ -121,7 +121,7 @@ pub fn comparison(previous: Option<&Value>, current: &Value) -> Result<Value, St
     let Some(previous) = previous else {
         return Ok(json!({"reason": "first"}));
     };
-    let missing = |k: &str| format!("KeyError: '{k}'");
+    let missing = |k: &str| format!("对账快照缺少有效字段: {k}");
     let obj = |v: &Value, k: &str| -> Result<Map<String, Value>, String> {
         v.get(k)
             .and_then(Value::as_object)

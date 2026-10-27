@@ -1,81 +1,81 @@
 {"in":{"args":[{"features_global":"{\"augment\": false}"},{"features":null},"vibe"]},"out":{"out":null,"needs_vibe":true}}
-{"in":{"args":[{"features_global":"[1]"},{"allow_anlas":false},"bogus"]},"out":{"err":"AttributeError"}}
+{"in":{"args":[{"features_global":"[1]"},{"allow_anlas":false},"bogus"]},"out":{"err":"invalid_flags"}}
 {"in":{"args":[{"global_daily_anlas":"200"},{"features":"","allow_anlas":false},"vibe"]},"out":{"out":null,"needs_vibe":true}}
-{"in":{"args":[{"features_global":"[1]"},{"features":"","allow_anlas":true},"vibe"]},"out":{"err":"AttributeError"}}
+{"in":{"args":[{"features_global":"[1]"},{"features":"","allow_anlas":true},"vibe"]},"out":{"err":"invalid_flags"}}
 {"in":{"args":[{"global_daily_anlas":"200"},{"features":"image,vibe"},"vibe"]},"out":{"out":null,"needs_vibe":true}}
 {"in":{"args":[{"global_daily_anlas":"abc"},{},"bogus"]},"out":{"out":null,"needs_vibe":false}}
-{"in":{"args":[{"global_daily_anlas":"100001"},{"features":"vibe"},"bogus"]},"out":{"err":"KeyError"}}
+{"in":{"args":[{"global_daily_anlas":"100001"},{"features":"vibe"},"bogus"]},"out":{"err":"unknown_feature"}}
 {"in":{"args":[{"global_daily_anlas":"5"},{"features":"image"},"vibe"]},"out":{"out":null,"needs_vibe":true}}
 {"in":{"args":[{"features_global":"{\"voice\": false, \"tags\": false}","global_daily_anlas":"-1"},{"features":"image,vibe"},"vibe"]},"out":{"out":null,"needs_vibe":true}}
 {"in":{"args":[{},{"features":null,"allow_anlas":true},"upscale"]},"out":{"out":null,"needs_vibe":false}}
-{"in":{"args":[{"global_daily_anlas":"200"},{"features":"tags"},"bogus"]},"out":{"err":"KeyError"}}
-{"in":{"args":[{"features_global":"[1]"},{"features":null,"allow_anlas":true},"tags"]},"out":{"err":"AttributeError"}}
+{"in":{"args":[{"global_daily_anlas":"200"},{"features":"tags"},"bogus"]},"out":{"err":"unknown_feature"}}
+{"in":{"args":[{"features_global":"[1]"},{"features":null,"allow_anlas":true},"tags"]},"out":{"err":"invalid_flags"}}
 {"in":{"args":[{"features_global":"{\"upscale\": false}"},{"features":"tags","allow_anlas":0},"vibe"]},"out":{"out":null,"needs_vibe":true}}
-{"in":{"args":[{"features_global":"[1]"},{"allow_anlas":null},"image"]},"out":{"err":"AttributeError"}}
+{"in":{"args":[{"features_global":"[1]"},{"allow_anlas":null},"image"]},"out":{"err":"invalid_flags"}}
 {"in":{"args":[{"features_global":"garbage"},{},"augment"]},"out":{"out":null,"needs_vibe":false}}
 {"in":{"args":[{"global_daily_anlas":"0"},{"features":null},"bogus"]},"out":{"out":null,"needs_vibe":false}}
-{"in":{"args":[{"global_daily_anlas":"100001"},{"features":"tags","allow_anlas":"0"},"bogus"]},"out":{"err":"KeyError"}}
+{"in":{"args":[{"global_daily_anlas":"100001"},{"features":"tags","allow_anlas":"0"},"bogus"]},"out":{"err":"unknown_feature"}}
 {"in":{"args":[{"features_global":"{\"upscale\": false}"},{"allow_anlas":0},"vibe"]},"out":{"out":null,"needs_vibe":true}}
-{"in":{"args":[{"features_global":"[1]"},{"features":"vibe","allow_anlas":null},"image"]},"out":{"err":"AttributeError"}}
-{"in":{"args":[{"global_daily_anlas":"5"},{"features":"vibe"},"bogus"]},"out":{"err":"KeyError"}}
+{"in":{"args":[{"features_global":"[1]"},{"features":"vibe","allow_anlas":null},"image"]},"out":{"err":"invalid_flags"}}
+{"in":{"args":[{"global_daily_anlas":"5"},{"features":"vibe"},"bogus"]},"out":{"err":"unknown_feature"}}
 {"in":{"args":[{"features_global":"garbage","global_daily_anlas":"5"},{},"vibe"]},"out":{"out":null,"needs_vibe":true}}
 {"in":{"args":[{},{"allow_anlas":"0"},"vibe"]},"out":{"out":null,"needs_vibe":false}}
 {"in":{"args":[{"features_global":"{\"augment\": false}"},{"features":"bogus","allow_anlas":0},"vibe"]},"out":{"out":null,"needs_vibe":true}}
-{"in":{"args":[{"features_global":"[1]"},{"features":"bogus","allow_anlas":true},"vibe"]},"out":{"err":"AttributeError"}}
-{"in":{"args":[{"features_global":"[1]"},{"allow_anlas":false},"bogus"]},"out":{"err":"AttributeError"}}
+{"in":{"args":[{"features_global":"[1]"},{"features":"bogus","allow_anlas":true},"vibe"]},"out":{"err":"invalid_flags"}}
+{"in":{"args":[{"features_global":"[1]"},{"allow_anlas":false},"bogus"]},"out":{"err":"invalid_flags"}}
 {"in":{"args":[{"global_daily_anlas":"5"},{"features":null,"allow_anlas":false},"vibe"]},"out":{"out":null,"needs_vibe":true}}
 {"in":{"args":[{"global_daily_anlas":"200"},{"features":""},"vibe"]},"out":{"out":null,"needs_vibe":true}}
-{"in":{"args":[{"features_global":"[1]"},{"features":null,"allow_anlas":null},"bogus"]},"out":{"err":"AttributeError"}}
-{"in":{"args":[{"features_global":"[1]"},{"features":"tags","allow_anlas":true},"bogus"]},"out":{"err":"AttributeError"}}
-{"in":{"args":[{"features_global":"[1]"},{"features":"image,vibe","allow_anlas":0},"augment"]},"out":{"err":"AttributeError"}}
+{"in":{"args":[{"features_global":"[1]"},{"features":null,"allow_anlas":null},"bogus"]},"out":{"err":"invalid_flags"}}
+{"in":{"args":[{"features_global":"[1]"},{"features":"tags","allow_anlas":true},"bogus"]},"out":{"err":"invalid_flags"}}
+{"in":{"args":[{"features_global":"[1]"},{"features":"image,vibe","allow_anlas":0},"augment"]},"out":{"err":"invalid_flags"}}
 {"in":{"args":[{"features_global":"{\"upscale\": false}"},{"allow_anlas":"0"},"upscale"]},"out":{"out":"本站未开放此功能：放大，未扣费。请在客户端中关闭该功能。","needs_vibe":false}}
-{"in":{"args":[{"features_global":"[1]"},{"features":"image","allow_anlas":false},"vibe"]},"out":{"err":"AttributeError"}}
+{"in":{"args":[{"features_global":"[1]"},{"features":"image","allow_anlas":false},"vibe"]},"out":{"err":"invalid_flags"}}
 {"in":{"args":[{},{"features":"image,vibe","allow_anlas":0},"tags"]},"out":{"out":"你的 Key 无权使用：标签补全，未扣费。如需开通，请联系站长。","needs_vibe":false}}
 {"in":{"args":[{},{"features":null,"allow_anlas":1},"bogus"]},"out":{"out":null,"needs_vibe":false}}
-{"in":{"args":[{"features_global":"{\"augment\": false}"},{"features":"vibe"},"bogus"]},"out":{"err":"KeyError"}}
-{"in":{"args":[{"features_global":"[1]"},{"features":""},"image"]},"out":{"err":"AttributeError"}}
+{"in":{"args":[{"features_global":"{\"augment\": false}"},{"features":"vibe"},"bogus"]},"out":{"err":"unknown_feature"}}
+{"in":{"args":[{"features_global":"[1]"},{"features":""},"image"]},"out":{"err":"invalid_flags"}}
 {"in":{"args":[{"global_daily_anlas":"abc"},{"allow_anlas":1},"augment"]},"out":{"out":null,"needs_vibe":false}}
 {"in":{"args":[{"features_global":"garbage"},{"allow_anlas":1},"upscale"]},"out":{"out":null,"needs_vibe":false}}
 {"in":{"args":[{},{"features":"bogus","allow_anlas":0},"vibe"]},"out":{"out":null,"needs_vibe":true}}
-{"in":{"args":[{"features_global":"{\"upscale\": false}"},{"features":"bogus"},"bogus"]},"out":{"err":"KeyError"}}
+{"in":{"args":[{"features_global":"{\"upscale\": false}"},{"features":"bogus"},"bogus"]},"out":{"err":"unknown_feature"}}
 {"in":{"args":[{"features_global":"garbage"},{"features":null},"vibe"]},"out":{"out":null,"needs_vibe":true}}
-{"in":{"args":[{"global_daily_anlas":"5"},{"features":"image","allow_anlas":"0"},"bogus"]},"out":{"err":"KeyError"}}
-{"in":{"args":[{"global_daily_anlas":"5"},{"features":"bogus"},"bogus"]},"out":{"err":"KeyError"}}
-{"in":{"args":[{"global_daily_anlas":"100001"},{"features":"","allow_anlas":null},"bogus"]},"out":{"err":"KeyError"}}
-{"in":{"args":[{"global_daily_anlas":"100001"},{"features":"image","allow_anlas":"0"},"bogus"]},"out":{"err":"KeyError"}}
+{"in":{"args":[{"global_daily_anlas":"5"},{"features":"image","allow_anlas":"0"},"bogus"]},"out":{"err":"unknown_feature"}}
+{"in":{"args":[{"global_daily_anlas":"5"},{"features":"bogus"},"bogus"]},"out":{"err":"unknown_feature"}}
+{"in":{"args":[{"global_daily_anlas":"100001"},{"features":"","allow_anlas":null},"bogus"]},"out":{"err":"unknown_feature"}}
+{"in":{"args":[{"global_daily_anlas":"100001"},{"features":"image","allow_anlas":"0"},"bogus"]},"out":{"err":"unknown_feature"}}
 {"in":{"args":[{},{"features":"tags","allow_anlas":false},"vibe"]},"out":{"out":null,"needs_vibe":true}}
-{"in":{"args":[{},{"features":"image,vibe"},"bogus"]},"out":{"err":"KeyError"}}
-{"in":{"args":[{"global_daily_anlas":"100001"},{"features":"","allow_anlas":0},"bogus"]},"out":{"err":"KeyError"}}
-{"in":{"args":[{"features_global":"[1]"},{"features":"tags","allow_anlas":0},"image"]},"out":{"err":"AttributeError"}}
+{"in":{"args":[{},{"features":"image,vibe"},"bogus"]},"out":{"err":"unknown_feature"}}
+{"in":{"args":[{"global_daily_anlas":"100001"},{"features":"","allow_anlas":0},"bogus"]},"out":{"err":"unknown_feature"}}
+{"in":{"args":[{"features_global":"[1]"},{"features":"tags","allow_anlas":0},"image"]},"out":{"err":"invalid_flags"}}
 {"in":{"args":[{"features_global":"{}"},{"features":"vibe","allow_anlas":false},"vibe"]},"out":{"out":null,"needs_vibe":true}}
-{"in":{"args":[{"features_global":"[1]","global_daily_anlas":"5"},{"features":null},"vibe"]},"out":{"err":"AttributeError"}}
-{"in":{"args":[{"global_daily_anlas":"200"},{"features":"image,vibe","allow_anlas":true},"bogus"]},"out":{"err":"KeyError"}}
+{"in":{"args":[{"features_global":"[1]","global_daily_anlas":"5"},{"features":null},"vibe"]},"out":{"err":"invalid_flags"}}
+{"in":{"args":[{"global_daily_anlas":"200"},{"features":"image,vibe","allow_anlas":true},"bogus"]},"out":{"err":"unknown_feature"}}
 {"in":{"args":[{},{},"image"]},"out":{"out":null,"needs_vibe":false}}
 {"in":{"args":[{},{"features":"","allow_anlas":true},"vibe"]},"out":{"out":null,"needs_vibe":false}}
-{"in":{"args":[{"features_global":"[1]","global_daily_anlas":"0"},{},"augment"]},"out":{"err":"AttributeError"}}
-{"in":{"args":[{"features_global":"garbage"},{"features":"image","allow_anlas":1},"bogus"]},"out":{"err":"KeyError"}}
-{"in":{"args":[{"features_global":"[1]","global_daily_anlas":"abc"},{},"augment"]},"out":{"err":"AttributeError"}}
+{"in":{"args":[{"features_global":"[1]","global_daily_anlas":"0"},{},"augment"]},"out":{"err":"invalid_flags"}}
+{"in":{"args":[{"features_global":"garbage"},{"features":"image","allow_anlas":1},"bogus"]},"out":{"err":"unknown_feature"}}
+{"in":{"args":[{"features_global":"[1]","global_daily_anlas":"abc"},{},"augment"]},"out":{"err":"invalid_flags"}}
 {"in":{"args":[{},{"features":"","allow_anlas":false},"vibe"]},"out":{"out":null,"needs_vibe":true}}
-{"in":{"args":[{"features_global":"garbage"},{"features":"image"},"bogus"]},"out":{"err":"KeyError"}}
-{"in":{"args":[{"features_global":"[1]"},{},"vibe"]},"out":{"err":"AttributeError"}}
+{"in":{"args":[{"features_global":"garbage"},{"features":"image"},"bogus"]},"out":{"err":"unknown_feature"}}
+{"in":{"args":[{"features_global":"[1]"},{},"vibe"]},"out":{"err":"invalid_flags"}}
 {"in":{"args":[{"global_daily_anlas":"200"},{"features":"bogus"},"vibe"]},"out":{"out":null,"needs_vibe":true}}
 {"in":{"args":[{"features_global":"{}"},{"features":"image,vibe","allow_anlas":0},"vibe"]},"out":{"out":null,"needs_vibe":true}}
-{"in":{"args":[{"features_global":"[1]","global_daily_anlas":"5"},{"features":"vibe"},"vibe"]},"out":{"err":"AttributeError"}}
-{"in":{"args":[{"features_global":"[1]"},{"features":"tags"},"tags"]},"out":{"err":"AttributeError"}}
+{"in":{"args":[{"features_global":"[1]","global_daily_anlas":"5"},{"features":"vibe"},"vibe"]},"out":{"err":"invalid_flags"}}
+{"in":{"args":[{"features_global":"[1]"},{"features":"tags"},"tags"]},"out":{"err":"invalid_flags"}}
 {"in":{"args":[{"global_daily_anlas":"0"},{"allow_anlas":0},"bogus"]},"out":{"out":null,"needs_vibe":false}}
-{"in":{"args":[{"features_global":"{\"vibe\": false}"},{"features":"","allow_anlas":1},"bogus"]},"out":{"err":"KeyError"}}
+{"in":{"args":[{"features_global":"{\"vibe\": false}"},{"features":"","allow_anlas":1},"bogus"]},"out":{"err":"unknown_feature"}}
 {"in":{"args":[{},{"features":""},"upscale"]},"out":{"out":"放大需要消耗 Anlas：按图片大小扣 Anlas。本站仅提供免费出图，未扣费。请在客户端中关闭该功能。","needs_vibe":false}}
 {"in":{"args":[{"features_global":"{\"augment\": false}"},{"features":"vibe"},"vibe"]},"out":{"out":null,"needs_vibe":true}}
 {"in":{"args":[{"features_global":"{\"vibe\": false}"},{"allow_anlas":true},"tags"]},"out":{"out":null,"needs_vibe":false}}
-{"in":{"args":[{"features_global":"{}"},{"features":"image,vibe"},"bogus"]},"out":{"err":"KeyError"}}
-{"in":{"args":[{"global_daily_anlas":"0"},{"features":"image,vibe","allow_anlas":1},"bogus"]},"out":{"err":"KeyError"}}
+{"in":{"args":[{"features_global":"{}"},{"features":"image,vibe"},"bogus"]},"out":{"err":"unknown_feature"}}
+{"in":{"args":[{"global_daily_anlas":"0"},{"features":"image,vibe","allow_anlas":1},"bogus"]},"out":{"err":"unknown_feature"}}
 {"in":{"args":[{"features_global":"garbage","global_daily_anlas":"0"},{"features":"","allow_anlas":0},"vibe"]},"out":{"out":"Vibe 编码需要消耗 Anlas：每次编码参考图约 2 Anlas。本站仅提供免费出图，未扣费。请在客户端中关闭该功能。","needs_vibe":true}}
 {"in":{"args":[{"global_daily_anlas":"5"},{"features":"","allow_anlas":0},"vibe"]},"out":{"out":null,"needs_vibe":true}}
-{"in":{"args":[{},{"features":"image","allow_anlas":null},"bogus"]},"out":{"err":"KeyError"}}
+{"in":{"args":[{},{"features":"image","allow_anlas":null},"bogus"]},"out":{"err":"unknown_feature"}}
 {"in":{"args":[{"features_global":"{}","global_daily_anlas":"100001"},{"allow_anlas":null},"vibe"]},"out":{"out":null,"needs_vibe":true}}
 {"in":{"args":[{"global_daily_anlas":"-1"},{"features":"image"},"image"]},"out":{"out":null,"needs_vibe":false}}
 {"in":{"args":[{},{"allow_anlas":0},"upscale"]},"out":{"out":null,"needs_vibe":false}}
-{"in":{"args":[{"features_global":"{}","global_daily_anlas":"0"},{"features":"image,vibe"},"bogus"]},"out":{"err":"KeyError"}}
+{"in":{"args":[{"features_global":"{}","global_daily_anlas":"0"},{"features":"image,vibe"},"bogus"]},"out":{"err":"unknown_feature"}}
 {"in":{"args":[{"global_daily_anlas":"100001"},{"allow_anlas":false},"image"]},"out":{"out":null,"needs_vibe":false}}
 {"in":{"args":[{"global_daily_anlas":"abc"},{"features":"bogus","allow_anlas":false},"vibe"]},"out":{"out":null,"needs_vibe":true}}
 {"in":{"args":[{"global_daily_anlas":"5"},{"features":"vibe","allow_anlas":0},"vibe"]},"out":{"out":null,"needs_vibe":true}}
@@ -84,8 +84,8 @@
 {"in":{"args":[{},{"features":null,"allow_anlas":1},"bogus"]},"out":{"out":null,"needs_vibe":false}}
 {"in":{"args":[{"global_daily_anlas":"100001"},{"allow_anlas":"0"},"vibe"]},"out":{"out":null,"needs_vibe":false}}
 {"in":{"args":[{"global_daily_anlas":"200"},{"features":null,"allow_anlas":"0"},"upscale"]},"out":{"out":null,"needs_vibe":false}}
-{"in":{"args":[{"features_global":"[1]"},{"features":"tags"},"vibe"]},"out":{"err":"AttributeError"}}
+{"in":{"args":[{"features_global":"[1]"},{"features":"tags"},"vibe"]},"out":{"err":"invalid_flags"}}
 {"in":{"args":[{},{"features":null,"allow_anlas":"0"},"bogus"]},"out":{"out":null,"needs_vibe":false}}
-{"in":{"args":[{"features_global":"[1]"},{"features":null,"allow_anlas":1},"augment"]},"out":{"err":"AttributeError"}}
-{"in":{"args":[{"features_global":"garbage"},{"features":"","allow_anlas":"0"},"bogus"]},"out":{"err":"KeyError"}}
+{"in":{"args":[{"features_global":"[1]"},{"features":null,"allow_anlas":1},"augment"]},"out":{"err":"invalid_flags"}}
+{"in":{"args":[{"features_global":"garbage"},{"features":"","allow_anlas":"0"},"bogus"]},"out":{"err":"unknown_feature"}}
 {"in":{"args":[{"features_global":"garbage","global_daily_anlas":"-1"},{},"vibe"]},"out":{"out":null,"needs_vibe":true}}

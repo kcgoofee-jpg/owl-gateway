@@ -243,7 +243,7 @@ fn features_pure_snapshot() {
                         .map(|(n, _)| ((*n).to_string(), json!(f[n])))
                         .collect(),
                 ),
-                Err(FeaturesError::Attribute(m)) => json!({"err": "AttributeError", "msg": m}),
+                Err(FeaturesError::InvalidFlags) => json!({"err": "invalid_flags"}),
                 Err(other) => panic!("意外的错误 {other}"),
             },
             other => panic!("未知 {other}"),
@@ -290,8 +290,8 @@ fn features_check_snapshot() {
             Err(e) => {
                 tally.add("error");
                 json!({"err": match e {
-                    FeaturesError::Attribute(_) => "AttributeError",
-                    FeaturesError::Key(_) => "KeyError",
+                    FeaturesError::InvalidFlags => "invalid_flags",
+                    FeaturesError::UnknownFeature(_) => "unknown_feature",
                     FeaturesError::MissingVibe => "MissingVibe",
                 }})
             }

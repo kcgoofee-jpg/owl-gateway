@@ -316,7 +316,9 @@ async fn perform_stream(
             };
             let mut handle = match opened {
                 Ok(h) => h,
-                Err(e) if e.local => return Err(GateError::with_code(e.status, e.message, e.code)),
+                Err(e) if e.local || (!e.transport && !ctx.was_sent() && !e.billing_uncertain) => {
+                    return Err(GateError::with_code(e.status, e.message, e.code));
+                }
                 Err(e) => {
                     return Ok(Err(Some(StreamFail::Upstream(
                         e.status,
@@ -591,8 +593,7 @@ async fn perform_stream(
     if cancelled {
         return Ok(());
     }
-    // 派发之后客户端断开、没拿到全部图（图已生成并计数）：这是客户端的行为（超时、关了页面、换了请求），
-    // 不是网关的 Bug，不进 Bug 列表（以前每次都记一条，总览永远挂着「1 个 Bug 没处理」）；只留一行日志，请求本身在用量日志里
+    // 客户端在派发后断开时保留用量记录，已完成图片仍然结算。
     if (disconnect.is_cancelled() || sink.client_gone()) && !delivered && was_dispatched {
         tracing::info!(rid = %ctx.rid(), "客户端在图片返回前断开连接（图已生成并计数）");
     }

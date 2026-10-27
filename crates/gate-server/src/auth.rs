@@ -101,7 +101,7 @@ pub fn ctx_of(parts: &Parts) -> ReqCtx {
         .unwrap_or_else(ReqCtx::new)
 }
 
-/// Key 已停用或已过期时的拒绝（403）；正常返回 None。`authenticate` 和问卷的会话分支共用，文案只此一份。
+/// Key 已停用或已过期时的拒绝（403）；正常返回 None。`authenticate` 和成员会话分支共用，文案只此一份。
 pub fn key_status_error(key: &Key, now: f64) -> Option<GateError> {
     if !key.enabled() {
         let why = key.get("disabled_reason").as_str();

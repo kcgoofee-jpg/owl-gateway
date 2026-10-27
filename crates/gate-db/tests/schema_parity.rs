@@ -1,4 +1,4 @@
-//! 全新库：Rust 建出来的表结构必须与旧版 Python `Database.connect()` 建的逐字一致；
+//! 数据库 bootstrap 的幂等性、事务与结构约束。
 //! 再跑一遍 bootstrap 必须是空操作（线上库每次重启都会跑）。
 
 use rusqlite::Connection;

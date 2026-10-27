@@ -13,7 +13,6 @@
 //! [`Effect::UpdateKeys`] 的执行：`UPDATE api_keys SET daily_images=?, daily_v5=?`
 //! WHERE quota_auto=1`。后台手动设过额度的 Key（`quota_auto=-1`）不动。
 
-use crate::validation::ValidationError;
 use crate::{primitives, values};
 use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value};
@@ -29,52 +28,14 @@ pub const V5_FULL_PERCENT: f64 = 99.5;
 // 错误与副作用
 // ---------------------------------------------------------------------------
 
-/// 额度判定失败，按异常类型分类（错误文案以 [`DecideError::error_kind`] 的类型名开头）。
+/// 运行保护读取到无效的数值设置。
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
-pub enum DecideError {
-    #[error("ValueError: {0}")]
-    Value(String),
-    #[error("JSONDecodeError: {0}")]
-    Json(String),
-    #[error("TypeError: {0}")]
-    Type(String),
-    #[error("KeyError: {0}")]
-    Key(String),
-    #[error("AttributeError: {0}")]
-    Attribute(String),
-    #[error("OverflowError: {0}")]
-    Overflow(String),
-    #[error("ZeroDivisionError: {0}")]
-    ZeroDivision(String),
-    /// 服务层没按约定提供某组输入（内部 bug，不属于上游判定失败）。
-    #[error("缺少输入: {0}")]
-    MissingInput(String),
-}
+#[error("{0}")]
+pub struct DecideError(pub String);
 
 impl DecideError {
     pub fn error_kind(&self) -> &'static str {
-        match self {
-            Self::Value(_) => "invalid_value",
-            Self::Json(_) => "JSONDecodeError",
-            Self::Type(_) => "invalid_type",
-            Self::Key(_) => "KeyError",
-            Self::Attribute(_) => "invalid_structure",
-            Self::Overflow(_) => "out_of_range",
-            Self::ZeroDivision(_) => "division_by_zero",
-            Self::MissingInput(_) => "MissingInput",
-        }
-    }
-}
-
-impl From<ValidationError> for DecideError {
-    fn from(e: ValidationError) -> Self {
-        match e {
-            ValidationError::InvalidValue(m) => Self::Value(m),
-            ValidationError::InvalidType(m) => Self::Type(m),
-            ValidationError::InvalidStructure(m) => Self::Attribute(m),
-            ValidationError::OutOfRange(m) => Self::Overflow(m),
-            ValidationError::DivisionByZero(m) => Self::ZeroDivision(m),
-        }
+        "invalid_setting"
     }
 }
 

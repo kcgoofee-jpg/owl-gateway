@@ -1408,6 +1408,76 @@ async fn stream_bad_wire_format_is_400_json() {
     );
 }
 
+/// Both response modes must reject a pre-dispatch timeout without feeding the upstream breaker.
+#[tokio::test]
+async fn queue_timeout_is_a_rejection_for_both_response_modes() {
+    for path in ["/ai/generate-image", "/ai/generate-image-stream"] {
+        let e = setup(&[]).await;
+        e.state
+            .guard
+            .with(|g| g.values.insert("interval_jitter".into(), 0));
+        e.mock.push(
+            "/ai/generate-image",
+            Reply::Chunks {
+                status: 200,
+                content_type: "binary/octet-stream".into(),
+                chunks: vec![(
+                    std::time::Duration::from_secs(7),
+                    bytes::Bytes::from(gate_testkit::zip_of_pngs(1)),
+                )],
+            },
+        );
+        let state = e.state.clone();
+        let first = tokio::spawn(async move {
+            call(
+                &state,
+                "POST",
+                "/ai/generate-image",
+                Some(TOKEN),
+                Some(image_body("nai-diffusion-4-5-full", 1)),
+            )
+            .await
+        });
+        for _ in 0..200 {
+            if !e.mock.requests_to("/ai/generate-image").is_empty() {
+                break;
+            }
+            tokio::time::sleep(std::time::Duration::from_millis(5)).await;
+        }
+        assert_eq!(e.mock.requests_to("/ai/generate-image").len(), 1);
+        let (status, _, body) = call(
+            &e.state,
+            "POST",
+            path,
+            Some(TOKEN),
+            Some(image_body("nai-diffusion-4-5-full", 1)),
+        )
+        .await;
+        assert_eq!(status, 429, "{}", String::from_utf8_lossy(&body));
+        assert_eq!(first.await.unwrap().0, StatusCode::OK);
+        assert!(e.mock.requests_to("/ai/generate-image-stream").is_empty());
+        assert_eq!(e.mock.requests_to("/ai/generate-image").len(), 1);
+        let rows = logs(&e.state).await;
+        let rejected: Vec<_> = rows.iter().filter(|r| r["status"] == "rejected").collect();
+        assert_eq!(rejected.len(), 1, "{rows:?}");
+        assert_eq!(rejected[0]["reason"], "queue_timeout", "{rows:?}");
+        assert!(!rows.iter().any(|r| r["status"] == "error"), "{rows:?}");
+        let uncertain: i64 = e
+            .state
+            .db
+            .read(|c| {
+                c.query_row(
+                    "SELECT count(*) FROM request_settlements WHERE status='uncertain'",
+                    [],
+                    |r| r.get(0),
+                )
+            })
+            .await
+            .unwrap();
+        assert_eq!(uncertain, 0);
+    }
+}
+
 #[tokio::test]
 async fn stream_upstream_failure_before_start_is_plain_json() {
     let e = setup(&[]).await;

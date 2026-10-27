@@ -1,13 +1,4 @@
-//! 功能开关（对应 `app/features.py`）：站长全局开关每项上游功能，并按 Key 授权。
-//!
-//! 不在这里的（服务层负责）：
-//! - `global_flags(db)`：`db.get_setting("features_global", None)` 读 `site_settings` 的 `features_global`（JSON 文本），
-//!   交给 [`parse_global_flags`]；
-//! - `check(db, key, name, settings)` 里的 `site_flags.get(...)`：只有 `name == "vibe"` 且前面没放行时才读
-//!   `global_daily_anlas`（int）这个键，算法见 [`needs_vibe_site_flags`]；取到的值交给 [`check_decision`]。
-//!   判定本身（[`check_decision`]）是纯函数。2.x 还读 `global_daily_anlas_until`（开放截止时间戳），
-//!   后台一直没有写入口，3.0 删除。
-//!
+//! 功能开关与成员功能准入判定。
 
 use crate::{validation, values};
 use serde_json::Value;
@@ -44,13 +35,10 @@ pub type Flags = BTreeMap<&'static str, bool>;
 
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
 pub enum FeaturesError {
-    /// `features_global` 是合法 JSON 但不是对象（库里存了坏值才会出现；文案带 `AttributeError`
-    /// 类型名前缀，调用方原样转成 500 上报）
-    #[error("AttributeError: {0}")]
-    Attribute(String),
-    /// 未登记的功能名走到 `FEATURES[name]`
-    #[error("KeyError: {0}")]
-    Key(String),
+    #[error("功能开关必须是 JSON 对象")]
+    InvalidFlags,
+    #[error("未知功能: {0}")]
+    UnknownFeature(String),
     /// `name == "vibe"` 走到 Anlas 分支却没有给 [`VibeAnlas`]（调用方 bug）
     #[error("缺少 vibe 的全站 Anlas 设置")]
     MissingVibe,
@@ -61,7 +49,7 @@ fn label(name: &str) -> Result<&'static str, FeaturesError> {
         .iter()
         .find(|(n, _)| *n == name)
         .map(|(_, l)| *l)
-        .ok_or_else(|| FeaturesError::Key(name.to_string()))
+        .ok_or_else(|| FeaturesError::UnknownFeature(name.to_string()))
 }
 
 fn anlas_note(name: &str) -> Option<&'static str> {
@@ -135,10 +123,7 @@ pub fn parse_global_flags(raw: Option<&str>) -> Result<Flags, FeaturesError> {
         _ => Value::Object(Default::default()),
     };
     let Value::Object(saved) = saved else {
-        return Err(FeaturesError::Attribute(format!(
-            "'{}' object has no attribute 'get'",
-            validation::type_name(&saved)
-        )));
+        return Err(FeaturesError::InvalidFlags);
     };
     for (name, _) in FEATURES {
         if let Some(Value::Bool(b)) = saved.get(name) {
