@@ -51,7 +51,7 @@ tools/deploy.sh            # deploy the latest green run
 tools/deploy.sh <run-id>   # deploy a specific green run
 ```
 
-The script refuses runs that did not fully succeed and skips if that build is already live. It downloads and stages the candidate image without changing `current` or `previous`, then waits up to 30 minutes for the live queue to reach the configured safe threshold before promoting the candidate and restarting. A timeout leaves the running version and rollback tag unchanged; retry `tools/deploy.sh <run-id>` later. After restart it checks `healthcheck`, `nai-ops smoke` and the public `/healthz`. Queue reads fail closed and an optional `CUTOVER_BUSY_HOURS` window is honored. `--force` skips the queue/window protection.
+The script refuses runs that did not fully succeed and skips if that build is already live. It downloads and stages the candidate image without changing `current` or `previous`, then promotes the candidate and restarts immediately — no queue wait (owner 10-27); the 1-2 minute downtime window is covered by the Caddy maintenance page, and the old gateway finishes accepted work while shutting down. After restart it checks `healthcheck`, `nai-ops smoke` and the public `/healthz`.
 
 `tools/deploy.sh --wait` reports CI state and its GitHub run URL every minute, and stops waiting after one hour by default (`OWL_CI_WAIT_TIMEOUT_SECONDS` changes that limit). Queue waiting defaults to 1800 seconds with 5-second polling; set `OWL_QUEUE_WAIT_TIMEOUT_SECONDS` and `OWL_QUEUE_POLL_SECONDS` in the local deployment environment file to change these values.
 

@@ -7,7 +7,6 @@ trap 'rm -rf "$tmp"' EXIT
 mkdir -p "$tmp/bin" "$tmp/legacy" "$tmp/opt/owl"
 : >"$tmp/legacy/.env"
 export DOCKER_STATE="$tmp/docker-state" DOCKER_CALLS="$tmp/docker-calls"
-export CUTOVER_TEST_QUEUE=busy
 export OWL_DIR="$tmp/opt/owl" LEGACY_DIR="$tmp/legacy" OWL_IMAGE=owl-gate
 export OWL_GATE_URL=http://127.0.0.1:3003 PROBE_URL=https://example.test
 export PATH="$tmp/bin:$PATH"
@@ -61,13 +60,6 @@ set -euo pipefail
 url=${@: -1}
 if [[ " $* " == *" -w "* ]]; then printf '200 0.1'; exit 0; fi
 case "$url" in
-  */public/live)
-    if [[ ${CUTOVER_TEST_QUEUE:-idle} == busy ]]; then
-      printf '{"queue":{"running":1,"waiting":0}}\n'
-    else
-      printf '{"queue":{"running":0,"waiting":0}}\n'
-    fi
-    ;;
   */healthz) printf '{"ok":true}\n' ;;
   *) printf '<html>ok</html>\n' ;;
 esac
@@ -83,20 +75,8 @@ bash "$repo/deploy/v3/cutover.sh" load "$tmp/image.tar.gz" >/dev/null
 [[ $(awk -F '\t' '$1=="owl-gate:previous" {print $2}' "$DOCKER_STATE") == sha256:older ]]
 [[ $(awk -F '\t' '$1=="owl-gate:staged" {print $2}' "$DOCKER_STATE") == sha256:build-sha ]]
 
-# If the queue does not drain before the deadline, do not promote or restart.
-set +e
-CUTOVER_QUEUE_WAIT_TIMEOUT=1 CUTOVER_QUEUE_POLL_SECONDS=1 \
-  bash "$repo/deploy/v3/cutover.sh" restart --wait-idle >"$tmp/timeout.log" 2>&1
-status=$?
-set -e
-[[ $status != 0 ]]
-grep -Fq '等待安全切换超时' "$tmp/timeout.log"
-[[ $(awk -F '\t' '$1=="owl-gate:current" {print $2}' "$DOCKER_STATE") == sha256:old ]]
-[[ $(awk -F '\t' '$1=="owl-gate:previous" {print $2}' "$DOCKER_STATE") == sha256:older ]]
-
-# When idle, promote the candidate and keep the formerly-live image as the rollback target.
-CUTOVER_TEST_QUEUE=idle CUTOVER_QUEUE_WAIT_TIMEOUT=10 \
-  bash "$repo/deploy/v3/cutover.sh" restart --wait-idle >"$tmp/restart.log" 2>&1
+# 10-27：不再等队列——restart 立即提升候选镜像并重启，原 current 保留为回滚目标。
+bash "$repo/deploy/v3/cutover.sh" restart >"$tmp/restart.log" 2>&1
 [[ $(awk -F '\t' '$1=="owl-gate:current" {print $2}' "$DOCKER_STATE") == sha256:build-sha ]]
 [[ $(awk -F '\t' '$1=="owl-gate:previous" {print $2}' "$DOCKER_STATE") == sha256:old ]]
 if awk -F '\t' '$1=="owl-gate:staged" {found=1} END {exit !found}' "$DOCKER_STATE"; then
@@ -107,8 +87,7 @@ grep -Fq '实测：经 Caddy 探测' "$tmp/restart.log"
 
 # Restaging the already-current image and restarting must not replace the last-good rollback tag.
 bash "$repo/deploy/v3/cutover.sh" load "$tmp/image.tar.gz" >/dev/null
-CUTOVER_TEST_QUEUE=idle CUTOVER_QUEUE_WAIT_TIMEOUT=10 \
-  bash "$repo/deploy/v3/cutover.sh" restart --wait-idle >"$tmp/retry.log" 2>&1
+bash "$repo/deploy/v3/cutover.sh" restart >"$tmp/retry.log" 2>&1
 [[ $(awk -F '\t' '$1=="owl-gate:current" {print $2}' "$DOCKER_STATE") == sha256:build-sha ]]
 [[ $(awk -F '\t' '$1=="owl-gate:previous" {print $2}' "$DOCKER_STATE") == sha256:old ]]
 

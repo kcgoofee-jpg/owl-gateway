@@ -5,14 +5,13 @@
 #   tools/deploy.sh              latest successful push run of CI on main
 #   tools/deploy.sh --wait       wait for the CI run of origin main HEAD, then deploy it
 #   tools/deploy.sh <run-id>     a specific run (must have succeeded)
-#   tools/deploy.sh ... --force  pass --force to cutover.sh (skip its active-queue guard)
 #
 # Steps: pick run -> refuse unless every job passed -> skip if already live -> download
 # artifacts (the image tarball is skipped when the server already loaded that exact image,
 # e.g. a cutover retry) -> sync deployment scripts -> stage image without touching the rollback
-# tag -> wait for an idle queue -> promote staged image and stop-then-start (the old gateway
-# finishes accepted work before the new one starts, so only one gateway ever sends to an upstream
-# account; the site is down 1-2 minutes) -> healthcheck + smoke inside the container -> public
+# tag -> promote the staged image and stop-then-start immediately (a maintenance page covers the
+# 1-2 minute window; the old gateway finishes accepted work while shutting down, and only one
+# gateway ever sends to an upstream account) -> healthcheck + smoke inside the container -> public
 # /healthz -> optional Discord notice (export DISCORD_ALERT_WEBHOOK in owl.env).
 # Rollback on failure: ssh in and run `/opt/owl/cutover.sh previous`.
 #
@@ -29,21 +28,15 @@ source "$HOME/.config/owl/owl.env"
 : "${OWL_IP:?OWL_IP missing in ~/.config/owl/owl.env}"
 KEY=(-i "$HOME/.ssh/naigate_ed25519" -o IdentitiesOnly=yes -o BatchMode=yes -o LogLevel=QUIET)
 CI_WAIT_TIMEOUT=${OWL_CI_WAIT_TIMEOUT_SECONDS:-3600}
-QUEUE_WAIT_TIMEOUT=${OWL_QUEUE_WAIT_TIMEOUT_SECONDS:-1800}
-QUEUE_POLL_SECONDS=${OWL_QUEUE_POLL_SECONDS:-5}
 
 mask() { sed -E 's/[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}/x.x.x.x/g'; }
 remote() { ssh "${KEY[@]}" "root@$OWL_IP" "$@" 2>&1 | mask; return "${PIPESTATUS[0]}"; }
 say() { printf '\033[1m==> %s\033[0m\n' "$*"; }
 die() { printf '\033[31mxx %s\033[0m\n' "$*" >&2; exit 1; }
-[[ $QUEUE_WAIT_TIMEOUT =~ ^(0|[1-9][0-9]*)$ && $QUEUE_POLL_SECONDS =~ ^[1-9][0-9]*$ ]] ||
-  die "OWL_QUEUE_WAIT_TIMEOUT_SECONDS / OWL_QUEUE_POLL_SECONDS must be integers"
-
-run_id="" wait=0 force=""
+run_id="" wait=0
 for a in "$@"; do
   case $a in
     --wait) wait=1 ;;
-    --force) force=--force ;;
     [0-9]*) run_id=$a ;;
     *) die "unknown argument: $a" ;;
   esac
@@ -107,8 +100,8 @@ scp -q "${KEY[@]}" "${files[@]}" "root@$OWL_IP:/opt/owl/" 2>&1 | mask
 
 say "cutover"
 remote "set -e; cd /opt/owl; chmod +x cutover.sh caddy-reload.sh
-  ./cutover.sh load owl-gate.tar.gz $force
-  CUTOVER_QUEUE_WAIT_TIMEOUT=$QUEUE_WAIT_TIMEOUT CUTOVER_QUEUE_POLL_SECONDS=$QUEUE_POLL_SECONDS ./cutover.sh restart --wait-idle $force
+  ./cutover.sh load owl-gate.tar.gz
+  ./cutover.sh restart
   ./cutover.sh install-ops /opt/owl/nai-ops
   rm -f owl-gate.tar.gz" || die "cutover failed; consider: ssh in and run /opt/owl/cutover.sh previous"
 

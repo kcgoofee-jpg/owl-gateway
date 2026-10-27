@@ -3,15 +3,14 @@
 #
 #   deploy/v3/cutover.sh load <owl-gate.tar.gz>   载入并暂存 CI 镜像，不改 current / previous
 #   deploy/v3/cutover.sh install-ops <nai-ops>     安装宿主机用的运维命令（静态二进制，快照脚本要用宿主机的 docker / 磁盘 / .env）
-#   deploy/v3/cutover.sh restart                   先停后起换上 owl-gate:current（tools/deploy.sh 用它）：旧网关在途的图收尾、
-#                                                  完全退出后再起新的。网站断 1–2 分钟（Caddy 显示「网关自检中」），但同一时刻只有一个网关在用账号
-#   deploy/v3/cutover.sh previous                  3.0 回到上一版 3.0 镜像（owl-gate:previous），同样走 restart
+#   deploy/v3/cutover.sh restart                   先停后起换上 owl-gate:current（tools/deploy.sh 用它）：立即停机换版，
+#                                                  不等队列；停机 1–2 分钟，期间 Caddy 显示「维护页」（在途和已排队的图
+#                                                  最多再收尾 120 秒）。同一时刻只有一个网关在用账号
+#   deploy/v3/cutover.sh previous                  回到上一版镜像（owl-gate:previous），同样走 restart
 # 改 Caddy 配置用 deploy/v3/caddy-reload.sh（不要 docker exec caddy caddy reload，原因见那个脚本）。
 #   deploy/v3/cutover.sh status
 #
-# restart / previous 之前会读取网关实时队列（/public/live 的排队 + 生成中）：超过阈值
-# （环境变量 CUTOVER_BUSY_THRESHOLD，默认 0）或现在正落在忙时（CUTOVER_BUSY_HOURS，如 "20-24"，默认不设）
-# 就拒绝执行，除非加 --force（放在子命令后面或前面都行）。
+# 站长 10-27：等安全窗口的流程整个删除——部署就是停机维护，由 Caddy 的维护页兜住访问。
 set -euo pipefail
 
 # 下面几项只给演练改（换个目录 / 项目名 / 容器名在备用机上整套跑一遍），线上全用默认值
@@ -26,70 +25,8 @@ PROBE_URL=${OWL_PROBE_URL:-https://gate.davidzhao.top}
 ENV_FILE=$LEGACY_DIR/.env
 COMPOSE=(docker compose -p "$PROJECT" --env-file "$ENV_FILE" -f "$OWL_DIR/compose.yml")
 
-BUSY_THRESHOLD=${CUTOVER_BUSY_THRESHOLD:-0}
-BUSY_HOURS=${CUTOVER_BUSY_HOURS:-}
-FORCE=0
-WAIT_IDLE=0
-QUEUE_WAIT_TIMEOUT=${CUTOVER_QUEUE_WAIT_TIMEOUT:-1800}
-QUEUE_POLL_SECONDS=${CUTOVER_QUEUE_POLL_SECONDS:-5}
-
 log() { printf '[%(%F %T)T] %s\n' -1 "$*"; }
 die() { log "✗ $*"; exit 1; }
-
-# 网关当前排队与生成中的图片数；历史完成量不代表重启会中断任务。
-current_images() {
-  curl -fsS -m 3 "$GATE_URL/public/live" |
-    jq -er '.queue | if (.running | type) == "number" and (.waiting | type) == "number" then .running + .waiting else error("queue counts unavailable") end'
-}
-
-# 现在是不是落在 CUTOVER_BUSY_HOURS（如 "20-24"，含起点、不含终点，可跨午夜 "22-6"）里
-in_busy_hours() {
-  [[ $BUSY_HOURS =~ ^([0-9]{1,2})-([0-9]{1,2})$ ]] || return 1
-  local from=$((10#${BASH_REMATCH[1]})) to=$((10#${BASH_REMATCH[2]})) now
-  now=$((10#$(date +%H)))
-  if ((from <= to)); then ((now >= from && now < to)); else ((now >= from || now < to)); fi
-}
-
-# 部署 / 重启前的忙碌检查：忙就拒绝，--force 才放行
-busy_guard() {
-  local n reason=""
-  n=$(current_images) || die "无法读取网关当前排队 / 生成任务数；为避免中断图片，取消切换"
-  [[ $n =~ ^[0-9]+$ ]] || die "网关返回的当前队列数无效；为避免中断图片，取消切换"
-  log "当前排队 / 生成中的图片：$n（阈值 $BUSY_THRESHOLD）"
-  if ((n > BUSY_THRESHOLD)); then reason="当前有 $n 张图片正在排队或生成，超过安全阈值 $BUSY_THRESHOLD"; fi
-  if [[ -z $reason ]] && in_busy_hours; then reason="现在（$(date +%H:%M)）在忙时 $BUSY_HOURS 内"; fi
-  if [[ -n $reason ]]; then
-    if ((FORCE)); then
-      log "! $reason；已加 --force，继续"
-    else
-      die "$reason；等队列清空或忙时结束后再试，--force 会跳过保护"
-    fi
-  fi
-  log "切换前会再次检查实时队列；网关停机时会先排空已接收的图片请求（最多 120 秒）"
-}
-
-# 自动发布可等待任务自然完成；手动 restart 仍立即失败，除非显式传 --wait-idle。
-wait_until_safe() {
-  if ((FORCE)); then busy_guard; return; fi
-  [[ $QUEUE_WAIT_TIMEOUT =~ ^(0|[1-9][0-9]*)$ && $QUEUE_POLL_SECONDS =~ ^[1-9][0-9]*$ ]] ||
-    die "CUTOVER_QUEUE_WAIT_TIMEOUT / CUTOVER_QUEUE_POLL_SECONDS 必须是正整数"
-  local deadline=$((SECONDS + QUEUE_WAIT_TIMEOUT)) last_report=-60 n
-  while :; do
-    n=$(current_images) || die "无法读取网关当前排队 / 生成任务数；为避免中断图片，取消切换"
-    [[ $n =~ ^[0-9]+$ ]] || die "网关返回的当前队列数无效；为避免中断图片，取消切换"
-    if ((n <= BUSY_THRESHOLD)) && ! in_busy_hours; then
-      busy_guard
-      return
-    fi
-    local elapsed=$((SECONDS - (deadline - QUEUE_WAIT_TIMEOUT)))
-    ((elapsed < QUEUE_WAIT_TIMEOUT)) || die "等待安全切换超时（队列 $n，阈值 $BUSY_THRESHOLD）；当前版本保持运行，可稍后重试"
-    if ((elapsed - last_report >= 60)); then
-      log "等待安全窗口：当前在途图片 $n，阈值 $BUSY_THRESHOLD；已等 ${elapsed}s / 最多 ${QUEUE_WAIT_TIMEOUT}s"
-      last_report=$elapsed
-    fi
-    sleep "$QUEUE_POLL_SECONDS"
-  done
-}
 
 wait_healthy() {
   local deadline=$((SECONDS + ${1:-90}))
@@ -173,7 +110,7 @@ cmd_install_ops() {
 restart_container() {
   docker image inspect "$IMAGE:current" >/dev/null 2>&1 || die "先 load 镜像"
   probe_start
-  log "停 $GATE：不再接新请求，手上的图出完（最多 120 秒）再退出；这期间网站显示「网关自检中」"
+  log "停 $GATE：不再接新请求，在途和已排队的图收尾（最多 120 秒）；这期间网站显示维护页"
   "${COMPOSE[@]}" stop -t 120 gate
   log "起新的 $GATE"
   if ! "${COMPOSE[@]}" up -d --remove-orphans || ! wait_healthy 90 || ! smoke; then
@@ -191,7 +128,6 @@ restart_container() {
 }
 
 cmd_restart() {
-  if ((WAIT_IDLE)); then wait_until_safe; else busy_guard; fi
   if docker image inspect "$IMAGE:staged" >/dev/null 2>&1; then
     local staged_id current_id running_id
     staged_id=$(docker image inspect -f '{{.Id}}' "$IMAGE:staged")
@@ -213,7 +149,6 @@ cmd_restart() {
 }
 
 cmd_previous() {
-  if ((WAIT_IDLE)); then wait_until_safe; else busy_guard; fi
   docker image inspect "$IMAGE:previous" >/dev/null 2>&1 || die "没有 owl-gate:previous"
   docker tag "$IMAGE:current" "$IMAGE:failed"
   docker tag "$IMAGE:previous" "$IMAGE:current"
@@ -225,16 +160,6 @@ cmd_status() {
   docker ps -a --filter name=owl- --format '{{.Names}}\t{{.Status}}\t{{.Image}}'
   curl -fsS -m 3 "$GATE_URL/healthz" && echo
 }
-
-args=()
-for a in "$@"; do
-  case $a in
-    --force) FORCE=1 ;;
-    --wait-idle) WAIT_IDLE=1 ;;
-    *) args+=("$a") ;;
-  esac
-done
-set -- "${args[@]+"${args[@]}"}"
 
 case ${1:-status} in
   load) shift; cmd_load "$@" ;;
