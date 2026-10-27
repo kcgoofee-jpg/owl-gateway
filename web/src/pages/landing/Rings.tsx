@@ -8,7 +8,6 @@
  */
 import { useEffect, useRef, useState } from "preact/hooks";
 import { animate, EASE_OUT, reduceMotion, stagger } from "../../lib/motion";
-import { cx } from "../../ui";
 import { type QuotaRow, quotaRows } from "./helpers";
 import { splashActive } from "./Splash";
 import type { MeMember } from "./types";
