@@ -202,9 +202,7 @@ test.describe("已登录", () => {
     await dlg.getByRole("spinbutton", { name: /^每月 Anlas 上限/ }).fill("0");
     await dlg.getByRole("checkbox", { name: /^允许消耗 Anlas/ }).check();
     await dlg.getByRole("button", { name: "保存" }).click();
-    await expect(
-      dlg.getByText("开通 Anlas 时，每日和每月上限至少一项大于 0（0 = 停用）"),
-    ).toBeVisible();
+    await expect(dlg.getByText("开通 Anlas 时，每日和每月上限至少一项大于 0（0 = 停用）")).toBeVisible();
     await dlg.getByRole("spinbutton", { name: /^每月 Anlas 上限/ }).fill("10");
     const saveResponse = page.waitForResponse(
       (response) =>
