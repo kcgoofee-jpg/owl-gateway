@@ -90,7 +90,7 @@ pub fn mask_ip(value: &str) -> String {
     if parts.len() == 4 {
         format!("*.*.{}.{}", parts[2], parts[3])
     } else {
-        format!("…{}", gate_core::pyc::last_chars(value, 6))
+        format!("…{}", gate_core::primitives::last_chars(value, 6))
     }
 }
 
@@ -160,7 +160,9 @@ impl ImageCooldown {
 
     /// 从库里恢复（`image_cooldown_until`）：非数 / 超过 1 小时的值视为无效。
     pub fn load(&self, raw: Option<&str>, now: f64) {
-        let v = raw.and_then(gate_core::pyc::parse_float).unwrap_or(0.0);
+        let v = raw
+            .and_then(gate_core::primitives::parse_float)
+            .unwrap_or(0.0);
         let v = if v.is_nan() || v > now + 3600.0 {
             0.0
         } else {

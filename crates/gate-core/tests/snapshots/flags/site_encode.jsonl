@@ -28,7 +28,7 @@
 {"in":{"spec":{"ref":"global_monthly_anlas"},"args":["1"]},"out":"1.0"}
 {"in":{"spec":{"ref":"global_monthly_anlas"},"args":[[]]},"out":{"err":"ValueError","msg":"global_monthly_anlas 必须是数字"}}
 {"in":{"spec":{"ref":"global_monthly_anlas"},"args":[{}]},"out":{"err":"ValueError","msg":"global_monthly_anlas 必须是数字"}}
-{"in":{"spec":{"ref":"algo_notice"},"args":[false]},"out":"False"}
+{"in":{"spec":{"ref":"algo_notice"},"args":[false]},"out":"false"}
 {"in":{"spec":{"ref":"algo_notice"},"args":[0]},"out":"0"}
 {"in":{"spec":{"ref":"algo_notice"},"args":[1]},"out":"1"}
 {"in":{"spec":{"ref":"algo_notice"},"args":[-1]},"out":"-1"}
@@ -36,21 +36,15 @@
 {"in":{"spec":{"ref":"algo_notice"},"args":[100000]},"out":"100000"}
 {"in":{"spec":{"ref":"algo_notice"},"args":[-0.5]},"out":"-0.5"}
 {"in":{"spec":{"ref":"algo_notice"},"args":[""]},"out":""}
-{"in":{"spec":{"ref":"algo_notice"},"args":[null]},"out":"None"}
+{"in":{"spec":{"ref":"algo_notice"},"args":[null]},"out":""}
 {"in":{"spec":{"ref":"algo_notice"},"args":[[]]},"out":"[]"}
-{"in":{"spec":{"ref":"algo_notice"},"args":[[1,"a"]]},"out":"[1, 'a']"}
+{"in":{"spec":{"ref":"algo_notice"},"args":[[1,"a"]]},"out":"[1,\"a\"]"}
 {"in":{"spec":{"ref":"algo_notice"},"args":[{}]},"out":"{}"}
-{"in":{"spec":{"ref":"algo_notice"},"args":[{"k":"v"}]},"out":"{'k': 'v'}"}
-{"in":{"spec":{"ref":"algo_notice"},"args":[["a\bb\f\u001f","~","a~b"," ","'"]]},"out":"['a\\x08b\\x0c\\x1f\\x7f', '~', 'a~b', ' ', \"'\"]"}
-{"in":{"spec":{"ref":"algo_notice"},"args":[["a\nb\\c"]]},"out":"['a\\nb\\\\c']"}
-{"in":{"spec":{"ref":"algo_notice"},"args":[["猫","😀"]]},"out":"['猫', '😀']"}
-{"in":{"spec":{"ref":"algo_notice"},"args":[[1.5,2.0,1e+22,1e-7]]},"out":"[1.5, 2.0, 1e+22, 1e-07]"}
-{"in":{"spec":{"ref":"audit_image_cap_mb"},"args":[""]},"out":{"err":"ValueError","msg":"audit_image_cap_mb 必须是数字"}}
-{"in":{"spec":{"ref":"audit_image_cap_mb"},"args":[[]]},"out":{"err":"ValueError","msg":"audit_image_cap_mb 必须是数字"}}
-{"in":{"spec":{"ref":"audit_image_cap_mb"},"args":[{}]},"out":{"err":"ValueError","msg":"audit_image_cap_mb 必须是数字"}}
-{"in":{"spec":{"ref":"audit_image_cap_mb"},"args":[[1.5,2.0,1e+22,1e-7]]},"out":{"err":"ValueError","msg":"audit_image_cap_mb 必须是数字"}}
-{"in":{"spec":{"ref":"audit_image_keep_hours"},"args":[0]},"out":"0"}
-{"in":{"spec":{"ref":"audit_image_keep_hours"},"args":[1]},"out":"1"}
+{"in":{"spec":{"ref":"algo_notice"},"args":[{"k":"v"}]},"out":"{\"k\":\"v\"}"}
+{"in":{"spec":{"ref":"algo_notice"},"args":[["a\bb\f\u001f","~","a~b"," ","'"]]},"out":"[\"a\\bb\\f\\u001f\",\"~\",\"a~b\",\" \",\"'\"]"}
+{"in":{"spec":{"ref":"algo_notice"},"args":[["a\nb\\c"]]},"out":"[\"a\\nb\\\\c\"]"}
+{"in":{"spec":{"ref":"algo_notice"},"args":[["猫","😀"]]},"out":"[\"猫\",\"😀\"]"}
+{"in":{"spec":{"ref":"algo_notice"},"args":[[1.5,2.0,1e+22,1e-7]]},"out":"[1.5,2.0,1e+22,1e-7]"}
 {"in":{"spec":{"inline":{"key":"x_choice","kind":"choice","default":"a","owner":"t","doc":"d","lo":null,"hi":null,"choices":["a","B","c d"]}},"args":[0]},"out":{"err":"ValueError","msg":"x_choice 只能是 a / B / c d"}}
 {"in":{"spec":{"inline":{"key":"x_choice","kind":"choice","default":"a","owner":"t","doc":"d","lo":null,"hi":null,"choices":["a","B","c d"]}},"args":[1]},"out":{"err":"ValueError","msg":"x_choice 只能是 a / B / c d"}}
 {"in":{"spec":{"inline":{"key":"x_choice","kind":"choice","default":"a","owner":"t","doc":"d","lo":null,"hi":null,"choices":["a","B","c d"]}},"args":[2]},"out":{"err":"ValueError","msg":"x_choice 只能是 a / B / c d"}}
@@ -91,5 +85,5 @@
 {"in":{"spec":{"inline":{"key":"x_float_free","kind":"float","default":0.0,"owner":"t","doc":"d","lo":null,"hi":null,"choices":[]}},"args":[[]]},"out":{"err":"ValueError","msg":"x_float_free 必须是数字"}}
 {"in":{"spec":{"inline":{"key":"x_float_free","kind":"float","default":0.0,"owner":"t","doc":"d","lo":null,"hi":null,"choices":[]}},"args":[{}]},"out":{"err":"ValueError","msg":"x_float_free 必须是数字"}}
 {"in":{"spec":{"inline":{"key":"x_str","kind":"str","default":"dflt","owner":"t","doc":"d","lo":null,"hi":null,"choices":[]}},"args":[""]},"out":""}
-{"in":{"spec":{"inline":{"key":"x_str","kind":"str","default":"dflt","owner":"t","doc":"d","lo":null,"hi":null,"choices":[]}},"args":[{"k":[1,null,true,"it's","say \"hi\""]}]},"out":"{'k': [1, None, True, \"it's\", 'say \"hi\"']}"}
+{"in":{"spec":{"inline":{"key":"x_str","kind":"str","default":"dflt","owner":"t","doc":"d","lo":null,"hi":null,"choices":[]}},"args":[{"k":[1,null,true,"it's","say \"hi\""]}]},"out":"{\"k\":[1,null,true,\"it's\",\"say \\\"hi\\\"\"]}"}
 {"in":{"spec":{"inline":{"key":"x_flag","kind":"flag","default":false,"owner":"t","doc":"d","lo":null,"hi":null,"choices":[]}},"args":[1]},"out":"1"}

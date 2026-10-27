@@ -503,6 +503,6 @@ async fn restart_after_a_quiet_night_keeps_the_idle_timer() {
 #[tokio::test]
 async fn restart_after_real_downtime_resets_the_idle_timer() {
     let (grace, resets) = restart_after(2.0 * 3600.0, 2.0 * 3600.0).await;
-    assert_eq!(grace.as_deref(), Some("1900000000.0"));
+    assert_eq!(grace.as_deref(), Some("1900000000"));
     assert_eq!(resets, 1);
 }

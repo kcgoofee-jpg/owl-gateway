@@ -89,7 +89,7 @@ impl Alerter {
     }
 
     async fn send(&self, text: &str) {
-        let content: String = gate_core::pyc::take_chars(text, 1900).to_string();
+        let content: String = gate_core::primitives::take_chars(text, 1900).to_string();
         let body = json!({"content": content, "allowed_mentions": {"parse": []}});
         let result: Result<(), String> = async {
             let auth = format!("Bot {}", self.bot_token);

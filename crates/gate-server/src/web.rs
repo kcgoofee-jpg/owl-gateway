@@ -163,7 +163,7 @@ pub fn apply_page_headers(h: &mut HeaderMap, page: Page) {
 
 /// 放进 `<script type="application/json">` 的 JSON：把 `<` `>` `&` 和 U+2028/2029 转义，杜绝提前闭合标签。
 fn json_for_html(v: &Value) -> String {
-    let raw = String::from_utf8(gate_core::pyjson::wire(v)).unwrap_or_default();
+    let raw = String::from_utf8(gate_core::json::wire(v)).unwrap_or_default();
     let mut out = String::with_capacity(raw.len());
     for c in raw.chars() {
         match c {

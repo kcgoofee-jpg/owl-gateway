@@ -36,8 +36,8 @@ const PAGES: Array<{ name: string; path: string; ready: (p: Page) => ReturnType<
   },
   {
     name: "logs-audit",
-    path: "/admin/audit/records",
-    ready: (p) => p.getByRole("button", { name: "导出全部" }),
+    path: "/admin/logs/prompts",
+    ready: (p) => p.getByRole("combobox", { name: "成员（可多选）" }),
   },
   {
     name: "logs-usage",
@@ -130,8 +130,8 @@ test.describe("已登录", () => {
     await page.keyboard.press("Escape");
   });
 
-  test("日志：成员可多选——打字过滤、勾选不关下拉、chips 展示与移除、一键导出", async ({ page }) => {
-    await open(page, "/admin/audit/records", PAGES.find((x) => x.name === "logs-audit")?.ready as never);
+  test("日志：成员可多选——打字过滤、勾选不关下拉、chips 展示与移除", async ({ page }) => {
+    await open(page, "/admin/logs/prompts", PAGES.find((x) => x.name === "logs-audit")?.ready as never);
     const box = page.getByRole("combobox", { name: "成员（可多选）" });
     await box.click();
     const list = page.getByRole("listbox", { name: "成员（可多选）" });
@@ -150,12 +150,10 @@ test.describe("已登录", () => {
       await opts.nth(0).click();
       await expect(list).toBeVisible();
       await expect(box).toHaveValue("");
-      await expect(page.getByRole("button", { name: "导出全部" })).toBeEnabled();
       await expect(chips.locator(".xa-chip")).toHaveCount(1);
       // 勾第二个：两个 chip，按钮变「导出 2 人」
       await opts.nth(1).click();
       await expect(chips.locator(".xa-chip")).toHaveCount(2);
-      await expect(page.getByRole("button", { name: "导出 2 人" })).toBeVisible();
       // 关掉下拉浮层再管理 chips（浮层会盖住下面的 chips 行）
       await box.press("Escape");
       await expect(list).toHaveCount(0);
@@ -502,7 +500,7 @@ test.describe("已登录", () => {
     // 「请求」= 这位成员（全部 Key）的请求日志；详情里降成了文字链接（站内链接样式）
     await expect(row.getByText("最近来源")).toHaveCount(0);
     await expect(row.getByRole("link", { name: "请求", exact: true })).toBeVisible();
-    await expect(row.getByRole("link", { name: "生成记录", exact: true })).toBeVisible();
+    await expect(row.getByRole("link", { name: "提示词记录", exact: true })).toBeVisible();
 
     // 发重置券：天数 1～30
     await row.getByRole("button", { name: "发重置券" }).click();
@@ -624,22 +622,16 @@ test.describe("已登录", () => {
     }
   });
 
-  test("日志：生成记录能放大查看（点画廊砖）", async ({ page }) => {
-    await open(page, "/admin/audit/records", PAGES[1]?.ready as never);
-    const first = page.getByRole("button", { name: /^查看 .* 的.*记录$/ }).first();
-    await first.waitFor({ state: "visible", timeout: 5000 }).catch(() => undefined);
-    if (await first.isVisible()) {
-      await first.click();
-      const lb = page.getByRole("dialog", { name: /的生成记录/ });
-      await expect(lb).toBeVisible();
-      expect(await seriousViolations(page), "lightbox").toEqual([]);
-      await page.keyboard.press("ArrowRight");
-      await expect(lb.getByText(/^2 \/ /)).toBeVisible();
-      await page.keyboard.press("Escape");
-      await expect(lb).toBeHidden();
-    }
-    // 生成记录的设置只在「领 Key 与功能」里改，日志页不再有第二个入口
-    await expect(page.getByRole("button", { name: "记录设置" })).toHaveCount(0);
+  test("日志：提示词详情、复制与参数，不出现图片和导出", async ({ page }) => {
+    await open(page, "/admin/logs/prompts", PAGES[1]?.ready as never);
+    const record = page.locator(".prompt-record").first();
+    await expect(record).toBeVisible();
+    await record.locator("summary").click();
+    await expect(record.getByText("生成参数与角色坐标")).toBeVisible();
+    await expect(record.getByRole("button", { name: "复制提示词" })).toBeEnabled();
+    await expect(page.locator("main img, .prompt-record img")).toHaveCount(0);
+    await expect(page.getByRole("button", { name: /导出/ })).toHaveCount(0);
+    expect(await seriousViolations(page)).toEqual([]);
   });
 
   for (const [vp, size] of [
@@ -731,15 +723,6 @@ test.describe("已登录", () => {
         await page.waitForTimeout(300);
         await page.screenshot({ path: `${SHOTS}/members-keydialog-${tag}.png` });
         await page.keyboard.press("Escape");
-        // 大图
-        await open(page, "/admin/audit/records", PAGES[1]?.ready as never);
-        const tile = page.getByRole("button", { name: /^查看 .* 的.*记录$/ }).first();
-        await tile.waitFor({ state: "visible", timeout: 5000 }).catch(() => undefined);
-        if (await tile.isVisible()) {
-          await tile.click();
-          await page.waitForTimeout(500);
-          await page.screenshot({ path: `${SHOTS}/logs-lightbox-${tag}.png` });
-        }
       }
     }
   });

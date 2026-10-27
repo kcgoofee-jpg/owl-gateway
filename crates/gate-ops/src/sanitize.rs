@@ -1,4 +1,3 @@
-//! 脱敏只读快照（移植自旧版 ro_sanitize.py，见标签 py-final）：给协作 AI 做只读分析用。
 //!
 //! 去掉：成员 API Key 原文（换成不可逆短哈希，同一把 Key 仍能对上）、盐 / 密码哈希等密钥类设置、
 //! 请求词条哈希、报错堆栈、提示词 / 负面词 / 附加参数原文（成员创作内容）、缩略图、头像。
@@ -53,7 +52,7 @@ pub fn sanitize(path: &Path) -> Result<usize> {
     // Bug 追踪（error_events，10-27 删除）的详情可能夹带请求内容：老快照里若还带着，整张删掉。
     tx.execute("DROP TABLE IF EXISTS error_events", [])?;
     tx.execute(
-        "UPDATE generation_audit SET prompt='', negative='', extra='', thumb=NULL",
+        "UPDATE generation_audit SET prompt='', negative='', extra=''",
         [],
     )?;
     tx.execute("UPDATE discord_registrations SET avatar=''", [])?;

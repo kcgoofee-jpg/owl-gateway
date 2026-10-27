@@ -3,48 +3,12 @@
 //! 逐字节快照见 `admin_snapshot.rs`；这里按接口写成可读的用例（鉴权、校验文案、返回结构、写进库的行、操作日志、导出内容）。
 
 mod common;
-use common::{query, ready, send};
+use common::{query, ready};
 use serde_json::{Value, json};
-use std::io::Read;
 
 const A: &str = "/admin/api";
 
 /// 8×8 的合成 PNG。
-const PNG_HEX: &str = "89504e470d0a1a0a0000000d49484452000000080000000808020000004b6d29dc0000006c4944415478da0dc94101003008033194a0a44aaa84e7a940094aaa68cb375545172a5c4cb1c51529aa9a6ed4b899669b6bd23f440b098b112b4e443f4c1b199b316bcec43f861e34789861871b323f965eb4789965975bb23f8e3e74f898638f3b723f42070587091b2e243cb02c5481f9a60b790000000049454e44ae426082";
-
-fn zip_files(blob: &[u8]) -> Vec<(String, Vec<u8>)> {
-    let mut z = zip::ZipArchive::new(std::io::Cursor::new(blob)).expect("是 zip");
-    (0..z.len())
-        .map(|i| {
-            let mut f = z.by_index(i).unwrap();
-            let mut data = Vec::new();
-            f.read_to_end(&mut data).unwrap();
-            (f.name().unwrap().to_string(), data)
-        })
-        .collect()
-}
-
-#[tokio::test]
-async fn audit_path_ids_are_checked_after_login() {
-    let (e, a) = ready().await;
-    // 先鉴权再校验参数；写请求的校验失败记成失败的操作
-    send(
-        &e.state,
-        "GET",
-        &format!("{A}/audit/x/thumb"),
-        None,
-        None,
-        &[],
-    )
-    .await
-    .assert_detail(401, "未登录或会话已过期");
-    a.get(&format!("{A}/audit/x/thumb"))
-        .await
-        .assert_detail(422, "audit_id 必须是整数");
-    // 登录会记录一条；GET 校验失败不写操作日志。
-    let acts = a.actions().await;
-    assert_eq!(acts.len(), 1, "{acts:?}");
-}
 
 #[tokio::test]
 async fn usage_logs_filter_and_paginate() {
@@ -309,274 +273,6 @@ async fn bug_tracker_lists_resolves_and_names_keys() {
     );
 }
 
-fn audit_seed(png: &str) -> String {
-    format!(
-        "INSERT INTO api_keys(id, name, token, created_at) VALUES (2, '白 鸟/x', 'nai-t-2', 1.0);\
-         INSERT INTO generation_audit(ts, key_id, key_name, prompt, negative, extra, image, image_type, image_size) VALUES \
-         (86400.0, 1, '测试成员', 'cat girl', 'lowres', '{{\"params\":{{\"width\":832,\"height\":1216,\"seed\":123,\"sampler\":\"k_euler\",\"steps\":28,\"scale\":5.0}}}}', X'{png}', 'image/png', 165), \
-         (90000.0, 1, '测试成员', 'owl', '', '{{\"params\":{{\"seed\":0,\"sampler\":\"\",\"steps\":0,\"scale\":0}}}}', X'{png}', '', 165), \
-         (91000.0, 1, '测试成员', '只有缩略图', '', '', NULL, '', NULL), \
-         (92000.0, 2, '白 鸟/x', 'moon', 'bad', 'not json', X'{png}', 'image/webp', 165), \
-         (93000.0, 2, '白 鸟/x', '没有图', '', '', NULL, '', NULL);\
-         UPDATE generation_audit SET thumb = X'ffd8ffe066616b65' WHERE id = 3;"
-    )
-}
-
-#[tokio::test]
-async fn audit_gallery_images_export_and_purge() {
-    let (e, a) = ready().await;
-    a.sql(&audit_seed(PNG_HEX)).await;
-    let v = a.get(&format!("{A}/audit")).await.json();
-    assert_eq!(
-        (
-            v["total"].clone(),
-            v["per_page"].clone(),
-            v["pages"].clone()
-        ),
-        (json!(5), json!(24), json!(1))
-    );
-    let first = &v["items"][0];
-    let order: Vec<&str> = first
-        .as_object()
-        .unwrap()
-        .keys()
-        .map(String::as_str)
-        .collect();
-    assert_eq!(
-        order,
-        [
-            "id",
-            "ts",
-            "rid",
-            "key_id",
-            "key_name",
-            "kind",
-            "model",
-            "status",
-            "prompt",
-            "negative",
-            "extra",
-            "has_thumb",
-            "has_image"
-        ]
-    );
-    assert_eq!(
-        (first["has_thumb"].clone(), first["has_image"].clone()),
-        (json!(0), json!(0))
-    );
-    assert_eq!(v["items"][2]["has_thumb"], 1);
-    // key_id：单个 Key，多个用逗号；小数写法（"1.0"）、垃圾、空串都查不到
-    assert_eq!(
-        a.get(&format!("{A}/audit?key_id=2")).await.json()["total"],
-        2
-    );
-    assert_eq!(
-        a.get(&format!("{A}/audit?key_id=1")).await.json()["total"],
-        3
-    );
-    assert_eq!(
-        a.get(&format!("{A}/audit?key_id=1.0")).await.json()["total"],
-        0
-    );
-    assert_eq!(
-        a.get(&format!("{A}/audit?key_id=1,2")).await.json()["total"],
-        5
-    );
-    assert_eq!(
-        a.get(&format!("{A}/audit?key_id=2,x,,9")).await.json()["total"],
-        2
-    );
-    for q in ["abc", "", "a,b"] {
-        assert_eq!(
-            a.get(&format!("{A}/audit?key_id={q}")).await.json()["total"],
-            0,
-            "{q}"
-        );
-    }
-    assert_eq!(
-        a.get(&format!("{A}/audit?per_page=48")).await.json()["per_page"],
-        48
-    );
-    assert_eq!(
-        a.get(&format!("{A}/audit?per_page=5")).await.json()["per_page"],
-        24
-    );
-    assert_eq!(a.get(&format!("{A}/audit?page=9")).await.json()["page"], 1);
-
-    // 缩略图：优先用存好的；没有就从原图现缩（JPEG）；都没有 404
-    let r = a.get(&format!("{A}/audit/3/thumb")).await;
-    assert_eq!(
-        (
-            r.status,
-            r.headers["content-type"].to_str().unwrap(),
-            r.body.clone()
-        ),
-        (
-            200,
-            "image/jpeg",
-            vec![0xff, 0xd8, 0xff, 0xe0, 0x66, 0x61, 0x6b, 0x65]
-        )
-    );
-    let r = a.get(&format!("{A}/audit/1/thumb")).await;
-    assert_eq!(r.status, 200);
-    assert_eq!(&r.body[..2], [0xff, 0xd8]);
-    a.get(&format!("{A}/audit/5/thumb"))
-        .await
-        .assert_detail(404, "没有图片（原图已过期或未记录）");
-    a.get(&format!("{A}/audit/999/thumb"))
-        .await
-        .assert_detail(404, "没有图片（原图已过期或未记录）");
-    // 原图：保存时的类型；类型为空回落 png；没有原图回落缩略图
-    let png = hex_bytes(PNG_HEX);
-    let r = a.get(&format!("{A}/audit/1/image")).await;
-    assert_eq!(
-        (r.headers["content-type"].to_str().unwrap(), r.body.clone()),
-        ("image/png", png.clone())
-    );
-    assert_eq!(
-        a.get(&format!("{A}/audit/2/image")).await.headers["content-type"],
-        "image/png"
-    );
-    assert_eq!(
-        a.get(&format!("{A}/audit/4/image")).await.headers["content-type"],
-        "image/webp"
-    );
-    let r = a.get(&format!("{A}/audit/3/image")).await;
-    assert_eq!(
-        (r.headers["content-type"].to_str().unwrap(), r.body.len()),
-        ("image/jpeg", 8)
-    );
-    a.get(&format!("{A}/audit/5/image"))
-        .await
-        .assert_detail(404, "没有图片");
-
-    // 导出：某成员的全部原图 + prompts.txt
-    a.get(&format!("{A}/audit/export"))
-        .await
-        .assert_detail(400, "缺少 key_id");
-    for q in ["3", "999", "abc"] {
-        a.get(&format!("{A}/audit/export?key_id={q}"))
-            .await
-            .assert_detail(404, "该成员没有可导出的原图");
-    }
-    // 多个 key_id：合并成一个 zip，每个有记录的账号一个文件夹（原图过期也有提示词）；都没记录就 404
-    a.get(&format!("{A}/audit/export?key_id=3,999"))
-        .await
-        .assert_detail(404, "选中的成员没有生成记录");
-    let r = a.get(&format!("{A}/audit/export?key_id=1,2")).await;
-    assert_eq!(r.status, 200);
-    assert_eq!(r.headers["content-type"], "application/zip");
-    let names: Vec<String> = zip_files(&r.body).into_iter().map(|(n, _)| n).collect();
-    assert!(names.iter().any(|n| n == "说明.txt"));
-    assert!(names.iter().any(|n| n.ends_with("/prompts.txt")));
-    assert!(names.iter().any(|n| n.contains('/') && !n.starts_with('/')));
-    let r = a.get(&format!("{A}/audit/export?key_id=2")).await;
-    assert_eq!(r.status, 200);
-    assert_eq!(r.headers["content-type"], "application/zip");
-    let disp = r.headers["content-disposition"].to_str().unwrap();
-    assert_eq!(
-        disp,
-        "attachment; filename=\"owl-x-1.zip\"; filename*=UTF-8''owl-%E7%99%BD%20%E9%B8%9F/x-1.zip",
-        "文件名只留字母数字和 _.-，其余换成 _ 并去掉两头的 _.；filename* 保留原名（/ 不转义）"
-    );
-    let files = zip_files(&r.body);
-    assert_eq!(files.len(), 2);
-    assert!(files[0].0.ends_with(".webp") && files[0].0.starts_with("0001_"));
-    assert_eq!(files[0].1, png);
-    let text = String::from_utf8(files[1].1.clone()).unwrap();
-    assert!(
-        text.starts_with("白 鸟/x 的作品 · 共 1 张 · 导出于 "),
-        "{text}"
-    );
-    assert!(text.contains("\n正面：moon\n负面：bad\n"), "{text}");
-    assert!(!text.contains("参数："), "extra 不是 JSON 就没有参数行");
-    let r = a.get(&format!("{A}/audit/export?key_id=1")).await;
-    let files = zip_files(&r.body);
-    let names: Vec<&str> = files.iter().map(|(n, _)| n.as_str()).collect();
-    assert_eq!(names.len(), 3);
-    assert!(
-        names[0].starts_with("0001_")
-            && names[0].ends_with(".png")
-            && names[1].starts_with("0002_")
-    );
-    let text = String::from_utf8(files[2].1.clone()).unwrap();
-    assert!(
-        text.contains(
-            "正面：cat girl\n负面：lowres\n参数：种子 123 · k_euler · 28步 · CFG 5.0 · 832×1216\n"
-        ),
-        "{text}"
-    );
-    assert!(
-        text.contains("正面：owl\n负面：\n参数：种子 0 · CFG 0\n"),
-        "种子 0 也算有，采样器 / 步数为 0 不显示: {text}"
-    );
-
-    // 缩略图有进程级缓存：清空原图之前翻页回来不再重算；清空接口会清缓存
-    let before = a.get(&format!("{A}/audit/1/thumb")).await.body;
-    e.state
-        .db
-        .purge_audit_images_before_id(1 << 40)
-        .await
-        .unwrap();
-    assert_eq!(
-        a.get(&format!("{A}/audit/1/thumb")).await.body,
-        before,
-        "缓存命中，原图已被后台任务清掉也照旧能看"
-    );
-    a.post(&format!("{A}/audit/purge-images"), json!({}))
-        .await
-        .assert_detail(422, "需要 confirm=清空");
-    a.post(
-        &format!("{A}/audit/purge-images"),
-        json!({"confirm": "yes"}),
-    )
-    .await
-    .assert_detail(422, "需要 confirm=清空");
-    a.sql(&format!("UPDATE generation_audit SET image = X'{PNG_HEX}', image_type='image/png' WHERE id IN (1, 4)")).await;
-    let r = a
-        .post(
-            &format!("{A}/audit/purge-images"),
-            json!({"confirm": "清空"}),
-        )
-        .await;
-    assert_eq!(r.json(), json!({"ok": true, "purged": 2}));
-    a.get(&format!("{A}/audit/1/thumb"))
-        .await
-        .assert_detail(404, "没有图片（原图已过期或未记录）");
-    assert_eq!(
-        a.get(&format!("{A}/audit")).await.json()["total"],
-        5,
-        "只清原图，提示词和参数照留"
-    );
-    let acts = a.actions().await;
-    // 成功那次是处理函数自己记的日志，中间件不重复记；两次确认没过各记一条失败
-    assert_eq!(
-        acts.iter()
-            .filter(|(act, _, _, ok)| act == "清空原图" && *ok)
-            .count(),
-        1,
-        "{acts:?}"
-    );
-    assert_eq!(
-        acts.iter()
-            .filter(|(act, _, _, ok)| act == "清空原图" && !*ok)
-            .count(),
-        2,
-        "{acts:?}"
-    );
-    assert!(
-        acts.iter()
-            .any(|(act, t, d, ok)| act == "清空原图" && t.is_empty() && d == "2 张" && *ok)
-    );
-}
-
-fn hex_bytes(h: &str) -> Vec<u8> {
-    (0..h.len())
-        .step_by(2)
-        .map(|i| u8::from_str_radix(&h[i..i + 2], 16).unwrap())
-        .collect()
-}
-
 #[tokio::test]
 async fn donations_are_gone() {
     let (_e, a) = ready().await;
@@ -677,16 +373,17 @@ async fn reset_all_keys_disables_everyone_but_invites() {
 #[tokio::test]
 async fn audit_list_truncates_prompts_unless_full() {
     let (e, a) = ready().await;
+    let now = e.state.now();
     let long_prompt = "正".repeat(450);
     let long_negative = "负".repeat(300);
     a.sql(&format!(
         "INSERT INTO generation_audit(ts, key_id, key_name, prompt, negative, extra) VALUES \
-         (86400.0, 1, '测试成员', '{long_prompt}', '{long_negative}', '{{\"params\":{{\"seed\":1}},\"char_prompts\":[\"a\"]}}'), \
-         (86400.0, 1, '测试成员', '短提示词', '短负面', 'not json');"
+         ({now}, 1, '测试成员', '{long_prompt}', '{long_negative}', '{{\"params\":{{\"seed\":1}},\"char_prompts\":[\"a\"]}}'), \
+         ({now}, 1, '测试成员', '短提示词', '短负面', 'not json');"
     ))
     .await;
 
-    let v = a.get(&format!("{A}/audit")).await.json();
+    let v = a.get(&format!("{A}/prompts")).await.json();
     let items = v["items"].as_array().unwrap();
     assert_eq!(v["total"], 2);
     // id 倒序：第 1 条是「短提示词」，第 2 条是长提示词
@@ -726,8 +423,6 @@ async fn audit_list_truncates_prompts_unless_full() {
             "prompt",
             "negative",
             "extra",
-            "has_thumb",
-            "has_image",
             "truncated"
         ]
     );
@@ -738,7 +433,7 @@ async fn audit_list_truncates_prompts_unless_full() {
 
     // ?full=1 / full=true 拿完整原文
     for q in ["full=1", "full=true"] {
-        let full = a.get(&format!("{A}/audit?{q}")).await.json();
+        let full = a.get(&format!("{A}/prompts?{q}")).await.json();
         let long_full = full["items"]
             .as_array()
             .unwrap()
@@ -752,8 +447,31 @@ async fn audit_list_truncates_prompts_unless_full() {
         );
         assert!(long_full.get("truncated").is_none());
     }
-    let bad = a.get(&format!("{A}/audit?full=maybe")).await;
+    let bad = a.get(&format!("{A}/prompts?full=maybe")).await;
     assert_eq!(bad.status, 422, "{}", bad.text());
     assert_eq!(bad.json()["detail"], "full 只能是 true 或 false");
     let _ = e;
+}
+
+#[tokio::test]
+async fn prompt_records_are_text_only_and_expire_after_thirty_days() {
+    let (e, a) = ready().await;
+    let now = e.state.now();
+    a.sql(&format!("INSERT INTO generation_audit(ts,key_id,key_name,model,prompt,negative,extra) VALUES ({},1,'member','nai-diffusion-4-5-full','recent','bad','{{\"params\":{{\"seed\":7}}}}'),({},1,'member','nai-diffusion-4-5-full','expired','','');",now-29.0*86400.0,now-31.0*86400.0)).await;
+    let value = a.get(&format!("{A}/prompts?full=1&key_id=1")).await.json();
+    assert_eq!(value["total"], 1);
+    assert_eq!(value["items"][0]["prompt"], "recent");
+    assert!(value["items"][0].get("has_image").is_none());
+    for path in [
+        "/audit",
+        "/audit/1/image",
+        "/audit/1/thumb",
+        "/audit/export?key_id=1",
+    ] {
+        assert_eq!(a.get(&format!("{A}{path}")).await.status, 404, "{path}");
+    }
+    gate_server::jobs::purge(&e.state).await.unwrap();
+    let rows = query(&e.state.db, "SELECT prompt FROM generation_audit").await;
+    assert_eq!(rows.len(), 1);
+    assert_eq!(rows[0]["prompt"], "recent");
 }

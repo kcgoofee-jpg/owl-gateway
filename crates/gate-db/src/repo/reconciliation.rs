@@ -1,7 +1,7 @@
 //! Anlas 对账快照。
 
 use crate::{Db, DbError, Result, value};
-use gate_core::pyjson;
+use gate_core::json;
 use rusqlite::params;
 use serde_json::Value;
 
@@ -43,7 +43,7 @@ impl Db {
     /// 存一份对账快照。序列化与 `json.dumps(…, ensure_ascii=False, allow_nan=False)` 等价：
     /// 默认分隔符（", " / ": "）、保留 UTF-8；`Value` 里不可能有 NaN / Infinity。
     pub async fn save_reconciliation(&self, snapshot: &Value) -> Result<()> {
-        let text = pyjson::dumps(snapshot);
+        let text = json::dumps(snapshot);
         self.write(move |tx| {
             tx.execute(
                 "INSERT INTO anlas_reconciliations(snapshot) VALUES (?)",

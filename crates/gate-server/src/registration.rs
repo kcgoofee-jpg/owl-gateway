@@ -16,9 +16,9 @@ use crate::env::{EnvConfig, RegistrationEnv};
 use crate::key::Key;
 use crate::ops::{self, Registration};
 use crate::state::AppState;
-use gate_core::pyc::{strip, take_chars};
+use gate_core::primitives::{strip, take_chars};
 use gate_core::snowflake::snowflake_created_at;
-use gate_core::{features, pyext, pyval, site_flags};
+use gate_core::{features, site_flags, validation, values};
 use gate_db::repo::discord::BanInfo;
 use gate_db::repo::footprint::DiscordConnection;
 use gate_db::repo::keys::NewKey;
@@ -128,7 +128,7 @@ impl DiscordUser {
     /// 从 Discord 返回的用户 JSON 里取（缺的、`null` 的都当空）。
     pub fn from_json(v: &Value) -> Self {
         let s = |k: &str| match v.get(k) {
-            Some(x) if pyval::truthy(x) => pyext::py_str(x),
+            Some(x) if values::enabled(x) => validation::text(x),
             _ => String::new(),
         };
         Self {
@@ -232,6 +232,7 @@ pub fn welcome_message(w: &Welcome) -> String {
     ));
     rules.push("• Key 只给本服务器成员：退出服务器后 Key 自动失效".into());
     rules.push("• 一人一把，请勿分享：共用或转售会被回收".into());
+    rules.push("• 提示词和生成参数保留 30 天用于排障和防滥用；本站不保存生成图片".into());
     let text = format!(
         "🦉 **欢迎来到猫头鹰公益站！** 这是你的 API Key（只发这一次，请先保存）：\n`{key}`\n\n\
          **三步开始出图（以柏宝绘为例）**\n\
@@ -249,7 +250,6 @@ pub fn welcome_message(w: &Welcome) -> String {
     take_chars(&text, 1990).to_string()
 }
 
-/// Python `urllib.parse.urlencode`（`quote_plus`）。
 pub fn urlencode(pairs: &[(&str, &str)]) -> String {
     fn quote(s: &str, out: &mut String) {
         for b in s.bytes() {
@@ -601,13 +601,13 @@ impl RegistrationService {
                 Err(_) => None,
             };
             if let Some((404, Some(code))) = &answer
-                && pyval::number_like(code) == Some(10007.0)
+                && values::number(code) == Some(10007.0)
             {
                 let label = self.registration_profile(&discord_id).await?;
                 let who = ["display_name", "username"]
                     .iter()
-                    .find_map(|k| label.get(k).filter(|v| pyval::truthy(v)))
-                    .map(pyext::py_str)
+                    .find_map(|k| label.get(k).filter(|v| values::enabled(v)))
+                    .map(validation::text)
                     .unwrap_or_else(|| discord_id.clone());
                 if let Some((key_id, key_name)) = &cand.invite_key {
                     log_action(
@@ -852,8 +852,8 @@ impl RegistrationService {
             let why = token_json
                 .as_ref()
                 .and_then(|v| v.get("error"))
-                .filter(|v| pyval::truthy(v))
-                .map(pyext::py_str)
+                .filter(|v| values::enabled(v))
+                .map(validation::text)
                 .unwrap_or_default();
             tracing::info!(
                 "[web-login] token exchange {status} {}",
@@ -864,7 +864,7 @@ impl RegistrationService {
         let token = token_json
             .as_ref()
             .and_then(|v| v.get("access_token"))
-            .map(pyext::py_str)
+            .map(validation::text)
             .ok_or_else(|| RegErr::Internal("KeyError: 'access_token'".into()))?;
         let bearer = format!("Bearer {token}");
         let user = match self.discord(Method::GET, "/users/@me", &bearer, None).await {
@@ -873,10 +873,10 @@ impl RegistrationService {
                 return denied("Discord 身份核验或私信失败，请检查授权和私信设置后重试。");
             }
             Err(DiscordErr::Net) => return Err(RegErr::Internal("HTTPError".into())),
-            Err(DiscordErr::Json) => return Err(RegErr::Internal("ValueError".into())),
+            Err(DiscordErr::Json) => return Err(RegErr::Internal("invalid_value".into())),
         };
         let id = if user.get("id").is_some_and(|v| !v.is_null()) {
-            pyext::py_str(&user["id"])
+            validation::text(&user["id"])
         } else {
             "None".into()
         };
@@ -996,13 +996,13 @@ impl RegistrationService {
     // ---- 发 Key ----
 
     async fn flag(&self, spec: &site_flags::Spec) -> Result<bool, DbError> {
-        crate::audit::site_bool(&self.db, spec).await
+        crate::settings::site_bool(&self.db, spec).await
     }
 
     /// 每小时领取 Key 总数的硬上限：把短时间的授权/领取突增抹平（2026-10-10 Discord 应用因「增长异常」被标记，
     /// 就是网页登录上线后一小时内 ~43 人集中授权触发的）。0 = 关闭。默认 12/小时，远高于自然速率、远低于会触发风控的突增。
     async fn issue_rate_blocked(&self, now: f64) -> Result<bool, DbError> {
-        let cap = crate::audit::site_f64(&self.db, &site_flags::ISSUE_HOURLY_CAP).await?;
+        let cap = crate::settings::site_f64(&self.db, &site_flags::ISSUE_HOURLY_CAP).await?;
         if cap <= 0.0 {
             return Ok(false);
         }
@@ -1082,7 +1082,7 @@ impl RegistrationService {
         user: &DiscordUser,
         invite_key: &str,
     ) -> Result<Issued, RegErr> {
-        if guild_id != self.cfg.guild_id || !pyext::is_decimal(user_id) {
+        if guild_id != self.cfg.guild_id || !validation::is_decimal(user_id) {
             return denied("请在指定服务器使用 /register。");
         }
         if defaults::REGISTER_MIN_ACCOUNT_DAYS != 0 {

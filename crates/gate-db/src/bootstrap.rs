@@ -1,9 +1,5 @@
-//! 启动时的建表与轻量迁移。表结构从 2.x 延续而来（线上库就是它建的），保证三件事：
-//! 1. 全新库建出来的 `sqlite_master` 与 2.x 建库脚本的产物逐字一致（tests/schema_parity.rs 对拍）；
-//! 2. 对线上库是空操作（只有幂等的 UPDATE / 重建触发器）；
-//! 3. 重复执行不出错（同一份脚本管全新库和线上库）。
-//!
-//! 表结构只增不减：已删除功能的死列 / 死表在 3.0 上线稳定后再单独迁移删除。
+//! Idempotent schema initialization and migrations for existing gateway databases.
+//! Prompt image removal is handled by prompt_migration after this schema is initialized.
 
 use rusqlite::{Connection, ErrorCode, OptionalExtension};
 
@@ -35,10 +31,6 @@ const ADD_COLUMNS: &[&str] = &[
     "ALTER TABLE usage_log ADD COLUMN src TEXT NOT NULL DEFAULT ''",
     "ALTER TABLE usage_log ADD COLUMN ver TEXT NOT NULL DEFAULT ''",
     "ALTER TABLE generation_audit ADD COLUMN extra TEXT NOT NULL DEFAULT ''",
-    "ALTER TABLE generation_audit ADD COLUMN image BLOB",
-    "ALTER TABLE generation_audit ADD COLUMN image_type TEXT NOT NULL DEFAULT ''",
-    "ALTER TABLE generation_audit ADD COLUMN image_file TEXT",
-    "ALTER TABLE generation_audit ADD COLUMN image_size INTEGER",
     "ALTER TABLE usage_log ADD COLUMN reason TEXT NOT NULL DEFAULT ''",
     "ALTER TABLE upstream_snapshots ADD COLUMN fresh INTEGER NOT NULL DEFAULT 0",
     "ALTER TABLE discord_registrations ADD COLUMN member_checked_at REAL NOT NULL DEFAULT 0",
@@ -91,7 +83,6 @@ pub const RUST_ADDED_COLUMNS: &[&str] = &[
 ];
 
 /// 3.0 新增的表（只增不减）。同 `RUST_ADDED_COLUMNS`：
-/// 不写进 `schema.sql`，`tests/schema_parity.rs` 的「Python 建的表」一侧也按这份清单补出来。
 pub const RUST_ADDED_TABLES: &[&str] = &[
     // Durable image request lifecycle. Unknown dispatched outcomes remain held for reconciliation;
     // upstream POSTs are never replayed from this table.
@@ -99,7 +90,6 @@ pub const RUST_ADDED_TABLES: &[&str] = &[
      request_id TEXT PRIMARY KEY, rid TEXT NOT NULL, key_id INTEGER NOT NULL, status TEXT NOT NULL, \
      day TEXT NOT NULL, anlas REAL NOT NULL DEFAULT 0, v5 INTEGER NOT NULL DEFAULT 0, legacy INTEGER NOT NULL DEFAULT 0, \
      dispatched_at REAL, result_json TEXT, updated_at REAL NOT NULL)",
-    "CREATE TABLE IF NOT EXISTS audit_request_links (request_id TEXT PRIMARY KEY, audit_id INTEGER NOT NULL UNIQUE)",
     // 成员用 Discord OAuth 授权后核验到的身份组（领 Key 的门槛只认这张表，不再用机器人 Token 查）。
     "CREATE TABLE IF NOT EXISTS role_verifications (\
      discord_id TEXT NOT NULL, guild_id TEXT NOT NULL, role_id TEXT NOT NULL, verified_at REAL NOT NULL, \
@@ -196,7 +186,6 @@ pub const RUST_ADDED_TABLES: &[&str] = &[
 ];
 
 /// 给 3.0 新增的表补列（在 `RUST_ADDED_TABLES` 之后执行；老库已有时报 duplicate column，忽略）。
-/// `tests/schema_parity.rs` 的「Python 建的表」一侧同样在建表之后补这些列。
 pub const RUST_ADDED_TABLE_COLUMNS: &[&str] = &[
     "ALTER TABLE request_settlements ADD COLUMN month TEXT NOT NULL DEFAULT ''",
     "ALTER TABLE request_settlements ADD COLUMN exclude_global_v5 INTEGER NOT NULL DEFAULT 0",
@@ -227,7 +216,6 @@ const INDEXES: &[&str] = &[
     "CREATE INDEX IF NOT EXISTS idx_admin_actions_action ON admin_actions (action)",
 ];
 
-/// 本版本写入 `PRAGMA user_version` 的值。Python 版从不读它，所以写它不影响回滚。
 pub const SCHEMA_VERSION: i64 = 1;
 
 /// 连接级设置：WAL + synchronous=NORMAL + 锁等待 15 秒。

@@ -8,8 +8,6 @@ use gate_core::image_events::{
     ImageEventTracker, WireFormat, b64decode_strict, encode_image_event, image_envelope,
 };
 use gate_core::json_body;
-use gate_core::pyloads::{self, Options};
-use gate_core::pymsgpack;
 use gate_core::sse::encode_sse;
 use proptest::prelude::*;
 use serde_json::json;
@@ -74,7 +72,6 @@ fn run_tracker(wire: WireFormat, stream: &[u8], cuts: &[usize]) -> Outcome {
 proptest! {
     #[test]
     fn json_parsers_never_panic(raw in proptest::collection::vec(any::<u8>(), 0..300)) {
-        let _ = pyloads::loads_bytes(&raw, Options::LOADS);
         let _ = json_body::parse_json(&raw);
         let _ = json_body::parse_json_body(&raw);
     }
@@ -93,7 +90,7 @@ proptest! {
         )
     ) {
         let text = parts.concat();
-        let a = pyloads::loads_bytes(text.as_bytes(), Options::LOADS);
+        let a = serde_json::from_str::<serde_json::Value>(&text);
         let b = json_body::parse_json(text.as_bytes());
         // 能被严格解析的，一定也能被宽松解析
         if b.is_ok() {
@@ -103,7 +100,7 @@ proptest! {
 
     #[test]
     fn msgpack_and_friends_never_panic(raw in proptest::collection::vec(any::<u8>(), 0..300)) {
-        let _ = pymsgpack::unpackb(&raw);
+        let _ = rmpv::decode::read_value_with_max_depth(&mut std::io::Cursor::new(&raw), 64);
         let _ = image_envelope(&raw);
         let s = String::from_utf8_lossy(&raw);
         let _ = b64decode_strict(&s);

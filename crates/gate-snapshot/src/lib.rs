@@ -9,8 +9,6 @@
 //! - bytes → `{"$b": "<base64>"}`；
 //! - dict 的非 str 键 → `{"$map": [[k, v], ...]}`。
 //!
-//! 3.0 上线期间这里还有一套读 2.x Python 冻结夹具、按 Python 语义比对的 golden API，第四批对拍退役后删除
-//! （生成脚本和旧代码在 git 标签 `py-final`，逐条偏差表在标签 `v3-deviations-final`）。
 
 pub mod snapshot;
 

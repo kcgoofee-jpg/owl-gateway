@@ -1,6 +1,4 @@
 //! 宽松取值：旧库靠 SQLite 的弱类型，同一列里可能混着 INTEGER / REAL / TEXT / NULL
-//! （例如 `REAL` 列里存了整数、设置表里的数字是字符串）。Python 拿到什么就用什么，
-//! 这里按「Python 会怎么理解这个值」来转换，而不是像 rusqlite 默认那样直接报类型错误。
 
 use rusqlite::types::ValueRef;
 use rusqlite::{Row, RowIndex};
@@ -42,7 +40,6 @@ pub fn i64_or<I: RowIndex>(row: &Row<'_>, idx: I, default: i64) -> rusqlite::Res
     Ok(i64_opt(row, idx)?.unwrap_or(default))
 }
 
-/// 布尔：Python 的 `bool(row[x])`。
 pub fn flag<I: RowIndex>(row: &Row<'_>, idx: I) -> rusqlite::Result<bool> {
     Ok(match row.get_ref(idx)? {
         ValueRef::Null => false,
@@ -53,13 +50,12 @@ pub fn flag<I: RowIndex>(row: &Row<'_>, idx: I) -> rusqlite::Result<bool> {
     })
 }
 
-/// 文本：TEXT 原样；数字按 Python `str()`；NULL → None。
 pub fn text_opt<I: RowIndex>(row: &Row<'_>, idx: I) -> rusqlite::Result<Option<String>> {
     Ok(match row.get_ref(idx)? {
         ValueRef::Null => None,
         ValueRef::Text(t) => Some(String::from_utf8_lossy(t).into_owned()),
         ValueRef::Integer(i) => Some(i.to_string()),
-        ValueRef::Real(f) => Some(gate_core::pyc::float_repr(f)),
+        ValueRef::Real(f) => Some(gate_core::primitives::float_text(f)),
         ValueRef::Blob(b) => Some(String::from_utf8_lossy(b).into_owned()),
     })
 }

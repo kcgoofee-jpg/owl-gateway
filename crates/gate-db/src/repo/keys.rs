@@ -2,7 +2,7 @@
 
 use super::{INVITE_TAG, ROLE_INVITE, ROLE_REGULAR, SqlValue, json_to_sql};
 use crate::{Db, DbError, Result, value};
-use gate_core::{pyc, pyval};
+use gate_core::{primitives, values};
 use rusqlite::{OptionalExtension, params};
 use serde::Deserialize;
 use serde_json::Value;
@@ -154,7 +154,6 @@ impl Db {
         .await
     }
 
-    /// 按白名单改列。`fields` 保持调用方的键顺序；开关类的列用 Python 真值判断（`1 if v else 0`），
     /// 其余原样绑定（bool 当整数；list / dict 无法绑定，返回 Err）。没有可改的列时什么都不做。
     pub async fn update_key(
         &self,
@@ -169,7 +168,7 @@ impl Db {
             }
             sets.push(format!("{k}=?"));
             if UPDATE_FLAGS.contains(&k.as_str()) {
-                vals.push(SqlValue::Integer(i64::from(pyval::truthy(v))));
+                vals.push(SqlValue::Integer(i64::from(values::enabled(v))));
             } else {
                 if k == "quota_limits" && (v.is_object() || v.is_array()) {
                     vals.push(SqlValue::Text(
@@ -185,7 +184,7 @@ impl Db {
         }
         // 改启用状态时一并记停用原因（3.0 新增）：启用就清掉；停用时调用方可传 `disabled_reason`，不传按站长手动停用
         if let Some(v) = fields.get("enabled") {
-            if pyval::truthy(v) {
+            if values::enabled(v) {
                 sets.push("disabled_reason=NULL".into());
             } else {
                 sets.push("disabled_reason=?".into());
@@ -245,7 +244,7 @@ impl Db {
                 .flatten();
             let grace = match raw {
                 None => 0.0, // 缺省 0
-                Some(s) => match pyc::parse_float(&s) {
+                Some(s) => match primitives::parse_float(&s) {
                     Some(g) => g,
                     None => return Ok(Vec::new()),
                 },

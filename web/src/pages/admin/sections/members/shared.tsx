@@ -5,9 +5,8 @@
 import { ChevronLeft, ChevronRight } from "lucide-preact";
 import type { ComponentChildren } from "preact";
 import { useEffect, useId, useRef, useState } from "preact/hooks";
-import { ApiError } from "../../../../lib/api";
 import { usedOf } from "../../../../lib/format";
-import { Button, cx, toast } from "../../../../ui";
+import { Button, cx } from "../../../../ui";
 import { useAdmin } from "../../Admin";
 import "./shared.css";
 
@@ -211,72 +210,6 @@ export function MiniBar(props: { label: string; used: number; max: number; tone?
       <span class="xa-minibar__n tabular">{usedOf(props.used, props.max)}</span>
     </div>
   );
-}
-
-/* ---------------- 下载（带错误提示） ---------------- */
-function filenameOf(res: Response, fallback: string): string {
-  const cd = res.headers.get("Content-Disposition") ?? "";
-  const star = /filename\*=UTF-8''([^;]+)/i.exec(cd);
-  if (star?.[1]) {
-    try {
-      return decodeURIComponent(star[1]);
-    } catch {
-      /* 退回下一种写法 */
-    }
-  }
-  const plain = /filename="?([^";]+)"?/i.exec(cd);
-  return plain?.[1] ?? fallback;
-}
-
-/** 导出文件：失败时（如 429 导出太频繁）用 toast 显示后端给的原因，而不是跳到一页 JSON。 */
-/**
- * 下载文件（带后台会话）。`onProgress` 收到 0–100 的百分比（服务端给了 Content-Length 才有；
- * 打包阶段服务端还没开始回数据时不会回调，调用方自己显示「打包中」）。
- */
-export async function downloadFile(
-  url: string,
-  fallbackName: string,
-  onProgress?: (pct: number) => void,
-): Promise<void> {
-  try {
-    const res = await fetch(url, { credentials: "same-origin" });
-    if (!res.ok) {
-      let msg = `导出失败（HTTP ${res.status}）`;
-      try {
-        const b = (await res.json()) as { message?: string; detail?: string; error?: { message?: string } };
-        msg = b.error?.message ?? b.message ?? b.detail ?? msg;
-      } catch {
-        /* 保持默认文案 */
-      }
-      throw new ApiError(res.status, msg);
-    }
-    const total = Number(res.headers.get("content-length") ?? 0);
-    let blob: Blob;
-    if (onProgress && total > 0 && res.body) {
-      const reader = res.body.getReader();
-      const parts: Uint8Array[] = [];
-      let got = 0;
-      for (;;) {
-        const { done, value } = await reader.read();
-        if (done) break;
-        parts.push(value);
-        got += value.length;
-        onProgress(Math.min(100, Math.floor((got / total) * 100)));
-      }
-      blob = new Blob(parts as BlobPart[], { type: res.headers.get("content-type") ?? "" });
-    } else {
-      blob = await res.blob();
-    }
-    const a = document.createElement("a");
-    a.href = URL.createObjectURL(blob);
-    a.download = filenameOf(res, fallbackName);
-    document.body.append(a);
-    a.click();
-    a.remove();
-    setTimeout(() => URL.revokeObjectURL(a.href), 10_000);
-  } catch (e) {
-    toast(e instanceof Error ? e.message : String(e), { error: true });
-  }
 }
 
 /**

@@ -9,9 +9,9 @@ use crate::key::Key;
 use crate::reqctx::ReqCtx;
 use crate::state::AppState;
 use gate_core::policy::{self, REFERENCE_FIELDS};
-use gate_core::pyc::take_chars;
-use gate_core::pyval::{py_str, truthy};
+use gate_core::primitives::take_chars;
 use gate_core::reasons;
+use gate_core::values::{enabled, text};
 use serde_json::{Map, Value, json};
 
 /// 回给「连接测试」请求的说明（Key 有效，但这类请求不出图）。
@@ -39,7 +39,7 @@ pub(super) async fn prepare(
 ) -> Result<Prepared, ApiError> {
     let mut body = Value::Object(body);
     let model_str = |b: &Value| match b.get("model") {
-        Some(v) if truthy(v) => py_str(v),
+        Some(v) if enabled(v) => text(v),
         _ => String::new(),
     };
     ctx.set_model(&model_str(&body));
@@ -55,8 +55,8 @@ pub(super) async fn prepare(
     }
     match policy::normalize_image_request(&mut body, &mut || rand::random::<u32>()) {
         Ok(()) => {}
-        Err(gate_core::pyext::PyErr::Value(m)) => {
-            let model = py_str(body.get("model").unwrap_or(&Value::String("?".into())));
+        Err(gate_core::validation::ValidationError::InvalidValue(m)) => {
+            let model = text(body.get("model").unwrap_or(&Value::String("?".into())));
             reject(take_chars(&model, 80), &m);
             return Err(GateError::with_code(
                 400,
@@ -67,7 +67,7 @@ pub(super) async fn prepare(
         }
         Err(e) => return Err(InternalError(e.to_string()).into()),
     }
-    let mut model = py_str(body.get("model").unwrap_or(&Value::Null));
+    let mut model = text(body.get("model").unwrap_or(&Value::Null));
     if let Err(problem) = policy::convert_legacy_references(&mut body) {
         reject(&model, take_chars(&problem, 120));
         return Err(GateError::with_code(400, problem, reasons::PARAM).into());
@@ -82,7 +82,7 @@ pub(super) async fn prepare(
         names.iter().any(|n| {
             b.get("parameters")
                 .and_then(|p| p.get(*n))
-                .is_some_and(truthy)
+                .is_some_and(enabled)
         })
     };
     if params_has(&body, &REFERENCE_FIELDS) {
@@ -112,7 +112,7 @@ pub(super) async fn prepare(
             GateError::with_code(400, CONNECTION_TEST_MESSAGE, reasons::TEST_REQUEST).into(),
         );
     }
-    if body.get("image").is_some_and(truthy) || body.get("mask").is_some_and(truthy) {
+    if body.get("image").is_some_and(enabled) || body.get("mask").is_some_and(enabled) {
         return Err(GateError::with_code(400, "图生图请求格式错误，未扣费。请更新或更换客户端。给客户端作者：image 和 mask 要放在 parameters 里", reasons::PARAM).into());
     }
     if let Some(problem) = policy::validate_image_references(&body) {
@@ -145,7 +145,7 @@ pub(super) async fn prepare(
             policy::FREE_MAX_STEPS,
             true,
         )
-        .map_err(|e| pyerr_400(&e, "生图参数有误，未扣费。请检查客户端中的参数设置。"))?;
+        .map_err(|e| validation_400(&e, "生图参数有误，未扣费。请检查客户端中的参数设置。"))?;
         if let Some(problem) = problem {
             reject(&model, &problem);
             return Err(GateError::with_code(400, problem, reasons::PARAM).into());
@@ -158,19 +158,18 @@ pub(super) async fn prepare(
     notes.extend(more);
     if tier == "v5" {
         // 站长临时降档：V5 Full（含局部重绘）改走 Medium，放在整理参数和费用估算之前，这样价格和免费额度都按 Medium 算。
-        if let Some(medium) =
-            policy::v5_medium_of(&py_str(body.get("model").unwrap_or(&Value::Null)))
+        if let Some(medium) = policy::v5_medium_of(&text(body.get("model").unwrap_or(&Value::Null)))
             && crate::v5_medium::active(state).await
         {
             body["model"] = Value::String(medium.into());
             notes.push("站长已临时切到 V5 Medium".to_string());
         }
-        if policy::is_v5_medium(&py_str(body.get("model").unwrap_or(&Value::Null))) {
+        if policy::is_v5_medium(&text(body.get("model").unwrap_or(&Value::Null))) {
             let (b, more) = policy::medium_normalize(&body);
             body = b;
             notes.extend(more);
         }
-        model = py_str(body.get("model").unwrap_or(&Value::Null));
+        model = text(body.get("model").unwrap_or(&Value::Null));
     }
     // 局部重绘缺蒙版 / 图生图带 SMEA → 上游只会回 500：放在费用估算之前，坏请求不占额度
     let (b, more, problem) = policy::guard_image_action(&body);
@@ -183,10 +182,10 @@ pub(super) async fn prepare(
     let p = body.get("parameters").cloned().unwrap_or(Value::Null);
     let n = p
         .get("n_samples")
-        .filter(|v| truthy(v))
+        .filter(|v| enabled(v))
         .cloned()
         .unwrap_or(json!(1));
-    let image_count = py_int(&n).ok_or_else(|| {
+    let image_count = integer(&n).ok_or_else(|| {
         GateError::with_code(
             400,
             "生成张数设置无效，未扣费。请改为 1 张。给客户端作者：n_samples 须为正整数",
@@ -204,7 +203,7 @@ pub(super) async fn prepare(
     // 2.x 这里还有「V5 续杯」：`anlas_auto` 的 Key 当天个人 V5 用完后改用 Anlas 生成同规格 V5。
     // Anlas 自动分配早已下线、没有 Key 再是 anlas_auto，3.0 删除（列保留）
     let mut est = Est::from_cost(policy::estimate_image_cost(&body, true, true).map_err(|e| {
-        pyerr_400(
+        validation_400(
             &e,
             "生图参数有误，无法计算费用，未扣费。请检查客户端中的参数设置。",
         )
@@ -261,23 +260,14 @@ pub(super) async fn prepare(
     })
 }
 
-/// Python `int(x)` 用于 `n_samples`（`p.get("n_samples", 1) or 1` 之后）。
-fn py_int(v: &Value) -> Option<i64> {
-    match v {
-        Value::Bool(b) => Some(i64::from(*b)),
-        Value::Number(n) if !n.is_f64() => n.as_i64(),
-        Value::Number(n) => n.as_f64().and_then(gate_core::pyc::int_of),
-        Value::String(s) => gate_core::pyc::parse_int(s),
-        _ => None,
-    }
+/// Sample counts are JSON integers.
+fn integer(v: &Value) -> Option<i64> {
+    v.as_i64()
 }
 
-fn pyerr_400(e: &gate_core::pyext::PyErr, msg: impl Into<String>) -> ApiError {
-    use gate_core::pyext::PyErr;
-    match e {
-        PyErr::Type(_) | PyErr::Value(_) | PyErr::Overflow(_) => {
-            GateError::with_code(400, msg, reasons::PARAM).into()
-        }
-        other => InternalError(other.to_string()).into(),
-    }
+fn validation_400(
+    _error: &gate_core::validation::ValidationError,
+    msg: impl Into<String>,
+) -> ApiError {
+    GateError::with_code(400, msg, reasons::PARAM).into()
 }

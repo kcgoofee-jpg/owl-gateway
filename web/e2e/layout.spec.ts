@@ -93,8 +93,7 @@ test("状态页：各宽度无孤字、控件对齐", async ({ page }) => {
 const ADMIN = [
   "/admin",
   "/admin/members",
-  "/admin/audit/records",
-  "/admin/audit/settings",
+  "/admin/logs/prompts",
   "/admin/logs/usage",
   "/admin/logs/actions",
   "/admin/upstream",

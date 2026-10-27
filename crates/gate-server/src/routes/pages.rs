@@ -17,7 +17,6 @@ pub fn router() -> Router<AppState> {
         .route("/healthz", get(healthz))
         .route("/", get(landing))
         .route("/admin", get(admin))
-        // Starlette 的 redirect_slashes：/admin/ → 307 /admin
         .route(
             "/admin/",
             get(|| async { axum::response::Redirect::temporary("/admin") }),

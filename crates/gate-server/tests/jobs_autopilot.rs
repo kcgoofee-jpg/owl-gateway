@@ -4,7 +4,7 @@
 mod common;
 use common::*;
 use gate_core::autopilot::KEY_GUARD_SKIP_REASONS;
-use gate_core::pyc;
+use gate_core::primitives;
 use gate_server::AppState;
 use serde_json::{Value, json};
 
@@ -65,7 +65,7 @@ async fn one_member_key_cannot_stop_the_whole_site() {
     assert_eq!(s.guard.with(|g| g.breaker_until), NOW + 300.0);
     assert_eq!(
         setting(s, "autopilot_breaker_until").await,
-        Some(pyc::float_repr(NOW + 300.0))
+        Some(primitives::float_text(NOW + 300.0))
     );
     assert_eq!(breaker_logs(&e).await, 1);
 }
@@ -102,7 +102,10 @@ async fn the_window_starts_after_the_last_breaker() {
     run_sql(&e, rows).await;
     e.state
         .db
-        .set_setting("autopilot_breaker_until", &pyc::float_repr(NOW - 120.0))
+        .set_setting(
+            "autopilot_breaker_until",
+            &primitives::float_text(NOW - 120.0),
+        )
         .await
         .unwrap();
     assert_eq!(

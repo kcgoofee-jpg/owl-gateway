@@ -28,7 +28,6 @@ pub mod registry;
 pub use registry::{JOBS, Job, JobError, JobsState, Origin, find, guarded, run_once, spawn_job};
 
 use crate::action_log::log_action;
-use crate::audit::{audit_flags, audit_image_cap_mb, audit_image_keep_hours};
 use crate::bugs::Report;
 use crate::state::AppState;
 use gate_core::idle;
@@ -172,25 +171,18 @@ pub(crate) async fn maintenance_job(state: &AppState) -> Result<String, JobError
     Ok("全部完成".to_string())
 }
 
-/// 清理过期记录。站长 10-22：后台的记录一律留存，不再按天数自动删除——请求日志（含 UA / IP）、操作日志、
-/// 设备指纹 / 设备与浏览器登录记录、网页登录资料、Bug、状态页统计、生成记录与原图都长期保留。
-/// 只剩两种「删」：设置里显式配了保留期 / 上限的（生成记录保留天数、原图保留小时数、原图容量上限、
-/// UA / IP 保留天数，0 = 永久 / 不限，现在线上全是 0）以及磁盘上找不到数据库记录的孤儿图片文件（写入中途失败留下的残渣）。
-/// 磁盘剩余不足 10% 时 [`disk_check`] 提醒站长。
+/// Remove prompt metadata after 30 days and apply request log retention.
 pub async fn purge(state: &AppState) -> Result<(), JobError> {
     let db = &state.db;
-    // 0 = 长期保留：已向成员披露保留范围，用于防滥用、回测和优化算法
-    let days = audit_flags(db).await?.2;
-    if days > 0 {
-        db.purge_audit(state.now() - days as f64 * 86400.0).await?;
-    }
+    db.purge_audit(state.now() - crate::audit::RETENTION_DAYS as f64 * 86400.0)
+        .await?;
     let keep = state.env.usage_log_retention_days;
     if keep > 0 {
         db.purge_usage_log(state.now() - std::cmp::max(7, keep) as f64 * 86400.0)
             .await?;
     }
     // 请求日志里的 UA / IP：后台设置了天数才清（0 = 永久）
-    let origin_days = crate::audit::usage_origin_keep_days(db).await?;
+    let origin_days = crate::settings::usage_origin_keep_days(db).await?;
     if origin_days > 0 {
         let cleared = db
             .purge_usage_origin(state.now() - origin_days as f64 * 86400.0)
@@ -200,35 +192,6 @@ pub async fn purge(state: &AppState) -> Result<(), JobError> {
         }
     }
     flush_status_stats(state).await?;
-    if let Err(e) = purge_audit_images(state).await {
-        capture(state, "audit_image_purge", &e);
-    }
-    Ok(())
-}
-
-async fn purge_audit_images(state: &AppState) -> Result<(), JobError> {
-    let db = &state.db;
-    let keep_h = audit_image_keep_hours(db).await?;
-    if keep_h > 0 {
-        let n = db
-            .purge_audit_images(state.now() - keep_h as f64 * 3600.0)
-            .await?;
-        if n > 0 {
-            tracing::info!("[audit] 原图保存超过 {keep_h} 小时，已删 {n} 张");
-        }
-    }
-    // 磁盘上找不到数据库记录的孤儿文件（写入中途失败的残渣）：不是数据，照删
-    db.sweep_orphan_images(state.now() - 3600.0).await?;
-    // 原图容量上限：后台设了才删最旧的（0 = 不限，线上是 0）
-    let cap_mb = audit_image_cap_mb(db).await?;
-    if cap_mb > 0 {
-        let n = db
-            .purge_audit_images_to_cap(cap_mb * 1024 * 1024, 0.9)
-            .await?;
-        if n > 0 {
-            tracing::info!("[audit] 原图超过容量上限 {cap_mb} MB，已清掉最旧的 {n} 张");
-        }
-    }
     Ok(())
 }
 
@@ -240,7 +203,7 @@ async fn disk_check(state: &AppState) -> Result<(), JobError> {
     let free = st.f_bavail.saturating_mul(st.f_frsize);
     let total = st.f_blocks.saturating_mul(st.f_frsize);
     if total == 0 {
-        return Err(JobError::new("ZeroDivisionError", "division by zero"));
+        return Err(JobError::new("division_by_zero", "division by zero"));
     }
     if (free as f64) / (total as f64) < 0.10 {
         state.alerter.notify(
@@ -396,7 +359,7 @@ pub async fn recycle_inactive_keys(state: &AppState) -> Result<Recycle, JobError
             .db
             .get_key(key_id)
             .await?
-            .and_then(|k| k.get("name").map(gate_core::pyval::py_str))
+            .and_then(|k| k.get("name").map(gate_core::values::text))
             .unwrap_or_else(|| format!("Key #{key_id}"));
         // 领取记录会随 Key 一起删掉：先记下是谁，删完摘身份组
         let reg = state.db.registration_for_key(key_id).await?;

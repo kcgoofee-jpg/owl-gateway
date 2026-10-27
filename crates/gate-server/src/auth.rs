@@ -16,11 +16,11 @@ use std::path::{Path, PathBuf};
 use std::sync::{LazyLock, Mutex};
 use std::time::{Duration, Instant};
 
-/// 请求头按 latin-1 解码（Starlette 的 `request.headers.get` 行为）；没有这个头为空串。
 pub fn header_str(headers: &HeaderMap, name: &str) -> String {
     headers
         .get(name)
-        .map(|v| v.as_bytes().iter().map(|&b| b as char).collect())
+        .and_then(|v| v.to_str().ok())
+        .map(str::to_owned)
         .unwrap_or_default()
 }
 
@@ -128,7 +128,7 @@ pub fn bearer(headers: &HeaderMap) -> String {
         .get(..7)
         .is_some_and(|p| p.eq_ignore_ascii_case("bearer "))
     {
-        gate_core::pyc::strip(&auth[7..]).to_string()
+        gate_core::primitives::strip(&auth[7..]).to_string()
     } else {
         String::new()
     }
@@ -323,12 +323,12 @@ pub fn record_auth_failure(state: &AppState, ip: &str, now: f64) {
 
 /// `site_flags.get(db, spec, settings)`：库里有就用库里的，没有就用登记表里的默认值（不再有环境变量回退）。
 pub async fn site_flag(state: &AppState, spec: &Spec) -> Result<Value, gate_db::DbError> {
-    crate::audit::site_value(&state.db, spec).await
+    crate::settings::site_value(&state.db, spec).await
 }
 
 /// 数值型站点设置。
 pub async fn site_flag_f64(state: &AppState, spec: &Spec) -> Result<f64, gate_db::DbError> {
-    crate::audit::site_f64(&state.db, spec).await
+    crate::settings::site_f64(&state.db, spec).await
 }
 
 /// 功能开关（站长全局开关 + 这把 Key 的功能列表）。

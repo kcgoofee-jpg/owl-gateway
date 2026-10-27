@@ -1,18 +1,11 @@
-//! 核心策略：Opus 免费档判定、Anlas 估算、参数钳制（移植自 `app/policy.py`；文本生成部分已随文本接口删除）。
-//!
-//! 行为与旧 Python 逐字一致，快照见 `tests/snapshots/policy/`。要点：
-//! - 请求体是任意 JSON（`serde_json::Value`，保序）；会转发给上游的 body，键顺序与 Python dict 完全一致；
-//! - 原地修改入参的函数（`normalize_image_request` / `fix_name_digit_weights` / `sanitize_and_translate_prompts`）
-//!   取 `&mut Value`；Python 里「浅拷贝后改副本」的函数（`clamp_*` / `fill_v4_prompt` / `medium_normalize` /
-//!   `guard_image_action`）取 `&Value` 返回新值，入参保持不变；
-//! - 校验失败返回 [`PyResult`]，`Err` 的中文消息可能原样回给成员；
-//! - 随机源（`secrets` / `random`）由调用方注入。
+//! Image model policy, request normalization, reference validation and cost estimation.
+//! Functions use JSON values and native validation errors; random values are supplied by callers.
 
-use crate::pyext::{
-    self, Obj, PyErr, PyResult, int_like, int_or, json_int, len_or_empty, nd_class, num_eq_int,
-    py_str, space_class, str_of_get, strict_int, truthy_opt,
+use crate::validation::{
+    self, Obj, ValidationError, ValidationResult, enabled_opt, int_like, int_or, json_int,
+    len_or_empty, nd_class, num_eq_int, space_class, str_of_get, strict_int, text,
 };
-use crate::{pyc, pyval};
+use crate::{primitives, values};
 use fancy_regex::Regex as FancyRegex;
 use regex::Regex;
 use serde_json::Value;
@@ -118,15 +111,15 @@ const PNG_MAGIC: &[u8] = b"\x89PNG\r\n\x1a\n";
 
 // ----------------------------------------------------------------------------- 小工具
 
-fn attribute_error_get(v: &Value) -> PyErr {
-    PyErr::Attribute(format!(
-        "'{}' object has no attribute 'get'",
-        pyext::type_name(v)
+fn attribute_error_get(v: &Value) -> ValidationError {
+    ValidationError::InvalidStructure(format!(
+        "expected an object, got {}",
+        validation::type_name(v)
     ))
 }
 
 /// `payload.get("parameters", payload)` 再要求它是 dict（否则后面的 `.get` 抛 AttributeError）。
-fn params_of(payload: &Value) -> PyResult<&Obj> {
+fn params_of(payload: &Value) -> ValidationResult<&Obj> {
     let obj = payload
         .as_object()
         .ok_or_else(|| attribute_error_get(payload))?;
@@ -137,14 +130,14 @@ fn params_of(payload: &Value) -> PyResult<&Obj> {
 /// `str(d.get(key, "") or "")`。
 fn str_or_empty(v: Option<&Value>) -> String {
     match v {
-        Some(x) if pyval::truthy(x) => py_str(x),
+        Some(x) if values::enabled(x) => text(x),
         _ => String::new(),
     }
 }
 
 /// `str(payload.get("model", "")).strip().lower()`
 fn model_key(payload: &Obj) -> String {
-    pyc::strip(&str_of_get(payload, "model")).to_lowercase()
+    primitives::strip(&str_of_get(payload, "model")).to_lowercase()
 }
 
 fn in_models(list: &[&str], model: &str) -> bool {
@@ -154,7 +147,7 @@ fn in_models(list: &[&str], model: &str) -> bool {
 /// `isinstance(v, (int, float)) and not bool and 0 <= v <= 1 and math.isfinite(v)`
 pub fn unit_value(v: &Value) -> bool {
     match v {
-        Value::Number(n) => match pyext::int_of_number(n) {
+        Value::Number(n) => match validation::int_of_number(n) {
             Some(i) => (0..=1).contains(&i),
             None => n
                 .as_f64()
@@ -169,7 +162,7 @@ fn unit_f64(v: &Value) -> f64 {
 }
 
 fn float_value(x: f64) -> Value {
-    pyval::float(x)
+    values::float(x)
 }
 
 fn empty_obj() -> &'static Obj {
@@ -177,12 +170,11 @@ fn empty_obj() -> &'static Obj {
     E.get_or_init(Obj::new)
 }
 
-/// 取 `dict(payload)`；非 dict 时 Python 的 `dict(...)` 多半抛 TypeError。
-fn dict_copy(payload: &Value) -> PyResult<Obj> {
+fn dict_copy(payload: &Value) -> ValidationResult<Obj> {
     payload.as_object().cloned().ok_or_else(|| {
-        PyErr::Type(format!(
+        ValidationError::InvalidType(format!(
             "'{}' object is not iterable",
-            pyext::type_name(payload)
+            validation::type_name(payload)
         ))
     })
 }
@@ -197,88 +189,15 @@ fn params_copy(out: &Obj) -> Obj {
 
 // ----------------------------------------------------------------------------- 引用校验
 
-/// 复刻 `base64.b64decode(s, validate=True)`（CPython 3.12 `binascii.a2b_base64(strict_mode=True)`）：
-/// 合法串 = 若干 4 字符组，末尾可以是 `xx==` 或 `xxx=`；任何非字母表字符（含空白 / 换行）、
-/// 填充后的多余数据、前导 `=`、多余的 `=` 都报错；不检查尾部多余比特。
-/// （以线上镜像 `python:3.12-slim` 当前的 3.12.14 为准：3.12 早期补丁版本对 `QUJD====` 这类多余填充更宽松。）
-/// 成功时返回解码后的前 `keep` 字节和总字节数——只需要看魔数，不必把 25 MiB 全解出来。
+/// Decode standard padded Base64 and retain only the requested prefix.
 pub(crate) fn strict_b64(s: &str, keep: usize) -> Option<(Vec<u8>, usize)> {
-    if !s.is_ascii() {
-        return None; // str 先 .encode("ascii")，非 ASCII 抛 ValueError
-    }
-    let bytes = s.as_bytes();
-    let val = |b: u8| -> Option<u8> {
-        match b {
-            b'A'..=b'Z' => Some(b - b'A'),
-            b'a'..=b'z' => Some(b - b'a' + 26),
-            b'0'..=b'9' => Some(b - b'0' + 52),
-            b'+' => Some(62),
-            b'/' => Some(63),
-            _ => None,
-        }
-    };
-    let data_len = bytes.iter().take_while(|&&b| b != b'=').count();
-    let pads = bytes.len() - data_len;
-    // `=` 之后不许再有数据字符
-    if bytes[data_len..].iter().any(|&b| b != b'=') {
-        return None;
-    }
-    if bytes[..data_len].iter().any(|&b| val(b).is_none()) {
-        return None;
-    }
-    let ok = match data_len % 4 {
-        0 => pads == 0,
-        2 => pads == 2,
-        3 => pads == 1,
-        _ => false,
-    };
-    if !ok {
-        return None;
-    }
-    let total = data_len / 4 * 3
-        + match data_len % 4 {
-            2 => 1,
-            3 => 2,
-            _ => 0,
-        };
-    let mut out = Vec::with_capacity(keep.min(total));
-    let mut quad = [0u8; 4];
-    let mut q = 0;
-    'outer: for &b in &bytes[..data_len] {
-        quad[q] = val(b).unwrap_or(0);
-        q += 1;
-        if q == 4 {
-            for byte in [
-                (quad[0] << 2) | (quad[1] >> 4),
-                (quad[1] << 4) | (quad[2] >> 2),
-                (quad[2] << 6) | quad[3],
-            ] {
-                if out.len() >= keep {
-                    break 'outer;
-                }
-                out.push(byte);
-            }
-            q = 0;
-        }
-    }
-    if q != 0 && out.len() < keep {
-        // 末尾不满 4 字符的那一组
-        let bytes_left = q - 1;
-        let tail = [
-            (quad[0] << 2) | (quad[1] >> 4),
-            (quad[1] << 4) | (quad[2] >> 2),
-        ];
-        for &byte in tail.iter().take(bytes_left) {
-            if out.len() >= keep {
-                break;
-            }
-            out.push(byte);
-        }
-    }
-    Some((out, total))
+    use base64::Engine;
+    let mut bytes = base64::engine::general_purpose::STANDARD.decode(s).ok()?;
+    let size = bytes.len();
+    bytes.truncate(keep);
+    Some((bytes, size))
 }
 
-/// `_base64_data(value, *, source_image=False, png=False)`
 pub fn base64_data(value: Option<&Value>, source_image: bool, png: bool) -> bool {
     let Some(Value::String(s)) = value else {
         return false;
@@ -302,23 +221,23 @@ pub fn base64_data(value: Option<&Value>, source_image: bool, png: bool) -> bool
 }
 
 /// `_reference_list(p, name)`
-pub fn reference_list<'a>(p: &'a Obj, name: &str) -> PyResult<&'a [Value]> {
+pub fn reference_list<'a>(p: &'a Obj, name: &str) -> ValidationResult<&'a [Value]> {
     match p.get(name) {
         None => Ok(&[]),
         Some(Value::Array(a)) => Ok(a),
-        Some(_) => Err(PyErr::value(format!("{name} 必须是数组"))),
+        Some(_) => Err(ValidationError::value(format!("{name} 必须是数组"))),
     }
 }
 
 pub fn validate_vibe_encoding(body: &Value) -> Option<String> {
-    let model_ok = matches!(pyval::get(body, "model"), Some(Value::String(m)) if in_models(&VIBE_ENCODED_MODELS, m));
+    let model_ok = matches!(values::get(body, "model"), Some(Value::String(m)) if in_models(&VIBE_ENCODED_MODELS, m));
     if !model_ok {
         return Some("Vibe 编码只支持 V4 / V4.5 模型，未扣费。请切换到 V4 或 V4.5。".into());
     }
-    if !base64_data(pyval::get(body, "image"), true, false) {
+    if !base64_data(values::get(body, "image"), true, false) {
         return Some("Vibe 参考图无法读取，未扣费。请改用 PNG、JPEG 或 WebP 图片。给客户端作者：image 须为不带 data URL 前缀的 base64".into());
     }
-    if !pyval::get(body, "informationExtracted").is_some_and(unit_value) {
+    if !values::get(body, "informationExtracted").is_some_and(unit_value) {
         return Some("Vibe 的「信息提取」须在 0 到 1 之间，未扣费。请在客户端中修改。给客户端作者：informationExtracted 须为 0 到 1 的有限数值".into());
     }
     None
@@ -366,7 +285,7 @@ fn legacy_reference_message(p: &Obj) -> Option<String> {
         ),
     ]
     .into_iter()
-    .find(|(n, _, _)| truthy_opt(p.get(*n)))?;
+    .find(|(n, _, _)| enabled_opt(p.get(*n)))?;
     Some(format!(
         "本站不支持此客户端的参考图写法：{what} {field}，未扣费。请去掉参考图或更换客户端。开发者参考：{fix}"
     ))
@@ -403,7 +322,7 @@ pub fn convert_legacy_references(body: &mut Value) -> Result<(), String> {
         return Ok(());
     }
     if p.get("director_reference_images_cached")
-        .is_some_and(pyval::truthy)
+        .is_some_and(values::enabled)
     {
         return Err("精确参考图重复提交，未扣费。请更新或更换客户端。给客户端作者：director_reference_images 和 director_reference_images_cached 只能选一种".into());
     }
@@ -438,7 +357,6 @@ pub fn convert_legacy_references(body: &mut Value) -> Result<(), String> {
 
 /// 完整校验 JSON 里的参考图数据（0..1 区间与 16 张上限是本站自己的输入限制）。返回 `Some(中文说明)` 表示拒绝。
 pub fn validate_image_references(payload: &Value) -> Option<String> {
-    // Python 对非 dict 的 payload 会在 `.get` 上抛 AttributeError；调用方保证传 dict，这里按「parameters 不是对象」处理
     let Some(root) = payload.as_object() else {
         return Some("生图参数格式错误，未扣费。请更新或更换客户端。给客户端作者：parameters 必须是 JSON 对象".into());
     };
@@ -574,11 +492,11 @@ pub fn validate_image_references(payload: &Value) -> Option<String> {
 }
 
 /// 单张参考附加费，批次减免在总价中处理；编码另行收费。
-pub fn reference_surcharge(payload: &Value) -> PyResult<i64> {
+pub fn reference_surcharge(payload: &Value) -> ValidationResult<i64> {
     let p = params_of(payload)?;
     let precise = len_or_empty(p.get("director_reference_images_cached"))?;
     let vibes = match p.get("reference_image_multiple") {
-        Some(x) if pyval::truthy(x) => pyext::py_len(x)?,
+        Some(x) if values::enabled(x) => validation::length(x)?,
         _ => len_or_empty(p.get("reference_image_multiple_cached"))?,
     };
     let model = model_key(payload.as_object().unwrap_or(empty_obj()));
@@ -597,16 +515,21 @@ pub fn reference_surcharge(payload: &Value) -> PyResult<i64> {
 /// 计价按 `int()` 截断而上游原样接收：放过 28.99 步或 1.99 张会让「免费」估价与实际扣费不一致。
 /// 出错时入参可能已被部分改写（先写回 model、再逐项转换浮点整数）。
 /// `randint` 是 `random.randint(0, 4294967295)` 的注入源（seed 超出 uint32 时重抽）。
-pub fn normalize_image_request(body: &mut Value, randint: &mut dyn FnMut() -> u32) -> PyResult<()> {
-    let body_type = pyext::type_name(body);
+pub fn normalize_image_request(
+    body: &mut Value,
+    randint: &mut dyn FnMut() -> u32,
+) -> ValidationResult<()> {
+    let body_type = validation::type_name(body);
     let Some(obj) = body.as_object_mut() else {
-        return Err(PyErr::Attribute(format!(
+        return Err(ValidationError::InvalidStructure(format!(
             "'{body_type}' object has no attribute 'get'"
         )));
     };
     let model = match obj.get("model") {
-        Some(Value::String(m)) if !pyc::strip(m).is_empty() => pyc::strip(m).to_lowercase(),
-        _ => return Err(PyErr::value("缺少 model")),
+        Some(Value::String(m)) if !primitives::strip(m).is_empty() => {
+            primitives::strip(m).to_lowercase()
+        }
+        _ => return Err(ValidationError::value("缺少 model")),
     };
     obj.insert("model".into(), Value::String(model));
     let Some(Value::Object(p)) = obj.get_mut("parameters") else {
@@ -631,7 +554,7 @@ pub fn normalize_image_request(body: &mut Value, randint: &mut dyn FnMut() -> u3
         let ok =
             !value.is_boolean() && strict_int(&value).is_some_and(|i| (0..=65536).contains(&i));
         if !ok {
-            return Err(PyErr::value(format!("{name} 必须是非负整数")));
+            return Err(ValidationError::value(format!("{name} 必须是非负整数")));
         }
     }
 
@@ -675,7 +598,9 @@ pub fn normalize_image_request(body: &mut Value, randint: &mut dyn FnMut() -> u3
             _ => false,
         };
         if !ok {
-            return Err(PyErr::value("scale 必须是 0 到 50 之间的有效数值"));
+            return Err(ValidationError::value(
+                "scale 必须是 0 到 50 之间的有效数值",
+            ));
         }
     }
     Ok(())
@@ -702,8 +627,8 @@ fn f_to_i128(f: f64) -> Option<i128> {
 /// 按固定顺序列出所有提示词位置：`(路径, 值)`，值可能不是字符串（由调用方判断）。
 pub fn prompt_texts(body: &Value) -> Vec<(String, Option<&Value>)> {
     let mut out: Vec<(String, Option<&Value>)> =
-        vec![("input".to_string(), pyval::get(body, "input"))];
-    let Some(Value::Object(p)) = pyval::get(body, "parameters") else {
+        vec![("input".to_string(), values::get(body, "input"))];
+    let Some(Value::Object(p)) = values::get(body, "parameters") else {
         return out;
     };
     for key in ["prompt", "negative_prompt"] {
@@ -920,7 +845,7 @@ pub fn upstream_parameter_problem(body: &Value) -> Option<String> {
         for caps in weight.captures_iter(text) {
             let caps = caps.expect("回溯上限已关闭，不会有运行期错误");
             let g = caps.get(1).expect("第 1 组总参与匹配").as_str();
-            let Some(val) = pyc::parse_float(g) else {
+            let Some(val) = primitives::parse_float(g) else {
                 continue;
             };
             if val.abs() > 100.0 {
@@ -930,11 +855,11 @@ pub fn upstream_parameter_problem(body: &Value) -> Option<String> {
             }
         }
     }
-    let p = match pyval::get(body, "parameters") {
+    let p = match values::get(body, "parameters") {
         Some(Value::Object(m)) => m,
         _ => empty_obj(),
     };
-    let generate = match pyval::get(body, "action") {
+    let generate = match values::get(body, "action") {
         None => true,
         Some(Value::String(a)) => a == "generate",
         Some(_) => false,
@@ -949,7 +874,7 @@ pub fn upstream_parameter_problem(body: &Value) -> Option<String> {
                 let lower = std::cmp::max(step, value / step * step);
                 // bool 也是 int：True 会走到这里并被打印成 "True"
                 let shown = match p.get(key) {
-                    Some(Value::Bool(b)) => pyc::bool_str(*b).to_string(),
+                    Some(Value::Bool(b)) => primitives::bool_text(*b).to_string(),
                     _ => value.to_string(),
                 };
                 let side = if key == "width" { "宽度" } else { "高度" };
@@ -992,7 +917,7 @@ pub fn upstream_parameter_problem(body: &Value) -> Option<String> {
             Value::String(s) => {
                 let stripped = s.replace('_', "");
                 s.is_ascii()
-                    && pyc::len_chars(s) <= 64
+                    && primitives::len_chars(s) <= 64
                     && !stripped.is_empty()
                     && stripped.bytes().all(|b| b.is_ascii_alphanumeric())
             }
@@ -1020,7 +945,8 @@ pub fn upstream_parameter_problem(body: &Value) -> Option<String> {
     if let Some(schedule) = p.get("noise_schedule")
         && !schedule.is_null()
     {
-        let valid = matches!(schedule, Value::String(s) if s.is_ascii() && pyc::len_chars(s) <= 32);
+        let valid =
+            matches!(schedule, Value::String(s) if s.is_ascii() && primitives::len_chars(s) <= 32);
         if !valid {
             return Some("噪声调度 noise_schedule 设置无效，未扣费。请在客户端中恢复默认值。给客户端作者：noise_schedule 须为不超过 32 个字符的 ASCII 字符串".into());
         }
@@ -1031,7 +957,7 @@ pub fn upstream_parameter_problem(body: &Value) -> Option<String> {
 // ----------------------------------------------------------------------------- 模型判定
 
 pub fn is_v5_model(model: &str) -> bool {
-    let m = pyc::strip(model).to_lowercase();
+    let m = primitives::strip(model).to_lowercase();
     m == "nai-diffusion-5"
         || m == "nai-v5"
         || m.starts_with("nai-diffusion-5-")
@@ -1040,7 +966,7 @@ pub fn is_v5_model(model: &str) -> bool {
 
 /// 返回 `"legacy"` / `"v5"`；未列入白名单的模型返回 None。
 pub fn image_model_tier(model: &str) -> Option<&'static str> {
-    let m = pyc::strip(model).to_lowercase();
+    let m = primitives::strip(model).to_lowercase();
     if is_v5_model(&m) {
         return Some("v5");
     }
@@ -1056,9 +982,8 @@ pub fn image_model_tier(model: &str) -> Option<&'static str> {
 
 // ----------------------------------------------------------------------------- 图片计费
 
-/// Python `math.ceil(float)`：返回浮点值（结果总是整数值），并按 Python 的写法把 -0.0 归一成 +0.0。
-fn py_ceil(x: f64) -> PyResult<f64> {
-    pyc::int_checked(x)?;
+fn checked_ceil(x: f64) -> ValidationResult<f64> {
+    primitives::int_checked(x)?;
     Ok(x.ceil() + 0.0)
 }
 
@@ -1069,8 +994,7 @@ pub fn per_image_cost(
     steps: i128,
     smea: bool,
     smea_dyn: bool,
-) -> PyResult<f64> {
-    // 乘积用 i128 精确算再转浮点（与 Python 的大整数转浮点一致，超出 i128 的天文数字饱和）
+) -> ValidationResult<f64> {
     let r = width.saturating_mul(height) as f64;
     let smea_factor = if smea && smea_dyn {
         1.4
@@ -1081,16 +1005,16 @@ pub fn per_image_cost(
     };
     let base = 2.951823174884865e-6 * r + 5.753298233447344e-7 * r * (steps as f64);
     // 模型倍率、SMEA 和强度之后才做最终取整，避免多次取整累积误差。
-    Ok(py_ceil(base)? * smea_factor)
+    Ok(checked_ceil(base)? * smea_factor)
 }
 
-pub fn has_paid_extras(params: &Value) -> PyResult<bool> {
+pub fn has_paid_extras(params: &Value) -> ValidationResult<bool> {
     let p = params_of(params)?;
-    if truthy_opt(p.get("controlnet_model")) || truthy_opt(p.get("controlnet_condition")) {
+    if enabled_opt(p.get("controlnet_model")) || enabled_opt(p.get("controlnet_condition")) {
         return Ok(true);
     }
     // V4/V5 角色参考 / 精确参考按张额外收费
-    if truthy_opt(p.get("characterReferences")) {
+    if enabled_opt(p.get("characterReferences")) {
         return Ok(true);
     }
     Ok(reference_surcharge(params)? != 0)
@@ -1102,7 +1026,7 @@ pub const FREE_MAX_STEPS: i64 = 28;
 pub const FREE_MAX_PIXELS: i64 = 1024 * 1024;
 
 /// 首张是否符合免费条件；批次内其余图片仍按张计费。
-pub fn opus_free_eligible(params: &Value) -> PyResult<bool> {
+pub fn opus_free_eligible(params: &Value) -> ValidationResult<bool> {
     let p = params_of(params)?;
     if has_paid_extras(params)? {
         return Ok(false);
@@ -1143,21 +1067,20 @@ fn sat_i64(i: i128) -> i64 {
 
 /// 估算一次 `/ai/generate-image` 的消耗。V5 多图批次可同时占首张额度并支付其余图片的 Anlas。
 ///
-/// 返回的 `anlas` 对超出 i64 的天文数字饱和（Python 是任意精度；线上边长已被限在 65536 以内）。
 pub fn estimate_image_cost(
     params: &Value,
     is_opus: bool,
     v5_allowance_available: bool,
-) -> PyResult<ImageCost> {
+) -> ValidationResult<ImageCost> {
     if let Some(problem) = validate_image_references(params) {
-        return Err(PyErr::Value(problem));
+        return Err(ValidationError::InvalidValue(problem));
     }
     let p = params_of(params)?;
     let w = int_or(p.get("width"), 832, 832)?;
     let h = int_or(p.get("height"), 1216, 1216)?;
     let steps = int_or(p.get("steps"), 28, 28)?;
-    let smea = truthy_opt(p.get("sm"));
-    let smea_dyn = truthy_opt(p.get("sm_dyn"));
+    let smea = enabled_opt(p.get("sm"));
+    let smea_dyn = enabled_opt(p.get("sm_dyn"));
     let n = std::cmp::max(1, int_or(p.get("n_samples"), 1, 1)?);
 
     let mut per = per_image_cost(w, h, steps, smea, smea_dyn)?;
@@ -1166,30 +1089,32 @@ pub fn estimate_image_cost(
     if is_v5 {
         per *= V5_COST_MULTIPLIER;
     }
-    if truthy_opt(p.get("mask")) {
+    if enabled_opt(p.get("mask")) {
         // 局部重绘使用 img2img.strength。
         let inpaint = match p.get("img2img") {
-            Some(x) if pyval::truthy(x) => x,
+            Some(x) if values::enabled(x) => x,
             _ => &Value::Null,
         };
         let inpaint_obj = match inpaint {
             Value::Object(m) => m,
             Value::Null => empty_obj(),
-            _ => return Err(PyErr::value("img2img 必须是 JSON 对象")),
+            _ => return Err(ValidationError::value("img2img 必须是 JSON 对象")),
         };
         let strength = inpaint_obj
             .get("strength")
             .cloned()
             .unwrap_or_else(|| float_value(1.0));
         if !unit_value(&strength) {
-            return Err(PyErr::value("img2img.strength 必须是 0 到 1 的有限数值"));
+            return Err(ValidationError::value(
+                "img2img.strength 必须是 0 到 1 的有限数值",
+            ));
         }
         let outer = p
             .get("strength")
             .cloned()
             .unwrap_or_else(|| float_value(0.0));
         if !unit_value(&outer) {
-            return Err(PyErr::value("strength 必须是 0 到 1 的有限数值"));
+            return Err(ValidationError::value("strength 必须是 0 到 1 的有限数值"));
         }
         // 上游可能按任一字段计价，取较大者
         let strength = f64::max(unit_f64(&strength), unit_f64(&outer));
@@ -1197,17 +1122,17 @@ pub fn estimate_image_cost(
         if model.to_lowercase().starts_with("nai-diffusion-4") {
             per *= strength;
         }
-    } else if truthy_opt(p.get("image")) {
+    } else if enabled_opt(p.get("image")) {
         let strength = p
             .get("strength")
             .cloned()
             .unwrap_or_else(|| float_value(1.0));
         if !unit_value(&strength) {
-            return Err(PyErr::value("strength 必须是 0 到 1 的有限数值"));
+            return Err(ValidationError::value("strength 必须是 0 到 1 的有限数值"));
         }
         per *= unit_f64(&strength);
     }
-    let per = std::cmp::max(2, py_ceil(per)? as i128);
+    let per = std::cmp::max(2, checked_ceil(per)? as i128);
 
     // 先排除参考附加费，判断基础生成是否满足 Opus 首张减免条件。
     let base_p: Obj = p
@@ -1249,21 +1174,24 @@ pub fn estimate_image_cost(
 // ----------------------------------------------------------------------------- 图片钳制
 
 /// 等比缩小到像素面积上限内，边长取 64 的倍数。
-pub fn fit_size(width: i128, height: i128, max_pixels: i128) -> PyResult<(i128, i128)> {
+pub fn fit_size(width: i128, height: i128, max_pixels: i128) -> ValidationResult<(i128, i128)> {
     let area = width.saturating_mul(height);
     if area <= max_pixels {
         return Ok((width, height));
     }
     if area == 0 {
-        return Err(PyErr::ZeroDivision("division by zero".into()));
+        return Err(ValidationError::DivisionByZero("division by zero".into()));
     }
     let q = max_pixels as f64 / area as f64;
     if q < 0.0 {
-        return Err(PyErr::value("math domain error"));
+        return Err(ValidationError::value("math domain error"));
     }
     let scale = q.sqrt();
     let snap = |side: i128| -> i128 {
-        std::cmp::max(64, i128::from(pyc::round0(side as f64 * scale / 64.0)) * 64)
+        std::cmp::max(
+            64,
+            i128::from(primitives::round0(side as f64 * scale / 64.0)) * 64,
+        )
     };
     let mut w2 = snap(width);
     let mut h2 = snap(height);
@@ -1286,7 +1214,7 @@ pub fn clamp_image_params(
     max_pixels: i64,
     max_steps: i64,
     allow_img2img: bool,
-) -> PyResult<(Value, Vec<String>, Option<String>)> {
+) -> ValidationResult<(Value, Vec<String>, Option<String>)> {
     let mut notes: Vec<String> = Vec::new();
     let mut out = dict_copy(payload)?;
     let mut p = params_copy(&out);
@@ -1301,7 +1229,7 @@ pub fn clamp_image_params(
     }
 
     // img2img / inpaint 审查
-    let is_img2img = truthy_opt(p.get("image")) || truthy_opt(p.get("mask"));
+    let is_img2img = enabled_opt(p.get("image")) || enabled_opt(p.get("mask"));
     if is_img2img && !allow_img2img {
         finish!(Some(
             "本站不支持图生图和局部重绘，未扣费。请在客户端中去掉原图。".into()
@@ -1349,20 +1277,20 @@ pub fn clamp_image_params(
     }
 
     // 沿用免费 Key 的保守钳制；SMEA 本身不排除首张减免资格。
-    if truthy_opt(p.get("sm")) || truthy_opt(p.get("sm_dyn")) {
+    if enabled_opt(p.get("sm")) || enabled_opt(p.get("sm_dyn")) {
         p.insert("sm".into(), Value::Bool(false));
         p.insert("sm_dyn".into(), Value::Bool(false));
         notes.push("SMEA 已按安全钳制规则关闭".into());
     }
 
     // ControlNet / 角色参考（额外计费）
-    if truthy_opt(p.get("controlnet_model")) || truthy_opt(p.get("controlnet_condition")) {
+    if enabled_opt(p.get("controlnet_model")) || enabled_opt(p.get("controlnet_condition")) {
         finish!(Some(
             "本站未开放 ControlNet，未扣费。请在客户端中关闭 ControlNet。".into()
         ));
     }
-    if truthy_opt(p.get("characterReferences")) {
-        pyval::pop(&mut p, "characterReferences");
+    if enabled_opt(p.get("characterReferences")) {
+        values::pop(&mut p, "characterReferences");
         notes.push("已移除角色参考（精确参考会消耗 Anlas）".into());
     }
     finish!(None)
@@ -1430,7 +1358,7 @@ pub fn fill_v4_prompt(payload: &Value) -> (Value, Vec<String>) {
             "v4_prompt".into(),
             Value::Object(obj(vec![
                 ("caption", Value::Object(caption)),
-                ("use_coords", Value::Bool(truthy_opt(p0.get("use_coords")))),
+                ("use_coords", Value::Bool(enabled_opt(p0.get("use_coords")))),
                 ("use_order", Value::Bool(true)),
             ])),
         );
@@ -1470,7 +1398,7 @@ pub fn fill_v4_prompt(payload: &Value) -> (Value, Vec<String>) {
 
 /// V5 Full（含局部重绘）对应的 Medium 模型；不是这两个模型（含已经是 Medium、Curated、别名）返回 None。
 pub fn v5_medium_of(model: &str) -> Option<&'static str> {
-    let m = pyc::strip(model).to_lowercase();
+    let m = primitives::strip(model).to_lowercase();
     V5_MEDIUM_OF
         .iter()
         .find(|(full, _)| *full == m)
@@ -1478,7 +1406,7 @@ pub fn v5_medium_of(model: &str) -> Option<&'static str> {
 }
 
 pub fn is_v5_medium(model: &str) -> bool {
-    let m = pyc::strip(model).to_lowercase();
+    let m = primitives::strip(model).to_lowercase();
     V5_MEDIUM_OF.iter().any(|(_, medium)| *medium == m)
 }
 
@@ -1508,11 +1436,11 @@ pub fn medium_normalize(payload: &Value) -> (Value, Vec<String>) {
         p.insert("sampler".into(), Value::String(V5_MEDIUM_SAMPLER.into()));
     }
     // `(x or 0) != 0`：任何真值都不等于 0
-    if truthy_opt(p.get("cfg_rescale")) {
+    if enabled_opt(p.get("cfg_rescale")) {
         p.insert("cfg_rescale".into(), Value::from(0));
         notes.push("Medium 不支持 rescale，已设为 0".into());
     }
-    let user_uc = pyc::strip(&str_or_empty(p.get("negative_prompt"))).to_string();
+    let user_uc = primitives::strip(&str_or_empty(p.get("negative_prompt"))).to_string();
     if !user_uc.is_empty() && user_uc != V5_MEDIUM_UC {
         notes.push(
             "Medium 不支持自定义负面词，已换成官方 Heavy 预设（可在正面提示词里用 -2::xx:: 排除）"
@@ -1555,15 +1483,15 @@ pub fn guard_image_action(body: &Value) -> (Value, Vec<String>, Option<String>) 
     let mut p = params_copy(&out);
     out.insert("parameters".into(), Value::Null);
     let mut notes = Vec::new();
-    let action = pyc::strip(&str_or_empty(out.get("action"))).to_lowercase();
+    let action = primitives::strip(&str_or_empty(out.get("action"))).to_lowercase();
     let mut err = None;
     if action == "infill" || action == "img2img" {
-        if action == "infill" && !truthy_opt(p.get("mask")) {
+        if action == "infill" && !enabled_opt(p.get("mask")) {
             err = Some(
                 "局部重绘缺少蒙版，未扣费。请在客户端中绘制蒙版后重新提交。给客户端作者：infill 须带 parameters.mask"
                     .to_string(),
             );
-        } else if truthy_opt(p.get("sm")) || truthy_opt(p.get("sm_dyn")) {
+        } else if enabled_opt(p.get("sm")) || enabled_opt(p.get("sm_dyn")) {
             p.insert("sm".into(), Value::Bool(false));
             p.insert("sm_dyn".into(), Value::Bool(false));
             notes.push(
@@ -1578,14 +1506,14 @@ pub fn guard_image_action(body: &Value) -> (Value, Vec<String>, Option<String>) 
 // ----------------------------------------------------------------------------- 工具
 
 pub fn mask_token(token: &str, keep: usize) -> String {
-    let len = pyc::len_chars(token);
+    let len = primitives::len_chars(token);
     if len <= keep {
         return "*".repeat(len);
     }
     format!(
         "{}…{}",
-        pyc::take_chars(token, keep),
-        pyc::last_chars(token, 4)
+        primitives::take_chars(token, keep),
+        primitives::last_chars(token, 4)
     )
 }
 
@@ -1629,20 +1557,20 @@ const NON_PLAIN_PARAMS: [&str; 6] = [
 /// （V4 / V4.5 结构化提示词取 `base_caption`，否则取 `input`）。
 /// 缺步数或尺寸（上游按默认值出大图）不算。
 pub fn is_connection_test(body: &Value) -> bool {
-    let Some(Value::Object(p)) = pyval::get(body, "parameters") else {
+    let Some(Value::Object(p)) = values::get(body, "parameters") else {
         return false;
     };
-    let action = pyc::strip(&str_or_empty(pyval::get(body, "action"))).to_lowercase();
+    let action = primitives::strip(&str_or_empty(values::get(body, "action"))).to_lowercase();
     if !action.is_empty() && action != "generate" {
         return false;
     }
     if NON_PLAIN_PARAMS
         .iter()
         .chain(REFERENCE_FIELDS.iter())
-        .any(|k| truthy_opt(p.get(*k)))
+        .any(|k| enabled_opt(p.get(*k)))
         || ["image", "mask"]
             .iter()
-            .any(|k| truthy_opt(pyval::get(body, k)))
+            .any(|k| enabled_opt(values::get(body, k)))
     {
         return false;
     }
@@ -1675,12 +1603,12 @@ pub fn is_connection_test(body: &Value) -> bool {
     }
     let prompt = match v4.and_then(|c| c.get("base_caption")) {
         Some(Value::String(s)) => s.as_str(),
-        _ => match pyval::get(body, "input") {
+        _ => match values::get(body, "input") {
             Some(Value::String(s)) => s.as_str(),
             _ => "",
         },
     };
-    pyc::len_chars(pyc::strip(prompt)) <= TEST_REQUEST_MAX_PROMPT_CHARS
+    primitives::len_chars(primitives::strip(prompt)) <= TEST_REQUEST_MAX_PROMPT_CHARS
 }
 
 #[cfg(test)]

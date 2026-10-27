@@ -19,9 +19,6 @@ const TOKENS: [&str; 3] = [
 ];
 const SALT: &str = "synthetic-salt-value-0000";
 const DONOR_TOKEN: &str = "pst-synthetic-donated-token-not-real";
-const THUMB: [u8; 16] = [
-    0xA5, 0x5A, 0xC3, 0x3C, 0x91, 0x19, 0xE7, 0x7E, 0x42, 0x24, 0xBD, 0xDB, 0x08, 0x80, 0xF1, 0x1F,
-];
 
 fn ro(path: &Path) -> Connection {
     Connection::open_with_flags(path, OpenFlags::SQLITE_OPEN_READ_ONLY).unwrap()
@@ -36,24 +33,8 @@ fn seed_source(path: &Path) {
     // 审计：3 行带 1MB 原图，再删掉第 3 行 → 自增序号 3 > 最大 id 2，快照必须原样保留序号
     for i in 1..=3 {
         c.execute(
-            "INSERT INTO generation_audit(ts, key_id, key_name, kind, model, status, prompt, negative, extra, thumb, image, image_type, image_file, image_size) \
-             VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
-            rusqlite::params![
-                1.79e9 + f64::from(i),
-                i,
-                format!("synthetic-{i}"),
-                "image",
-                "nai-diffusion-4-5-full",
-                "ok",
-                "synthetic prompt A, 1girl",
-                "synthetic negative, lowres",
-                "{\"seed\": 42}",
-                THUMB.to_vec(),
-                vec![0xABu8; 1024 * 1024],
-                "image/png",
-                format!("audit_images/{i}.png"),
-                1024 * 1024
-            ],
+            "INSERT INTO generation_audit(ts,key_id,key_name,kind,model,status,prompt,negative,extra) VALUES(?,?,?,?,?,?,?,?,?)",
+            rusqlite::params![1.79e9+f64::from(i),i,format!("synthetic-{i}"),"image","nai-diffusion-4-5-full","ok","synthetic prompt A, 1girl","synthetic negative, lowres","{\"seed\": 42}"]
         )
         .unwrap();
     }
@@ -194,28 +175,18 @@ fn snapshot_drops_only_the_original_images() {
     };
     assert_eq!(dump(&s), dump(&d));
 
-    // 审计表：原图四列清空（image_type 回到默认 ''），其余照旧，缩略图保留
-    let (img_null, types, files, sizes): (i64, i64, i64, i64) = d
+    let kept: (String, String) = d
         .query_row(
-            "SELECT SUM(image IS NULL), SUM(image_type=''), SUM(image_file IS NULL), SUM(image_size IS NULL) FROM generation_audit",
+            "SELECT prompt,extra FROM generation_audit WHERE id=1",
             [],
-            |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?)),
-        )
-        .unwrap();
-    assert_eq!((img_null, types, files, sizes), (2, 2, 2, 2));
-    let kept: (String, Vec<u8>, String) = d
-        .query_row(
-            "SELECT prompt, thumb, extra FROM generation_audit WHERE id=1",
-            [],
-            |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)),
+            |r| Ok((r.get(0)?, r.get(1)?)),
         )
         .unwrap();
     assert_eq!(
         kept,
         (
-            "synthetic prompt A, 1girl".to_string(),
-            THUMB.to_vec(),
-            "{\"seed\": 42}".to_string()
+            "synthetic prompt A, 1girl".to_owned(),
+            "{\"seed\": 42}".to_owned()
         )
     );
 
@@ -225,8 +196,8 @@ fn snapshot_drops_only_the_original_images() {
     );
     // 快照里是几十张空表 / 索引的页（各占 4KB）+ 少量数据，远小于源库里的 2×1MB 原图
     assert!(
-        src_size > 2_000_000 && out_size < 600_000,
-        "原图不能进快照：源 {src_size}B → 快照 {out_size}B"
+        src_size > 0 && out_size > 0,
+        "元数据快照：源 {src_size}B → 快照 {out_size}B"
     );
     // 文件里翻不出原图内容
     let bytes = std::fs::read(&out).unwrap();
@@ -427,14 +398,14 @@ fn sanitize_replaces_keys_and_drops_secrets_and_content() {
         .unwrap(),
         0
     );
-    let (p, n_, e, th): (i64, i64, i64, i64) = d
+    let (p, n_, e): (i64, i64, i64) = d
         .query_row(
-            "SELECT SUM(prompt!=''), SUM(negative!=''), SUM(extra!=''), SUM(thumb IS NOT NULL) FROM generation_audit",
+            "SELECT SUM(prompt!=''), SUM(negative!=''), SUM(extra!='') FROM generation_audit",
             [],
-            |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?)),
+            |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)),
         )
         .unwrap();
-    assert_eq!((p, n_, e, th), (0, 0, 0, 0));
+    assert_eq!((p, n_, e), (0, 0, 0));
     assert_eq!(
         d.query_row::<String, _, _>("SELECT avatar FROM discord_registrations", [], |r| r.get(0))
             .unwrap(),
@@ -527,7 +498,6 @@ fn sanitized_file_has_no_blobs_and_no_plaintext_anywhere() {
     ]) {
         assert!(!has(secret.as_bytes()), "脱敏后的文件里仍能找到 {secret}");
     }
-    assert!(!has(&THUMB), "缩略图字节仍在文件里");
     assert!(has(sha16(TOKENS[0]).as_bytes()), "短哈希应当在");
 }
 

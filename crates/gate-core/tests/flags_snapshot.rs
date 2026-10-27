@@ -9,8 +9,8 @@ mod common;
 use common::{Tally, obj};
 use gate_core::bot_config::{self, BotConfigError};
 use gate_core::features::{self, FeaturesError, VibeAnlas};
-use gate_core::pyval;
 use gate_core::site_flags::{self, ALL, Kind, Spec, SpecDefault};
+use gate_core::values;
 use gate_snapshot::snapshot::check;
 use serde_json::{Map, Value, json};
 
@@ -66,7 +66,7 @@ fn spec_json(s: &Spec) -> Value {
         "default": match s.default {
             SpecDefault::Bool(b) => json!(b),
             SpecDefault::Int(i) => json!(i),
-            SpecDefault::Float(x) => pyval::float(x),
+            SpecDefault::Float(x) => values::float(x),
             SpecDefault::Str(t) => json!(t),
         },
         "owner": s.owner,
@@ -327,13 +327,13 @@ fn bot_heartbeat_keeps_whitelisted_fields_only() {
     });
     let stored = bot_config::status_to_store(status.as_object().unwrap(), 1790947275.123456);
     assert_eq!(
-        stored,
-        r#"{"user": null, "guild": 0.1, "latency_ms": 42, "ready_at": "猫x", "version": "猫x", "seen_at": 1790947275.123456}"#
+        serde_json::from_str::<Value>(&stored).unwrap(),
+        json!({"user":null,"guild":0.1,"latency_ms":42,"ready_at":"猫x","version":"猫x","seen_at":1790947275.123456})
     );
     // 空心跳也有 seen_at；字段顺序固定，不看入参的顺序
     assert_eq!(
         bot_config::status_to_store(&Map::new(), 1000.0),
-        r#"{"seen_at": 1000.0}"#
+        r#"{"seen_at":1000.0}"#
     );
 }
 

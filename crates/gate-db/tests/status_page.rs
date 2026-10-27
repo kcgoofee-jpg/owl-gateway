@@ -38,7 +38,7 @@ async fn incidents_roundtrip_and_reopen() {
         .read(|c| c.query_row("SELECT components FROM incidents", [], |r| r.get(0)))
         .await
         .unwrap();
-    assert_eq!(raw, r#"["api", "upstream"]"#);
+    assert_eq!(raw, r#"["api","upstream"]"#);
 
     assert!(
         db.add_incident_update(1, "resolved", "完", T0 + 60.0)

@@ -6,9 +6,8 @@
 //! 更新：`UPDATE_SNAPSHOT=1 cargo test -p gate-db --test repo_snapshot`，然后审阅 `git diff`。
 
 use base64::{Engine, engine::general_purpose::STANDARD as B64};
-use gate_core::{clock::Clock, pyval, reasons::reason_label};
+use gate_core::{clock::Clock, reasons::reason_label, values};
 use gate_db::repo::{
-    audit::NewAudit,
     discord::BanInfo,
     keys::NewKey,
     usage::{LogFilter, NewLog, Success},
@@ -31,7 +30,7 @@ fn arg<'a>(c: &'a Case, i: usize, name: &str) -> Option<&'a Value> {
 }
 
 fn s(v: Option<&Value>, default: &str) -> String {
-    v.map_or_else(|| default.to_string(), pyval::py_str)
+    v.map_or_else(|| default.to_string(), values::text)
 }
 
 fn int(v: Option<&Value>, default: i64) -> i64 {
@@ -39,7 +38,7 @@ fn int(v: Option<&Value>, default: i64) -> i64 {
         None | Some(Value::Null) => default,
         // Python int(x)：浮点向零截断
         Some(Value::Number(n)) if n.is_f64() => n.as_f64().unwrap().trunc() as i64,
-        Some(other) => pyval::int_like(other).unwrap_or_else(|| panic!("不是整数：{other}")),
+        Some(other) => values::int_like(other).unwrap_or_else(|| panic!("不是整数：{other}")),
     }
 }
 
@@ -50,8 +49,8 @@ fn num(v: Option<&Value>, default: f64) -> f64 {
     }
 }
 
-fn truthy(v: Option<&Value>, default: bool) -> bool {
-    v.map_or(default, pyval::truthy)
+fn enabled(v: Option<&Value>, default: bool) -> bool {
+    v.map_or(default, values::enabled)
 }
 
 fn opt_int(v: Option<&Value>) -> Option<i64> {
@@ -69,20 +68,9 @@ fn str_list(v: &Value) -> Vec<String> {
         .collect()
 }
 
-fn unb(v: Option<&Value>) -> Option<Vec<u8>> {
-    match v {
-        Some(Value::Object(m)) => Some(B64.decode(m["$b"].as_str().unwrap()).unwrap()),
-        _ => None,
-    }
-}
-
 // ------------------------------------------------------------------ 返回值编码（`$map` / `$b` 的约定见 gate_snapshot）
 fn js<T: Serialize>(v: &T) -> Value {
     serde_json::to_value(v).unwrap()
-}
-
-fn blob(b: Option<Vec<u8>>) -> Value {
-    b.map_or(Value::Null, |b| json!({"$b": B64.encode(b)}))
 }
 
 /// dict[int, X]：非空时是 {"$map": [[k, v], ...]}，空时是 {}。
@@ -216,7 +204,12 @@ async fn seed(db: &Db, case: &Case) -> Vec<String> {
             .await
             .unwrap_or_else(|e| panic!("种子 SQL 执行失败：{e}\n{stmt:?}"));
     }
-    let root = db.image_dir().to_path_buf();
+    let root = &db
+        .path()
+        .parent()
+        .unwrap()
+        .join("audit_images")
+        .to_path_buf();
     let mut extra = Vec::new();
     let seed_files = list(case, "seed_files");
     let seed_dirs = list(case, "seed_dirs");
@@ -291,8 +284,11 @@ async fn call(db: &Db, c: &Case) -> Out {
             Value::Null
         }
         "set_upstream_token_enabled" => {
-            db.set_upstream_token_enabled(&s(a(0, "token_id"), ""), truthy(a(1, "enabled"), false))
-                .await?;
+            db.set_upstream_token_enabled(
+                &s(a(0, "token_id"), ""),
+                enabled(a(1, "enabled"), false),
+            )
+            .await?;
             Value::Null
         }
         "set_upstream_token_image_concurrency" => {
@@ -335,7 +331,7 @@ async fn call(db: &Db, c: &Case) -> Out {
                 .as_object()
                 .unwrap()
                 .iter()
-                .map(|(k, v)| (k.clone(), pyval::py_str(v)))
+                .map(|(k, v)| (k.clone(), values::text(v)))
                 .collect();
             db.set_settings_bulk(&pairs).await?;
             Value::Null
@@ -355,7 +351,7 @@ async fn call(db: &Db, c: &Case) -> Out {
         "list_coupons" => json!(
             db.list_coupons(
                 int(a(0, "key_id"), 0),
-                truthy(a(1, "active_only"), true),
+                enabled(a(1, "active_only"), true),
                 now
             )
             .await?
@@ -373,7 +369,7 @@ async fn call(db: &Db, c: &Case) -> Out {
                 &s(a(1, "action"), ""),
                 &s(a(2, "target"), ""),
                 &s(a(3, "detail"), ""),
-                truthy(a(4, "ok"), false),
+                enabled(a(4, "ok"), false),
                 now,
             )
             .await?;
@@ -402,7 +398,7 @@ async fn call(db: &Db, c: &Case) -> Out {
         "list_bans" => {
             let q = match a(0, "q") {
                 None | Some(Value::Null) => String::new(),
-                Some(v) => pyval::py_str(v),
+                Some(v) => values::text(v),
             };
             json!(db.list_bans(&q).await?)
         }
@@ -595,98 +591,6 @@ async fn call(db: &Db, c: &Case) -> Out {
             int_map(db.generated_image_totals(opt_int(a(0, "key_id"))).await?)
         }
         "user_image_timing" => js(&db.user_image_timing(int(a(0, "key_id"), 0), now).await?),
-        // ---------------- audit
-        "add_audit" => {
-            let thumb = unb(a(7, "thumb"));
-            let image = unb(a(9, "image"));
-            let (key_name, kind, model, status) = (
-                s(a(1, "key_name"), ""),
-                s(a(2, "kind"), ""),
-                s(a(3, "model"), ""),
-                s(a(4, "status"), ""),
-            );
-            let (prompt, negative, extra, image_type) = (
-                s(a(5, "prompt"), ""),
-                s(a(6, "negative"), ""),
-                s(a(8, "extra"), ""),
-                s(a(10, "image_type"), ""),
-            );
-            let na = NewAudit {
-                key_id: opt_int(a(0, "key_id")),
-                key_name: &key_name,
-                kind: &kind,
-                model: &model,
-                status: &status,
-                prompt: &prompt,
-                negative: &negative,
-                thumb: thumb.as_deref(),
-                extra: &extra,
-                image: image.as_deref(),
-                image_type: &image_type,
-                rid: "",
-                request_id: "",
-            };
-            let uuid = c
-                .get("uuids")
-                .and_then(Value::as_array)
-                .and_then(|u| u.first())
-                .and_then(Value::as_str)
-                .unwrap_or("ffffffffffffffffffffffffffffffff")
-                .to_string();
-            db.add_audit_with_id(&na, now, &clock, &uuid).await?;
-            Value::Null
-        }
-        "list_audit_ids" => {
-            let ids: Vec<i64> = c
-                .arg(2)
-                .as_array()
-                .unwrap()
-                .iter()
-                .map(|v| int(Some(v), 0))
-                .collect();
-            let (rows, total) = db
-                .list_audit_ids(int(a(0, "limit"), 0), int(a(1, "offset"), 0), &ids)
-                .await?;
-            json!([rows, total])
-        }
-        "audit_thumb" => blob(db.audit_thumb(int(a(0, "audit_id"), 0)).await?),
-        "audit_image" => {
-            let (data, ty) = db.audit_image(int(a(0, "audit_id"), 0)).await?;
-            json!([blob(data), ty])
-        }
-        "audit_images_for" => json!(
-            db.audit_images_for_key(
-                int(a(0, "key_id"), 0),
-                int(a(1, "max_bytes"), 0),
-                num(a(2, "since"), 0.0)
-            )
-            .await?
-            .into_iter()
-            .map(|i| json!([
-                i.id,
-                float(i.ts),
-                i.image_type,
-                i.prompt,
-                i.negative,
-                i.extra,
-                blob(Some(i.image))
-            ]))
-            .collect::<Vec<_>>()
-        ),
-        "audit_image_bytes" => json!(db.audit_image_bytes().await?),
-        "purge_audit_images_to_cap" => json!(
-            db.purge_audit_images_to_cap(int(a(0, "cap_bytes"), 0), num(a(1, "low_water"), 0.9))
-                .await?
-        ),
-        "purge_audit_images_before_id" => {
-            json!(
-                db.purge_audit_images_before_id(int(a(0, "before_id"), 0))
-                    .await?
-            )
-        }
-        "purge_audit_images" => json!(db.purge_audit_images(num(a(0, "older_than"), 0.0)).await?),
-        "purge_audit" => json!(db.purge_audit(num(a(0, "older_than"), 0.0)).await?),
-        "sweep_orphan_images" => json!(db.sweep_orphan_images(num(a(0, "older_than"), 0.0)).await?),
         other => panic!("夹具里有未实现的方法：{other}"),
     })
 }
@@ -730,7 +634,8 @@ async fn run_case(case: &Case) -> Value {
     let db = Db::open(dir.path().join("gate.db")).unwrap();
     let extra = seed(&db, case).await;
     let tables_before = dump_tables(&db).await;
-    let (files_before, dirs_before) = snap_files(db.image_dir(), &extra);
+    let (files_before, dirs_before) =
+        snap_files(&db.path().parent().unwrap().join("audit_images"), &extra);
 
     let mut out = Map::new();
     match call(&db, case).await {
@@ -745,7 +650,8 @@ async fn run_case(case: &Case) -> Value {
     if !tables.is_empty() {
         out.insert("tables".into(), Value::Object(tables));
     }
-    let (files_after, dirs_after) = snap_files(db.image_dir(), &extra);
+    let (files_after, dirs_after) =
+        snap_files(&db.path().parent().unwrap().join("audit_images"), &extra);
     let files = changed_files(&files_before, &files_after);
     if !files.is_empty() {
         out.insert("files".into(), Value::Object(files));
@@ -787,7 +693,6 @@ area_tests!(
     keys,
     counters,
     usage,
-    audit,
 );
 
 /// `call` 支持的全部方法：每个方法在快照里至少要有 `MIN_CASES_PER_METHOD` 个用例（抽样、删用例时不会悄悄丢掉一个方法）。
@@ -845,17 +750,6 @@ const METHODS: &[&str] = &[
     "usage_by_kind",
     "generated_image_totals",
     "user_image_timing",
-    "add_audit",
-    "list_audit_ids",
-    "audit_thumb",
-    "audit_image",
-    "audit_images_for",
-    "audit_image_bytes",
-    "purge_audit_images_to_cap",
-    "purge_audit_images_before_id",
-    "purge_audit_images",
-    "purge_audit",
-    "sweep_orphan_images",
 ];
 const MIN_CASES_PER_METHOD: usize = 2;
 

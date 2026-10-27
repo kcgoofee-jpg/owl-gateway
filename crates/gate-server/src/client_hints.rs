@@ -6,7 +6,7 @@
 //! 隐私：Authorization / Cookie 的原文一律不碰；浏览器标记 Cookie 只存哈希前 16 位。
 
 use axum::http::HeaderMap;
-use gate_core::pyc::take_chars;
+use gate_core::primitives::take_chars;
 use gate_db::repo::usage::ClientHints;
 use sha2::{Digest, Sha256};
 

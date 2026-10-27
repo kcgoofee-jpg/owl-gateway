@@ -11,7 +11,7 @@ use axum::Router;
 use axum::extract::{Request, State};
 use axum::routing::get;
 use gate_core::features::FEATURES;
-use gate_core::pyc;
+use gate_core::primitives;
 
 use serde_json::{Value, json};
 
@@ -54,12 +54,12 @@ async fn v1_me(State(state): State<AppState>, req: Request) -> ApiResult {
             "images": c.images,
             "daily_images": key.get("daily_images"),
             "legacy_free_images_today": c.legacy_free_images,
-            "anlas_today": pyc::round(anlas_today, 2),
+            "anlas_today": primitives::round(anlas_today, 2),
             "daily_anlas": key.get("daily_anlas"),
             "v5_today": c.v5,
             "daily_v5": key.get("daily_v5"),
             "image_model_scope": key.get("image_model_scope"),
-            "anlas_month": pyc::round(anlas_month, 2),
+            "anlas_month": primitives::round(anlas_month, 2),
             "monthly_anlas": key.get("monthly_anlas"),
             "quota_limits": key.quota_limits(),
             "quota_limits_valid": key.try_quota_limits().is_ok(),

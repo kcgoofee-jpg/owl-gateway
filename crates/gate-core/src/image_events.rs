@@ -1,38 +1,35 @@
-//! 图片事件流校验（`app/image_events.py`）：转发前逐条检查 SSE / msgpack 事件，只数「完整的最终图」。
-//!
-//! 规则（有快照测试锁定）：
-//! - 进度事件、EOF、传输字节数都不代表成功；只有合法的 `final`（样本序号在范围内、图片能 base64 解出且
-//!   信封完整）才计数；同一个 `samp_ix` 重复只算一次；
-//! - 显式 `error` 事件（`event_type == "error"` 或 payload 里有 `error` 键）让流失败，但此前已计数的 final 保留，
-//!   且这条错误事件**不转发**；
-//! - 任何格式问题（JSON / msgpack 解不开、事件类型不对、base64 / 信封不合法、超出大小限制）都立即拒绝：
-//!   `failed = true`、缓冲清空、报 [`ImageStreamProtocolError`]（错误文案不含上游内容）；
-//! - msgpack 帧 = 4 字节大端长度 + msgpack map；长度必须在 `1..=单事件上限`，声明长度先校验再缓冲；
-//! - SSE 事件转发的是**重新编码**后的 `encode_sse(data, event)`，不是原始字节。
-//!
-//! 解析语义：SSE 事件体走的是**默认的** `json.loads`（接受 `NaN` / `Infinity`、不限深度，约 1 万层才抛
-//! `RecursionError`——见 `pyloads`），msgpack 走 `unpackb(raw=False)`（键只能是 str / bytes、str 必须是合法 UTF-8、
-//! 容器嵌套 ≤ 1024，见 `pymsgpack`）；`base64.b64decode(validate=True)` 按 CPython 3.12.14 的严格模式（不同补丁版本
-//! 对多余的 `=` 处理不同，所以这个版本号要和线上镜像保持一致）。
-//!
-//! 唯一的不可约差异在 `error_detail`（只进日志）：上游错误消息里的孤立代理换成 U+FFFD；消息本身是 list / dict / bytes
-//! 且含生僻 Unicode 时，`repr` 里「是否可打印」只做了近似（未分配码位按可打印处理）。
-//!
-//! Python 的 `frames` 是生成器：路由逐帧转发、每帧后读 `completed_images`。这里一次返回所有帧，
-//! 每帧附带「吐出这一帧时的已完成张数」，出错时错误排在已吐出的帧之后——调用方先转发帧、再处理错误即可。
-
+//! Validated image streams using standard JSON and MessagePack.
 use std::collections::HashSet;
 
 use serde_json::Value;
 use thiserror::Error;
 
-use crate::pyc;
-use crate::pyjson;
-use crate::pyloads::{self, Options};
-use crate::pymsgpack;
-use crate::pyobj::Obj;
+use crate::json;
+use crate::primitives;
 use crate::sse::{SseDecoder, encode_sse};
 
+fn messagepack_value(value: &Value) -> rmpv::Value {
+    match value {
+        Value::Null => rmpv::Value::Nil,
+        Value::Bool(b) => rmpv::Value::Boolean(*b),
+        Value::Number(n) => {
+            if let Some(i) = n.as_i64() {
+                i.into()
+            } else if let Some(i) = n.as_u64() {
+                i.into()
+            } else {
+                rmpv::Value::F64(n.as_f64().unwrap_or(0.0))
+            }
+        }
+        Value::String(s) => s.as_str().into(),
+        Value::Array(a) => rmpv::Value::Array(a.iter().map(messagepack_value).collect()),
+        Value::Object(m) => rmpv::Value::Map(
+            m.iter()
+                .map(|(k, v)| (k.as_str().into(), messagepack_value(v)))
+                .collect(),
+        ),
+    }
+}
 /// 单个事件上限。
 pub const MAX_EVENT_BYTES: u64 = 32 * 1024 * 1024;
 /// 单条流上限。
@@ -79,7 +76,9 @@ pub enum EncodeError {
 pub fn encode_image_event(payload: &Value, wire: WireFormat) -> Result<Vec<u8>, EncodeError> {
     match wire {
         WireFormat::Msgpack => {
-            let data = pymsgpack::packb(payload);
+            let mut data = Vec::new();
+            rmpv::encode::write_value(&mut data, &messagepack_value(payload))
+                .map_err(|_| EncodeError::TooLarge)?;
             let len = u32::try_from(data.len()).map_err(|_| EncodeError::TooLarge)?;
             let mut out = Vec::with_capacity(4 + data.len());
             out.extend_from_slice(&len.to_be_bytes());
@@ -92,7 +91,7 @@ pub fn encode_image_event(payload: &Value, wire: WireFormat) -> Result<Vec<u8>, 
                 .and_then(Value::as_str)
                 .ok_or(EncodeError::NoEventType)?;
             Ok(encode_sse(
-                pyjson::dumps(payload).as_bytes(),
+                json::dumps(payload).as_bytes(),
                 event.as_bytes(),
             ))
         }
@@ -127,7 +126,6 @@ pub fn image_envelope(data: &[u8]) -> bool {
     false
 }
 
-/// `base64.b64decode(s, validate=True)`（CPython 3.12.14 的 `binascii.a2b_base64(strict_mode=True)`）。
 /// 失败（含非 ASCII 字符）返回 None。实现见 [`crate::policy::strict_b64`]。
 pub fn b64decode_strict(s: &str) -> Option<Vec<u8>> {
     crate::policy::strict_b64(s, usize::MAX).map(|(v, _)| v)
@@ -165,7 +163,6 @@ pub struct ImageEventTracker {
     failed: bool,
     error_detail: String,
     completed: HashSet<i64>,
-    first_image: Option<Vec<u8>>,
     sse: SseDecoder,
     binary: Vec<u8>,
     total_bytes: u64,
@@ -196,7 +193,6 @@ impl ImageEventTracker {
             failed: false,
             error_detail: String::new(),
             completed: HashSet::new(),
-            first_image: None,
             sse: SseDecoder::new(max_event, max_stream),
             binary: Vec::new(),
             total_bytes: 0,
@@ -215,11 +211,6 @@ impl ImageEventTracker {
 
     pub fn completed_images(&self) -> usize {
         self.completed.len()
-    }
-
-    /// 第一张完整的最终图（原始字节），供生成记录保存。
-    pub fn first_image(&self) -> Option<&[u8]> {
-        self.first_image.as_deref()
     }
 
     fn reject(&mut self) -> ImageStreamProtocolError {
@@ -289,7 +280,12 @@ impl ImageEventTracker {
             start += take;
             if self.binary.len() == target && target > 4 {
                 let wire = std::mem::take(&mut self.binary);
-                let payload = pymsgpack::unpackb(&wire[4..]).map_err(|_| Reject)?;
+                let mut reader = std::io::Cursor::new(&wire[4..]);
+                let payload =
+                    rmpv::decode::read_value_with_max_depth(&mut reader, 64).map_err(|_| Reject)?;
+                if reader.position() as usize != wire.len() - 4 {
+                    return Err(Reject);
+                }
                 self.dispatch(&payload, "")?;
                 if self.failed {
                     return Ok(());
@@ -313,9 +309,10 @@ impl ImageEventTracker {
         let feed = self.sse.feed(chunk);
         for ev in feed.events {
             let text = std::str::from_utf8(&ev.data).map_err(|_| Reject)?;
-            let payload = pyloads::loads_str(text, Options::LOADS)
+            let json = crate::json_body::parse_json(text.as_bytes())
                 .map_err(|_| Reject)?
                 .value;
+            let payload = messagepack_value(&json);
             let name = std::str::from_utf8(&ev.event).map_err(|_| Reject)?;
             self.dispatch(&payload, name)?;
             if self.failed {
@@ -333,55 +330,71 @@ impl ImageEventTracker {
         Ok(())
     }
 
-    fn dispatch(&mut self, payload: &Obj, event_name: &str) -> Result<(), Reject> {
-        let Obj::Dict(d) = payload else {
+    fn dispatch(&mut self, payload: &rmpv::Value, event_name: &str) -> Result<(), Reject> {
+        let rmpv::Value::Map(entries) = payload else {
             return Err(Reject);
         };
-        // payload.get("event_type", event_name)
-        let event_type: &str = match d.get("event_type") {
-            Some(Obj::Str(s)) => s,
-            Some(_) => return Err(Reject),
+        if entries.iter().any(|(key, _)| key.as_str().is_none()) {
+            return Err(Reject);
+        }
+        let get = |name: &str| {
+            entries
+                .iter()
+                .rev()
+                .find(|(key, _)| key.as_str() == Some(name))
+                .map(|(_, value)| value)
+        };
+        // Only text map keys are part of the event protocol.
+        let event_type: &str = match get("event_type") {
+            Some(value) => value.as_str().ok_or(Reject)?,
             None => event_name,
         };
         if !(event_name.is_empty() || event_name == "message" || event_name == event_type) {
             return Err(Reject);
         }
-        if event_type == "error" || d.contains("error") {
+        if event_type == "error" || get("error").is_some() {
             self.failed = true;
             let msg = ["message", "error", "statusCode"]
                 .iter()
-                .filter_map(|k| d.get(k))
-                .find(|v| v.truthy())
-                .map(Obj::py_str)
+                .filter_map(|k| get(k))
+                .find(|v| !v.is_nil())
+                .map(|v| {
+                    v.as_str()
+                        .map(str::to_owned)
+                        .unwrap_or_else(|| v.to_string())
+                })
                 .unwrap_or_default();
             let squashed = msg
-                .split(pyc::is_space)
+                .split(primitives::is_space)
                 .filter(|s| !s.is_empty())
                 .collect::<Vec<_>>()
                 .join(" ");
-            self.error_detail = pyc::take_chars(&squashed, ERROR_DETAIL_MAX_CHARS).to_string();
+            self.error_detail =
+                primitives::take_chars(&squashed, ERROR_DETAIL_MAX_CHARS).to_string();
             return Ok(());
         }
         if event_type != "final" {
             return Ok(());
         }
         // type(sample) is int and 0 <= sample < expected_images
-        let sample = match d.get("samp_ix") {
-            Some(Obj::Int(i)) if (0..i128::from(self.expected_images)).contains(i) => *i as i64,
+        let sample = match get("samp_ix") {
+            Some(value) => value
+                .as_i64()
+                .filter(|i| (0..self.expected_images).contains(i))
+                .ok_or(Reject)?,
             _ => return Err(Reject),
         };
-        let decoded = match d.get("image") {
-            Some(Obj::Str(s)) if !s.is_empty() => b64decode_strict(s).ok_or(Reject)?,
-            Some(Obj::Bytes(b)) if !b.is_empty() => b.clone(),
+        let decoded = match get("image") {
+            Some(rmpv::Value::String(s)) => b64decode_strict(s.as_str().ok_or(Reject)?)
+                .filter(|b| !b.is_empty())
+                .ok_or(Reject)?,
+            Some(rmpv::Value::Binary(b)) if !b.is_empty() => b.clone(),
             _ => return Err(Reject),
         };
         if !image_envelope(&decoded) {
             return Err(Reject);
         }
         self.completed.insert(sample);
-        if self.first_image.is_none() {
-            self.first_image = Some(decoded);
-        }
         Ok(())
     }
 }
@@ -405,7 +418,7 @@ mod tests {
 
     fn sse_final(sample: i64) -> Vec<u8> {
         let payload = json!({"event_type": "final", "samp_ix": sample, "image": b64(&png())});
-        encode_sse(pyjson::dumps(&payload).as_bytes(), b"final")
+        encode_sse(json::dumps(&payload).as_bytes(), b"final")
     }
 
     #[test]
@@ -436,7 +449,6 @@ mod tests {
         assert_eq!(out.frames.len(), 2);
         assert_eq!(out.frames[0].completed_after, 1);
         assert_eq!(t.completed_images(), 1);
-        assert_eq!(t.first_image(), Some(&png()[..]));
     }
 
     #[test]

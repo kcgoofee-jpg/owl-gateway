@@ -13,10 +13,10 @@ use crate::reqctx::ReqCtx;
 use crate::state::AppState;
 use axum::response::Response;
 use gate_core::policy;
-use gate_core::pyc::take_chars;
-use gate_core::pyval::{py_str, truthy};
+use gate_core::primitives::take_chars;
 use gate_core::reasons;
 use gate_core::upstream_errors::upstream_error_message;
+use gate_core::values::{enabled, text};
 use gate_upstream::client::{Callbacks, RequestOpts, UpstreamError};
 use serde_json::{Map, Value, json};
 use std::sync::{Arc, Mutex};
@@ -241,7 +241,7 @@ pub(super) async fn perform_generation(
                 )
                 .await;
             state
-                .audit_generation(ctx, &key, "image", &model, "error", &prep.body, None)
+                .audit_generation(ctx, &key, "image", &model, "error", &prep.body)
                 .await;
             state.record_upstream(false);
             return Err(exc.into());
@@ -285,7 +285,7 @@ pub(super) async fn perform_generation(
             )
             .await;
         state
-            .audit_generation(ctx, &key, "image", &model, "error", &prep.body, None)
+            .audit_generation(ctx, &key, "image", &model, "error", &prep.body)
             .await;
         state.record_upstream(resp.status < 500);
         return Err(
@@ -311,15 +311,7 @@ pub(super) async fn perform_generation(
             },
         )
         .await;
-    state.schedule_audit(
-        ctx,
-        &key,
-        "image",
-        &model,
-        "ok",
-        prep.body.clone(),
-        Some(resp.body.clone()),
-    );
+    state.schedule_audit(ctx, &key, "image", &model, "ok", prep.body.clone());
     state.record_upstream(true);
     let media = resp
         .headers
@@ -338,8 +330,8 @@ fn request_shape(body: &Value) -> String {
         .get("parameters")
         .and_then(Value::as_object)
         .unwrap_or(&empty);
-    let g = |k: &str| py_str(p.get(k).unwrap_or(&Value::Null));
-    let flag = |k: &str| u8::from(p.get(k).is_some_and(truthy));
+    let g = |k: &str| text(p.get(k).unwrap_or(&Value::Null));
+    let flag = |k: &str| u8::from(p.get(k).is_some_and(enabled));
     let refs = match p.get("reference_image_multiple") {
         Some(Value::Array(a)) => a.len(),
         _ => 0,
@@ -352,8 +344,8 @@ fn request_shape(body: &Value) -> String {
         .map_or(0, Vec::len);
     let text_len = |v: Option<&Value>| match v {
         None | Some(Value::Null) => 0,
-        Some(v) if !truthy(v) => 0,
-        Some(v) => gate_core::pyc::len_chars(&py_str(v)),
+        Some(v) if !enabled(v) => 0,
+        Some(v) => gate_core::primitives::len_chars(&text(v)),
     };
     let mut keys: Vec<&String> = p.keys().collect();
     keys.sort();
@@ -362,17 +354,17 @@ fn request_shape(body: &Value) -> String {
         .map(|k| k.as_str())
         .collect::<Vec<_>>()
         .join(",");
-    let vibe = p.get("director_reference_images").is_some_and(truthy)
+    let vibe = p.get("director_reference_images").is_some_and(enabled)
         || p.get("director_reference_images_cached")
-            .is_some_and(truthy);
+            .is_some_and(enabled);
     format!(
         "{} · {}x{} · {}步 · n={} · action={} · prompt={}字 uc={}字 角色={} · sampler={} v={} sm={}/{} qt={} ucPreset={} · 图={} 蒙版={} 参考={} vibe={} 原图={} · keys={}",
-        py_str(body.get("model").unwrap_or(&Value::String("?".into()))),
+        text(body.get("model").unwrap_or(&Value::String("?".into()))),
         g("width"),
         g("height"),
         g("steps"),
-        py_str(p.get("n_samples").unwrap_or(&json!(1))),
-        py_str(
+        text(p.get("n_samples").unwrap_or(&json!(1))),
+        text(
             body.get("action")
                 .unwrap_or(&Value::String("generate".into()))
         ),
@@ -405,6 +397,6 @@ mod tests {
         let s = request_shape(&body);
         assert!(s.starts_with("nai-diffusion-4-5-full · 832x1216 · 28步 · n=1 · action=generate · prompt=2字 uc=0字 角色=0"));
         assert!(s.ends_with("keys=alpha,height,sampler,sm,steps,width,zeta"));
-        assert!(s.contains("sm=1/0 qt=0 ucPreset=None"));
+        assert!(s.contains("sm=1/0 qt=0 ucPreset="));
     }
 }

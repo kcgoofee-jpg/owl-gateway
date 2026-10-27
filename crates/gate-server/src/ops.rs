@@ -6,13 +6,12 @@
 //! 另外放几个后台接口共用的单例：
 //! 测试告警的 10 秒节流、运行期限制的写锁、Anlas 核对的互斥锁。
 
-use crate::audit::{audit_flags, audit_image_cap_mb, audit_image_keep_hours};
 use crate::defaults;
 use crate::error::{ApiError, HttpError, InternalError};
 use crate::state::AppState;
 use gate_core::features::{self, FEATURES, GLOBAL_KEY};
 use gate_core::site_flags::{self, GLOBAL_DAILY_V5, REGISTER_OPEN};
-use gate_core::{pyc, pyjson, pyval};
+use gate_core::{json, primitives, values};
 use gate_db::{Db, DbError};
 use serde_json::{Map, Value, json};
 use std::sync::Mutex;
@@ -65,12 +64,12 @@ pub struct Shared {
 
 /// V5 暂停（手动开关 `v5_paused`，站长 10-23；按电量自动暂停已删除）。
 pub async fn v5_paused(db: &Db) -> Result<bool, DbError> {
-    crate::audit::site_bool(db, &site_flags::V5_PAUSED).await
+    crate::settings::site_bool(db, &site_flags::V5_PAUSED).await
 }
 
 /// 全站每日 V5（手动，0 = 不限）。
 pub async fn global_daily_v5(db: &Db) -> Result<i64, DbError> {
-    crate::audit::site_int(db, &GLOBAL_DAILY_V5).await
+    crate::settings::site_int(db, &GLOBAL_DAILY_V5).await
 }
 
 /// Canonical site quota modes. The numeric site flags are compatibility projections only.
@@ -82,7 +81,7 @@ pub async fn global_quota_modes(db: &Db) -> Result<gate_core::quota_limits::Glob
             .ok_or_else(|| DbError::Invalid("quota_modes_v1 contains invalid mode/value".into()));
     }
     let get = |spec: &'static gate_core::site_flags::Spec| async move {
-        crate::audit::site_f64(db, spec).await
+        crate::settings::site_f64(db, spec).await
     };
     Ok(gate_core::quota_limits::GlobalLimits::from_legacy([
         get(&gate_core::site_flags::REGISTER_DAILY_IMAGES).await?,
@@ -208,8 +207,8 @@ impl Registration {
 
 /// `max(0, int(float(value)))`，读不懂就用默认值。
 fn to_int(raw: Option<&str>, default: i64) -> i64 {
-    raw.and_then(pyc::parse_float)
-        .and_then(pyc::int_of)
+    raw.and_then(primitives::parse_float)
+        .and_then(primitives::int_of)
         .map_or(default, |n| n.max(0))
 }
 
@@ -281,8 +280,8 @@ pub async fn registration_settings_for(db: &Db, configured: bool) -> Result<Regi
         open,
         max_users,
         features,
-        daily_images: crate::audit::site_int(db, &site_flags::REGISTER_DAILY_IMAGES).await?,
-        daily_v5: crate::audit::site_int(db, &site_flags::REGISTER_DAILY_V5).await?,
+        daily_images: crate::settings::site_int(db, &site_flags::REGISTER_DAILY_IMAGES).await?,
+        daily_v5: crate::settings::site_int(db, &site_flags::REGISTER_DAILY_V5).await?,
         image_scope,
         expires_days,
         role_guild,
@@ -336,7 +335,8 @@ fn role_extra_to_store(v: &Value) -> Result<String, OpsError> {
             continue; // 空行：忽略
         }
         for (name, id) in [("服务器 ID", &guild), ("身份组 ID", &role)] {
-            let ok = gate_core::pyext::is_decimal(id) && (15..=21).contains(&pyc::len_chars(id));
+            let ok = gate_core::validation::is_decimal(id)
+                && (15..=21).contains(&primitives::len_chars(id));
             if !ok {
                 return Err(OpsError::Invalid(format!(
                     "额外身份组的{name}需要是 15～21 位的 Discord 数字 ID"
@@ -346,7 +346,7 @@ fn role_extra_to_store(v: &Value) -> Result<String, OpsError> {
         let rule = RoleRule {
             guild,
             role,
-            note: pyc::take_chars(&get("note"), 60).to_string(),
+            note: primitives::take_chars(&get("note"), 60).to_string(),
         };
         if !out
             .iter()
@@ -383,7 +383,7 @@ pub async fn set_registration(state: &AppState, body: &Map<String, Value>) -> Re
     if let Some(v) = body.get("open") {
         values.push((
             "register_open".into(),
-            if pyval::truthy(v) { "1" } else { "0" }.into(),
+            if values::enabled(v) { "1" } else { "0" }.into(),
         ));
     }
     for (name, low, high) in [("max_users", 0, 1000), ("expires_days", 0, 3650)] {
@@ -394,8 +394,8 @@ pub async fn set_registration(state: &AppState, body: &Map<String, Value>) -> Re
     for name in ["role_guild", "role_id"] {
         if let Some(v) = body.get(name) {
             let t = text_field(v);
-            let digits = gate_core::pyext::is_decimal(&t);
-            let len = pyc::len_chars(&t);
+            let digits = gate_core::validation::is_decimal(&t);
+            let len = primitives::len_chars(&t);
             if !t.is_empty() && !(digits && (15..=21).contains(&len)) {
                 return Err(OpsError::Invalid(format!(
                     "{name} 需要是 Discord 的数字 ID"
@@ -409,7 +409,7 @@ pub async fn set_registration(state: &AppState, body: &Map<String, Value>) -> Re
             Ok::<String, DbError>(
                 db.get_setting(name)
                     .await?
-                    .map(|s| pyc::strip(&s).to_string())
+                    .map(|s| primitives::strip(&s).to_string())
                     .unwrap_or_default(),
             )
         };
@@ -430,7 +430,7 @@ pub async fn set_registration(state: &AppState, body: &Map<String, Value>) -> Re
     if let Some(v) = body.get("role_note") {
         values.push((
             "register_role_note".into(),
-            pyc::take_chars(&text_field(v), 60).to_string(),
+            primitives::take_chars(&text_field(v), 60).to_string(),
         ));
     }
     if let Some(v) = body.get("role_extra") {
@@ -484,68 +484,26 @@ pub async fn set_global_features(
     }
     state
         .db
-        .set_setting(GLOBAL_KEY, &pyjson::dumps(&Value::Object(current)))
+        .set_setting(GLOBAL_KEY, &json::dumps(&Value::Object(current)))
         .await?;
     Ok(())
 }
 
-// ------------------------------------------------------------------ 生成记录
-
-/// 保存记录开关与保留天数；返回生效后的值（机器人 `/ops audit` 把它连同提示语一起回给管理员）。
-pub async fn set_audit(state: &AppState, body: &Map<String, Value>) -> Result<Value, OpsError> {
-    let db = &state.db;
-    let (mut prompts, mut thumbs, mut days) = audit_flags(db).await?;
-    let mut cap_mb = audit_image_cap_mb(db).await?;
-    let mut keep_hours = audit_image_keep_hours(db).await?;
-    let mut origin_days = crate::audit::usage_origin_keep_days(db).await?;
-    // 不是数字统一回 422「参数无效」；小数向零取整，再夹到 0～hi
-    let clamped = |v: &Value, hi: i64| -> Result<i64, OpsError> {
-        let n = v
-            .as_f64()
-            .ok_or_else(|| OpsError::Invalid("参数无效".into()))?;
-        Ok(n.trunc().clamp(0.0, hi as f64) as i64)
-    };
-    if let Some(v) = body.get("prompts") {
-        prompts = pyval::truthy(v);
-    }
-    if let Some(v) = body.get("thumbs") {
-        thumbs = pyval::truthy(v);
-    }
-    if let Some(v) = body.get("retention_days") {
-        days = clamped(v, 3650)?; // 0 = 长期保留
-    }
-    if let Some(v) = body.get("image_cap_mb") {
-        cap_mb = clamped(v, 500_000)?; // 0 = 不限
-    }
-    if let Some(v) = body.get("image_keep_hours") {
-        keep_hours = clamped(v, 8760)?; // 0 = 永久
-    }
-    if let Some(v) = body.get("origin_keep_days") {
-        origin_days = clamped(v, 365)?; // 0 = 永久
-    }
-    // site_flags.put(spec, value)：写 encode 之后的串
-    let spec = &site_flags::IMAGE_KEEP_HOURS;
-    let text =
-        site_flags::encode(spec, &Value::from(keep_hours)).map_err(|e| OpsError::Invalid(e.0))?;
-    db.set_setting(spec.key, &text).await?;
-    db.set_settings_bulk(&[
-        (
-            "audit_prompts".into(),
-            if prompts { "1" } else { "0" }.into(),
-        ),
-        ("audit_thumbs".into(), if thumbs { "1" } else { "0" }.into()),
-        ("audit_retention_days".into(), days.to_string()),
-        (site_flags::IMAGE_CAP_MB.key.into(), cap_mb.to_string()),
-        (
-            site_flags::ORIGIN_KEEP_DAYS.key.into(),
-            origin_days.to_string(),
-        ),
-    ])
-    .await?;
-    Ok(json!({
-        "prompts": prompts, "thumbs": thumbs, "retention_days": days,
-        "image_cap_mb": cap_mb, "image_keep_hours": keep_hours, "origin_keep_days": origin_days,
-    }))
+/// Save the request metadata retention policy.
+pub async fn set_log_retention(
+    state: &AppState,
+    body: &Map<String, Value>,
+) -> Result<Value, OpsError> {
+    let days = body
+        .get("origin_keep_days")
+        .and_then(Value::as_i64)
+        .filter(|v| (0..=365).contains(v))
+        .ok_or_else(|| OpsError::Invalid("origin_keep_days 必须是 0 到 365 的整数".into()))?;
+    state
+        .db
+        .set_setting(site_flags::ORIGIN_KEEP_DAYS.key, &days.to_string())
+        .await?;
+    Ok(json!({"origin_keep_days":days}))
 }
 
 #[cfg(test)]

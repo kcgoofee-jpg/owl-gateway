@@ -13,7 +13,7 @@
 
 use serde_json::{Value, json};
 
-use crate::pyval;
+use crate::values;
 
 /// 调用方从库里查好的数字。
 #[derive(Debug, Clone, Copy)]
@@ -44,21 +44,21 @@ fn field<'a>(key: &'a Value, name: &'static str) -> Result<&'a Value, Subscripti
 
 /// `float(x or 0)`：数字（含 bool）或 None / 0。
 fn float_or_zero(v: &Value, name: &'static str) -> Result<f64, SubscriptionError> {
-    if !pyval::truthy(v) {
+    if !values::enabled(v) {
         return Ok(0.0);
     }
-    pyval::number_like(v).ok_or(SubscriptionError::BadNumber(name))
+    values::number(v).ok_or(SubscriptionError::BadNumber(name))
 }
 
 /// `int(x or 0)`：浮点向零截断。
 fn int_or_zero(v: &Value, name: &'static str) -> Result<i64, SubscriptionError> {
-    if !pyval::truthy(v) {
+    if !values::enabled(v) {
         return Ok(0);
     }
-    if let Some(i) = pyval::int_like(v) {
+    if let Some(i) = values::int_like(v) {
         return Ok(i);
     }
-    match pyval::number_like(v) {
+    match values::number(v) {
         Some(f) if f.is_finite() => Ok(f.trunc() as i64),
         _ => Err(SubscriptionError::BadNumber(name)),
     }
@@ -115,7 +115,7 @@ pub fn subscription_payload(
         }
         mode => mode.resolve(None),
     };
-    let paid = pyval::truthy(field(key, "allow_anlas")?);
+    let paid = values::enabled(field(key, "allow_anlas")?);
     let monthly_limit = quota_limits.monthly_anlas.resolve(None);
     let anlas_left = if paid && monthly_limit.is_some() {
         ((monthly_limit.unwrap_or_default() - data.month_anlas_used).trunc() as i64).max(0)
@@ -135,7 +135,7 @@ pub fn subscription_payload(
         limits.push(daily_limit.trunc() as i64);
         remaining.push(((daily_limit - data.daily_v5_used as f64).trunc() as i64).max(0));
     }
-    if !key.get("exclude_global_v5").is_some_and(pyval::truthy) {
+    if !key.get("exclude_global_v5").is_some_and(values::enabled) {
         let global_limit = data.global_quota_modes.global_daily_v5.resolve(None);
         if let Some(global_limit) = global_limit {
             limits.push(global_limit.trunc() as i64);
@@ -158,10 +158,10 @@ pub fn subscription_payload(
 
     // int(key["expires_at"] or now + 3650 * 86400)
     let expires = field(key, "expires_at")?;
-    let expires_at = if pyval::truthy(expires) {
-        match pyval::int_like(expires) {
+    let expires_at = if values::enabled(expires) {
+        match values::int_like(expires) {
             Some(i) => i,
-            None => match pyval::number_like(expires) {
+            None => match values::number(expires) {
                 Some(f) if f.is_finite() => f.trunc() as i64,
                 _ => return Err(SubscriptionError::BadNumber("expires_at")),
             },

@@ -1,7 +1,7 @@
 //! 后台操作日志：谁在什么时候做了什么。写入失败只打印警告，绝不影响操作本身。
 //! 参数摘要去掉 Token、密码和公告正文等敏感内容。
 
-use gate_core::pyc::take_chars;
+use gate_core::primitives::take_chars;
 use gate_db::Db;
 use serde_json::{Map, Value};
 
@@ -61,14 +61,13 @@ pub const ADMIN_ACTIONS: &[(&str, &str, &str)] = &[
     ("POST", "/alerts/test", "发送测试告警"),
     ("PUT", "/ops/registration", "修改开放注册设置"),
     ("PUT", "/ops/features", "修改全局功能开关"),
-    ("PUT", "/ops/audit", "修改生成记录设置"),
+    ("PUT", "/ops/log-retention", "修改请求来源保留设置"),
     ("PUT", "/guard", "修改账号保护与排队设置"),
     ("POST", "/errors/{sig}/resolve", "标记 Bug 已处理"),
     ("POST", "/errors/resolve-all", "全部标记 Bug 已处理"),
     ("PUT", "/quota-algo", "修改动态额度参数"),
     ("POST", "/keys/{key_id}/share-clear", "防分享清零（误判）"),
     ("PUT", "/share-guard", "修改防分享模式"),
-    ("POST", "/audit/purge-images", "清空原图"),
     ("POST", "/ops/reset-all-keys", "全站杀头重置"),
     ("POST", "/abuse/{abuse_id}", "处理待审"),
 ];
@@ -91,7 +90,7 @@ pub fn summarize(body: &Value, limit: usize) -> String {
         let v = if SECRET_FIELDS.contains(&name.to_lowercase().as_str()) {
             Value::String("（已隐去）".into())
         } else if let Value::String(s) = value
-            && gate_core::pyc::len_chars(s) > 80
+            && gate_core::primitives::len_chars(s) > 80
         {
             Value::String(format!("{}…", take_chars(s, 80)))
         } else {
@@ -99,9 +98,8 @@ pub fn summarize(body: &Value, limit: usize) -> String {
         };
         clean.insert(name.clone(), v);
     }
-    let text =
-        String::from_utf8(gate_core::pyjson::wire(&Value::Object(clean))).unwrap_or_default();
-    if gate_core::pyc::len_chars(&text) <= limit {
+    let text = String::from_utf8(gate_core::json::wire(&Value::Object(clean))).unwrap_or_default();
+    if gate_core::primitives::len_chars(&text) <= limit {
         text
     } else {
         format!("{}…", take_chars(&text, limit))

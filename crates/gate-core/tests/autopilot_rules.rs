@@ -8,7 +8,7 @@ use gate_core::autopilot::{
     self, BREAKER_SECS, BREAKER_UNTIL_KEY, BreakerInputs, BreakerRows, KEY_GUARD_PAUSE_REASON,
     KEY_GUARD_PAUSE_SECS, KeyGuardInputs,
 };
-use gate_core::pyc;
+use gate_core::primitives;
 use gate_core::quota::Effect;
 use proptest::prelude::*;
 use std::collections::{HashMap, HashSet};
@@ -80,7 +80,7 @@ fn breaker_texts_are_unchanged() {
             },
             Effect::Set {
                 key: BREAKER_UNTIL_KEY.into(),
-                value: pyc::float_repr(NOW + 300.0),
+                value: primitives::float_text(NOW + 300.0),
             },
             Effect::Log {
                 actor: "系统".into(),
@@ -129,7 +129,7 @@ fn breaker_window_starts_after_the_last_breaker() {
         NOW - 900.0
     );
     assert_eq!(
-        autopilot::breaker_since(NOW, Some(&pyc::float_repr(NOW - 60.0))).unwrap(),
+        autopilot::breaker_since(NOW, Some(&primitives::float_text(NOW - 60.0))).unwrap(),
         NOW - 60.0
     );
     // 很久以前的熔断不影响
@@ -170,7 +170,7 @@ proptest! {
             prop_assert_eq!(BREAKER_SECS, 300);
             let until = Effect::Set {
                 key: BREAKER_UNTIL_KEY.into(),
-                value: pyc::float_repr(now + 300.0),
+                value: primitives::float_text(now + 300.0),
             };
             prop_assert_eq!(&out.effects[1], &until);
             let logs = out.effects.iter().filter(|e| matches!(e, Effect::Log { .. })).count();

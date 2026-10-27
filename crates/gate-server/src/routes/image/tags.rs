@@ -13,9 +13,9 @@ use axum::body::Body;
 use axum::extract::{Query, Request};
 use axum::http::Method;
 use axum::response::Response;
-use gate_core::pyval::{py_str, truthy};
 use gate_core::reasons;
 use gate_core::upstream_errors::upstream_error_message;
+use gate_core::values::{enabled, text};
 use gate_upstream::client::{Callbacks, RequestOpts};
 use serde_json::json;
 use std::collections::HashMap;
@@ -95,7 +95,7 @@ async fn suggest(
     } else {
         let b = read_json(&parts.headers, body, 64 * 1024).await?;
         let s = |k: &str| match b.get(k) {
-            Some(v) if truthy(v) => py_str(v),
+            Some(v) if enabled(v) => text(v),
             _ => String::new(),
         };
         (s("prompt"), s("model"))

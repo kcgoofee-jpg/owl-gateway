@@ -10,7 +10,6 @@ use std::net::SocketAddr;
 use std::time::Duration;
 
 /// 全局分配器换成 mimalloc：glibc malloc 在多线程 + 大量短命缓冲区（图片、上游响应）下碎片多，
-/// 线上网关常驻内存在 300 MB 上下波动、回不去（Python 版是 89 MB）；mimalloc 会把空闲页及时还给系统。
 #[global_allocator]
 static GLOBAL: mimalloc::MiMalloc = mimalloc::MiMalloc;
 

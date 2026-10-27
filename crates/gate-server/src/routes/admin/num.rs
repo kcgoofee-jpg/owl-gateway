@@ -1,7 +1,7 @@
 //! 后台数值字段的严格解析，所有后台接口共用这一份。
 
 use crate::error::HttpError;
-use gate_core::{pyc, pyval};
+use gate_core::{primitives, values};
 use serde_json::Value;
 
 /// 数字字段的类型（`_num` 的 `kind`）。
@@ -15,7 +15,7 @@ pub(super) enum Kind {
 fn parse(value: &Value, kind: Kind, lo: f64, hi: f64, name: &str) -> Result<f64, HttpError> {
     let empty = match value {
         Value::Null | Value::Bool(_) => true,
-        Value::String(s) => pyc::strip(s).is_empty(),
+        Value::String(s) => primitives::strip(s).is_empty(),
         _ => false,
     };
     if empty {
@@ -24,7 +24,7 @@ fn parse(value: &Value, kind: Kind, lo: f64, hi: f64, name: &str) -> Result<f64,
     let invalid = || HttpError::new(422, format!("{name} 必须是有效数字"));
     let v = match value {
         Value::Number(n) => n.as_f64().ok_or_else(invalid)?,
-        Value::String(s) => pyc::parse_float(s).ok_or_else(invalid)?,
+        Value::String(s) => primitives::parse_float(s).ok_or_else(invalid)?,
         _ => return Err(invalid()),
     };
     if !v.is_finite() {
@@ -38,7 +38,7 @@ fn parse(value: &Value, kind: Kind, lo: f64, hi: f64, name: &str) -> Result<f64,
             if kind == Kind::Int {
                 (x as i64).to_string()
             } else {
-                pyc::float_repr(x)
+                primitives::float_text(x)
             }
         };
         return Err(HttpError::new(
@@ -62,7 +62,7 @@ pub(super) fn strict_num(
     let v = parse(value, kind, lo, hi, name)?;
     Ok(match kind {
         Kind::Int => Value::from(v as i64),
-        Kind::Float => pyval::float(v),
+        Kind::Float => values::float(v),
     })
 }
 
@@ -82,7 +82,7 @@ mod tests {
     use serde_json::json;
 
     #[test]
-    fn strict_num_matches_python_messages() {
+    fn strict_num_validates_bounds() {
         let int = |v: Value| strict_num(&v, Kind::Int, 0.0, 100000.0, "n").map_err(|e| e.detail);
         assert_eq!(int(json!(150)).unwrap(), json!(150));
         assert_eq!(int(json!("150")).unwrap(), json!(150));
@@ -103,7 +103,7 @@ mod tests {
         assert_eq!(float(json!(5000)).unwrap(), json!(5000.0));
         assert_eq!(
             float(json!(2e6)).unwrap_err(),
-            json!("m 必须在 0.0～1000000.0 之间")
+            json!("m 必须在 0～1000000 之间")
         );
     }
 
@@ -118,7 +118,7 @@ mod tests {
         assert_eq!(strict_float(&json!("2.5"), 0.0, 30.0, "x").unwrap(), 2.5);
         assert_eq!(
             strict_float(&json!(31), 0.0, 30.0, "x").unwrap_err().detail,
-            json!("x 必须在 0.0～30.0 之间")
+            json!("x 必须在 0～30 之间")
         );
     }
 }

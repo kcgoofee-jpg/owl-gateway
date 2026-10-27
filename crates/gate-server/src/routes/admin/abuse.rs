@@ -11,7 +11,7 @@ use crate::state::AppState;
 use axum::Router;
 use axum::extract::{Request, State};
 use axum::routing::{get, post};
-use gate_core::pyval;
+use gate_core::values;
 use gate_db::repo::abuse::{ABUSE_STATUSES, LoginScope};
 use serde_json::{Value, json};
 
@@ -154,7 +154,7 @@ async fn act(
     let who = actor(&st, &parts);
     let action = body
         .get("action")
-        .map(pyval::py_str)
+        .map(values::text)
         .unwrap_or_default()
         .to_string();
     let (status, verb) = match action.as_str() {
@@ -206,7 +206,7 @@ async fn act(
         &who,
         verb,
         &format!("待审 #{id} {}", kind_label(&kind)),
-        gate_core::pyc::take_chars(&detail, 300),
+        gate_core::primitives::take_chars(&detail, 300),
         true,
         st.now(),
     )

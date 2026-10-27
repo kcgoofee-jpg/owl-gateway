@@ -27,7 +27,7 @@
 //! - 2.x 单 Key 守护里依赖防分享证据的两条（来回切换网段、多客户端全天在用）：输入恒为空，从未触发。
 //! - 「名额 +5」和每条规则的 `off` / `observe` / `enforce` 模式：熔断与单 Key 限流一律执行。
 
-use crate::pyc;
+use crate::primitives;
 use crate::quota::{DecideError, Effect};
 use crate::reasons::{
     BODY_ABORT, BREAKER, BURST_CAP, CAP_3H, COOLDOWN, DAILY_CAP, FEATURE_OFF, HOURLY_CAP, KEY_BUSY,
@@ -134,7 +134,7 @@ pub fn key_guard_rule(rejects_1h: i64) -> Option<String> {
 /// 熔断统计的下界：`max(now - 900, float(autopilot_breaker_until or 0))`——只看上次熔断结束之后的数据。
 /// 设置读不懂时返回错误，服务层按「没有失败」处理（不让整轮失败）。
 pub fn breaker_since(now: f64, breaker_until_setting: Option<&str>) -> Result<f64, DecideError> {
-    Ok(pyc::py_max(
+    Ok(primitives::maximum(
         now - 900.0,
         setting_float(breaker_until_setting)?,
     ))
@@ -145,7 +145,7 @@ fn setting_float(raw: Option<&str>) -> Result<f64, DecideError> {
     match raw {
         None => Ok(0.0),
         Some("") => Ok(0.0),
-        Some(s) => pyc::parse_float(s)
+        Some(s) => primitives::parse_float(s)
             .ok_or_else(|| DecideError::Value(format!("could not convert string to float: {s:?}"))),
     }
 }
@@ -202,7 +202,7 @@ pub fn breaker(inp: &BreakerInputs) -> BreakerOutcome {
         });
         effects.push(Effect::Set {
             key: BREAKER_UNTIL_KEY.to_string(),
-            value: pyc::float_repr(now + BREAKER_SECS as f64),
+            value: primitives::float_text(now + BREAKER_SECS as f64),
         });
         effects.push(log(
             "自动驾驶：熔断",

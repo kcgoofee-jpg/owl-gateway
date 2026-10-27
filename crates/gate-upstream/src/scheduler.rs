@@ -199,7 +199,6 @@ impl Scheduler {
     }
 }
 
-/// Python `random.uniform(a, b)` = `a + (b - a) * random()`。
 fn uniform(a: f64, b: f64) -> f64 {
     a + (b - a) * rand::random::<f64>()
 }

@@ -21,7 +21,7 @@
 //! - `v5_period_samples` 不是 `{token: [[ts, 秒], ...]}` 的形状时，不合法的部分当作没有；
 //! - 订阅响应只按 UTF-8 解析；
 
-use crate::pyc;
+use crate::primitives;
 use serde_json::{Map, Value};
 use std::collections::BTreeMap;
 
@@ -141,7 +141,7 @@ impl Periods {
                 (k.clone(), Value::Array(arr))
             })
             .collect();
-        crate::pyjson::dumps(&Value::Object(obj))
+        crate::json::dumps(&Value::Object(obj))
     }
 }
 
@@ -240,9 +240,9 @@ pub fn retry_seconds(status: Option<u16>, retry_after: &str) -> i64 {
         return 60;
     }
     let mut secs = 300;
-    if crate::pyext::is_decimal(retry_after)
-        && pyc::len_chars(retry_after) < 7
-        && let Some(v) = pyc::parse_int(retry_after)
+    if crate::validation::is_decimal(retry_after)
+        && primitives::len_chars(retry_after) < 7
+        && let Some(v) = primitives::parse_int(retry_after)
     {
         secs = secs.max(v.min(86400));
     }
@@ -324,7 +324,7 @@ impl AllowanceCore {
             .filter(|(ts, _)| now - (*ts as f64) < PERIOD_WINDOW as f64)
             .copied()
             .collect();
-        rows.push((pyc::round0(now), seconds));
+        rows.push((primitives::round0(now), seconds));
         let start = rows.len().saturating_sub(PERIOD_KEEP);
         let rows = rows[start..].to_vec();
         match periods.tokens.iter_mut().find(|(k, _)| k == token_id) {
@@ -481,20 +481,20 @@ impl AllowanceCore {
             row.next_percent_seconds
                 .filter(|n| *n > 0)
                 .map_or(Value::Null, |n| {
-                    crate::pyval::float(pyc::round(86400.0 / n as f64, 1))
+                    crate::values::float(primitives::round(86400.0 / n as f64, 1))
                 }),
         );
         out.insert(
             "historical_sample_based_recharge_per_day_estimate".into(),
             nps.map_or(Value::Null, |n| {
-                crate::pyval::float(pyc::round(86400.0 / n as f64, 1))
+                crate::values::float(primitives::round(86400.0 / n as f64, 1))
             }),
         );
         // Backward-compatible capacity/job consumer; explicitly an estimate derived from observed timings.
         out.insert(
             "recharge_per_day".into(),
             nps.map_or(Value::Null, |n| {
-                crate::pyval::float(pyc::round(86400.0 / n as f64, 1))
+                crate::values::float(primitives::round(86400.0 / n as f64, 1))
             }),
         );
         out.insert("active".into(), row.active.map_or(Value::Null, Value::Bool));
@@ -529,7 +529,7 @@ impl AllowanceCore {
         );
         out.insert(
             "checked_at".into(),
-            row.checked_at.map_or(Value::Null, crate::pyval::float),
+            row.checked_at.map_or(Value::Null, crate::values::float),
         );
         out.insert("low".into(), Value::Bool(low));
         out.insert("uncertain".into(), Value::Bool(stale || error.is_some()));

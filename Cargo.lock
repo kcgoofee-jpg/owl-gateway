@@ -923,6 +923,7 @@ dependencies = [
  "fancy-regex",
  "gate-snapshot",
  "hex",
+ "httpdate",
  "jiff",
  "proptest",
  "regex",

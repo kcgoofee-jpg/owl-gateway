@@ -3,7 +3,6 @@
 //! 1. [`GateError`]（成员接口）：顶层 `statusCode` / `message` 与 NovelAI 官方错误格式一致，
 //!    客户端直接显示这句话；消息统一带「猫头鹰公益站提醒：」前缀，免得成员以为是 NovelAI 官方出错。
 //!    `{"statusCode": s, "message": m, "error": {"message": m, "status": s, "request_id": rid, "code": code, "execution_unknown": bool, "retryable": bool}}`
-//! 2. [`HttpError`]（后台 / 桥接 / 成员页接口，对应 FastAPI 的 `HTTPException`）：`{"detail": m}`。
 //! 3. 未预料的内部错误（500）：`{"error": {"message": "...错误编号 rid", "status": 500, "request_id": rid}}`，
 //!    并带 `X-Request-Id`。
 //!
@@ -181,7 +180,6 @@ impl IntoResponse for GateError {
     }
 }
 
-/// FastAPI `HTTPException(status, detail)` 的等价物。
 #[derive(Debug, Clone)]
 pub struct HttpError {
     pub status: u16,
@@ -261,9 +259,8 @@ pub fn upstream_transport(ctx: &crate::reqctx::ReqCtx, message: String) -> ApiEr
     InternalError(message).into()
 }
 
-/// 与 Starlette `JSONResponse` 相同的序列化（紧凑、UTF-8、Python 浮点格式）。
 pub fn json_response(status: u16, body: &Value) -> Response {
-    let mut resp = Response::new(axum::body::Body::from(gate_core::pyjson::wire(body)));
+    let mut resp = Response::new(axum::body::Body::from(gate_core::json::wire(body)));
     *resp.status_mut() = StatusCode::from_u16(status).unwrap_or(StatusCode::INTERNAL_SERVER_ERROR);
     resp.headers_mut()
         .insert("content-type", HeaderValue::from_static("application/json"));

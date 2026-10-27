@@ -1,9 +1,5 @@
-//! 一致快照（移植自旧版 snapshot.py，见标签 py-final，加上 naigate-snapshot 的「完整性校验 → gzip（权限 600）」两步）。
-//!
-//! 为什么不用 sqlite3 `.backup` / backup API：库里 90% 是审计原图 BLOB（曾达 1.3GB），整库复制 + VACUUM
-//! 要好几分钟、磁盘 IO 打满，网关写库等锁超过 15 秒就报 database is locked（2026-10-10 两次部署，
-//! 成员收到几十个 500）。现在：同一个读事务里把每张表 `INSERT ... SELECT` 到新库，
-//! `generation_audit` 不读原图那几列（列在行尾，不选就不会读溢出页），只读几十 MB。WAL 下读事务不挡写。
+//! Consistent SQLite snapshots with integrity checks and private compressed output.
+//! Tables are copied within one read transaction; indexes and triggers are installed after data.
 
 use crate::util;
 use anyhow::{Context, Result, bail};
@@ -11,12 +7,6 @@ use rusqlite::{Connection, OpenFlags};
 use std::io::Write;
 use std::path::{Path, PathBuf};
 use std::time::Duration;
-
-/// 原图（BLOB 或文件）不进备份：缩略图（thumb）照常保留。
-const SKIP: [(&str, &[&str]); 1] = [(
-    "generation_audit",
-    &["image", "image_type", "image_file", "image_size"],
-)];
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Info {
@@ -65,12 +55,7 @@ pub fn make_snapshot(src: &Path, out: &Path) -> Result<Info> {
             stmt.query_map([], |r| r.get::<_, String>(1))?
                 .collect::<rusqlite::Result<_>>()?
         };
-        let skip: &[&str] = SKIP.iter().find(|(t, _)| t == name).map_or(&[], |(_, c)| c);
-        let keep: Vec<String> = cols
-            .iter()
-            .filter(|c| !skip.contains(&c.as_str()))
-            .map(|c| quote_ident(c))
-            .collect();
+        let keep: Vec<String> = cols.iter().map(|c| quote_ident(c)).collect();
         let cl = keep.join(", ");
         dst.execute_batch(&format!(
             "INSERT INTO main.{t} ({cl}) SELECT {cl} FROM s.{t}",

@@ -11,12 +11,12 @@ use crate::state::{AppState, RUNTIME_LIMIT_BOUNDS};
 use axum::Router;
 use axum::extract::{Request, State};
 use axum::routing::get;
-use gate_core::pyext::PyErr;
 use gate_core::site_flags::{
     self, GLOBAL_DAILY_ANLAS, GLOBAL_DAILY_V5, GLOBAL_MONTHLY_ANLAS, MEMBER_DAILY_ANLAS,
     REGISTER_DAILY_IMAGES, REGISTER_DAILY_V5, V5_MEDIUM_MODE, V5_PAUSED,
 };
-use gate_core::{pyc, pyval};
+use gate_core::validation::ValidationError;
+use gate_core::{primitives, values};
 use serde_json::{Value, json};
 
 pub(super) fn router() -> Router<AppState> {
@@ -41,7 +41,7 @@ async fn get_settings(State(state): State<AppState>, _s: AdminSession) -> ApiRes
     let policy = crate::v5_access::configuration(&state).await?;
     let policy_mode = policy.mode.as_str();
     Ok(ok_json(&json!({
-        "global_monthly_anlas": pyval::float(site_flag_f64(&state, &GLOBAL_MONTHLY_ANLAS).await?),
+        "global_monthly_anlas": values::float(site_flag_f64(&state, &GLOBAL_MONTHLY_ANLAS).await?),
         "global_daily_v5": crate::ops::global_daily_v5(&state.db).await?,
         "global_daily_anlas": site_flag(&state, &GLOBAL_DAILY_ANLAS).await?,
         "member_daily_anlas": site_flag(&state, &MEMBER_DAILY_ANLAS).await?,
@@ -280,7 +280,7 @@ async fn put_settings(State(state): State<AppState>, _s: AdminSession, req: Requ
     {
         let mut modes = quota_modes.unwrap_or(crate::ops::global_quota_modes(&state.db).await?);
         let legacy = |v: &Value| {
-            let n = pyval::number_like(v).unwrap_or(0.0);
+            let n = values::number(v).unwrap_or(0.0);
             if n <= 0.0 {
                 gate_core::quota_limits::Limit::Unlimited
             } else {
@@ -299,7 +299,7 @@ async fn put_settings(State(state): State<AppState>, _s: AdminSession, req: Requ
             }
             if body.contains_key(GLOBAL_DAILY_ANLAS.key) {
                 modes.global_daily_anlas = legacy(&daily_anlas);
-                modes.public_vibe_enabled = pyval::number_like(&daily_anlas).unwrap_or(0.0) > 0.0;
+                modes.public_vibe_enabled = values::number(&daily_anlas).unwrap_or(0.0) > 0.0;
             }
             if body.contains_key(MEMBER_DAILY_ANLAS.key) {
                 modes.member_daily_anlas = legacy(&member);
@@ -323,7 +323,7 @@ async fn put_settings(State(state): State<AppState>, _s: AdminSession, req: Requ
     if let Some(modes) = quota_modes {
         use gate_core::quota_limits::Limit;
         let numeric = |mode: Limit| match mode {
-            Limit::Limit(n) => pyval::float(n),
+            Limit::Limit(n) => values::float(n),
             Limit::Unlimited => json!(0),
             Limit::Inherit => Value::Null,
         };
@@ -368,7 +368,7 @@ async fn put_settings(State(state): State<AppState>, _s: AdminSession, req: Requ
         gate_core::quota_limits::Limit::Inherit => Value::Null,
     };
     let project_float = |mode: gate_core::quota_limits::Limit| match mode {
-        gate_core::quota_limits::Limit::Limit(n) => pyval::float(n),
+        gate_core::quota_limits::Limit::Limit(n) => values::float(n),
         gate_core::quota_limits::Limit::Unlimited => json!(0.0),
         gate_core::quota_limits::Limit::Inherit => Value::Null,
     };
@@ -425,7 +425,7 @@ async fn put_runtime_limits(
             .iter()
             .find(|(n, _, _)| n == name)
             .expect("上面已校验过名字");
-        match pyval::strict_int(value) {
+        match values::strict_int(value) {
             Some(n) if (lo..=hi).contains(&n) => values.push((name, n)),
             _ => {
                 return Err(HttpError::new(422, format!("{name} 必须是 {lo}～{hi} 的整数")).into());
@@ -457,7 +457,7 @@ async fn guard_view(state: &AppState) -> Result<Value, ApiError> {
         let c = state.db.get_upstream_counter(&t.token_id, &day).await?;
         // 账号的出图节奏：周期 = 出图耗时 + 出完后歇的秒数（手动）；429 只让账号冷却
         let p = state.nai.pacing(&t);
-        let r1 = |x: f64| pyc::round(x, 1);
+        let r1 = |x: f64| primitives::round(x, 1);
         // 今天出满了：账号本身可用，但不会再接图（不能显示成「可用 / 0 秒后能开始」）
         let full = state
             .guard
@@ -469,7 +469,7 @@ async fn guard_view(state: &AppState) -> Result<Value, ApiError> {
             "today": c.images,
             "cycle": r1(p.cycle),
             "gen_secs": r1(p.gen_secs),
-            "last_429": if p.last_429 > 0.0 { pyval::float(p.last_429) } else { Value::Null },
+            "last_429": if p.last_429 > 0.0 { values::float(p.last_429) } else { Value::Null },
             "cooling": if f.admin_enabled && !f.disabled { ((f.blocked_until - now) as i64).max(0) } else { 0 },
             "waiting": p.waiting,
             "next_start_in": if full { Value::Null } else { json!(r1(p.next_start_in)) },
@@ -499,7 +499,7 @@ async fn guard_put(State(state): State<AppState>, _s: AdminSession, req: Request
     match state.guard.save(&body).await {
         Ok(_) => {}
         // 值不合法 → 422 原文；其余（库写失败等）是 500
-        Err(GuardIoError::Guard(PyErr::Value(msg))) => {
+        Err(GuardIoError::Guard(ValidationError::InvalidValue(msg))) => {
             return Err(HttpError::new(422, msg).into());
         }
         Err(e) => return Err(InternalError(e.to_string()).into()),

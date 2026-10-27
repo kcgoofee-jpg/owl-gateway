@@ -1,7 +1,7 @@
 //! `/status.json` 的内容与状态页用到的小工具。
 
 use super::snapshot::{Snapshot, impact_rank};
-use gate_core::pyval::float;
+use gate_core::values::float;
 use gate_db::repo::status_page::Incident;
 use serde_json::{Value, json};
 
@@ -69,7 +69,6 @@ pub fn status_json(snap: &Snapshot) -> Value {
     })
 }
 
-/// 当前未解决事件里最严重的严重度（页面 `<body>` 的状态类用）；并列取先出现的（Python `max(key=)` 的行为）。
 pub fn worst_active_impact(snap: &Snapshot) -> Option<&str> {
     let mut best: Option<(&str, usize)> = None;
     for &i in &snap.active {

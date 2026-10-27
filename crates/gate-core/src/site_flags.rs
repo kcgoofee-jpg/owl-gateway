@@ -9,7 +9,7 @@
 //! 格式怪癖：float 类型的设置被夹到边界时得到的是 **int**（`lo` / `hi` 在登记表里都是整数字面量，
 //! 夹取返回「胜出的那个值」），`encode` 因此写出 `"0"` 而不是 `"0.0"`；没夹到边界才是 float。
 
-use crate::{pyc, pyext, pyval};
+use crate::{primitives, validation, values};
 use serde_json::Value;
 
 /// 设置项的类型（`Spec.kind`）。
@@ -49,7 +49,7 @@ impl SpecDefault {
         match self {
             SpecDefault::Bool(b) => Value::Bool(b),
             SpecDefault::Int(i) => Value::from(i),
-            SpecDefault::Float(f) => pyval::float(f),
+            SpecDefault::Float(f) => values::float(f),
             SpecDefault::Str(s) => Value::String(s.into()),
         }
     }
@@ -203,28 +203,6 @@ pub static ALGO_NOTICE: Spec = spec(
     "quota_algo → 首页",
     "首页显示的今日额度说明",
 );
-pub static IMAGE_CAP_MB: Spec = bounded(
-    spec(
-        "audit_image_cap_mb",
-        Kind::Int,
-        SpecDefault::Int(0),
-        "audit",
-        "原图占用上限（MB）：超过后自动删掉最旧的原图；0 = 不限",
-    ),
-    0,
-    500_000,
-);
-pub static IMAGE_KEEP_HOURS: Spec = bounded(
-    spec(
-        "audit_image_keep_hours",
-        Kind::Int,
-        SpecDefault::Int(24),
-        "audit",
-        "原图在服务器上保存几小时，到点自动删；0 = 只按容量上限删",
-    ),
-    0,
-    8760,
-);
 /// 请求日志里来源 IP 和客户端（User-Agent）保留几天，到期由维护任务清成空串；0 = 永久（站长 10-22：后台记录一律留存）。
 pub static ORIGIN_KEEP_DAYS: Spec = bounded(
     spec(
@@ -259,7 +237,7 @@ pub static V5_MEDIUM_MODE: Spec = Spec {
 };
 
 /// 登记表（已删除的设置不在里面；新增的追加在末尾）。
-pub static ALL: [&Spec; 11] = [
+pub static ALL: [&Spec; 9] = [
     &MEMBER_SWEEP,
     &ISSUE_HOURLY_CAP,
     &REGISTER_OPEN,
@@ -267,8 +245,6 @@ pub static ALL: [&Spec; 11] = [
     &GLOBAL_DAILY_ANLAS,
     &GLOBAL_MONTHLY_ANLAS,
     &ALGO_NOTICE,
-    &IMAGE_CAP_MB,
-    &IMAGE_KEEP_HOURS,
     &V5_MEDIUM_MODE,
     &ORIGIN_KEEP_DAYS,
 ];
@@ -279,18 +255,17 @@ pub fn default_of(spec: &Spec) -> Value {
 }
 
 /// `parse(spec, raw, fallback)`：库里的原始值（字符串 / `Settings` 属性 / 请求体里的任意值）→ 带类型的值。
-/// 转不了返回 `fallback`。`raw` 为 `Value::Null` 即 Python 的 `None`。
 pub fn parse(spec: &Spec, raw: &Value, fallback: Value) -> Value {
     if raw.is_null() {
         return fallback;
     }
     if let Value::String(s) = raw
-        && pyc::strip(s).is_empty()
+        && primitives::strip(s).is_empty()
         && spec.kind != Kind::Str
     {
         return fallback;
     }
-    let s = pyc::strip(&pyext::py_str(raw)).to_string();
+    let s = primitives::strip(&validation::text(raw)).to_string();
     let low = s.to_lowercase();
     match spec.kind {
         // 认不出的写法回到默认值（fail-closed），不能当成「关」
@@ -306,9 +281,9 @@ pub fn parse(spec: &Spec, raw: &Value, fallback: Value) -> Value {
                 fallback
             }
         }
-        Kind::Str => Value::String(pyext::py_str(raw)),
+        Kind::Str => Value::String(validation::text(raw)),
         Kind::Int | Kind::Float => {
-            let Some(f) = pyc::parse_float(&s) else {
+            let Some(f) = primitives::parse_float(&s) else {
                 return fallback;
             };
             if f.is_nan() {
@@ -328,14 +303,13 @@ pub fn parse(spec: &Spec, raw: &Value, fallback: Value) -> Value {
             }
             match (spec.kind, num) {
                 (Kind::Int, Num::Float(x)) => Value::from(x.trunc() as i64),
-                (_, Num::Float(x)) => pyval::float(x),
+                (_, Num::Float(x)) => values::float(x),
                 (_, Num::Int(i)) => Value::from(i),
             }
         }
     }
 }
 
-/// `max` / `min` 之后的数：保留 Python 里「是 int 还是 float」的类型信息。
 #[derive(Clone, Copy)]
 enum Num {
     Int(i64),
@@ -360,7 +334,6 @@ pub fn get_from_raw(spec: &Spec, raw: Option<&str>) -> Value {
     }
 }
 
-/// `encode(spec, value)` 的错误（Python 抛 `ValueError`，带中文原因）。
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
 #[error("{0}")]
 pub struct EncodeError(pub String);
@@ -368,7 +341,7 @@ pub struct EncodeError(pub String);
 /// `encode(spec, value)`：要写进 `site_settings` 的字符串。
 pub fn encode(spec: &Spec, value: &Value) -> Result<String, EncodeError> {
     match spec.kind {
-        Kind::Flag => Ok(if pyval::truthy(value) { "1" } else { "0" }.into()),
+        Kind::Flag => Ok(if values::enabled(value) { "1" } else { "0" }.into()),
         Kind::Choice => {
             let ok = matches!(value, Value::String(s) if spec.choices.contains(&s.as_str()));
             if !ok {
@@ -378,16 +351,16 @@ pub fn encode(spec: &Spec, value: &Value) -> Result<String, EncodeError> {
                     spec.choices.join(" / ")
                 )));
             }
-            Ok(pyext::py_str(value))
+            Ok(validation::text(value))
         }
         Kind::Int | Kind::Float => {
             let v = parse(spec, value, Value::Null);
             if v.is_null() {
                 return Err(EncodeError(format!("{} 必须是数字", spec.key)));
             }
-            Ok(pyext::py_str(&v))
+            Ok(validation::text(&v))
         }
-        Kind::Str => Ok(pyext::py_str(value)),
+        Kind::Str => Ok(validation::text(value)),
     }
 }
 

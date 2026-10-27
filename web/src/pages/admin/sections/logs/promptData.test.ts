@@ -1,9 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   allPromptText,
-  aspectOf,
   charsText,
-  hasPicture,
   infoLine,
   negativeText,
   paramsLine,
@@ -11,7 +9,7 @@ import {
   positiveText,
   statusText,
   statusTone,
-} from "./auditData";
+} from "./promptData";
 
 describe("parseExtra", () => {
   it("坏 JSON / 空 / 非对象都当作空", () => {
@@ -24,11 +22,6 @@ describe("parseExtra", () => {
 });
 
 describe("aspectOf / paramsLine", () => {
-  it("按宽高算比例，缺失按 2:3", () => {
-    expect(aspectOf({ params: { width: 1216, height: 832 } })).toBeCloseTo(1.4615, 3);
-    expect(aspectOf({})).toBeCloseTo(2 / 3, 5);
-    expect(aspectOf({ params: { width: 0, height: 10 } })).toBeCloseTo(2 / 3, 5);
-  });
   it("参数摘要只列有值的项，种子 0 也要显示；采样器枚举显示成友好名", () => {
     expect(
       paramsLine({ params: { seed: 0, sampler: "k_euler", steps: 28, scale: 5, width: 832, height: 1216 } }),
@@ -72,8 +65,6 @@ describe("大图下方一行与复制文本", () => {
 
 describe("其他", () => {
   it("是否有图、状态文字", () => {
-    expect(hasPicture({ has_image: 0, has_thumb: 1 })).toBe(true);
-    expect(hasPicture({ has_image: false, has_thumb: false })).toBe(false);
     expect(statusText("ok")).toBe("成功");
     expect(statusText("timeout")).toBe("timeout");
     expect(statusText("")).toBe("错误");

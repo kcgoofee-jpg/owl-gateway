@@ -1,4 +1,3 @@
-//! 线上冒烟（取代旧版的 live_smoke.py 与 smoke_test.py，见标签 py-final）：只做**不出图**的检查，
 //! 不消耗任何 Anlas / 免费额度，也不会触发出图间隔。
 //!
 //! 检查：`/healthz`、`/public/status`、`/public/live`、`/status.json`、`/queue-status`；
@@ -125,7 +124,7 @@ impl Smoke<'_> {
             Some(g) => format!(
                 "[{}] {:28} {:>8}B",
                 g.status,
-                gate_core::pyc::take_chars(&g.content_type, 28),
+                gate_core::primitives::take_chars(&g.content_type, 28),
                 g.body.len()
             ),
             None => String::new(),

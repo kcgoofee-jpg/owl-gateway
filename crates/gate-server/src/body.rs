@@ -5,18 +5,13 @@ use crate::error::{GateError, HttpError};
 use crate::multipart::{parse_image_multipart, read_bounded_body};
 use axum::body::Body;
 use axum::http::HeaderMap;
-use gate_core::json_body::{BodyJsonError, THREAD_PARSE_BYTES, parse_json_body};
+use gate_core::json_body::{THREAD_PARSE_BYTES, parse_json_body};
 use serde_json::{Map, Value};
 
 pub type JsonObject = Map<String, Value>;
 
 fn parse(raw: &[u8]) -> Result<JsonObject, HttpError> {
-    match parse_json_body(raw) {
-        // 超出 i64 的整数 / 孤立代理 / 溢出的浮点：直接按非法 JSON 拒绝，不等到转发上游才失败
-        Ok((_, lossy)) if lossy.any() => Err(HttpError::new(400, BodyJsonError::Invalid.message())),
-        Ok((m, _)) => Ok(m),
-        Err(e) => Err(HttpError::new(400, e.message())),
-    }
+    parse_json_body(raw).map_err(|e| HttpError::new(400, e.message()))
 }
 
 /// `parse_json_body`：大请求体放到阻塞线程里解析，避免拖慢其他成员。
@@ -70,7 +65,7 @@ pub async fn read_image_payload(
 /// 请求体读不下来 / 格式不对：客户端的问题（上传中断单算），带上原因码。
 fn to_gate(e: HttpError) -> GateError {
     use gate_core::reasons::{BODY_ABORT, PARAM};
-    let detail = gate_core::pyval::py_str(&e.detail);
+    let detail = gate_core::values::text(&e.detail);
     let code = if e.status >= 500 {
         ""
     } else if detail == crate::multipart::MSG_INTERRUPTED {

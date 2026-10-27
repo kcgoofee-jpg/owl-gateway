@@ -50,11 +50,6 @@
 {"in":{"spec":{"ref":"algo_notice"},"raw":"nan","present":true},"out":"nan"}
 {"in":{"spec":{"ref":"algo_notice"},"raw":"c d","present":true},"out":"c d"}
 {"in":{"spec":{"ref":"algo_notice"},"raw":"猫","present":true},"out":"猫"}
-{"in":{"spec":{"ref":"audit_image_cap_mb"},"raw":null,"present":false},"out":0}
-{"in":{"spec":{"ref":"audit_image_cap_mb"},"raw":"0","present":true},"out":0}
-{"in":{"spec":{"ref":"audit_image_cap_mb"},"raw":"-3","present":true},"out":0}
-{"in":{"spec":{"ref":"audit_image_keep_hours"},"raw":null,"present":false},"out":24}
-{"in":{"spec":{"ref":"audit_image_keep_hours"},"raw":"","present":true},"out":24}
 {"in":{"spec":{"inline":{"key":"x_choice","kind":"choice","default":"a","owner":"t","doc":"d","lo":null,"hi":null,"choices":["a","B","c d"]}},"raw":"0","present":true},"out":"a"}
 {"in":{"spec":{"inline":{"key":"x_choice","kind":"choice","default":"a","owner":"t","doc":"d","lo":null,"hi":null,"choices":["a","B","c d"]}},"raw":"c d","present":true},"out":"c d"}
 {"in":{"spec":{"inline":{"key":"x_int_free","kind":"int","default":5,"owner":"t","doc":"d","lo":null,"hi":null,"choices":[]}},"raw":"0","present":true},"out":0}

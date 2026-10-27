@@ -70,9 +70,8 @@ CREATE TABLE IF NOT EXISTS generation_audit (
     prompt TEXT NOT NULL DEFAULT '',
     negative TEXT NOT NULL DEFAULT '',
     extra TEXT NOT NULL DEFAULT '',
-    thumb BLOB,
-    image BLOB,
-    image_type TEXT NOT NULL DEFAULT ''
+    rid TEXT NOT NULL DEFAULT '',
+    request_id TEXT NOT NULL DEFAULT ''
 );
 CREATE INDEX IF NOT EXISTS idx_audit_ts ON generation_audit(ts);
 CREATE INDEX IF NOT EXISTS idx_audit_key ON generation_audit(key_id, ts);

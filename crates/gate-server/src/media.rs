@@ -137,7 +137,7 @@ pub fn validate_result(
 
 fn int_field(body: &Map<String, Value>, name: &str) -> Option<Option<i64>> {
     // Some(None)：字段存在但不是 int（type(x) is not int，bool 也不算）
-    body.get(name).map(gate_core::pyval::strict_int)
+    body.get(name).map(gate_core::values::strict_int)
 }
 
 /// 放大 / 导演工具：校验参数并按官方规则算 Anlas。返回 (发给上游的请求体, 费用)。
@@ -177,10 +177,10 @@ pub fn prepare_tool(body: &Value, operation: &str) -> Result<(Value, i64), Strin
             .is_none_or(|m| m.as_str() == Some(UPSCALE_MODEL));
         let scale_ok = b
             .get("scale")
-            .is_none_or(|s| gate_core::pyval::strict_int(s) == Some(2));
+            .is_none_or(|s| gate_core::values::strict_int(s) == Some(2));
         let blur_ok = b
             .get("declared_blur_sigma")
-            .is_none_or(|s| gate_core::pyval::strict_number(s) == Some(0.0));
+            .is_none_or(|s| gate_core::values::strict_number(s) == Some(0.0));
         if !(model_ok && scale_ok && blur_ok) {
             return Err("放大仅支持 2 倍默认设置，未扣费。请在客户端中恢复默认值。给客户端作者：只支持官方当前放大模型、scale=2、declared_blur_sigma=0".into());
         }
@@ -221,7 +221,7 @@ pub fn prepare_tool(body: &Value, operation: &str) -> Result<(Value, i64), Strin
     if tool == "colorize" || tool == "emotion" {
         let defry = match b.get("defry") {
             None => 0,
-            Some(v) => match gate_core::pyval::strict_int(v) {
+            Some(v) => match gate_core::values::strict_int(v) {
                 Some(d) if (0..=5).contains(&d) => d,
                 _ => {
                     return Err(
@@ -338,7 +338,6 @@ mod tests {
             (p["width"].as_u64(), p["height"].as_u64()),
             (Some(1024), Some(1024))
         );
-        // base = max(2, ceil((2.9518e-6 + 5.7533e-7*28) * 1048576)) = 20（Python 实算）→ 3*20+5
         assert_eq!(cost, 65);
         let (_, c2) = prepare_tool(
             &json!({"image": b64, "req_type": "lineart"}),

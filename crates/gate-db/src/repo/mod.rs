@@ -42,10 +42,6 @@ pub const ROLE_REGULAR: &str = "regular";
 /// 身份组 → 中文标签。
 pub const ROLE_LABELS: [(&str, &str); 2] = [(ROLE_INVITE, "邀请"), (ROLE_REGULAR, "普通")];
 
-/// 原图在 BLOB（老记录）或文件里。
-pub const HAS_IMAGE: &str = "(image IS NOT NULL OR image_file IS NOT NULL)";
-pub const IMAGE_SIZE: &str = "COALESCE(image_size, LENGTH(image), 0)";
-
 /// 后台请求日志列表读出的列：usage_log 的全部列，顺序同 schema.sql（`client` 放在最后）。
 /// `client` = 原始 User-Agent、`src` = 来源 IP，保留期（`usage_origin_keep_days`）过后被清成空串。
 pub(crate) const LOG_COLUMNS: &str = "id, ts, key_id, key_name, kind, model, status, images, anlas, tokens, \
@@ -71,14 +67,13 @@ v5 = v5 + excluded.v5, \
 legacy_free_images = legacy_free_images + excluded.legacy_free_images";
 
 /// 保持插入顺序的键值列表。
-pub type PyMap<K, V> = Vec<(K, V)>;
+pub type OrderedPairs<K, V> = Vec<(K, V)>;
 
 /// `?,?,?` 占位符串。
 pub(crate) fn marks(n: usize) -> String {
     vec!["?"; n].join(",")
 }
 
-/// JSON 值 → SQLite 绑定值（Python sqlite3 绑定参数的规则：bool 当整数；list / dict 不支持）。
 pub(crate) fn json_to_sql(v: &serde_json::Value) -> crate::Result<SqlValue> {
     use serde_json::Value;
     Ok(match v {

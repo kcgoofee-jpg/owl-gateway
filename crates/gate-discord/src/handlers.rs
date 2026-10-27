@@ -45,7 +45,7 @@ fn key<'a>(d: &'a Map<String, Value>, k: &str) -> Result<&'a Value, HandlerError
 }
 
 /// 值算不算「有内容」：null / false / 0 / 空串 / 空列表 / 空对象都算没有。
-fn truthy(v: &Value) -> bool {
+fn enabled(v: &Value) -> bool {
     match v {
         Value::Null => false,
         Value::Bool(b) => *b,
@@ -164,7 +164,7 @@ pub fn register_message(status: u16, body: &[u8]) -> Result<String, HandlerError
             };
             let d = obj(&data)?;
             if status == 200 {
-                Ok(match d.get("message").filter(|v| truthy(v)) {
+                Ok(match d.get("message").filter(|v| enabled(v)) {
                     Some(m) => show(m),
                     None => REGISTER_DONE.to_owned(),
                 })

@@ -3,8 +3,8 @@
 //! 以前这些地方用 `detail LIKE '%排队的人太多%'` 数中文，改一个字就静默失效。现在 guard / 鉴权返回 [`Reason`]
 //! （带 `.code` 的说明文字）→ `err(..., code)` → `usage_log.reason`。所有中文文案是面向成员的，逐字保持。
 
-use crate::pyc;
-use crate::pyext::is_nd;
+use crate::primitives;
+use crate::validation::is_nd;
 
 pub const KEY_PAUSED: &str = "key_paused"; // Key 被自动驾驶临时暂停
 pub const QUEUE_FULL: &str = "queue_full"; // 全站排队满（节约模式按它判断拥挤）
@@ -223,7 +223,7 @@ fn strip_status_prefix(detail: &str) -> &str {
         }
     }
     let rest = it.next().map_or("", |(i, _)| &detail[i..]);
-    rest.trim_start_matches(pyc::is_space)
+    rest.trim_start_matches(primitives::is_space)
 }
 
 /// 没带原因码的拒绝按说明文字归类（与 [`BACKFILL`] 同一张表）：写日志时兜底，
@@ -242,15 +242,15 @@ pub fn reason_label(code: &str, detail: &str) -> String {
     {
         return (*label).to_string();
     }
-    let text = pyc::strip(strip_status_prefix(detail));
+    let text = primitives::strip(strip_status_prefix(detail));
     // re.split(r"[（(，,。：:；;]", text, maxsplit=1)[0].strip()
     let first = text
         .split(['（', '(', '，', ',', '。', '：', ':', '；', ';'])
         .next()
         .unwrap_or("");
-    let text = pyc::strip(first);
-    if pyc::len_chars(text) > 18 {
-        format!("{}…", pyc::take_chars(text, 18))
+    let text = primitives::strip(first);
+    if primitives::len_chars(text) > 18 {
+        format!("{}…", primitives::take_chars(text, 18))
     } else if text.is_empty() {
         "其他".to_string()
     } else {

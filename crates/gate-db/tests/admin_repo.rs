@@ -344,39 +344,18 @@ async fn audit_queries_filter_by_integer_key_id() {
     sql(
         &db,
         &format!(
-            "INSERT INTO generation_audit(ts, key_id, key_name, prompt, negative, extra, image, image_type, image_size) VALUES \
-             (10.0, {a}, '甲 乙', 'p1', 'n1', '', X'89504e47', 'image/png', 4), (20.0, {a}, '甲 乙', 'p2', '', '', NULL, '', NULL);"
+            "INSERT INTO generation_audit(ts, key_id, key_name, prompt, negative, extra) VALUES (10.0,{a},'甲 乙','p1','n1',''),(20.0,{a},'甲 乙','p2','','');"
+
         ),
     )
     .await;
     for (ids, n) in [(vec![a], 2), (vec![a + 1], 0), (vec![a, a + 1], 2)] {
-        let (rows, total) = db.list_audit_ids(24, 0, &ids).await.unwrap();
+        let (rows, total) = db.list_audit_ids(24, 0, &ids, 0.0).await.unwrap();
         assert_eq!((total, rows.len() as i64), (n, n), "{ids:?}");
     }
-    let (rows, total) = db.list_audit_ids(24, 0, &[]).await.unwrap();
-    assert_eq!(
-        (
-            total,
-            rows[0]["id"].clone(),
-            rows[0]["has_image"].clone(),
-            rows[1]["has_image"].clone()
-        ),
-        (2, json!(2), json!(0), json!(1))
-    );
-    assert_eq!(db.key_name(a).await.unwrap().as_deref(), Some("甲 乙"));
-    assert_eq!(db.key_name(a + 1).await.unwrap(), None);
-    let imgs = db.audit_images_for_key(a, 1 << 20, 0.0).await.unwrap();
-    assert_eq!(imgs.len(), 1);
-    assert_eq!(
-        (imgs[0].prompt.as_str(), imgs[0].image.as_slice()),
-        ("p1", &[0x89, b'P', b'N', b'G'][..])
-    );
-    assert!(
-        db.audit_images_for_key(a + 1, 1 << 20, 0.0)
-            .await
-            .unwrap()
-            .is_empty()
-    );
+    let (rows, total) = db.list_audit_ids(24, 0, &[], 0.0).await.unwrap();
+    assert_eq!((total, rows[0]["id"].clone()), (2, json!(2)));
+    assert!(rows.iter().all(|r| r.get("has_image").is_none()));
 }
 
 /// 浏览器标记登录记录：同账号同浏览器只留一行（刷新 IP / 时间）。

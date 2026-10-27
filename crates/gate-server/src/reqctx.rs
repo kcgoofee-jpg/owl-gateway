@@ -198,7 +198,7 @@ impl ReqCtx {
 
     /// 记下本请求的模型（截到 80 个码点），被拒的请求也能按模型统计。
     pub fn set_model(&self, model: &str) {
-        let m = gate_core::pyc::take_chars(model, 80).to_string();
+        let m = gate_core::primitives::take_chars(model, 80).to_string();
         self.with(|i| i.model = m);
     }
 

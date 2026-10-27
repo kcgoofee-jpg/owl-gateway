@@ -6,8 +6,8 @@
 
 use super::JobError;
 use crate::action_log::log_action;
-use crate::audit::site_bool;
 use crate::error::ApiError;
+use crate::settings::site_bool;
 use crate::state::AppState;
 use gate_core::quota::{self, AccountAllowance, Effect, Manual};
 use gate_core::site_flags::V5_PAUSED;
@@ -117,7 +117,7 @@ pub(crate) async fn apply_effects(state: &AppState, effects: Vec<Effect>) -> Res
                 state
                     .guard
                     .with(|g| g.trip_breaker(seconds as f64, &reason, now))
-                    .map_err(|e| JobError::new("ValueError", format!("{e:?}")))?;
+                    .map_err(|e| JobError::new("invalid_value", format!("{e:?}")))?;
             }
             // 临时暂停单把 Key：写 share_state 表（现在只存这个，表名为兼容旧库保留）并更新内存里的暂停表
             Effect::PauseKey {

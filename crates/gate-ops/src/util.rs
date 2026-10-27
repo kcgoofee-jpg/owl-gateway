@@ -11,7 +11,6 @@ pub fn now_secs() -> f64 {
         .unwrap_or(0.0)
 }
 
-/// 本机时区（Python 的 `time.localtime()` 看进程 TZ；探测失败按 UTC）。
 pub fn local_tz() -> TimeZone {
     TimeZone::try_system().unwrap_or(TimeZone::UTC)
 }
@@ -106,7 +105,6 @@ pub fn nearest_rank<T: Copy>(sorted: &[T], q: f64) -> Option<T> {
     Some(sorted[idx])
 }
 
-/// 读取 `.env` 风格文件里的某个键（与旧版 patrol.py 的 `env_value` 一致，见标签 py-final：取第一处命中，
 /// 去掉首尾空白与成对引号字符；文件读不到按空串）。
 pub fn env_file_value(path: &Path, key: &str) -> String {
     let Ok(bytes) = std::fs::read(path) else {
@@ -115,10 +113,9 @@ pub fn env_file_value(path: &Path, key: &str) -> String {
     let text = String::from_utf8_lossy(&bytes);
     let prefix = format!("{key}=");
     for line in text.lines() {
-        let line = gate_core::pyc::strip(line);
+        let line = gate_core::primitives::strip(line);
         if let Some(rest) = line.strip_prefix(&prefix) {
-            let v = gate_core::pyc::strip(rest);
-            // Python 的 str.strip('"') 会去掉两端所有连续的引号字符
+            let v = gate_core::primitives::strip(rest);
             return v.trim_matches('"').trim_matches('\'').to_string();
         }
     }

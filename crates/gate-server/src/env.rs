@@ -11,7 +11,7 @@
 //! - 整数：空串或解析失败都用默认值（`int(os.environ.get(name, "").strip() or default)`）。
 //! - 每 Token 列表（`NAI_TOKEN_ALLOW_ANLAS`）补齐 / 截断到 Token 个数。
 
-use gate_core::pyc;
+use gate_core::primitives;
 use std::collections::HashMap;
 use std::path::PathBuf;
 
@@ -33,7 +33,7 @@ impl EnvSource for HashMap<String, String> {
     }
 }
 
-fn truthy(v: &str) -> bool {
+fn enabled(v: &str) -> bool {
     matches!(
         v.trim().to_ascii_lowercase().as_str(),
         "1" | "true" | "yes" | "on" | "y"
@@ -72,14 +72,16 @@ impl Reader<'_> {
         if raw.is_empty() {
             default
         } else {
-            pyc::parse_int(raw).unwrap_or(default)
+            primitives::parse_int(raw).unwrap_or(default)
         }
     }
     /// registration.py 的 `number()`：`max(0, int(os.getenv(name, default)))`，解析失败用默认值（不夹 0）。
     fn nonneg(&self, name: &str, default: i64) -> i64 {
         match self.0.get(name) {
             None => default.max(0),
-            Some(v) => pyc::parse_int(&v).map(|n| n.max(0)).unwrap_or(default),
+            Some(v) => primitives::parse_int(&v)
+                .map(|n| n.max(0))
+                .unwrap_or(default),
         }
     }
 }
@@ -152,7 +154,7 @@ impl EnvConfig {
         let nai_tokens: Vec<String> = raw_tokens
             .replace('\n', ",")
             .split(',')
-            .map(|t| pyc::strip(t).to_string())
+            .map(|t| primitives::strip(t).to_string())
             .filter(|t| !t.is_empty())
             .collect();
         let n = nai_tokens.len();
@@ -161,10 +163,10 @@ impl EnvConfig {
                 .str(name, "")
                 .split(',')
                 .map(|item| {
-                    if pyc::strip(item).is_empty() {
+                    if primitives::strip(item).is_empty() {
                         default
                     } else {
-                        truthy(item)
+                        enabled(item)
                     }
                 })
                 .collect();
@@ -196,7 +198,7 @@ impl EnvConfig {
                 return None;
             }
             let secret = src.get("REGISTRATION_BRIDGE_SECRET")?;
-            if pyc::len_chars(&secret) < 32 {
+            if primitives::len_chars(&secret) < 32 {
                 tracing::warn!("REGISTRATION_BRIDGE_SECRET 少于 32 个字符，自助注册保持关闭。");
                 return None;
             }

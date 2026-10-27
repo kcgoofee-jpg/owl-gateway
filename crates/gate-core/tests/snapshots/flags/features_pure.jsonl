@@ -59,16 +59,16 @@
 {"in":{"fn":"global_flags","args":["{\"image\": false}"]},"out":{"image":false,"upscale":true,"augment":true,"vibe":true,"tags":true}}
 {"in":{"fn":"global_flags","args":["{\"image\": 0}"]},"out":{"image":true,"upscale":true,"augment":true,"vibe":true,"tags":true}}
 {"in":{"fn":"global_flags","args":["{\"vibe\": \"no\"}"]},"out":{"image":true,"upscale":true,"augment":true,"vibe":true,"tags":true}}
-{"in":{"fn":"global_flags","args":["[1]"]},"out":{"err":"AttributeError","msg":"'list' object has no attribute 'get'"}}
-{"in":{"fn":"global_flags","args":["null"]},"out":{"err":"AttributeError","msg":"'NoneType' object has no attribute 'get'"}}
+{"in":{"fn":"global_flags","args":["[1]"]},"out":{"err":"AttributeError","msg":"'array' object has no attribute 'get'"}}
+{"in":{"fn":"global_flags","args":["null"]},"out":{"err":"AttributeError","msg":"'null' object has no attribute 'get'"}}
 {"in":{"fn":"global_flags","args":["garbage"]},"out":{"image":true,"upscale":true,"augment":true,"vibe":true,"tags":true}}
-{"in":{"fn":"global_flags","args":["5"]},"out":{"err":"AttributeError","msg":"'int' object has no attribute 'get'"}}
-{"in":{"fn":"global_flags","args":["\"s\""]},"out":{"err":"AttributeError","msg":"'str' object has no attribute 'get'"}}
-{"in":{"fn":"global_flags","args":["true"]},"out":{"err":"AttributeError","msg":"'bool' object has no attribute 'get'"}}
-{"in":{"fn":"global_flags","args":["1.5"]},"out":{"err":"AttributeError","msg":"'float' object has no attribute 'get'"}}
+{"in":{"fn":"global_flags","args":["5"]},"out":{"err":"AttributeError","msg":"'number' object has no attribute 'get'"}}
+{"in":{"fn":"global_flags","args":["\"s\""]},"out":{"err":"AttributeError","msg":"'string' object has no attribute 'get'"}}
+{"in":{"fn":"global_flags","args":["true"]},"out":{"err":"AttributeError","msg":"'boolean' object has no attribute 'get'"}}
+{"in":{"fn":"global_flags","args":["1.5"]},"out":{"err":"AttributeError","msg":"'number' object has no attribute 'get'"}}
 {"in":{"fn":"global_flags","args":["{\"image\": null}"]},"out":{"image":true,"upscale":true,"augment":true,"vibe":true,"tags":true}}
 {"in":{"fn":"global_flags","args":["{\"augment\": false, \"upscale\": false, \"vibe\": false}"]},"out":{"image":true,"upscale":false,"augment":false,"vibe":false,"tags":true}}
 {"in":{"fn":"global_flags","args":[" "]},"out":{"image":true,"upscale":true,"augment":true,"vibe":true,"tags":true}}
 {"in":{"fn":"global_flags","args":["{\"image\": false"]},"out":{"image":true,"upscale":true,"augment":true,"vibe":true,"tags":true}}
-{"in":{"fn":"global_flags","args":["[]"]},"out":{"err":"AttributeError","msg":"'list' object has no attribute 'get'"}}
+{"in":{"fn":"global_flags","args":["[]"]},"out":{"err":"AttributeError","msg":"'array' object has no attribute 'get'"}}
 {"in":{"fn":"global_flags","args":["{\"a\":1}"]},"out":{"image":true,"upscale":true,"augment":true,"vibe":true,"tags":true}}

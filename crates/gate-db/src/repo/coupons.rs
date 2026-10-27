@@ -1,7 +1,7 @@
 //! 成员的券（现在只有「重置券」）。
 
 use crate::{Db, Result, value};
-use gate_core::pyc;
+use gate_core::primitives;
 use rusqlite::{OptionalExtension, params};
 use serde::Serialize;
 use serde_json::Value;
@@ -36,8 +36,8 @@ impl Db {
     ) -> Result<NewCoupon> {
         let scope = scope.to_string();
         let kind = kind.to_string();
-        let note = pyc::take_chars(note, 200).to_string();
-        let by = pyc::take_chars(by, 40).to_string();
+        let note = primitives::take_chars(note, 200).to_string();
+        let by = primitives::take_chars(by, 40).to_string();
         let expires_at = now + days * 86400.0;
         self.write(move |tx| {
             tx.execute(

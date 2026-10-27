@@ -22,7 +22,7 @@ use axum::response::sse::{Event, KeepAlive, Sse};
 use axum::response::{IntoResponse, Response};
 use axum::routing::{get, post};
 use futures::StreamExt;
-use gate_core::pyc::take_chars;
+use gate_core::primitives::take_chars;
 use serde_json::{Map, Value, json};
 use std::convert::Infallible;
 use std::hash::{Hash, Hasher};
@@ -58,7 +58,6 @@ pub fn router() -> Router<AppState> {
 
 // ------------------------------------------------------------------ 小件
 
-/// 已经序列化好的 JSON 文本 → 响应（与 Starlette `JSONResponse` 一样的 content-type）。
 fn json_text(text: String) -> Response {
     let mut r = Response::new(Body::from(text));
     r.headers_mut().insert(
@@ -235,7 +234,7 @@ async fn queue_status(State(state): State<AppState>) -> ApiResult {
             "waiting": waiting,
             "concurrency": usable.iter().map(|t| t.image_slots.limit() as i64).sum::<i64>(),
         },
-        "image_next_slot_in": gate_core::pyc::round(next, 1),
+        "image_next_slot_in": gate_core::primitives::round(next, 1),
         "image_cooldown_remaining": state.cooldown.remaining(now),
         "queue_timeout": lim.queue_timeout as i64,
     })))
@@ -692,7 +691,7 @@ pub(super) async fn me_payload(
             "v5_paused": v5_access.paused,
             "v5_access_allowed": v5_access.decision.allowed,
             "v5_access_reason": v5_access.decision.reason,
-            "anlas": gate_core::pyc::round0(c.anlas),
+            "anlas": gate_core::primitives::round0(c.anlas),
             "daily_anlas": live::member_anlas_cap(state, key).await?,
             "reset_hour": state.guard.with(|g| g.reset_hour),
         }),

@@ -3,7 +3,7 @@
 //! 只记录、不自动处理；关联由每 6 小时的扫描任务写进 `abuse_signals`。永久保留。
 
 use crate::{Db, Result};
-use gate_core::pyc::take_chars;
+use gate_core::primitives::take_chars;
 use rusqlite::OptionalExtension;
 use rusqlite::params;
 

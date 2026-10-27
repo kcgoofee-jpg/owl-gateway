@@ -19,7 +19,7 @@ use axum::body::Body;
 use axum::extract::{Path, Request, State};
 use axum::http::request::Parts;
 use axum::routing::{get, post, put};
-use gate_core::{pyc, pyext, pyval};
+use gate_core::{primitives, validation, values};
 use gate_upstream::{headers::token_id, token_store};
 use serde_json::{Map, Value, json};
 
@@ -106,7 +106,7 @@ async fn page(State(state): State<AppState>, _s: AdminSession, req: Request) -> 
     };
     let session = session_cookie(&parts);
     Ok(ok_json(&json!({
-        "generated_at": pyval::float(now),
+        "generated_at": values::float(now),
         "pool_configured": state.nai.configured().await,
         "accounts": accounts,
         "threshold": allowance["threshold"],
@@ -212,7 +212,7 @@ pub(super) async fn pool_status(state: &AppState) -> Result<Vec<Value>, ApiError
             "disabled": f.disabled,
             "fails": f.fails,
             "blocked_for": ((f.blocked_until - now) as i64).max(0),
-            "last_ok": pyval::float(f.last_ok),
+            "last_ok": values::float(f.last_ok),
             "allow_anlas": f.allow_anlas,
             "image_concurrency": t.image_slots.limit(),
             "image_active": t.image_slots.active(),
@@ -258,7 +258,7 @@ async fn token_payload(
     let body = read_json_body(&parts.headers, body, TOKEN_BODY_LIMIT).await?;
     let token = body
         .get("token")
-        .map(|v| pyc::strip(&pyext::py_str(v)).to_string())
+        .map(|v| primitives::strip(&validation::text(v)).to_string())
         .unwrap_or_default();
     if !token_store::valid_token(&token) {
         return Err(HttpError::new(
@@ -302,7 +302,7 @@ async fn add_token(State(state): State<AppState>, _s: AdminSession, req: Request
         .into_iter()
         .find(|(k, _)| *k == id)
         .map(|(_, v)| v);
-    let allow_anlas = body.get("allow_anlas").is_some_and(pyval::truthy);
+    let allow_anlas = body.get("allow_anlas").is_some_and(values::enabled);
     state
         .nai
         .add_token(token, allow_anlas, saved_v5, saved_enabled)
@@ -390,7 +390,7 @@ async fn set_v5_limit(
 ) -> ApiResult {
     let (parts, body) = req.into_parts();
     let body = read_json_body(&parts.headers, body, BODY_LIMIT).await?;
-    let limit = match body.get("v5_daily_limit").and_then(pyval::strict_int) {
+    let limit = match body.get("v5_daily_limit").and_then(values::strict_int) {
         // 10-27 规范化：0 = 停用这把 Token 的免费 V5，上限最大 9999（存量 0 已迁移成 9999）
         Some(n) if (0..=9999).contains(&n) => n,
         _ => {
@@ -480,7 +480,7 @@ async fn reconcile(State(state): State<AppState>, _s: AdminSession, req: Request
         return Err(HttpError::new(403, "会话校验失败，请刷新后台后重试").into());
     }
     let ct = crate::auth::header_str(&parts.headers, "content-type");
-    if pyc::strip(ct.split(';').next().unwrap_or("")).to_lowercase() != "application/json" {
+    if primitives::strip(ct.split(';').next().unwrap_or("")).to_lowercase() != "application/json" {
         return Err(HttpError::new(415, "请使用 JSON 请求").into());
     }
     if !read_json_body(&parts.headers, body, 1024).await?.is_empty() {

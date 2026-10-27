@@ -77,7 +77,7 @@ async fn target_of(state: &AppState, template: &str, path: &str) -> String {
             return String::new();
         };
         let name = match state.db.get_key(n).await {
-            Ok(Some(k)) => gate_core::pyval::py_str(k.get("name").unwrap_or(&Value::Null)),
+            Ok(Some(k)) => gate_core::values::text(k.get("name").unwrap_or(&Value::Null)),
             Ok(None) => "(不存在)".into(),
             Err(_) => return String::new(),
         };
@@ -87,10 +87,10 @@ async fn target_of(state: &AppState, template: &str, path: &str) -> String {
         return format!("待审 #{id}");
     }
     if let Some(t) = param("token_id") {
-        return format!("上游 {}", gate_core::pyc::take_chars(&t, 24));
+        return format!("上游 {}", gate_core::primitives::take_chars(&t, 24));
     }
     if let Some(sig) = param("sig") {
-        return format!("Bug {}", gate_core::pyc::take_chars(&sig, 12));
+        return format!("Bug {}", gate_core::primitives::take_chars(&sig, 12));
     }
     let suffix: &[(&str, &str)] = &[
         ("/errors/resolve-all", "全部未处理 Bug"),
@@ -183,11 +183,11 @@ async fn audited(State(state): State<AppState>, req: Request, next: Next) -> Res
         return resp;
     }
     if let Some(HttpErrorInfo(e)) = resp.extensions().get::<HttpErrorInfo>() {
-        let detail = gate_core::pyc::take_chars(
+        let detail = gate_core::primitives::take_chars(
             &format!(
                 "失败（{}）：{}",
                 e.status,
-                gate_core::pyval::py_str(&e.detail)
+                gate_core::values::text(&e.detail)
             ),
             200,
         )
@@ -212,8 +212,8 @@ async fn audited(State(state): State<AppState>, req: Request, next: Next) -> Res
     {
         target = obj
             .get("name")
-            .filter(|v| gate_core::pyval::truthy(v))
-            .map(gate_core::pyext::py_str)
+            .filter(|v| gate_core::values::enabled(v))
+            .map(gate_core::validation::text)
             .unwrap_or_default();
     }
     if path == "/keys/{key_id}" && method == "DELETE" {

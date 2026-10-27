@@ -7,7 +7,7 @@
 
 use crate::error::{ApiError, InternalError};
 use crate::state::AppState;
-use gate_core::{pyc, pyval};
+use gate_core::{primitives, values};
 use gate_db::DbError;
 use gate_upstream::client::Token;
 use serde_json::{Map, Value, json};
@@ -77,7 +77,7 @@ fn internal(msg: impl Into<String>) -> RunError {
 /// 这些数只给后台页面和核对任务读，读取方都按 f64（页面按 number）；数值在 1e12 以内，f64 能精确表示。
 /// 新写入快照里的整数会带小数点（`10.0`），库里的旧快照照样能读。
 fn round4(x: f64) -> f64 {
-    pyc::round(x, 4)
+    primitives::round(x, 4)
 }
 
 /// `amount(value)`：必须是有限的数字（bool 不算），且在 0～1e12 之间。
@@ -98,11 +98,11 @@ pub fn balance(data: &Value) -> Option<Value> {
     // 用订阅到期时间判断是否进入了新的计费周期
     let expires_at = match obj.get("expiresAt") {
         None | Some(Value::Null) => Value::Null,
-        Some(v) => pyval::float(amount(v)?),
+        Some(v) => values::float(amount(v)?),
     };
     Some(json!({
-        "fixed": pyval::float(fixed),
-        "purchased": pyval::float(purchased),
+        "fixed": values::float(fixed),
+        "purchased": values::float(purchased),
         "expires_at": expires_at,
     }))
 }
@@ -110,7 +110,7 @@ pub fn balance(data: &Value) -> Option<Value> {
 /// 两个值是否相等（数字按数值比较，1 == 1.0；缺失只和缺失相等）。
 fn value_eq(a: Option<&Value>, b: Option<&Value>) -> bool {
     match (a, b) {
-        (Some(x), Some(y)) => pyval::py_eq(x, y),
+        (Some(x), Some(y)) => values::equal(x, y),
         (None, None) => true,
         _ => false,
     }
@@ -176,14 +176,14 @@ pub fn comparison(previous: Option<&Value>, current: &Value) -> Result<Value, St
     Ok(json!({
         "reason": null,
         "since": since,
-        "balance_decrease": pyval::float(decrease),
-        "recorded": pyval::float(recorded),
-        "site_paid": pyval::float(site_paid),
-        "difference": pyval::float(round4(decrease - recorded)),
-        "unconfirmed_anlas": pyval::float(round4(
+        "balance_decrease": values::float(decrease),
+        "recorded": values::float(recorded),
+        "site_paid": values::float(site_paid),
+        "difference": values::float(round4(decrease - recorded)),
+        "unconfirmed_anlas": values::float(round4(
             ledger(&after, "unconfirmed_anlas")? - ledger(&before, "unconfirmed_anlas")?,
         )),
-        "unconfirmed_requests": pyval::float(
+        "unconfirmed_requests": values::float(
             ledger(&after, "unconfirmed_requests")? - ledger(&before, "unconfirmed_requests")?,
         ),
     }))
@@ -238,7 +238,7 @@ async fn query(state: &AppState, token: &Token) -> Result<Value, RunError> {
             .db
             .set_setting(
                 COOLDOWN_SETTING,
-                &pyc::float_repr(state.now() + delay as f64),
+                &primitives::float_text(state.now() + delay as f64),
             )
             .await?;
         return Err(ReconError::new("官方查询限流，请稍后重试；上次结果已保留", 429, delay).into());
@@ -256,7 +256,7 @@ async fn query(state: &AppState, token: &Token) -> Result<Value, RunError> {
 pub async fn retry_after(state: &AppState) -> Result<i64, RunError> {
     let value = match state.db.get_setting(COOLDOWN_SETTING).await? {
         None => 0.0,
-        Some(raw) => pyc::parse_float(&raw)
+        Some(raw) => primitives::parse_float(&raw)
             .ok_or_else(|| internal(format!("{COOLDOWN_SETTING} 不是数字")))?,
     };
     Ok(((value - state.now()).ceil() as i64).max(0))
@@ -343,7 +343,10 @@ pub async fn run_with(state: &AppState, wait_timeout: Duration) -> Result<Value,
         // 先把冷却写进库，失败的尝试也算
         state
             .db
-            .set_setting(COOLDOWN_SETTING, &pyc::float_repr(state.now() + 60.0))
+            .set_setting(
+                COOLDOWN_SETTING,
+                &primitives::float_text(state.now() + 60.0),
+            )
             .await?;
         let queried = tokio::time::timeout(QUERY_TIMEOUT, async {
             let mut rows = Map::new();
@@ -372,10 +375,10 @@ pub async fn run_with(state: &AppState, wait_timeout: Duration) -> Result<Value,
             balance += part("fixed") + part("purchased");
         }
         let mut current = Map::new();
-        current.insert("checked_at".into(), pyval::float(state.now()));
+        current.insert("checked_at".into(), values::float(state.now()));
         current.insert("accounts".into(), Value::Object(rows));
         current.insert("ledger".into(), ledger);
-        current.insert("balance".into(), pyval::float(balance));
+        current.insert("balance".into(), values::float(balance));
         let current = Value::Object(current);
         let mut previous = state.db.reconciliation_history(1).await?;
         // 旧快照没记站付 V5：补上它那一刻的累计，不然这次会把以前所有站付都算进来
@@ -385,7 +388,7 @@ pub async fn run_with(state: &AppState, wait_timeout: Duration) -> Result<Value,
             && !l.contains_key("site_paid")
         {
             let before = state.db.site_paid_before(at).await?;
-            l.insert("site_paid".into(), pyval::float(before));
+            l.insert("site_paid".into(), values::float(before));
         }
         let cmp = comparison(previous.first(), &current).map_err(internal)?;
         let mut snapshot = current;
@@ -492,7 +495,7 @@ mod tests {
                    "site_paid": 0.0, "difference": 3.0, "unconfirmed_anlas": 3.0, "unconfirmed_requests": 1.0})
         );
         // 序列化时整数值也带小数点
-        let text = String::from_utf8(gate_core::pyjson::wire(&c)).unwrap();
+        let text = String::from_utf8(gate_core::json::wire(&c)).unwrap();
         assert!(
             text.contains("\"balance_decrease\":10.0,") && text.contains("\"recorded\":7.0,"),
             "{text}"

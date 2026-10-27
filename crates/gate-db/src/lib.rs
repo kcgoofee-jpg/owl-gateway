@@ -7,12 +7,12 @@
 //!   等连接的读请求在异步信号量上排队，不占阻塞线程（同一时刻最多「池子大小」个读线程）。
 //!
 //! `repo` 里每个方法都有快照：`tests/repo_snapshot.rs` 对返回值、有变化的表和原图目录做快照
-//! （夹具取自 2.x 时代的真实数据，脚本见标签 py-final）。
 //!
 //! 事务失败即整体回滚：由 `rusqlite::Transaction` 的 Drop 自动完成，不会出现「一条语句失败后
 //! 事务挂着、之后所有写都 locked」。
 
 pub mod bootstrap;
+mod prompt_migration;
 pub mod repo;
 pub mod value;
 
@@ -50,8 +50,6 @@ pub struct Db {
 
 struct Inner {
     path: PathBuf,
-    /// 审计原图目录：`<库所在目录>/audit_images`。
-    image_dir: PathBuf,
     writer: std::sync::mpsc::SyncSender<Job>,
     readers: Mutex<Vec<Connection>>,
     /// 许可数 = 读连接数：拿到许可才进阻塞线程，所以进去时池子里一定有空闲连接。
@@ -86,6 +84,7 @@ impl Db {
         let path = path.as_ref().to_path_buf();
         let mut writer_conn = Connection::open(&path)?;
         bootstrap::run(&mut writer_conn)?;
+        prompt_migration::run(&mut writer_conn, &path)?;
 
         let mut pool = Vec::with_capacity(READERS);
         for _ in 0..READERS {
@@ -127,17 +126,9 @@ impl Db {
             })
             .expect("能创建写线程");
 
-        // 与库同目录的 audit_images/
-        let abs = std::fs::canonicalize(&path).unwrap_or_else(|_| path.clone());
-        let image_dir = abs
-            .parent()
-            .map(|p| p.join("audit_images"))
-            .unwrap_or_else(|| PathBuf::from("audit_images"));
-
         Ok(Self {
             inner: Arc::new(Inner {
                 path,
-                image_dir,
                 writer: tx,
                 read_slots: Arc::new(tokio::sync::Semaphore::new(pool.len())),
                 readers: Mutex::new(pool),
@@ -147,11 +138,6 @@ impl Db {
 
     pub fn path(&self) -> &Path {
         &self.inner.path
-    }
-
-    /// 审计原图目录（与库放在一起）。
-    pub fn image_dir(&self) -> &Path {
-        &self.inner.image_dir
     }
 
     /// 在写线程上执行一个事务；闭包返回 Err 或 panic 时整个事务回滚。

@@ -145,7 +145,7 @@ async fn create_key_validates_then_stores_manual_quota() {
         (json!({"daily_images": 1.5}), "daily_images 必须是整数"),
         (
             json!({"monthly_anlas": 100001}),
-            "monthly_anlas 必须在 0.0～99999.0 之间",
+            "monthly_anlas 必须在 0～99999 之间",
         ),
         (json!({"rpm": 0}), "rpm 必须在 1～600 之间"),
         (
@@ -177,10 +177,7 @@ async fn create_key_validates_then_stores_manual_quota() {
         &[],
     )
     .await;
-    bad.assert_detail(
-        400,
-        "请求格式错误，未处理。请更新或更换客户端。开发者参考：请求体不是合法 JSON",
-    );
+    bad.assert_detail(400, "请求体不是合法的 UTF-8 JSON，或嵌套超过 32 层");
 
     let r = a
         .post(

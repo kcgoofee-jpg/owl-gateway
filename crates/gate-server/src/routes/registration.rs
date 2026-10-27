@@ -1,7 +1,6 @@
 //! 机器人桥接 `/self-register/*`。
 //!
 //! 鉴权：`Authorization: Bearer <REGISTRATION_BRIDGE_SECRET>`；成员网页接口见 `member.rs`。
-//! 错误一律是 `{"detail": ...}`；请求体的校验错误沿用 FastAPI（pydantic v2）的 422 形状。
 //! 检查次序固定：先校验请求体（422），再鉴权（503 / 401），再校验服务器（403）。
 //! 机器人只有成员命令（/register /resetkey /反馈；/quota、/help 10-23 删除）；管理员命令 `ops` / `slots` / `revoke` 已删除（管理都在网页后台）。
 
@@ -19,7 +18,7 @@ use axum::http::request::Parts;
 use axum::response::Response;
 use axum::routing::post;
 use gate_core::bot_config;
-use gate_core::pyc::take_chars;
+use gate_core::primitives::take_chars;
 use serde_json::{Map, Value, json};
 use std::net::SocketAddr;
 
@@ -33,47 +32,24 @@ pub fn router() -> Router<AppState> {
 /// 桥接 / 成员页接口的请求体上限（正常请求都在几百字节）。
 pub(super) const BODY_LIMIT: usize = 1024 * 1024;
 
-// ------------------------------------------------------------------ 请求体校验（FastAPI / pydantic v2 的 422 形状）
-
 /// 一个已解析的 JSON 对象请求体 + 字段校验的错误清单（`finish` 时有错误就回 422）。
 pub(super) struct Model {
     body: Value,
-    errors: Vec<Value>,
+    errors: Vec<String>,
 }
 
 impl Model {
     pub(super) fn parse(raw: &[u8]) -> Result<Self, HttpError> {
-        let err = |e: Value| HttpError {
-            status: 422,
-            detail: Value::Array(vec![e]),
-        };
-        if raw.iter().all(u8::is_ascii_whitespace) {
-            return Err(err(
-                json!({"type": "missing", "loc": ["body"], "msg": "Field required", "input": null}),
-            ));
-        }
-        match serde_json::from_slice::<Value>(raw) {
-            Err(e) => Err(err(json!({
-                "type": "json_invalid", "loc": ["body", e.column().saturating_sub(1)],
-                "msg": "JSON decode error", "input": {}, "ctx": {"error": "Expecting value"},
-            }))),
-            Ok(v @ Value::Object(_)) => Ok(Self {
-                body: v,
-                errors: Vec::new(),
-            }),
-            Ok(other) => Err(err(json!({
-                "type": "model_attributes_type", "loc": ["body"],
-                "msg": "Input should be a valid dictionary or object to extract fields from",
-                "input": other,
-            }))),
-        }
+        let body = gate_core::json_body::parse_json_body(raw)
+            .map_err(|e| HttpError::new(422, e.message()))?;
+        Ok(Self {
+            body: Value::Object(body),
+            errors: Vec::new(),
+        })
     }
 
-    fn fail(&mut self, kind: &str, loc: Vec<&str>, msg: &str, input: &Value) {
-        let mut l: Vec<Value> = vec![Value::from("body")];
-        l.extend(loc.into_iter().map(Value::from));
-        self.errors
-            .push(json!({"type": kind, "loc": l, "msg": msg, "input": input}));
+    fn fail(&mut self, _kind: &str, loc: Vec<&str>, msg: &str, _input: &Value) {
+        self.errors.push(format!("{}: {msg}", loc.join(".")));
     }
 
     fn get(&self, name: &str) -> Option<Value> {
@@ -103,7 +79,6 @@ impl Model {
         }
     }
 
-    /// `name: dict | None = None`（pydantic 把 `X | None` 当可空类型，类型不对只报 X 的错）
     fn opt_dict(&mut self, name: &str) -> Option<Map<String, Value>> {
         match self.get(name) {
             Some(Value::Object(m)) => Some(m),
@@ -124,10 +99,7 @@ impl Model {
         if self.errors.is_empty() {
             Ok(())
         } else {
-            Err(HttpError {
-                status: 422,
-                detail: Value::Array(self.errors),
-            })
+            Err(HttpError::new(422, self.errors.join("; ")))
         }
     }
 }
@@ -178,7 +150,7 @@ fn authorize<'a>(
 
 /// `_checked`：只认指定服务器；发命令的人要是纯数字 ID。
 fn checked<'a>(svc: &RegistrationService, who: &'a Who) -> Result<&'a str, HttpError> {
-    if who.guild_id != svc.command_guild() || !gate_core::pyext::is_decimal(&who.discord_id) {
+    if who.guild_id != svc.command_guild() || !gate_core::validation::is_decimal(&who.discord_id) {
         return Err(HttpError::new(
             403,
             "请在猫头鹰公益站的 Discord 服务器里使用这个命令。",

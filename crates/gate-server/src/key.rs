@@ -1,7 +1,6 @@
 //! 虚拟 Key 行。数据库读出来是一个 JSON 对象（列名 → 值）；
-//! 这里给常用字段一组带 Python 语义的访问器（`bool(row[x])`、缺列当假 / 0）。
 
-use gate_core::pyval;
+use gate_core::values;
 use serde_json::Value;
 
 #[derive(Debug, Clone)]
@@ -45,22 +44,22 @@ impl Key {
 
     /// `bool(row[name])`；缺列为假。
     pub fn flag(&self, name: &str) -> bool {
-        pyval::truthy(self.get(name))
+        values::enabled(self.get(name))
     }
 
     pub fn int(&self, name: &str) -> i64 {
         let v = self.get(name);
-        pyval::int_like(v)
-            .or_else(|| pyval::number_like(v).and_then(gate_core::pyc::int_of))
+        values::int_like(v)
+            .or_else(|| values::number(v).and_then(gate_core::primitives::int_of))
             .unwrap_or(0)
     }
 
     pub fn float(&self, name: &str) -> f64 {
-        pyval::number_like(self.get(name)).unwrap_or(0.0)
+        values::number(self.get(name)).unwrap_or(0.0)
     }
 
     pub fn opt_float(&self, name: &str) -> Option<f64> {
-        pyval::number_like(self.get(name))
+        values::number(self.get(name))
     }
 
     pub fn str(&self, name: &str) -> &str {

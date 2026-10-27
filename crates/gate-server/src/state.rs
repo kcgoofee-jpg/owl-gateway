@@ -328,7 +328,7 @@ impl AppState {
             self.db
                 .set_setting(
                     "key_inactivity_grace_started_at",
-                    &gate_core::pyc::float_repr(now),
+                    &gate_core::primitives::float_text(now),
                 )
                 .await?;
             self.db
@@ -361,7 +361,8 @@ impl AppState {
         let mut values = Vec::new();
         for (name, lo, hi) in RUNTIME_LIMIT_BOUNDS {
             if let Some(raw) = self.db.get_setting(&format!("runtime_{name}")).await?
-                && let Some(v) = gate_core::pyc::parse_int(&raw).filter(|v| (lo..=hi).contains(v))
+                && let Some(v) =
+                    gate_core::primitives::parse_int(&raw).filter(|v| (lo..=hi).contains(v))
             {
                 values.push((name, v));
             }
@@ -418,7 +419,10 @@ impl AppState {
         let until = self.cooldown.block(retry_after, now);
         if let Err(e) = self
             .db
-            .set_setting("image_cooldown_until", &gate_core::pyc::float_repr(until))
+            .set_setting(
+                "image_cooldown_until",
+                &gate_core::primitives::float_text(until),
+            )
             .await
         {
             self.bugs.capture(crate::bugs::Report {

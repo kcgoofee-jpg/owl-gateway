@@ -238,7 +238,7 @@ pub fn official_value(resp: &Value, fetched_at: f64) -> Option<Value> {
         "image": text(&img, "status"),
         "image_code": img.get("status_code").cloned().unwrap_or_else(|| json!(0)),
         "updated": text(overall, "updated"),
-        "fetched_at": gate_core::pyval::float(fetched_at),
+        "fetched_at": gate_core::values::float(fetched_at),
     }))
 }
 

@@ -1,16 +1,12 @@
-/** 告警渠道；生成记录的原图存储（清空原图，在「生成记录」页用）。 */
+/** 告警渠道和请求来源保留设置。 */
 import { useState } from "preact/hooks";
-import { withUnit } from "../../../../lib/format";
-import { Badge, Button, Card, Notice } from "../../../../ui";
+import { Badge, Button, Card } from "../../../../ui";
 import { useAdmin } from "../../Admin";
 import { actOrError, ConfirmDialog } from "../_kit";
-import type { AuditInfo } from "../onboarding/core";
-import { bytesText } from "./core";
 import { withTone } from "./forms";
 
 export type ServerStatus = {
   alerts: { configured: boolean; sent: number };
-  audit: AuditInfo;
 };
 
 export function AlertsCard() {
@@ -53,39 +49,48 @@ export function AlertsCard() {
   );
 }
 
-export function StorageCard() {
-  const { data } = useAdmin<ServerStatus>("/admin/api/status");
-  const [open, setOpen] = useState(false);
+export function LogRetentionCard() {
+  const { data } = useAdmin<{ log_retention: { origin_keep_days: number } }>("/admin/api/ops");
+  const [days, setDays] = useState<string | null>(null);
+  const [saving, setSaving] = useState(false);
   if (!data) return null;
-  const a = data.audit;
+  const value = days ?? String(data.log_retention.origin_keep_days);
   return (
-    <Card title="清空原图" sub="只删原图，提示词和参数保留">
-      <div class="actions">
-        <Button variant="danger" disabled={a.image_bytes <= 0} onClick={() => setOpen(true)}>
-          清空服务器上的全部原图
-        </Button>
-      </div>
-      <ConfirmDialog
-        open={open}
-        title="清空全部原图？"
-        confirmText="清空"
-        danger
-        phrase="清空"
-        onClose={() => setOpen(false)}
-        onConfirm={() =>
-          actOrError<{ purged: number }>(
-            "POST",
-            "/admin/api/audit/purge-images",
-            { confirm: "清空" },
-            (r) => `已清空 ${withUnit(r.purged, "张原图")}`,
-          )
-        }
+    <Card
+      title="请求来源保留"
+      sub="只影响请求日志里的 IP 和客户端信息；0 表示长期保留。提示词固定保存 30 天。"
+    >
+      <form
+        onSubmit={async (e) => {
+          e.preventDefault();
+          setSaving(true);
+          const ok = await actOrError(
+            "PUT",
+            "/admin/api/ops/log-retention",
+            { origin_keep_days: Number(value) },
+            "请求来源保留设置已保存",
+          );
+          setSaving(false);
+          if (ok) setDays(null);
+        }}
       >
-        <Notice tone="danger">
-          将删除服务器上的全部原图（当前占用 {bytesText(a.image_bytes)}
-          ），且无法恢复。提示词和参数保留。
-        </Notice>
-      </ConfirmDialog>
+        <label class="field">
+          IP / UA 保留天数
+          <input
+            class="input"
+            type="number"
+            min="0"
+            max="365"
+            step="1"
+            required
+            value={value}
+            onInput={(e) => setDays(e.currentTarget.value)}
+          />
+        </label>
+        <Button type="submit" disabled={saving || days === null}>
+          保存保留设置
+        </Button>
+      </form>
     </Card>
   );
 }

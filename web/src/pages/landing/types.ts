@@ -101,11 +101,8 @@ export interface MyRequest {
   remaining_anlas?: number;
   remaining_v5?: number;
   remaining_legacy?: number;
-  /** True only when the retained audit store still has an image for this key and RID. */
-  image_available?: boolean;
+  /** Public correlation token for diagnostics. */
   correlation_id?: string;
-  /** Opaque owner-scoped URL generated from the durable internal request link. */
-  image_url?: string | null;
   images: number;
   /** 成员自己花的 Anlas（本站账号代付的记 0） */
   anlas: number;

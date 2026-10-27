@@ -1,6 +1,5 @@
 //! 合成演示数据（公开仓库：全部是假的）。
 //!
-//! 只通过 gate-db 的方法写库（整个项目只有 gate-db 写 SQL）。内容是旧版 `seed_demo.py`（见标签 py-final）的超集：
 //! 它建了 8 把带名字的 Key、各自的 Discord 领取记录和 400 条用量日志；这里在此之上补了计数器、
 //! 生成记录、捐赠、券、黑名单、状态页事件、操作日志和状态码统计，让后台每一页都有东西可看。
 //!
@@ -112,9 +111,7 @@ pub const DEV_UPSTREAM_TOKEN: &str = "pst-devdevdevdevdevdevdev";
 pub async fn seed(db: &Db, clock: &Clock, now: f64) -> Result<Seeded> {
     let mut rng = StdRng::seed_from_u64(7);
     let keys = seed_members(db, now).await?;
-    let thumb =
-        gate_server::audit::make_thumbnail(&gate_testkit::tiny_png()).context("生成缩略图失败")?;
-    seed_usage(db, clock, now, &keys, &thumb, &mut rng).await?;
+    seed_usage(db, clock, now, &keys, &mut rng).await?;
     seed_member_extras(db, now, &keys).await?;
     seed_records(db, now).await?;
     seed_site(db, now).await?;
@@ -236,7 +233,6 @@ async fn seed_usage(
     clock: &Clock,
     now: f64,
     keys: &[SeededKey],
-    thumb: &[u8],
     rng: &mut StdRng,
 ) -> Result<()> {
     let audit_from = clock
@@ -325,7 +321,6 @@ async fn seed_usage(
                             status: "ok",
                             prompt,
                             negative,
-                            thumb: Some(thumb),
                             ..Default::default()
                         },
                         e.ts,
@@ -607,7 +602,7 @@ mod tests {
                     .await
                     .unwrap();
             assert_eq!(audited, logged);
-            assert_eq!(db.audit_image_bytes().await.unwrap(), 0);
+            assert!(!db.path().parent().unwrap().join("audit_images").exists());
 
             // 会话成员没有券
             let member = seeded.keys[0].id;

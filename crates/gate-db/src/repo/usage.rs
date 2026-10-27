@@ -1,8 +1,8 @@
 //! 用量日志：成功记账、拒绝 / 失败日志、各类统计查询。
 
-use super::{INSERT_LOG, LOG_COLUMNS, PyMap, SqlValue, UPSERT_COUNTERS, marks};
+use super::{INSERT_LOG, LOG_COLUMNS, OrderedPairs, SqlValue, UPSERT_COUNTERS, marks};
 use crate::{Db, Result, value};
-use gate_core::pyc;
+use gate_core::primitives;
 use rusqlite::{OptionalExtension, params};
 use serde::Serialize;
 use serde_json::Value;
@@ -108,7 +108,7 @@ impl ClientHints {
     /// 写库用：按列长截断，空串 → NULL。顺序同 `INSERT_LOG` 末尾的 xrw, lang, chua, hfp, bid, origin。
     pub(crate) fn columns(&self) -> [Option<String>; 6] {
         let col = |s: &str, n: usize| {
-            let t = pyc::take_chars(s.trim(), n);
+            let t = primitives::take_chars(s.trim(), n);
             (!t.is_empty()).then(|| t.to_string())
         };
         [
@@ -203,23 +203,23 @@ fn insert_usage_log(tx: &rusqlite::Transaction<'_>, l: &NewLog, now: f64) -> rus
         params![
             now,
             l.key_id,
-            pyc::take_chars(&l.key_name, 80),
+            primitives::take_chars(&l.key_name, 80),
             l.kind,
-            pyc::take_chars(&l.model, 80),
+            primitives::take_chars(&l.model, 80),
             l.status,
             l.images,
             l.anlas,
             l.tokens,
-            pyc::take_chars(&l.detail, 500),
+            primitives::take_chars(&l.detail, 500),
             l.unconfirmed_anlas,
             l.wait_ms.max(0),
             l.dur_ms.max(0),
             l.up_status,
-            pyc::take_chars(&l.rid, 16),
-            pyc::take_chars(&l.reason, 24),
+            primitives::take_chars(&l.rid, 16),
+            primitives::take_chars(&l.reason, 24),
             l.token_id,
-            pyc::take_chars(&l.client, 160),
-            pyc::take_chars(&l.ip, 64),
+            primitives::take_chars(&l.client, 160),
+            primitives::take_chars(&l.ip, 64),
             h[0],
             h[1],
             h[2],
@@ -473,16 +473,16 @@ impl Db {
                     s.images,
                     s.anlas + s.site_paid_anlas,
                     s.tokens,
-                    pyc::take_chars(&s.detail, 500),
+                    primitives::take_chars(&s.detail, 500),
                     s.unconfirmed_anlas,
                     s.wait_ms.max(0),
                     s.dur_ms.max(0),
                     s.up_status,
-                    pyc::take_chars(&s.rid, 16),
+                    primitives::take_chars(&s.rid, 16),
                     "",
                     s.token_id,
-                    pyc::take_chars(&s.client, 160),
-                    pyc::take_chars(&s.ip, 64),
+                    primitives::take_chars(&s.client, 160),
+                    primitives::take_chars(&s.ip, 64),
                     h[0],
                     h[1],
                     h[2],
@@ -687,7 +687,6 @@ impl Db {
         self.read(move |c| {
             let mut stmt = c.prepare(
                 "SELECT l.id, l.rid, l.ts, l.kind, l.model, l.status, l.images, l.anlas, l.wait_ms, l.dur_ms, l.reason, l.detail, \
-                 (EXISTS(SELECT 1 FROM audit_request_links al JOIN generation_audit a ON a.id=al.audit_id WHERE al.request_id=u.request_id AND a.key_id=l.key_id AND a.status='ok' AND (a.image IS NOT NULL OR a.image_file IS NOT NULL)) = 1) AS image_available, \
                  COALESCE(s.delivery_state,'unknown') AS delivery_state, s.status AS settlement_status, \
                  COALESCE(s.anlas,0) AS remaining_anlas, COALESCE(s.v5,0) AS remaining_v5, COALESCE(s.legacy,0) AS remaining_legacy, u.request_id, COALESCE(s.correlation_id,'') AS correlation_id \
                  FROM usage_log l LEFT JOIN usage_request_links u ON u.usage_log_id=l.id LEFT JOIN request_settlements s ON s.request_id=u.request_id \
@@ -769,7 +768,7 @@ impl Db {
         &self,
         since: f64,
         reason_label: &(dyn Fn(&str, &str) -> String + Sync),
-    ) -> Result<PyMap<i64, Milestone>> {
+    ) -> Result<OrderedPairs<i64, Milestone>> {
         // 先在读连接里取回原始分组行，再在写侧合并（reason_label 不必跨线程）
         type RawWhy = (i64, String, String, i64);
         type RawImg = (i64, Option<f64>, Option<f64>);
@@ -814,8 +813,8 @@ impl Db {
             })
             .await?;
 
-        let mut out: PyMap<i64, Milestone> = Vec::new();
-        fn slot(out: &mut PyMap<i64, Milestone>, key: i64) -> &mut Milestone {
+        let mut out: OrderedPairs<i64, Milestone> = Vec::new();
+        fn slot(out: &mut OrderedPairs<i64, Milestone>, key: i64) -> &mut Milestone {
             let idx = match out.iter().position(|(k, _)| *k == key) {
                 Some(i) => i,
                 None => {
@@ -844,7 +843,7 @@ impl Db {
             slot(&mut out, key_id).rejected_24h = n;
         }
         // 被拒原因：同一句话（只差数字）合并，按次数降序取前 3（次数相同保持首次出现的顺序）
-        let mut by_key: PyMap<i64, Vec<(String, i64)>> = Vec::new();
+        let mut by_key: OrderedPairs<i64, Vec<(String, i64)>> = Vec::new();
         for (key_id, code, detail, n) in why {
             let label = reason_label(&code, &detail);
             let idx = match by_key.iter().position(|(k, _)| *k == key_id) {
@@ -933,7 +932,10 @@ impl Db {
     }
 
     /// 每把 Key 成功生成的张数（含流式完成的图）。
-    pub async fn generated_image_totals(&self, key_id: Option<i64>) -> Result<PyMap<i64, i64>> {
+    pub async fn generated_image_totals(
+        &self,
+        key_id: Option<i64>,
+    ) -> Result<OrderedPairs<i64, i64>> {
         self.read(move |c| {
             let mut sql = "SELECT key_id, COALESCE(SUM(images), 0) AS images \
                            FROM usage_log \
@@ -997,14 +999,13 @@ impl Db {
                 [day_ago],
                 |r| value::f64_opt(r, 0),
             )?;
-            // Python `if x`：None 与 0.0 都是假
-            let truthy = |v: Option<f64>| v.filter(|x| *x != 0.0);
-            let site_avg = truthy(site).unwrap_or(9000.0);
+            let enabled = |v: Option<f64>| v.filter(|x| *x != 0.0);
+            let site_avg = enabled(site).unwrap_or(9000.0);
             Ok(ImageTiming {
                 count: cnt,
-                avg_dur_s: truthy(avg_dur).map(|x| pyc::round(x / 1000.0, 1)),
-                avg_wait_s: truthy(avg_wait).map(|x| pyc::round(x / 1000.0, 1)),
-                site_avg_dur_s: pyc::round(site_avg / 1000.0, 1),
+                avg_dur_s: enabled(avg_dur).map(|x| primitives::round(x / 1000.0, 1)),
+                avg_wait_s: enabled(avg_wait).map(|x| primitives::round(x / 1000.0, 1)),
+                site_avg_dur_s: primitives::round(site_avg / 1000.0, 1),
             })
         })
         .await

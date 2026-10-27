@@ -17,7 +17,7 @@ use axum::extract::{Path, Query, State};
 use axum::http::{HeaderMap, HeaderValue, StatusCode};
 use axum::response::Response;
 use axum::routing::{get, post};
-use gate_core::pyval;
+use gate_core::values;
 use serde_json::json;
 use std::collections::HashMap;
 
@@ -28,10 +28,6 @@ pub fn router() -> Router<AppState> {
         .route("/logout", post(logout))
         .route("/public/me", get(public_me))
         .route("/public/me/requests", get(my_requests))
-        .route(
-            "/public/me/requests/image/{request_id}",
-            get(my_request_image),
-        )
         .route("/public/me/coupons/{coupon_id}/use", post(use_my_coupon))
 }
 
@@ -145,7 +141,7 @@ async fn login_callback(
             "[web-login] callback rejected: code={} state_ok={} err={}",
             if code.is_empty() { 'n' } else { 'y' },
             if signed.is_some() || same { 'y' } else { 'n' },
-            gate_core::pyc::take_chars(q.get("error").map_or("", String::as_str), 40)
+            gate_core::primitives::take_chars(q.get("error").map_or("", String::as_str), 40)
         );
         return Ok(redirect("/?login=failed"));
     };
@@ -351,43 +347,8 @@ async fn my_requests(
     }))))
 }
 
-/// Retrieve an image only when the current member's selected key owns the successful request.
-/// The audit store's existing retention and size limits apply.
-async fn my_request_image(
-    State(state): State<AppState>,
-    headers: HeaderMap,
-    Path(request_id): Path<String>,
-) -> ApiResult {
-    let Some((_, Some(key))) = member_state(&state, &headers).await? else {
-        return Err(HttpError::new(401, "未登录或你还没有 Key").into());
-    };
-    if request_id.len() != 32 || !request_id.bytes().all(|b| b.is_ascii_hexdigit()) {
-        return Err(HttpError::new(404, "没有找到这张已保存的图片").into());
-    }
-    let Some((image, media)) = state.db.member_audit_image(key.id(), &request_id).await? else {
-        return Err(
-            HttpError::new(404, "没有找到这张已保存的图片（可能未开启保存或已过期）").into(),
-        );
-    };
-    let mut response = Response::new(Body::from(image));
-    *response.status_mut() = StatusCode::OK;
-    response.headers_mut().insert(
-        "content-type",
-        HeaderValue::from_str(&media)
-            .unwrap_or(HeaderValue::from_static("application/octet-stream")),
-    );
-    response
-        .headers_mut()
-        .insert("cache-control", HeaderValue::from_static("no-store"));
-    Ok(response)
-}
-
 /// 一行请求日志 → 成员看到的一条（`rid` = 请求编号，与错误响应的 request_id / x-request-id、后台请求日志的「编号」同一个）：拒绝 / 失败的说明去掉开头的状态码另放；站付的图成员花的 Anlas 记 0。
 fn my_request_item(r: &serde_json::Value) -> serde_json::Value {
-    let image_available = r["image_available"]
-        .as_bool()
-        .or_else(|| r["image_available"].as_i64().map(|v| v != 0))
-        .unwrap_or(false);
     let detail = r["detail"].as_str().unwrap_or("");
     let (code, message) = match detail.split_once(' ') {
         Some((c, rest)) if c.len() == 3 && c.bytes().all(|b| b.is_ascii_digit()) => {
@@ -426,24 +387,12 @@ fn my_request_item(r: &serde_json::Value) -> serde_json::Value {
         "remaining_anlas": r["remaining_anlas"],
         "remaining_v5": r["remaining_v5"],
         "remaining_legacy": r["remaining_legacy"],
-        "image_available": image_available,
         "correlation_id": r["correlation_id"],
-        "image_url": if image_available {
-            r["request_id"].as_str().map(|id| format!("/public/me/requests/image/{id}"))
-        } else { None },
     })
 }
 
-/// FastAPI 的路径参数 `coupon_id: int` 解析失败。
-fn int_path_error(raw: &str) -> HttpError {
-    HttpError {
-        status: 422,
-        detail: json!([{
-            "type": "int_parsing", "loc": ["path", "coupon_id"],
-            "msg": "Input should be a valid integer, unable to parse string as an integer",
-            "input": raw,
-        }]),
-    }
+fn int_path_error(_raw: &str) -> HttpError {
+    HttpError::new(422, "coupon_id 必须是整数")
 }
 
 /// 成员在首页用掉一张重置券：重置券上写明的几项（默认只有 V4.5；V5 / Anlas 要发券时勾选），和站长后台「重置今日额度」一样。
@@ -475,8 +424,8 @@ async fn use_my_coupon(
         .await?;
     let note = c
         .get("note")
-        .filter(|n| pyval::truthy(n))
-        .map(gate_core::pyext::py_str);
+        .filter(|n| values::enabled(n))
+        .map(gate_core::validation::text);
     log_discord(
         &state,
         &discord_id,

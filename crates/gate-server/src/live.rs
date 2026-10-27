@@ -13,17 +13,17 @@ use crate::auth::site_flag;
 use crate::error::InternalError;
 use crate::state::AppState;
 use gate_core::features::{self, FEATURES};
-use gate_core::pyc;
-use gate_core::pyval;
+use gate_core::primitives;
 use gate_core::reasons::Reason;
 use gate_core::site_flags::ALGO_NOTICE;
+use gate_core::values;
 use serde_json::{Map, Value, json};
 
 fn public_algo_notice(custom: &str, mode: gate_core::v5_access::Mode) -> String {
     match mode {
         gate_core::v5_access::Mode::Restricted => "V5 当前仅授权成员可用。".to_string(),
         gate_core::v5_access::Mode::Closed => "V5 当前已关闭。".to_string(),
-        _ => pyc::take_chars(custom, 300).to_string(),
+        _ => primitives::take_chars(custom, 300).to_string(),
     }
 }
 use std::collections::HashMap;
@@ -193,7 +193,6 @@ pub async fn build(state: &AppState, now: f64) -> Result<Map<String, Value>, Int
         {
             let mut first: Option<&Reason> = None;
             for r in why.iter().flatten() {
-                // Python `min(key=...)`：并列取先出现的
                 if first.is_none_or(|f| wait_minutes(r.text()) < wait_minutes(f.text())) {
                     first = Some(r);
                 }
@@ -247,7 +246,7 @@ pub async fn build(state: &AppState, now: f64) -> Result<Map<String, Value>, Int
     );
     body.insert("members".into(), members);
     // 一个账号平均多久开始一张（可用账号的平均周期）；首页使用指南的「生图间隔」建议用
-    body.insert("cycle".into(), json!(pyc::round(cycle, 1)));
+    body.insert("cycle".into(), json!(primitives::round(cycle, 1)));
     body.insert(
         "rules".into(),
         // 3.0 删掉的字段：`base`（保底）、`borrow_open`（空闲借用）、
@@ -289,13 +288,16 @@ async fn build_meta(state: &AppState) -> Result<Map<String, Value>, InternalErro
             reg["slots_left"] = json!(left);
         }
     }
-    let algo = pyval::py_str(&site_flag(state, &ALGO_NOTICE).await?);
+    let algo = values::text(&site_flag(state, &ALGO_NOTICE).await?);
     let policy = crate::v5_access::evaluate(state, None).await?;
     let algo = public_algo_notice(&algo, policy.mode);
     let mut m = Map::new();
     m.insert("site".into(), json!(env.site_url.trim_end_matches('/')));
     m.insert("discord_invite".into(), json!(env.discord_invite_url));
-    m.insert("algo_notice".into(), json!(pyc::take_chars(&algo, 300)));
+    m.insert(
+        "algo_notice".into(),
+        json!(primitives::take_chars(&algo, 300)),
+    );
     m.insert(
         "key_inactivity_delete_days".into(),
         json!(env.key_inactivity_delete_days),
@@ -356,7 +358,7 @@ pub async fn build_status(state: &AppState) -> Result<Value, InternalError> {
         .filter(|r| r.active)
         .count();
     let env = &state.env;
-    let algo = pyval::py_str(&site_flag(state, &ALGO_NOTICE).await?);
+    let algo = values::text(&site_flag(state, &ALGO_NOTICE).await?);
     let policy = crate::v5_access::evaluate(state, None).await?;
     let algo = public_algo_notice(&algo, policy.mode);
     Ok(json!({
@@ -368,7 +370,7 @@ pub async fn build_status(state: &AppState) -> Result<Value, InternalError> {
             "label": FEATURES.iter().find(|(f, _)| f == n).map_or("", |(_, l)| *l),
         })).collect::<Vec<_>>(),
         "web_login": true,
-        "algo_notice": pyc::take_chars(&algo, 300),
+        "algo_notice": primitives::take_chars(&algo, 300),
         "discord_invite": env.discord_invite_url,
         "key_inactivity_delete_days": env.key_inactivity_delete_days,
         "limits": public_limits(state),
@@ -400,14 +402,13 @@ pub struct Snapshot {
     made: Instant,
 }
 
-/// 与 Starlette `JSONResponse` 相同的紧凑 JSON 文本。
 pub fn wire_text(v: &Value) -> String {
-    String::from_utf8(gate_core::pyjson::wire(v)).unwrap_or_default()
+    String::from_utf8(gate_core::json::wire(v)).unwrap_or_default()
 }
 
 fn hash_value(v: &Value) -> u64 {
     let mut h = std::collections::hash_map::DefaultHasher::new();
-    gate_core::pyjson::wire(v).hash(&mut h);
+    gate_core::json::wire(v).hash(&mut h);
     h.finish()
 }
 
@@ -447,7 +448,6 @@ impl Snapshot {
         }
     }
 
-    /// 不带 `me` 的 JSON 文本（紧凑、Python 浮点格式）。
     pub fn json(&self) -> &str {
         &self.json
     }

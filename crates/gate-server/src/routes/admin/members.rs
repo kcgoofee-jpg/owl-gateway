@@ -19,7 +19,7 @@ use crate::state::AppState;
 use axum::Router;
 use axum::extract::{Request, State};
 use axum::routing::{delete, get, patch, post, put};
-use gate_core::{features, pyc, pyext, pyval};
+use gate_core::{features, primitives, validation, values};
 use gate_db::repo::counters::Counter;
 use gate_db::repo::{
     INVITE_TAG, ROLE_INVITE, ROLE_LABELS, ROLE_REGULAR,
@@ -75,7 +75,7 @@ fn jget(row: &Value, name: &str) -> Value {
 }
 
 fn jflag(row: &Value, name: &str) -> bool {
-    row.get(name).is_some_and(pyval::truthy)
+    row.get(name).is_some_and(values::enabled)
 }
 
 fn role_label(role: &str) -> &'static str {
@@ -91,7 +91,7 @@ fn valid_role(role: &str) -> bool {
 
 /// `str(x).strip().lower()`
 fn norm_role(v: &str) -> String {
-    pyc::strip(v).to_lowercase()
+    primitives::strip(v).to_lowercase()
 }
 
 /// `gen_key("nai")`
@@ -138,7 +138,7 @@ pub(crate) fn discord_avatar_url(id: &str, avatar: Option<&str>) -> String {
     match avatar.filter(|a| !a.is_empty()) {
         Some(a) => format!("https://cdn.discordapp.com/avatars/{id}/{a}.png?size=64"),
         None => {
-            let n = pyext::py_int_str(id).unwrap_or(0);
+            let n = validation::integer_string(id).unwrap_or(0);
             format!(
                 "https://cdn.discordapp.com/embed/avatars/{}.png",
                 (n >> 22).rem_euclid(6)
@@ -186,7 +186,7 @@ fn key_json(row: &Value, c: &Counter, generated: i64, role: Option<&str>) -> Val
         "allow_img2img": jflag(row, "allow_img2img"),
         "exclude_global_v5": jflag(row, "exclude_global_v5"),
         "image_model_scope": jget(row, "image_model_scope"),
-        "quota_auto": pyext::num_eq_int(row.get("quota_auto"), 1),
+        "quota_auto": validation::num_eq_int(row.get("quota_auto"), 1),
         "role": role,
         "role_label": role_label(role),
         "features": features::key_features(row),
@@ -197,7 +197,7 @@ fn key_json(row: &Value, c: &Counter, generated: i64, role: Option<&str>) -> Val
             "images": c.images,
             "generated_images_total": generated,
             "legacy_free_images": c.legacy_free_images,
-            "anlas": pyval::float(pyc::round(anlas, 2)),
+            "anlas": values::float(primitives::round(anlas, 2)),
             "v5": c.v5,
             "requests": c.requests,
         },
@@ -272,8 +272,8 @@ async fn create_invite_key(State(state): State<AppState>, _s: AdminSession) -> R
         .iter()
         .filter_map(|n| {
             let rest = n.strip_prefix("邀请-")?;
-            let digits: String = rest.chars().take_while(|c| pyext::is_nd(*c)).collect();
-            pyc::parse_int(&digits)
+            let digits: String = rest.chars().take_while(|c| validation::is_nd(*c)).collect();
+            primitives::parse_int(&digits)
         })
         .max()
         .unwrap_or(0);
@@ -371,10 +371,10 @@ async fn create_key(State(state): State<AppState>, _s: AdminSession, req: Reques
     } else {
         "legacy"
     };
-    let truthy = |name: &str| body.get(name).is_some_and(pyval::truthy);
+    let enabled = |name: &str| body.get(name).is_some_and(values::enabled);
     // 配额检查只认 > 0 的上限：allow_anlas 开着而日 / 月上限都是 0 = 个人 Anlas 完全无上限，
     // 可无限烧共享账号的付费点数（422 文案写「0 = 不限」，但实际 0 + 0 会被拒——历史如此，文案不动）
-    if truthy("allow_anlas")
+    if enabled("allow_anlas")
         && !body.contains_key("quota_limits")
         && daily_anlas <= 0.0
         && monthly_anlas <= 0.0
@@ -382,14 +382,14 @@ async fn create_key(State(state): State<AppState>, _s: AdminSession, req: Reques
         return Err(http(422, ANLAS_CAP));
     }
     let role = match body.get("role") {
-        Some(v) if pyval::truthy(v) => Some(norm_role(&pyext::py_str(v))),
+        Some(v) if values::enabled(v) => Some(norm_role(&validation::text(v))),
         _ => None,
     };
     if role.as_deref().is_some_and(|r| !valid_role(r)) {
         return Err(http(422, ROLE_HINT));
     }
     let name = {
-        let n = pyc::take_chars(pyc::strip(&pstr(&body, "name")), 60).to_string();
+        let n = primitives::take_chars(primitives::strip(&pstr(&body, "name")), 60).to_string();
         if n.is_empty() {
             "未命名".to_string()
         } else {
@@ -409,7 +409,7 @@ async fn create_key(State(state): State<AppState>, _s: AdminSession, req: Reques
     }).transpose()?.unwrap_or_else(|| serde_json::to_string(
         &gate_core::quota_limits::MemberLimits::legacy(daily_images, daily_v5, daily_anlas, monthly_anlas, -1)
     ).expect("valid manual quota modes"));
-    if truthy("allow_anlas")
+    if enabled("allow_anlas")
         && let Some(v) = body.get("quota_limits")
     {
         let limits = gate_core::quota_limits::MemberLimits::from_value(v).expect("validated above");
@@ -434,9 +434,9 @@ async fn create_key(State(state): State<AppState>, _s: AdminSession, req: Reques
         // 文本接口已删除：列保留（只增不减），新 Key 写 0，不再读
         daily_text_tokens: 0,
         rpm,
-        allow_anlas: truthy("allow_anlas"),
-        allow_img2img: truthy("allow_img2img"),
-        exclude_global_v5: truthy("exclude_global_v5"),
+        allow_anlas: enabled("allow_anlas"),
+        allow_img2img: enabled("allow_img2img"),
+        exclude_global_v5: enabled("exclude_global_v5"),
         image_model_scope: scope.to_string(),
         expires_at,
         features: new_key_features(st, &body).await?,
@@ -509,7 +509,7 @@ async fn patch_key(
                 "image_model_scope",
                 "features",
             ] {
-                pyval::pop(&mut body, k);
+                values::pop(&mut body, k);
             }
         }
     }
@@ -526,9 +526,9 @@ async fn patch_key(
     }
     let mut fields: Map<String, Value> = Map::new();
     if let Some(v) = body.get("name") {
-        let n = pyc::take_chars(
-            pyc::strip(&if pyval::truthy(v) {
-                pyext::py_str(v)
+        let n = primitives::take_chars(
+            primitives::strip(&if values::enabled(v) {
+                validation::text(v)
             } else {
                 String::new()
             }),
@@ -541,7 +541,7 @@ async fn patch_key(
         );
     }
     if let Some(v) = body.get("enabled") {
-        fields.insert("enabled".into(), Value::Bool(pyval::truthy(v)));
+        fields.insert("enabled".into(), Value::Bool(values::enabled(v)));
     }
     if let Some(v) = body.get("daily_images") {
         fields.insert(
@@ -552,7 +552,7 @@ async fn patch_key(
     if let Some(v) = body.get("daily_anlas") {
         fields.insert(
             "daily_anlas".into(),
-            pyval::float(strict_float(v, 0.0, 9999.0, "daily_anlas")?),
+            values::float(strict_float(v, 0.0, 9999.0, "daily_anlas")?),
         );
     }
     if let Some(v) = body.get("daily_v5") {
@@ -564,7 +564,7 @@ async fn patch_key(
     if let Some(v) = body.get("monthly_anlas") {
         fields.insert(
             "monthly_anlas".into(),
-            pyval::float(strict_float(v, 0.0, 99_999.0, "monthly_anlas")?),
+            values::float(strict_float(v, 0.0, 99_999.0, "monthly_anlas")?),
         );
     }
     if let Some(v) = body.get("quota_limits") {
@@ -609,12 +609,12 @@ async fn patch_key(
     }
     for k in ["allow_anlas", "allow_img2img", "exclude_global_v5"] {
         if let Some(v) = body.get(k) {
-            fields.insert(k.into(), Value::Bool(pyval::truthy(v)));
+            fields.insert(k.into(), Value::Bool(values::enabled(v)));
         }
     }
     if let Some(v) = body.get("role") {
-        let role = norm_role(&if pyval::truthy(v) {
-            pyext::py_str(v)
+        let role = norm_role(&if values::enabled(v) {
+            validation::text(v)
         } else {
             String::new()
         });
@@ -645,7 +645,7 @@ async fn patch_key(
         fields.insert(
             "expires_at".into(),
             if d > 0 {
-                pyval::float(st.now() + d as f64 * 86400.0)
+                values::float(st.now() + d as f64 * 86400.0)
             } else {
                 Value::Null
             },
@@ -657,7 +657,7 @@ async fn patch_key(
         fields.insert("exclude_global_v5".into(), json!(false));
         fields.insert("features".into(), Value::Null);
         fields.insert("allow_anlas".into(), json!(false));
-        fields.insert("daily_anlas".into(), pyval::float(0.0));
+        fields.insert("daily_anlas".into(), values::float(0.0));
     }
     // 同 create_key：开 Anlas 必须留一道上限，日 / 月全为 0 等于个人无上限（2026-10-13 审查）
     let pick = |name: &str| {
@@ -667,8 +667,8 @@ async fn patch_key(
             .cloned()
             .unwrap_or(Value::Null)
     };
-    let le0 = |v: Value| pyval::number_like(&v).is_some_and(|x| x <= 0.0);
-    if pyval::truthy(&pick("allow_anlas"))
+    let le0 = |v: Value| values::number(&v).is_some_and(|x| x <= 0.0);
+    if values::enabled(&pick("allow_anlas"))
         && !body.contains_key("quota_limits")
         && le0(pick("daily_anlas"))
         && le0(pick("monthly_anlas"))
@@ -690,7 +690,7 @@ async fn patch_key(
         } else if quota_s == Some("manual") || quota_fields_changed {
             -1
         } else {
-            pyval::int_like(before.get("quota_auto").unwrap_or(&Value::Null)).unwrap_or(1)
+            values::int_like(before.get("quota_auto").unwrap_or(&Value::Null)).unwrap_or(1)
         };
         let number = |name: &str| {
             fields
@@ -699,10 +699,10 @@ async fn patch_key(
                 .cloned()
                 .unwrap_or(Value::Null)
         };
-        let images = pyval::int_like(&number("daily_images")).unwrap_or(0);
-        let v5 = pyval::int_like(&number("daily_v5")).unwrap_or(0);
-        let daily_anlas = pyval::number_like(&number("daily_anlas")).unwrap_or(0.0);
-        let monthly = pyval::number_like(&number("monthly_anlas")).unwrap_or(0.0);
+        let images = values::int_like(&number("daily_images")).unwrap_or(0);
+        let v5 = values::int_like(&number("daily_v5")).unwrap_or(0);
+        let daily_anlas = values::number(&number("daily_anlas")).unwrap_or(0.0);
+        let monthly = values::number(&number("monthly_anlas")).unwrap_or(0.0);
         let modes =
             gate_core::quota_limits::MemberLimits::legacy(images, v5, daily_anlas, monthly, auto);
         fields.insert("quota_limits".into(), json!(modes));
@@ -721,7 +721,7 @@ async fn patch_key(
             .any(|k| {
                 fields
                     .get(*k)
-                    .is_some_and(|v| !pyval::py_eq(v, before.get(*k).unwrap_or(&Value::Null)))
+                    .is_some_and(|v| !values::equal(v, before.get(*k).unwrap_or(&Value::Null)))
             });
         if quota_mode_auto || quota_changed {
             // 手动改了额度或模型 → 这把 Key 由站长管理（-1），动态额度算法不再覆盖；选「交给算法」恢复为 1 并立即重算
@@ -731,7 +731,7 @@ async fn patch_key(
             if quota_mode_auto && let Err(e) = crate::jobs::quota::run_now(&st).await {
                 let (ty, msg) = match &e {
                     crate::error::ApiError::Internal(i) => ("InternalError", i.0.clone()),
-                    crate::error::ApiError::Http(h) => ("HTTPException", pyval::py_str(&h.detail)),
+                    crate::error::ApiError::Http(h) => ("HTTPException", values::text(&h.detail)),
                     crate::error::ApiError::Gate(g) => ("GateError", g.message.clone()),
                 };
                 st.bugs.capture(crate::bugs::Report {
@@ -775,7 +775,7 @@ async fn switch_key_role(
         &st.db,
         "站长",
         "修改账号身份组",
-        &format!("Key #{key_id} {}", pyval::py_str(&jget(&key, "name"))),
+        &format!("Key #{key_id} {}", values::text(&jget(&key, "name"))),
         &format!("切换为「{label}」{exemption}"),
         true,
         st.now(),
@@ -836,12 +836,14 @@ async fn bind_discord(
     req: Request,
 ) -> R {
     let (_, body) = json_of(req).await?;
-    let discord_id = pyc::strip(&pstr(&body, "discord_id")).to_string();
-    if !gate_core::pyext::is_decimal(&discord_id) {
+    let discord_id = primitives::strip(&pstr(&body, "discord_id")).to_string();
+    if !gate_core::validation::is_decimal(&discord_id) {
         return Err(http(422, "Discord ID 必须是纯数字"));
     }
-    let username = pyc::take_chars(pyc::strip(&pstr(&body, "username")), 80).to_string();
-    let display_name = pyc::take_chars(&pstr_or(&body, "display_name", &username), 80).to_string();
+    let username =
+        primitives::take_chars(primitives::strip(&pstr(&body, "username")), 80).to_string();
+    let display_name =
+        primitives::take_chars(&pstr_or(&body, "display_name", &username), 80).to_string();
     let st = state.clone();
     let Some(row) = load_key(&st, key_id).await? else {
         return Err(http(404, NO_KEY));
@@ -885,7 +887,7 @@ async fn bind_discord(
         }
         BindOutcome::Bound(reg) => reg,
     };
-    let old_name = pyval::py_str(&jget(&row, "name"));
+    let old_name = values::text(&jget(&row, "name"));
     // 读不到资料时日志和以前一样；读到了再注明来源和改名
     let note = match &profile.key_name {
         Some(n) if *n != old_name => format!("；已从 Discord 读取资料，Key 名改为「{n}」"),
@@ -940,8 +942,8 @@ async fn give_coupon(
     if load_key(&st, key_id).await?.is_none() {
         return Err(http(404, NO_KEY));
     }
-    let note = pyc::take_chars(&pstr(&body, "note"), 200).to_string();
-    let by = pyc::take_chars(&pstr_or(&body, "by", "站长"), 40).to_string();
+    let note = primitives::take_chars(&pstr(&body, "note"), 200).to_string();
+    let by = primitives::take_chars(&pstr_or(&body, "by", "站长"), 40).to_string();
     let scope = reset_scope_of(&body).canonical();
     let c = st
         .db
@@ -1009,12 +1011,15 @@ async fn list_bans(State(state): State<AppState>, _s: AdminSession, q: AdminQuer
 async fn create_ban(State(state): State<AppState>, _s: AdminSession, req: Request) -> R {
     let (_, body) = json_of(req).await?;
     let st = state.clone();
-    let discord_id = pyc::strip(&pstr(&body, "discord_id")).to_string();
-    if !gate_core::pyext::is_decimal(&discord_id) {
+    let discord_id = primitives::strip(&pstr(&body, "discord_id")).to_string();
+    if !gate_core::validation::is_decimal(&discord_id) {
         return Err(http(422, "Discord ID 必须为纯数字"));
     }
-    let reason =
-        pyc::take_chars(pyc::strip(&pstr_or(&body, "reason", "站长手动封禁")), 100).to_string();
+    let reason = primitives::take_chars(
+        primitives::strip(&pstr_or(&body, "reason", "站长手动封禁")),
+        100,
+    )
+    .to_string();
     match st.registration.clone() {
         Some(reg) => reg.ban(&discord_id, &reason, "站长").await?,
         None => {
@@ -1047,7 +1052,7 @@ async fn delete_ban(
     AdminPath(discord_id): AdminPath<String>,
 ) -> R {
     let st = state.clone();
-    let discord_id = pyc::strip(&discord_id).to_string();
+    let discord_id = primitives::strip(&discord_id).to_string();
     if !st.db.unban_discord(&discord_id).await? {
         return Err(http(404, "该账号不在黑名单中"));
     }
@@ -1090,17 +1095,19 @@ async fn put_key_tag(
     let (_, body) = json_of(req).await?;
     // `" ".join(str(...).split())[:12]`：任何空白折成一个空格
     let joined = pstr(&body, "tag")
-        .split(pyc::is_space)
+        .split(primitives::is_space)
         .filter(|w| !w.is_empty())
         .collect::<Vec<_>>()
         .join(" ");
-    let tag = pyc::take_chars(&joined, TAG_MAX_LEN).to_string();
+    let tag = primitives::take_chars(&joined, TAG_MAX_LEN).to_string();
     if tag.is_empty() {
         return Err(http(422, "标签不能为空"));
     }
-    let note = pyc::take_chars(pyc::strip(&pstr(&body, "note")), TAG_NOTE_MAX).to_string();
+    let note =
+        primitives::take_chars(primitives::strip(&pstr(&body, "note")), TAG_NOTE_MAX).to_string();
     let by = {
-        let b = pyc::take_chars(pyc::strip(&pstr_or(&body, "by", "站长")), 20).to_string();
+        let b = primitives::take_chars(primitives::strip(&pstr_or(&body, "by", "站长")), 20)
+            .to_string();
         if b.is_empty() {
             "站长".to_string()
         } else {
@@ -1144,22 +1151,19 @@ fn as_obj(v: &Value) -> &Obj {
     v.as_object().unwrap_or(&EMPTY)
 }
 
-/// Python `a + b`：整数相加仍是整数，有浮点则是浮点。
 fn num_add(a: &Value, b: &Value) -> Value {
     match (
         a.as_i64().filter(|_| !a.is_f64()),
         b.as_i64().filter(|_| !b.is_f64()),
     ) {
         (Some(x), Some(y)) => json!(x + y),
-        _ => pyval::float(
-            pyval::number_like(a).unwrap_or(0.0) + pyval::number_like(b).unwrap_or(0.0),
-        ),
+        _ => values::float(values::number(a).unwrap_or(0.0) + values::number(b).unwrap_or(0.0)),
     }
 }
 
 /// `x or 0`
 fn or0(v: &Value) -> Value {
-    if pyval::truthy(v) {
+    if values::enabled(v) {
         v.clone()
     } else {
         json!(0)
@@ -1167,7 +1171,7 @@ fn or0(v: &Value) -> Value {
 }
 
 fn fnum(v: &Value) -> f64 {
-    pyval::number_like(v).unwrap_or(0.0)
+    values::number(v).unwrap_or(0.0)
 }
 
 /// 站长点过「没问题」打的标签：24 小时内可确认的提醒不再算「要处理」。
@@ -1289,7 +1293,7 @@ async fn members(State(state): State<AppState>, _s: AdminSession, q: AdminQuery)
         .into_iter()
         .map(|(k, paused)| {
             let v = if paused > now {
-                pyval::float(paused)
+                values::float(paused)
             } else {
                 json!(0)
             };
@@ -1318,8 +1322,8 @@ async fn members(State(state): State<AppState>, _s: AdminSession, q: AdminQuery)
         let Some(rest) = target.strip_prefix("Key #") else {
             continue;
         };
-        let digits: String = rest.chars().take_while(|c| pyext::is_nd(*c)).collect();
-        let Some(id) = pyc::parse_int(&digits) else {
+        let digits: String = rest.chars().take_while(|c| validation::is_nd(*c)).collect();
+        let Some(id) = primitives::parse_int(&digits) else {
             continue;
         };
         let e = reset_map.entry(id).or_insert((0, 0.0));
@@ -1342,8 +1346,8 @@ async fn members(State(state): State<AppState>, _s: AdminSession, q: AdminQuery)
         let (images, v5, anlas, requests) =
             today_counters.get(&id).copied().unwrap_or((0, 0, 0.0, 0));
         let w = week.get(&id).cloned().unwrap_or(Value::Null);
-        let wi = |k: &str| pyval::number_like(&jget(&w, k)).map_or(0, |x| x as i64);
-        let wf = |k: &str| pyval::number_like(&jget(&w, k)).unwrap_or(0.0);
+        let wi = |k: &str| values::number(&jget(&w, k)).map_or(0, |x| x as i64);
+        let wf = |k: &str| values::number(&jget(&w, k)).unwrap_or(0.0);
         let my_tags = manual_tags.get(&id);
         let role = role_of(my_tags.is_some_and(|t| t.iter().any(|x| x.tag == INVITE_TAG)));
         let reg_row = reg.get(&id);
@@ -1377,17 +1381,17 @@ async fn members(State(state): State<AppState>, _s: AdminSession, q: AdminQuery)
         put("image_model_scope", jget(&row, "image_model_scope"));
         put(
             "quota_auto",
-            json!(pyext::num_eq_int(row.get("quota_auto"), 1)),
+            json!(validation::num_eq_int(row.get("quota_auto"), 1)),
         );
         put(
             "today",
-            json!({"images": images, "v5": v5, "anlas": pyval::float(pyc::round(anlas, 2)),
+            json!({"images": images, "v5": v5, "anlas": values::float(primitives::round(anlas, 2)),
                    "requests": requests}),
         );
         put(
             "week",
             json!({"images": wi("images"), "v5": wi("v5"),
-                   "anlas": pyval::float(pyc::round(wf("anlas"), 2)), "requests": wi("requests")}),
+                   "anlas": values::float(primitives::round(wf("anlas"), 2)), "requests": wi("requests")}),
         );
         put("total_images", json!(totals.get(&id).copied().unwrap_or(0)));
         // 筛选用：领取时间（Discord 领取优先，否则建 Key 时间）、首次 / 最近成功出图、24h 被拒次数
@@ -1416,7 +1420,7 @@ async fn members(State(state): State<AppState>, _s: AdminSession, q: AdminQuery)
             "reset_today",
             reset_map.get(&id).map_or(
                 Value::Null,
-                |(c, t)| json!({"count": c, "last_ts": pyval::float(*t)}),
+                |(c, t)| json!({"count": c, "last_ts": values::float(*t)}),
             ),
         );
         put(
@@ -1425,7 +1429,7 @@ async fn members(State(state): State<AppState>, _s: AdminSession, q: AdminQuery)
                 my_tags
                     .into_iter()
                     .flatten()
-                    .map(|t| json!({"tag": t.tag, "note": t.note, "by": t.by, "ts": pyval::float(t.ts)}))
+                    .map(|t| json!({"tag": t.tag, "note": t.note, "by": t.by, "ts": values::float(t.ts)}))
                     .collect(),
             ),
         );
@@ -1521,7 +1525,7 @@ async fn members(State(state): State<AppState>, _s: AdminSession, q: AdminQuery)
                 "last_used_at".into(),
                 if fnum(&b) > fnum(&a) { b } else { a },
             );
-            if pyval::truthy(&other["last_image_at"]) {
+            if values::enabled(&other["last_image_at"]) {
                 let a = or0(&head["last_image_at"]);
                 let b = other["last_image_at"].clone();
                 head.insert(
@@ -1529,9 +1533,9 @@ async fn members(State(state): State<AppState>, _s: AdminSession, q: AdminQuery)
                     if fnum(&b) > fnum(&a) { b } else { a },
                 );
             }
-            if pyval::truthy(&other["first_image_at"]) {
+            if values::enabled(&other["first_image_at"]) {
                 let b = other["first_image_at"].clone();
-                let a = if pyval::truthy(&head["first_image_at"]) {
+                let a = if values::enabled(&head["first_image_at"]) {
                     head["first_image_at"].clone()
                 } else {
                     b.clone()

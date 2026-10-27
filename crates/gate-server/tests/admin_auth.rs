@@ -28,11 +28,7 @@ const ENDPOINTS: &[(&str, &str)] = &[
     // 日志 / 记录 / 导出
     ("GET", "/logs"),
     ("GET", "/actions"),
-    ("GET", "/audit"),
-    ("GET", "/audit/1/thumb"),
-    ("GET", "/audit/1/image"),
-    ("GET", "/audit/export?key_id=1"),
-    ("POST", "/audit/purge-images"),
+    ("GET", "/prompts"),
     ("POST", "/ops/reset-all-keys"),
     // 待审（防滥用）
     ("GET", "/abuse"),
@@ -55,7 +51,7 @@ const ENDPOINTS: &[(&str, &str)] = &[
     ("GET", "/ops"),
     ("PUT", "/ops/registration"),
     ("PUT", "/ops/features"),
-    ("PUT", "/ops/audit"),
+    ("PUT", "/ops/log-retention"),
     ("GET", "/guard"),
     ("PUT", "/guard"),
     ("GET", "/discord-bot"),

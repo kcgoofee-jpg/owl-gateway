@@ -8,9 +8,8 @@
 //!   判定本身（[`check_decision`]）是纯函数。2.x 还读 `global_daily_anlas_until`（开放截止时间戳），
 //!   后台一直没有写入口，3.0 删除。
 //!
-//! 已知边界：`features_global` 里若有 Python 才认的裸 `NaN` / `Infinity`，serde_json 会当成坏 JSON（→ 全部开启）。
 
-use crate::{pyext, pyval};
+use crate::{validation, values};
 use serde_json::Value;
 use std::collections::BTreeMap;
 
@@ -88,7 +87,7 @@ pub fn parse_list(value: &Value) -> Option<Vec<String>> {
         return None;
     }
     Some(
-        pyext::py_str(value)
+        validation::text(value)
             .split(',')
             .filter(|n| FEATURES.iter().any(|(f, _)| f == n))
             .map(str::to_string)
@@ -121,7 +120,7 @@ where
 
 /// `key_features(key)`：`key` 是 `api_keys` 的一行（JSON 对象）；没有 `features` 列等同 NULL。
 pub fn key_features(key: &Value) -> Option<Vec<String>> {
-    pyval::get(key, "features").and_then(parse_list)
+    values::get(key, "features").and_then(parse_list)
 }
 
 /// `global_flags(db)` 的解析部分：`raw` 是 `features_global` 的取值（没有这一行 = None）。
@@ -138,7 +137,7 @@ pub fn parse_global_flags(raw: Option<&str>) -> Result<Flags, FeaturesError> {
     let Value::Object(saved) = saved else {
         return Err(FeaturesError::Attribute(format!(
             "'{}' object has no attribute 'get'",
-            pyext::type_name(&saved)
+            validation::type_name(&saved)
         )));
     };
     for (name, _) in FEATURES {
@@ -157,7 +156,7 @@ pub struct VibeAnlas {
 }
 
 fn has_anlas(key: &Value) -> bool {
-    pyval::get(key, "allow_anlas").is_some_and(pyval::truthy)
+    values::get(key, "allow_anlas").is_some_and(values::enabled)
 }
 
 /// 走到 `check` 里读全站 Anlas 设置的那个分支吗？服务层用它决定要不要去读 `site_settings`

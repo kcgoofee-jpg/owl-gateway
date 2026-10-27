@@ -1,6 +1,5 @@
 //! 服务日：每天 [`DAY_RESET_HOUR`]（7）点切换，时区 [`TZ`]（Asia/Shanghai）。两个都是代码常量，不读环境变量。
 //!
-//! 与 Python 版 `state.day / day_start / month`、`quota_algo` 里的 `time.mktime(strptime(day))`
 //! 逐位一致；时间戳一律是 Unix 秒（f64），由调用方传入，这里不读时钟。
 
 use jiff::{Timestamp, tz::TimeZone};
@@ -22,7 +21,6 @@ impl Clock {
         Self::new(TZ, DAY_RESET_HOUR)
     }
 
-    /// `tz` 是 IANA 名（如 "Asia/Shanghai"）；未知名字回落到 UTC（Python 的 ZoneInfo 会抛异常，
     /// 但配置层已保证这里拿到的是合法值）。`reset_hour` 夹在 0..=23。
     pub fn new(tz: &str, reset_hour: i64) -> Self {
         Self {

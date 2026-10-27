@@ -17,8 +17,8 @@ use bytes::Bytes;
 use futures::StreamExt;
 use gate_core::image_events::{ImageEventTracker, WireFormat, encode_image_event};
 use gate_core::policy;
-use gate_core::pyval::py_str;
 use gate_core::reasons;
+use gate_core::values::text;
 use gate_upstream::client::Callbacks;
 use serde_json::{Value, json};
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -30,7 +30,7 @@ use tokio_util::sync::CancellationToken;
 fn normalize_wire_format(raw: Option<&Value>) -> Result<WireFormat, GateError> {
     let token = match raw {
         None | Some(Value::Null) | Some(Value::Bool(_)) => return Ok(WireFormat::Sse),
-        Some(v) => gate_core::pyc::strip(&py_str(v)).to_lowercase(),
+        Some(v) => gate_core::primitives::strip(&text(v)).to_lowercase(),
     };
     match token.as_str() {
         "msgpack" | "messagepack" | "binary" => Ok(WireFormat::Msgpack),
@@ -565,11 +565,6 @@ async fn perform_stream(
                 &model,
                 if ok { "ok" } else { "error" },
                 &prep.body,
-                if completed > 0 {
-                    tracker.first_image().map(Bytes::copy_from_slice)
-                } else {
-                    None
-                },
             )
             .await;
         state.record_upstream(ok);

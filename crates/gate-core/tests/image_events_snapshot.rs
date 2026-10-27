@@ -2,11 +2,10 @@
 
 mod common;
 
-use common::{Tally, b64, bytes_of, depth_of, tag};
+use common::{Tally, b64, bytes_of};
 use gate_core::image_events::{
     ImageEventTracker, WireFormat, b64decode_strict, encode_image_event, image_envelope,
 };
-use gate_core::pymsgpack;
 use gate_snapshot::Case;
 use gate_snapshot::snapshot::check;
 use serde_json::{Value, json};
@@ -85,33 +84,6 @@ fn strict_base64_snapshot() {
     tally.assert_at_least(&[("ok", 10), ("rejected", 10)]);
 }
 
-/// 深度超过这个值的结果只记深度（`tag` 是递归实现，只用于深度不大的结果）。
-const TAG_MAX_DEPTH: usize = 64;
-
-#[test]
-fn unpackb_snapshot() {
-    let mut tally = Tally::default();
-    check(M, "image_events/unpackb", |c| {
-        Some(match pymsgpack::unpackb(&bytes_of(c.get("raw")?)) {
-            Ok(obj) => {
-                let depth = depth_of(&obj);
-                if depth > TAG_MAX_DEPTH {
-                    tally.add("deep");
-                    json!({"depth": depth})
-                } else {
-                    tally.add("ok");
-                    tag(&obj)
-                }
-            }
-            Err(e) => {
-                tally.add("rejected");
-                json!({"err": format!("{e:?}")})
-            }
-        })
-    });
-    tally.assert_at_least(&[("ok", 15), ("rejected", 10), ("deep", 1)]);
-}
-
 /// 一串 frames / feed / finish：每步记转发的帧、每帧后的已完成张数、是否报错、failed、completed、
 /// error_detail 和第一张图。
 #[test]
@@ -166,11 +138,7 @@ fn tracker_snapshot() {
                     Value::Array(frames.iter().map(|f| json!(f.completed_after)).collect()),
                 );
                 step.insert("detail".into(), json!(t.error_detail()));
-                step.insert(
-                    "first_image".into(),
-                    t.first_image()
-                        .map_or(Value::Null, |b| json!({"$b": b64(b)})),
-                );
+
                 Value::Object(step)
             })
             .collect();

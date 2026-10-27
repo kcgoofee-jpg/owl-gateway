@@ -26,19 +26,10 @@ async fn overview(State(state): State<AppState>, _s: AdminSession) -> ApiResult 
 
 /// 告警与记录功能的当前状态（不含任何密钥）。
 async fn server_status(State(state): State<AppState>, _s: AdminSession) -> ApiResult {
-    let (prompts, thumbs, days) = crate::audit::audit_flags(&state.db).await?;
     Ok(ok_json(&json!({
         "alerts": {
             "configured": state.alerter.configured(),
             "sent": state.alerter.sent.load(std::sync::atomic::Ordering::Relaxed),
-        },
-        "audit": {
-            "prompts": prompts,
-            "thumbs": thumbs,
-            "retention_days": days,
-            "image_cap_mb": crate::audit::audit_image_cap_mb(&state.db).await?,
-            "image_bytes": state.db.audit_image_bytes().await?,
-            "image_keep_hours": crate::audit::audit_image_keep_hours(&state.db).await?,
         },
     })))
 }

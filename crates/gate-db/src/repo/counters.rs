@@ -1,8 +1,8 @@
 //! 每日计数器、额度基线、全站汇总。
 
-use super::{PyMap, marks};
+use super::{OrderedPairs, marks};
 use crate::{Db, DbError, Result, value};
-use gate_core::{clock::Clock, pyc};
+use gate_core::{clock::Clock, primitives};
 use rusqlite::params;
 use serde::Serialize;
 use serde_json::Value;
@@ -257,7 +257,7 @@ impl Db {
     }
 
     /// 每个 Key 近一段时间的用量汇总（来自每日计数器）；值里带 key_id。
-    pub async fn member_usage(&self, since_day: &str) -> Result<PyMap<i64, Value>> {
+    pub async fn member_usage(&self, since_day: &str) -> Result<OrderedPairs<i64, Value>> {
         let since_day = since_day.to_string();
         self.read(move |c| {
             let mut stmt = c.prepare(
@@ -336,7 +336,7 @@ impl Db {
                     params![start, end],
                     |r| Ok((value::i64_or(r, 0, 0)?, value::f64_or(r, 1, 0.0)?)),
                 )?;
-                anomaly.push((n, pyc::round(sum, 2)));
+                anomaly.push((n, primitives::round(sum, 2)));
             }
 
             let sql = format!(
@@ -384,13 +384,13 @@ impl Db {
                  WHERE c.day=?",
                 &[&today],
             )?;
-            let month_prefix: String = pyc::take_chars(&today, 7).to_string();
+            let month_prefix: String = primitives::take_chars(&today, 7).to_string();
             let month_anlas = one_f(MONTH_ANLAS_ALL_SQL, &[&month_prefix])?;
             Ok(Overview {
                 today: OverviewToday {
                     images: today_images,
                     member_images,
-                    anlas: pyc::round(today_anlas, 2),
+                    anlas: primitives::round(today_anlas, 2),
                     text_tokens: today_tokens,
                     requests: today_requests,
                     v5: today_v5,
@@ -403,7 +403,7 @@ impl Db {
                 keys_active,
                 week,
                 month: OverviewMonth {
-                    anlas: pyc::round(month_anlas, 2),
+                    anlas: primitives::round(month_anlas, 2),
                     unconfirmed_requests: anomaly[1].0,
                     unconfirmed_anlas: anomaly[1].1,
                 },

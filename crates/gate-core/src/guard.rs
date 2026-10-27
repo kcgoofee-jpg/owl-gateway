@@ -19,9 +19,9 @@
 //!   （`upstream_token_counters` 表的 `images`，没有记录是 0）：服务层取出 `used` 传进来。
 
 use crate::clock::Clock;
-use crate::pyc;
-use crate::pyext::PyErr;
+use crate::primitives;
 use crate::reasons::{self, Reason};
+use crate::validation::ValidationError;
 use serde_json::{Map, Value};
 use std::collections::BTreeMap;
 
@@ -102,11 +102,12 @@ pub fn setting_key(name: &str) -> String {
 }
 
 /// 设置表里 `float(await get_setting(k, 0) or 0)` 的读法：没有 / 空串 → 0.0，读不懂 → ValueError。
-pub fn parse_setting_float(raw: Option<&str>) -> Result<f64, PyErr> {
+pub fn parse_setting_float(raw: Option<&str>) -> Result<f64, ValidationError> {
     match raw {
         None | Some("") => Ok(0.0),
-        Some(s) => pyc::parse_float(s)
-            .ok_or_else(|| PyErr::Value(format!("could not convert string to float: {s:?}"))),
+        Some(s) => primitives::parse_float(s).ok_or_else(|| {
+            ValidationError::InvalidValue(format!("could not convert string to float: {s:?}"))
+        }),
     }
 }
 
@@ -207,15 +208,18 @@ impl GuardCore {
     /// `load()` 的解析：`stored` 是库里 `guard_*` 键的原文（没有的键 = 没存，保持现值）。
     /// 每个字段 `max(low, min(high, int(float(raw))))`；读不懂（ValueError / TypeError）回到字段默认值；
     /// `inf` 同样返回 `Err`，前面已处理的字段保持已更新。
-    pub fn load_settings(&mut self, stored: &BTreeMap<String, String>) -> Result<(), PyErr> {
+    pub fn load_settings(
+        &mut self,
+        stored: &BTreeMap<String, String>,
+    ) -> Result<(), ValidationError> {
         for f in FIELDS {
             let Some(raw) = stored.get(&setting_key(f.name)) else {
                 continue;
             };
-            let v = match pyc::parse_float(raw) {
+            let v = match primitives::parse_float(raw) {
                 None => f.default,
                 Some(x) if x.is_nan() => f.default,
-                Some(x) => pyc::int_checked(x)?.clamp(f.min, f.max),
+                Some(x) => primitives::int_checked(x)?.clamp(f.min, f.max),
             };
             self.values.insert(f.name.to_string(), v);
         }
@@ -240,7 +244,7 @@ impl GuardCore {
 
     /// `save(body)` 的校验：不认识的字段忽略；每个值必须是整数（bool、字符串、小数都不行）且在范围内。
     /// 返回按请求体顺序的更新列表；不改内存。
-    pub fn validate_save(body: &Map<String, Value>) -> Result<Vec<(String, i64)>, PyErr> {
+    pub fn validate_save(body: &Map<String, Value>) -> Result<Vec<(String, i64)>, ValidationError> {
         let mut updates = Vec::new();
         for (name, value) in body {
             let Some(f) = FIELDS.iter().find(|f| f.name == name) else {
@@ -259,10 +263,13 @@ impl GuardCore {
                 _ => None,
             };
             let Some(int) = int else {
-                return Err(PyErr::Value(format!("{} 必须是整数", f.label)));
+                return Err(ValidationError::InvalidValue(format!(
+                    "{} 必须是整数",
+                    f.label
+                )));
             };
             if !(i128::from(f.min) <= int && int <= i128::from(f.max)) {
-                return Err(PyErr::Value(format!(
+                return Err(ValidationError::InvalidValue(format!(
                     "{} 必须在 {}～{} 之间",
                     f.label, f.min, f.max
                 )));
@@ -281,7 +288,7 @@ impl GuardCore {
 
     /// `save(body)` 整体：校验 + 改内存，并给出要写库的键值。
     /// 想「先写库后改内存」时，改用 `validate_save` + 写库 + `apply_updates`。
-    pub fn save(&mut self, body: &Map<String, Value>) -> Result<Saved, PyErr> {
+    pub fn save(&mut self, body: &Map<String, Value>) -> Result<Saved, ValidationError> {
         let updates = Self::validate_save(body)?;
         let writes = updates
             .iter()
@@ -316,12 +323,17 @@ impl GuardCore {
     }
 
     /// 全站熔断：在 `seconds` 秒内，所有上游账号都拒接新的出图任务。到点自动恢复。
-    pub fn trip_breaker(&mut self, seconds: f64, reason: &str, now: f64) -> Result<(), PyErr> {
+    pub fn trip_breaker(
+        &mut self,
+        seconds: f64,
+        reason: &str,
+        now: f64,
+    ) -> Result<(), ValidationError> {
         self.breaker_until = now + if seconds > 0.0 { seconds } else { 0.0 };
         self.breaker_reason = if reason.is_empty() {
             format!(
                 "NovelAI 连续出错，全站暂停出图 {} 秒，未扣费。到时自动恢复。",
-                pyc::int_checked(seconds)?
+                primitives::int_checked(seconds)?
             )
         } else {
             reason.to_string()

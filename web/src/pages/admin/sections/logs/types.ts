@@ -2,7 +2,7 @@
 
 export type Paged = { page: number; per_page: number; total: number; pages: number };
 
-export type AuditItem = {
+export type PromptRecord = {
   id: number;
   ts: number;
   /** 请求编号（与请求日志的「编号」相同）；10-23 之前的记录为空串 */
@@ -16,12 +16,10 @@ export type AuditItem = {
   negative: string;
   /** JSON 字符串：{params, char_prompts, char_negatives} */
   extra: string;
-  has_image: boolean | number;
-  has_thumb: boolean | number;
 };
-export type AuditResp = Paged & { items: AuditItem[] };
+export type PromptsResp = Paged & { items: PromptRecord[] };
 
-export type AuditExtra = {
+export type PromptMetadata = {
   params?: {
     width?: number;
     height?: number;

@@ -7,13 +7,13 @@
 {"in":{"args":[0,0,4096]},"out":[0,0]}
 {"in":{"args":[0,5,4096]},"out":[0,5]}
 {"in":{"args":[5,0,4096]},"out":[5,0]}
-{"in":{"args":[0,0,-1]},"out":{"err":"ZeroDivisionError","msg":"division by zero"}}
-{"in":{"args":[5,0,-1]},"out":{"err":"ZeroDivisionError","msg":"division by zero"}}
+{"in":{"args":[0,0,-1]},"out":{"err":"division_by_zero","msg":"division by zero"}}
+{"in":{"args":[5,0,-1]},"out":{"err":"division_by_zero","msg":"division by zero"}}
 {"in":{"args":[-5,5,4096]},"out":[-5,5]}
 {"in":{"args":[-5,-5,4096]},"out":[-5,-5]}
 {"in":{"args":[-5,-5,20]},"out":[64,64]}
 {"in":{"args":[-5,5,-100]},"out":[64,64]}
-{"in":{"args":[10,10,-1]},"out":{"err":"ValueError","msg":"math domain error"}}
+{"in":{"args":[10,10,-1]},"out":{"err":"invalid_value","msg":"math domain error"}}
 {"in":{"args":[10,10,0]},"out":[64,64]}
 {"in":{"args":[10,10,50]},"out":[64,64]}
 {"in":{"args":[10000000,10000000,1048576]},"out":[1024,1024]}

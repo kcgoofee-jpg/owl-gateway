@@ -1,31 +1,4 @@
-//! Launcher 的 multipart 图片请求体：`app/body.py::read_bounded_body` + `app/image_payload.py::read_image_body`。
-//!
-//! Launcher 把二进制图片放在前面的附件 part（`image` / `mask` / `reference_image` / `ref_multiple_N` /
-//! `director_ref_N`），最后一个名为 `request` 的 part 是 JSON，里面的图片字段写的是附件名。
-//! 这里把附件展开成 Base64 填回 JSON，之后走和纯 JSON 请求一样的准入、参数与费用检查。
-//!
-//! 两个入口：
-//! - [`read_bounded_body`]：先看 `Content-Length` 再边读边数，超限 413；
-//! - [`parse_image_multipart`]：已读好的 multipart 体 → 展开后的 JSON 对象。
-//!
-//! 报错文案与状态码是客户端依赖的固定契约，不要随手改。解析层的取舍：
-//! - multipart 的切分用 `multer`；`Content-Type` / `Content-Disposition` 的参数解析是
-//!   `python_multipart.parse_options_header` 的逐行移植（大小写、引号转义、`name*=` 被忽略、`filename=` 即算文件），
-//!   不用 multer 自带的（它对这些的取舍不同）；
-//! - Starlette 的限额：文件 part ≤ 19（`REFERENCE_LIMIT + 3`），非文件 part ≤ 10，
-//!   非文件 part 单个 ≤ 1 MiB；python-multipart 0.0.32 的单 part 头数量 ≤ 8、单个头 ≤ 4224 字节、边界 ≤ 256 字节。
-//!   超出一律是 400「multipart 请求格式无效或过大」；
-//! - `Content-Type` 主类型不是（小写的）`multipart/form-data` 时，Starlette 把表单当空的，
-//!   所以得到 400「缺少 request JSON 字段」。
-//!
-//! 已知的行为边界（都只出现在手工构造的畸形体里，正常客户端不会碰到）：
-//! - 带 `charset=` 的 `Content-Type`：只认 UTF-8 别名，其他字符集一律按 latin-1 解码；
-//! - 体在最后一个 part 中途被截断 / 缺结尾边界：400「格式无效」，不静默丢 part；
-//! - 边界后面的传输层空白、边界行里的前导杂字节、数据里出现 `\r\n--边界` 加其他字符：
-//!   首个边界之前的杂字节与其后的空白按宽松方式处理（见 `start_check`），其余交给 multer；
-//! - 单 part 的头数量按 multer 去重后的头计数，头大小按 `Name: value` 估算；
-//! - JSON 里无法无损装进 `serde_json::Value` 的数字 / 孤立代理按「不是合法 JSON」拒绝（见 `gate_core::json_body::Lossy`）。
-
+//! Bounded multipart image requests parsed by multer.
 use std::collections::{HashMap, HashSet};
 use std::convert::Infallible;
 use std::future::Future;
@@ -33,7 +6,7 @@ use std::task::{Context, Poll, Waker};
 
 use axum::body::Body;
 use axum::http::HeaderMap;
-use axum::http::header::{CONTENT_DISPOSITION, CONTENT_LENGTH};
+use axum::http::header::CONTENT_LENGTH;
 use base64::Engine;
 use base64::engine::general_purpose::STANDARD;
 use bytes::{Bytes, BytesMut};
@@ -71,9 +44,7 @@ const MSG_UNUSED_ATTACHMENT: &str =
 /// `Request.form(max_files=REFERENCE_LIMIT + 3, max_fields=10)`
 const MAX_FILES: usize = REFERENCE_LIMIT + 3;
 const MAX_FIELDS: usize = 10;
-/// Starlette `MultiPartParser.max_part_size`：只约束没有 filename 的 part。
 const MAX_FIELD_PART_BYTES: usize = 1024 * 1024;
-/// python-multipart `DEFAULT_MAX_HEADER_COUNT` / `DEFAULT_MAX_HEADER_SIZE` / `MAX_BOUNDARY_LENGTH`
 const MAX_PART_HEADERS: usize = 8;
 const MAX_PART_HEADER_BYTES: usize = 4096 + 128;
 const MAX_BOUNDARY_LEN: usize = 256;
@@ -161,9 +132,6 @@ pub fn parse_image_multipart(
         None => return Err(bad_request(MSG_NO_REQUEST)),
     };
     let parsed = parse_json(&raw).map_err(|_| bad_request(MSG_REQUEST_NOT_JSON))?;
-    if parsed.lossy.any() {
-        return Err(bad_request(MSG_REQUEST_NOT_JSON));
-    }
     let Value::Object(mut data) = parsed.value else {
         return Err(bad_request(MSG_REQUEST_NOT_OBJECT));
     };
@@ -281,11 +249,9 @@ impl<'a> Resolver<'a> {
 }
 
 // ---------------------------------------------------------------------------------------------
-// 表单解析（Starlette `Request.form` 的等价物）
 // ---------------------------------------------------------------------------------------------
 
 enum Content {
-    /// 带 filename 的 part（Starlette 的 `UploadFile`）
     File(Bytes),
     /// 不带 filename 的 part，按字符集解码成字符串
     Text(String),
@@ -296,56 +262,31 @@ struct Item {
     content: Content,
 }
 
-#[derive(Clone, Copy, PartialEq, Eq)]
-enum Charset {
-    Utf8,
-    Latin1,
-}
-
-/// 解析失败（本层任何一步的失败都归到这里）。
 type FormResult<T> = Result<T, ()>;
-
 fn parse_form(content_type: &[u8], body: Bytes) -> FormResult<Vec<Item>> {
-    let (media_type, params) = parse_options_header(content_type);
-    if media_type != b"multipart/form-data" {
-        return Ok(Vec::new()); // Starlette：既不是 multipart 也不是 urlencoded → 空表单
-    }
-    let charset = charset_of(params.get(b"charset".as_slice()).map(Vec::as_slice));
-    let boundary = params.get(b"boundary".as_slice()).ok_or(())?;
+    let header = std::str::from_utf8(content_type).map_err(|_| ())?;
+    let boundary = multer::parse_boundary(header).map_err(|_| ())?;
     if boundary.len() > MAX_BOUNDARY_LEN {
         return Err(());
     }
-    let body = match start_check(&body, boundary) {
-        Start::Empty => return Ok(Vec::new()),
-        Start::Bad => return Err(()),
-        Start::At(offset) => body.slice(offset..),
-    };
-    let boundary = String::from_utf8(boundary.clone()).map_err(|_| ())?;
-    // 体已完整在内存里，multer 的流只有一个就绪的块：一次 poll 必然跑完，不需要执行器。
-    poll_ready(collect_items(boundary, body, charset)).unwrap_or(Err(()))
+    poll_ready(collect_items(boundary, body)).unwrap_or(Err(()))
 }
-
-async fn collect_items(boundary: String, body: Bytes, charset: Charset) -> FormResult<Vec<Item>> {
+async fn collect_items(boundary: String, body: Bytes) -> FormResult<Vec<Item>> {
     let stream = futures::stream::once(std::future::ready(Ok::<Bytes, Infallible>(body)));
     let mut multipart = multer::Multipart::new(stream, boundary);
-    let (mut files, mut fields) = (0usize, 0usize);
+    let (mut files, mut fields) = (0, 0);
     let mut items = Vec::new();
     while let Some(mut field) = multipart.next_field().await.map_err(|_| ())? {
-        // 头大小按常见写法 `Name: value` 估算
-        let oversized = |(name, value): (&axum::http::HeaderName, &axum::http::HeaderValue)| {
-            name.as_str().len() + 2 + value.len() > MAX_PART_HEADER_BYTES
-        };
-        if field.headers().len() > MAX_PART_HEADERS || field.headers().iter().any(oversized) {
+        if field.headers().len() > MAX_PART_HEADERS
+            || field
+                .headers()
+                .iter()
+                .any(|(k, v)| k.as_str().len() + 2 + v.len() > MAX_PART_HEADER_BYTES)
+        {
             return Err(());
         }
-        let disposition = field
-            .headers()
-            .get(CONTENT_DISPOSITION)
-            .map_or(&[][..], |v| v.as_bytes());
-        let (_, options) = parse_options_header(disposition);
-        let name = options.get(b"name".as_slice()).ok_or(())?;
-        let name = user_safe_decode(name, charset);
-        let is_file = options.contains_key(b"filename".as_slice());
+        let name = field.name().ok_or(())?.to_owned();
+        let is_file = field.file_name().is_some();
         if is_file {
             files += 1;
             if files > MAX_FILES {
@@ -358,25 +299,16 @@ async fn collect_items(boundary: String, body: Bytes, charset: Charset) -> FormR
             }
         }
         let mut data = BytesMut::new();
-        loop {
-            match field.chunk().await {
-                Ok(Some(chunk)) => {
-                    if !is_file && data.len() + chunk.len() > MAX_FIELD_PART_BYTES {
-                        return Err(());
-                    }
-                    data.extend_from_slice(&chunk);
-                }
-                Ok(None) => break,
-                // 头部完整、数据一直读到体结束也没等到下一个边界：python-multipart 不报错，
-                // 只是这个 part 永远没有「结束」事件，于是被丢弃，前面已结束的 part 照常使用。
-                Err(multer::Error::IncompleteFieldData { .. }) => return Ok(items),
-                Err(_) => return Err(()),
+        while let Some(chunk) = field.chunk().await.map_err(|_| ())? {
+            if !is_file && data.len() + chunk.len() > MAX_FIELD_PART_BYTES {
+                return Err(());
             }
+            data.extend_from_slice(&chunk);
         }
         let content = if is_file {
             Content::File(data.freeze())
         } else {
-            Content::Text(user_safe_decode(&data, charset))
+            Content::Text(String::from_utf8(data.to_vec()).map_err(|_| ())?)
         };
         items.push(Item { name, content });
     }
@@ -395,238 +327,6 @@ fn poll_ready<F: Future>(future: F) -> Option<F::Output> {
     }
 }
 
-enum Start {
-    /// 体里一个 part 都没有
-    Empty,
-    /// 开头不合法
-    Bad,
-    /// 第一个边界从这个偏移开始
-    At(usize),
-}
-
-/// python-multipart `MultipartParser` 开头的状态机：
-/// 先跳过开头的 CR / LF（并一路跳到下一个 `-`），之后必须是 `--边界`，再紧跟 CRLF（新 part）或 `--`（空消息）。
-/// 不允许前导杂文字，也不允许边界行尾有空白（multer 对这两处更宽松）。体在边界中途结束不算错，只是没有 part。
-fn start_check(body: &[u8], boundary: &[u8]) -> Start {
-    let Some(&first) = body.first() else {
-        return Start::Empty;
-    };
-    let mut begin = 0;
-    if first == b'\r' || first == b'\n' {
-        match body.iter().position(|&b| b == b'-') {
-            Some(dash) => begin = dash,
-            None => return Start::Empty,
-        }
-    }
-    let rest = &body[begin..];
-    let delimiter = [b"--".as_slice(), boundary].concat();
-    let common = rest.len().min(delimiter.len());
-    if rest[..common] != delimiter[..common] {
-        return Start::Bad;
-    }
-    if rest.len() <= delimiter.len() {
-        return Start::Empty;
-    }
-    let after = &rest[delimiter.len()..];
-    match (after[0], after.get(1)) {
-        (b'\r', Some(b'\n')) | (b'-', Some(b'-')) => Start::At(begin),
-        (b'\r' | b'-', None) => Start::Empty,
-        _ => Start::Bad,
-    }
-}
-
-/// 字符集参数：只区分 UTF-8 别名；未知字符集按 latin-1 解码。
-fn charset_of(param: Option<&[u8]>) -> Charset {
-    let Some(raw) = param else {
-        return Charset::Utf8;
-    };
-    // `encodings.normalize_encoding`：非字母数字（点除外）折叠成一个下划线，去掉首尾下划线
-    let mut name = String::new();
-    for &b in raw {
-        if b.is_ascii_alphanumeric() || b == b'.' {
-            name.push(b.to_ascii_lowercase() as char);
-        } else if !name.ends_with('_') {
-            name.push('_');
-        }
-    }
-    match name.trim_matches('_') {
-        "utf_8" | "utf8" | "u8" | "utf" | "utf8_ucs2" | "utf8_ucs4" | "cp65001" => Charset::Utf8,
-        _ => Charset::Latin1,
-    }
-}
-
-/// `starlette.formparsers._user_safe_decode`
-fn user_safe_decode(src: &[u8], charset: Charset) -> String {
-    if charset == Charset::Utf8
-        && let Ok(text) = std::str::from_utf8(src)
-    {
-        return text.to_owned();
-    }
-    src.iter().map(|&b| char::from(b)).collect()
-}
-
-// ---------------------------------------------------------------------------------------------
-// python_multipart.multipart.parse_options_header 的移植（按 latin-1 字节处理）
-// ---------------------------------------------------------------------------------------------
-
-type Options = HashMap<Vec<u8>, Vec<u8>>;
-
-/// 返回 `(主值, 参数表)`。参数名转小写，同名取后者，值去掉引号并处理 `\\` / `\"` 转义；
-/// 带 `*` 的参数名（RFC 5987 扩展语法）被忽略。
-fn parse_options_header(value: &[u8]) -> (Vec<u8>, Options) {
-    if value.is_empty() {
-        return (Vec::new(), Options::new());
-    }
-    if !value.contains(&b';') {
-        return (strip(&value.to_ascii_lowercase()).to_vec(), Options::new());
-    }
-    let mut segments = parse_params(value).into_iter();
-    let media_type = segments.next().unwrap_or_default();
-    let mut options = Options::new();
-    for segment in segments {
-        let (key, mut val) = match segment.iter().position(|&b| b == b'=') {
-            Some(eq) => (segment[..eq].to_vec(), segment[eq + 1..].to_vec()),
-            None => (segment.clone(), Vec::new()),
-        };
-        if key.contains(&b'*') {
-            continue;
-        }
-        if val.len() >= 2 && val[0] == b'"' && val[val.len() - 1] == b'"' {
-            let inner = &val[1..val.len() - 1];
-            val = replace(&replace(inner, b"\\\\", b"\\"), b"\\\"", b"\"");
-        }
-        options.insert(key, val);
-    }
-    (media_type, options)
-}
-
-/// `_parseparam`（含它的逐字实现，包括负下标 / 空区间的 Python 切片语义）。
-fn parse_params(value: &[u8]) -> Vec<Vec<u8>> {
-    let mut s = Vec::with_capacity(value.len() + 1);
-    s.push(b';');
-    s.extend_from_slice(value);
-    let mut params = Vec::new();
-    let mut start: i64 = 0;
-    while find(&s, b";", start, None) == start {
-        start += 1;
-        let mut end = find(&s, b";", start, None);
-        let (mut ind, mut diff) = (start, 0i64);
-        while end > 0 {
-            diff += count(&s, b"\"", ind, end) - count(&s, b"\\\"", ind, end);
-            if diff % 2 == 0 {
-                break;
-            }
-            let next = find(&s, b";", end + 1, None);
-            end = ind;
-            ind = next;
-        }
-        if end < 0 {
-            end = s.len() as i64;
-        }
-        let eq = find(&s, b"=", start, Some(end));
-        let part = if eq == -1 {
-            slice(&s, start, end).to_vec()
-        } else {
-            let mut joined = rstrip(slice(&s, start, eq)).to_ascii_lowercase();
-            joined.push(b'=');
-            joined.extend_from_slice(lstrip(slice(&s, eq + 1, end)));
-            joined
-        };
-        params.push(strip(&part).to_vec());
-        start = end;
-    }
-    params
-}
-
-/// Python `str.isspace()` 对 latin-1 字符的判定（比 `u8::is_ascii_whitespace` 多 VT、FS/GS/RS/US、NEL、NBSP）。
-fn is_space(b: u8) -> bool {
-    matches!(
-        b,
-        b'\t' | b'\n' | 0x0b | 0x0c | b'\r' | 0x1c..=0x1f | b' ' | 0x85 | 0xa0
-    )
-}
-
-fn lstrip(s: &[u8]) -> &[u8] {
-    let start = s.iter().position(|&b| !is_space(b)).unwrap_or(s.len());
-    &s[start..]
-}
-
-fn rstrip(s: &[u8]) -> &[u8] {
-    let end = s.iter().rposition(|&b| !is_space(b)).map_or(0, |i| i + 1);
-    &s[..end]
-}
-
-fn strip(s: &[u8]) -> &[u8] {
-    lstrip(rstrip(s))
-}
-
-/// Python 切片 `s[start:end]` 的下标规整：负数加长度（仍为负则取 0），超出长度取长度。
-fn bounds(len: usize, start: i64, end: i64) -> (usize, usize) {
-    let norm = |i: i64| -> usize {
-        let i = if i < 0 { i + len as i64 } else { i };
-        i.clamp(0, len as i64) as usize
-    };
-    (norm(start), norm(end))
-}
-
-fn slice(s: &[u8], start: i64, end: i64) -> &[u8] {
-    let (a, b) = bounds(s.len(), start, end);
-    if a >= b { &[] } else { &s[a..b] }
-}
-
-/// `s.find(sub, start[, end])`，找不到返回 -1。
-fn find(s: &[u8], sub: &[u8], start: i64, end: Option<i64>) -> i64 {
-    let (a, b) = bounds(s.len(), start, end.unwrap_or(s.len() as i64));
-    if a > b || b - a < sub.len() {
-        return -1;
-    }
-    s[a..b]
-        .windows(sub.len())
-        .position(|w| w == sub)
-        .map_or(-1, |i| (a + i) as i64)
-}
-
-/// `s.count(sub, start, end)`（不重叠）。
-fn count(s: &[u8], sub: &[u8], start: i64, end: i64) -> i64 {
-    let (a, b) = bounds(s.len(), start, end);
-    if a >= b {
-        return 0;
-    }
-    let (mut n, mut i) = (0, a);
-    while i + sub.len() <= b {
-        if &s[i..i + sub.len()] == sub {
-            n += 1;
-            i += sub.len();
-        } else {
-            i += 1;
-        }
-    }
-    n
-}
-
-/// `bytes.replace(old, new)`（`old` 非空）。
-fn replace(s: &[u8], old: &[u8], new: &[u8]) -> Vec<u8> {
-    let mut out = Vec::with_capacity(s.len());
-    let mut i = 0;
-    while i < s.len() {
-        if s[i..].starts_with(old) {
-            out.extend_from_slice(new);
-            i += old.len();
-        } else {
-            out.push(s[i]);
-            i += 1;
-        }
-    }
-    out
-}
-
-// ---------------------------------------------------------------------------------------------
-// 测试
-//
-// 期望值逐字节固定（改动断言 = 行为变更，要显式评审）。
-// 体的构造方式与浏览器一致：`--边界` 行、`Content-Disposition`（文件 part 带 `filename="blob"`）、
-// 可选 `Content-Type`、空行、数据，最后是 `--边界--`。
-// ---------------------------------------------------------------------------------------------
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -681,7 +381,6 @@ mod tests {
         }
     }
 
-    /// 没有 filename 的 request part（Starlette 当普通字段）
     fn req_text(payload: impl AsRef<[u8]>) -> Part {
         Part {
             filename: None,
@@ -782,6 +481,17 @@ mod tests {
         STANDARD.encode(data)
     }
 
+    #[test]
+    fn native_multipart_rejects_incomplete_uploads_and_missing_request() {
+        assert_400(parse(&[]), E_NO_REQUEST);
+        assert_400(run("text/plain", b"{}", LIMIT), E_FRAMING);
+        let body = build(&[req("{}")]);
+        assert_400(
+            run(&content_type(), &body[..body.len() - 8], LIMIT),
+            E_FRAMING,
+        );
+    }
+
     // ---- 成功路径 -----------------------------------------------------------------------------
 
     #[test]
@@ -838,7 +548,6 @@ mod tests {
             },
         });
         assert_eq!(got, expected);
-        // 键顺序保持（Python dict 赋值不改变位置）
         let keys: Vec<_> = got["parameters"]
             .as_object()
             .unwrap()
@@ -883,18 +592,18 @@ mod tests {
         // request 在前也行
         let got = ok_value(parse(&[req(r#"{"image":"image"}"#), file("image", PNG)]));
         assert_eq!(got, json!({"image": "iVBORw0KGgoAAQID"}));
-        // 没有 filename 的 request：Starlette 当字段，文本按 UTF-8 解码后再编码成 UTF-8 交给 JSON 解析
         let got = ok_value(parse(&[
             file("image", PNG),
             req_text(r#"{"image":"image","n":"é"}"#),
         ]));
         assert_eq!(got, json!({"image": "iVBORw0KGgoAAQID", "n": "é"}));
-        // 字段里不是 UTF-8 的字节按 latin-1 兜底（0xE9 → é）：解码不会失败，坏 JSON 走 400
-        let got = ok_value(parse(&[
-            file("image", PNG),
-            req_text(b"{\"n\":\"\xe9\",\"image\":\"image\"}"),
-        ]));
-        assert_eq!(got, json!({"n": "é", "image": "iVBORw0KGgoAAQID"}));
+        assert_400(
+            parse(&[
+                file("image", PNG),
+                req_text(b"{\"n\":\"\xe9\",\"image\":\"image\"}"),
+            ]),
+            E_FRAMING,
+        );
         // 同样的字节以文件形式上传：直接当 bytes 解析，非法 UTF-8 → 不是合法 JSON
         assert_400(
             parse(&[
@@ -937,7 +646,6 @@ mod tests {
         let mut body = b"\r\n".to_vec();
         body.extend(build(&[req("{}")]));
         assert_eq!(ok_value(run(&content_type(), &body, LIMIT)), json!({}));
-        // python-multipart 的边界上限是 256 字节
         let long = "b".repeat(256);
         let ct = format!("multipart/form-data; boundary={long}");
         let body = build_with(&[req("{}")], &long, true);
@@ -953,81 +661,6 @@ mod tests {
         let nested = |depth: usize| format!("{{\"a\":{}{}}}", "[".repeat(depth), "]".repeat(depth));
         assert!(parse(&[req(nested(31))]).is_ok()); // 加上外层对象正好 32 层
         assert_400(parse(&[req(nested(32))]), E_NOT_JSON);
-    }
-
-    // ---- 400「格式无效或过大」：Starlette 解析失败与限额 ------------------------------------------
-
-    #[test]
-    fn malformed_multipart_is_rejected_with_the_generic_message() {
-        let ok_body = build(&[req("{}")]);
-        let no_name = format!(
-            "--{BOUNDARY}\r\nContent-Disposition: form-data\r\n\r\nx\r\n--{BOUNDARY}--\r\n"
-        );
-        let no_disposition =
-            format!("--{BOUNDARY}\r\nContent-Type: text/plain\r\n\r\nx\r\n--{BOUNDARY}--\r\n");
-        let cases: Vec<(&str, String, Vec<u8>)> = vec![
-            (
-                "缺少 boundary 参数",
-                "multipart/form-data".into(),
-                ok_body.clone(),
-            ),
-            (
-                "只有 charset 没有 boundary",
-                "multipart/form-data; charset=utf-8".into(),
-                ok_body.clone(),
-            ),
-            (
-                "边界与体不一致",
-                "multipart/form-data; boundary=other".into(),
-                ok_body.clone(),
-            ),
-            (
-                "体不是 multipart",
-                content_type(),
-                b"not multipart at all".to_vec(),
-            ),
-            (
-                "边界前有杂文字",
-                content_type(),
-                [b"preamble\r\n".as_slice(), &ok_body].concat(),
-            ),
-            ("part 缺少 name", content_type(), no_name.into_bytes()),
-            (
-                "part 没有 Content-Disposition",
-                content_type(),
-                no_disposition.into_bytes(),
-            ),
-        ];
-        for (what, ct, body) in cases {
-            expect_err(what, run(&ct, &body, LIMIT), 400, E_FRAMING);
-        }
-    }
-
-    #[test]
-    fn empty_or_unparsed_forms_report_the_missing_request() {
-        // Starlette：既不是（小写的）multipart/form-data 也不是 urlencoded → 空表单
-        let body = build(&[file("image", PNG), req("{}")]);
-        for ct in [
-            format!("Multipart/Form-Data; boundary={BOUNDARY}"),
-            format!("multipart/mixed; boundary={BOUNDARY}"),
-            String::new(),
-        ] {
-            expect_err(&ct, run(&ct, &body, LIMIT), 400, E_NO_REQUEST);
-        }
-        // 空体、只有换行、只有结束边界：没有任何 part
-        assert_400(run(&content_type(), b"", LIMIT), E_NO_REQUEST);
-        assert_400(run(&content_type(), b"\r\n\r\n", LIMIT), E_NO_REQUEST);
-        assert_400(run(&content_type(), &closing(), LIMIT), E_NO_REQUEST);
-        // 最后一个 part 没有收到结束边界：静默丢弃它（于是 request 不见了）
-        let unterminated = build_with(
-            &[file("image", PNG), req(r#"{"image":"image"}"#)],
-            BOUNDARY,
-            false,
-        );
-        assert_400(run(&content_type(), &unterminated, LIMIT), E_NO_REQUEST);
-        // 没有 request，只有别的字段 / 附件
-        assert_400(parse(&[file("image", PNG)]), E_NO_REQUEST);
-        assert_400(parse(&[field("extra", "v")]), E_NO_REQUEST);
     }
 
     #[test]
@@ -1216,48 +849,6 @@ mod tests {
     }
 
     #[test]
-    fn content_disposition_spellings_follow_python_multipart() {
-        // (头, 是否能当作名叫 image 的文件附件)
-        let cases = [
-            (r#"form-data; name="image"; filename="blob""#, true),
-            (r#"form-data; name="image"; filename="""#, true), // 空 filename 也算文件
-            (r#"form-data; name="image"; filename"#, true),
-            (r#"form-data; name="image"; FILENAME="b""#, true),
-            (r#"form-data; NAME="image"; filename="b""#, true),
-            ("form-data; name=image; filename=b", true),
-            (r#"form-data; filename="b"; name="image""#, true),
-            (r#"form-data; name = "image" ; filename = "b""#, true),
-            (r#"form-data; name="image"; filename="a;b""#, true),
-            (r#"form-data; name="image"; filename="a\"; x="1"#, true),
-            // `filename*=`（RFC 5987）被忽略，于是只是个普通字段
-            (r#"form-data; name="image"; filename*=UTF-8''b.png"#, false),
-            (r#"form-data; name="image""#, false),
-            (r#"form-data; name="im\"age"; filename="b""#, false),
-            (r#"form-data; name="ima;ge"; filename="b""#, false),
-            (r#"form-data; name="image; filename="b""#, false),
-        ];
-        let request = raw_part(
-            r#"form-data; name="request"; filename="blob""#,
-            br#"{"image":"image"}"#,
-        );
-        for (disposition, is_file) in cases {
-            let mut body = raw_part(disposition, PNG);
-            body.extend(&request);
-            body.extend(closing());
-            let result = run(&content_type(), &body, LIMIT);
-            if is_file {
-                assert_eq!(
-                    ok_value(result),
-                    json!({"image": "iVBORw0KGgoAAQID"}),
-                    "{disposition}"
-                );
-            } else {
-                expect_err(disposition, result, 400, E_BAD_FIELD);
-            }
-        }
-    }
-
-    #[test]
     fn missing_referenced_attachment() {
         assert_400(parse(&[req(r#"{"image":"image"}"#)]), E_MISSING);
         assert_400(
@@ -1411,136 +1002,6 @@ mod tests {
     }
 
     // ---- charset / Content-Disposition 解析 -----------------------------------------------------
-
-    #[test]
-    fn charset_param_selects_how_names_and_text_parts_are_decoded() {
-        let body = |name: &[u8]| {
-            let mut out =
-                format!("--{BOUNDARY}\r\nContent-Disposition: form-data; name=\"").into_bytes();
-            out.extend_from_slice(name);
-            out.extend_from_slice(
-                format!("\"; filename=\"b\"\r\n\r\n{{}}\r\n--{BOUNDARY}--\r\n").as_bytes(),
-            );
-            out
-        };
-        // name 的字节不是 UTF-8 时按 latin-1 兜底，所以 `request\xe9` ≠ `request`；`é` 的 UTF-8 也不是 request
-        assert_400(
-            run(&content_type(), &body(b"request\xe9"), LIMIT),
-            E_NO_REQUEST,
-        );
-        assert_400(
-            run(&content_type(), &body("é".as_bytes()), LIMIT),
-            E_NO_REQUEST,
-        );
-        assert_eq!(
-            ok_value(run(&content_type(), &body(b"request"), LIMIT)),
-            json!({})
-        );
-        // charset 参数的写法不影响 ASCII 名字
-        for charset in ["latin-1", "UTF-8", "utf-16"] {
-            let ct = format!("multipart/form-data; charset={charset}; boundary={BOUNDARY}");
-            let body = build(&[file("image", PNG), req(r#"{"image":"image"}"#)]);
-            assert_eq!(
-                ok_value(run(&ct, &body, LIMIT))["image"],
-                json!("iVBORw0KGgoAAQID")
-            );
-        }
-        // 非 UTF-8 的字符集下，文本字段里的 UTF-8 多字节被拆成 latin-1 字符
-        let text = build(&[req_text("{\"n\":\"é\"}")]);
-        let ct = format!("multipart/form-data; charset=latin-1; boundary={BOUNDARY}");
-        assert_eq!(ok_value(run(&ct, &text, LIMIT)), json!({"n": "Ã©"}));
-        assert_eq!(
-            ok_value(run(&content_type(), &text, LIMIT)),
-            json!({"n": "é"})
-        );
-    }
-
-    #[test]
-    fn parse_options_header_matches_python_multipart() {
-        fn expect(value: &str, media: &str, options: &[(&str, &str)]) {
-            let (got_media, got) = parse_options_header(value.as_bytes());
-            assert_eq!(got_media, media.as_bytes(), "{value:?}");
-            let want: Options = options
-                .iter()
-                .map(|(k, v)| (k.as_bytes().to_vec(), v.as_bytes().to_vec()))
-                .collect();
-            assert_eq!(got, want, "{value:?}");
-        }
-        expect(
-            r#"form-data; name="a"; filename="b.png""#,
-            "form-data",
-            &[("name", "a"), ("filename", "b.png")],
-        );
-        // `name*=` 一类扩展语法被忽略；带引号的分号不分段
-        expect(
-            r#"form-data; name="a;b"; filename*=UTF-8''x.png"#,
-            "form-data",
-            &[("name", "a;b")],
-        );
-        // 参数名转小写，主值不转（有参数时）
-        expect(
-            r#"Form-Data; NAME="x"; FileName=y"#,
-            "Form-Data",
-            &[("name", "x"), ("filename", "y")],
-        );
-        expect(
-            r#"form-data; name="a\"b\\c""#,
-            "form-data",
-            &[("name", r#"a"b\c"#)],
-        );
-        // 没有 `=` 的参数值为空串，但键存在
-        expect(
-            "form-data; name=x; filename",
-            "form-data",
-            &[("name", "x"), ("filename", "")],
-        );
-        expect(
-            r#"form-data; name="a"; name="b""#,
-            "form-data",
-            &[("name", "b")],
-        );
-        expect(
-            r#"multipart/form-data; boundary="a b"; charset=UTF-8"#,
-            "multipart/form-data",
-            &[("boundary", "a b"), ("charset", "UTF-8")],
-        );
-        expect(
-            "multipart/form-data;boundary=x;",
-            "multipart/form-data",
-            &[("boundary", "x"), ("", "")],
-        );
-        // 没有参数时才转小写
-        expect("MULTIPART/FORM-DATA", "multipart/form-data", &[]);
-        expect(
-            "Multipart/Form-Data; boundary=x",
-            "Multipart/Form-Data",
-            &[("boundary", "x")],
-        );
-        // 引号没闭合：保留原样
-        expect(
-            r#"form-data; name="un;closed"#,
-            "form-data",
-            &[("name", r#""un;closed"#)],
-        );
-        expect(
-            r#"form-data; name=""; filename="""#,
-            "form-data",
-            &[("name", ""), ("filename", "")],
-        );
-        expect("", "", &[]);
-        expect("form-data;", "form-data", &[("", "")]);
-        expect(
-            r#"form-data; name="a" ; filename = "c""#,
-            "form-data",
-            &[("name", "a"), ("filename", "c")],
-        );
-        expect(
-            r#"form-data; name="a;b"; filename="c;d"; x="1"#,
-            "form-data",
-            &[("name", "a;b"), ("filename", "c;d"), ("x", r#""1"#)],
-        );
-        expect("a=b; c=d", "a=b", &[("c", "d")]);
-    }
 
     // ---- read_bounded_body ----------------------------------------------------------------------
 

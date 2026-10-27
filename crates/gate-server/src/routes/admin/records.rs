@@ -2,7 +2,7 @@
 //! 导出（zip / CSV）的格式固定，导出的文件有人存档，别随手改列名与列序。
 
 use super::mark_logged;
-use super::req::{AdminPath, AdminQuery, R, bytes_response, http, internal, json_of, py_quote};
+use super::req::{AdminQuery, R, http, json_of};
 use crate::action_log::log_action;
 use crate::error::ApiError;
 use crate::error::ok_json;
@@ -12,23 +12,16 @@ use axum::Router;
 use axum::extract::{Request, State};
 use axum::response::Response;
 use axum::routing::{get, post};
-use gate_core::{features, pyc, pyext};
+use gate_core::{features, primitives};
 use gate_db::repo::admin_records::ActionFilter;
 use gate_db::repo::usage::LogFilter;
 use serde_json::{Value, json};
-use std::collections::{HashMap, VecDeque};
-use std::path::PathBuf;
-use std::sync::{LazyLock, Mutex};
 
 pub fn router() -> Router<AppState> {
     Router::new()
         .route("/admin/api/logs", get(logs))
         .route("/admin/api/actions", get(admin_actions))
-        .route("/admin/api/audit", get(audit_list))
-        .route("/admin/api/audit/export", get(audit_export))
-        .route("/admin/api/audit/purge-images", post(audit_purge_images))
-        .route("/admin/api/audit/{audit_id}/thumb", get(audit_thumb))
-        .route("/admin/api/audit/{audit_id}/image", get(audit_image))
+        .route("/admin/api/prompts", get(audit_list))
         .route("/admin/api/ops/reset-all-keys", post(ops_reset_all_keys))
 }
 
@@ -57,14 +50,6 @@ fn key_id_list(raw: &str) -> Result<Vec<i64>, ApiError> {
     Ok(parts.iter().filter_map(|x| x.parse().ok()).collect())
 }
 
-/// 生成记录导出里的单个 Key 编号：只认十进制整数（不能带空格、小数点或逗号）；其余当作没有这把 Key。
-fn parse_key_id(raw: &str) -> Option<i64> {
-    if raw.is_empty() || !raw.chars().all(pyext::is_digit) {
-        return None;
-    }
-    i64::try_from(pyext::py_int_str(raw).ok()?).ok()
-}
-
 /// 请求日志（每次请求一行）：按成员 / 功能 / 状态 / 来源 IP / 原因码 / 错误编号筛选，服务端分页。
 /// `summary` 是同一组筛选条件下各状态的条数（不受 `status` 自己影响，这样筛了状态也看得到其他状态有多少）。
 async fn logs(State(state): State<AppState>, _s: AdminSession, q: AdminQuery) -> R {
@@ -77,9 +62,9 @@ async fn logs(State(state): State<AppState>, _s: AdminSession, q: AdminQuery) ->
     let page = q.int("page", 1)?;
     let feature = q.get("feature").map(str::to_string);
     let rid = q.text("rid").to_string();
-    let status = pyc::strip(q.text("status")).to_string();
-    let ip = pyc::strip(q.text("ip")).to_string();
-    let reason = pyc::strip(q.text("reason")).to_string();
+    let status = primitives::strip(q.text("status")).to_string();
+    let ip = primitives::strip(q.text("ip")).to_string();
+    let reason = primitives::strip(q.text("reason")).to_string();
     let per_page = q.int("per_page", 20)?;
     let per_page: i64 = if matches!(per_page, 20 | 50 | 100) {
         per_page
@@ -119,7 +104,7 @@ async fn logs(State(state): State<AppState>, _s: AdminSession, q: AdminQuery) ->
             .map(str::to_string)
             .collect::<Vec<_>>()
     });
-    let rid: String = pyc::strip(&rid)
+    let rid: String = primitives::strip(&rid)
         .to_lowercase()
         .chars()
         .filter(|c| "0123456789abcdef".contains(*c))
@@ -180,11 +165,11 @@ async fn admin_actions(State(state): State<AppState>, _s: AdminSession, q: Admin
     let st = state.clone();
     let per_page = 30_i64;
     let filter = ActionFilter {
-        actor_kind: pyc::strip(&actor_q).to_string(),
+        actor_kind: primitives::strip(&actor_q).to_string(),
         // 后台按分组筛，一组可含多个旧名
         actions: action_q
             .split('|')
-            .map(|a| pyc::strip(a).to_string())
+            .map(|a| primitives::strip(a).to_string())
             .filter(|a| !a.is_empty())
             .take(40)
             .collect(),
@@ -263,20 +248,7 @@ async fn audit_list(State(state): State<AppState>, _s: AdminSession, q: AdminQue
     };
     let mut page = clamp_page(page);
     // 查询串里的 Key 编号：单个，或逗号分隔的同一成员的多把 Key；不是数字的段忽略，一个编号都没有就查不到记录。
-    let key_ids: Option<Vec<i64>> = match key_id.as_deref() {
-        Some(k) => {
-            let mut v = Vec::new();
-            for x in k
-                .split(',')
-                .filter(|x| !x.is_empty() && x.chars().all(pyext::is_digit))
-            {
-                let n = pyext::py_int_str(x).map_err(|e| internal(e.to_string()))?;
-                v.push(i64::try_from(n).map_err(|_| http(422, "key_id 超出范围"))?);
-            }
-            Some(v)
-        }
-        None => None,
-    };
+    let key_ids = key_id.as_deref().map(key_id_list).transpose()?;
     let fetch = |page: i64| {
         let st = st.clone();
         let key_ids = key_ids.clone();
@@ -285,8 +257,26 @@ async fn audit_list(State(state): State<AppState>, _s: AdminSession, q: AdminQue
             match key_ids {
                 // 给了 key_id 却解析不出任何编号：没有记录（不能落到 list_audit_ids 的「空 = 不筛」）
                 Some(ids) if ids.is_empty() => Ok((Vec::new(), 0)),
-                Some(ids) => st.db.list_audit_ids(per_page, offset, &ids).await,
-                None => st.db.list_audit_ids(per_page, offset, &[]).await,
+                Some(ids) => {
+                    st.db
+                        .list_audit_ids(
+                            per_page,
+                            offset,
+                            &ids,
+                            st.now() - crate::audit::RETENTION_DAYS as f64 * 86400.0,
+                        )
+                        .await
+                }
+                None => {
+                    st.db
+                        .list_audit_ids(
+                            per_page,
+                            offset,
+                            &[],
+                            st.now() - crate::audit::RETENTION_DAYS as f64 * 86400.0,
+                        )
+                        .await
+                }
             }
         }
     };
@@ -311,286 +301,6 @@ async fn audit_list(State(state): State<AppState>, _s: AdminSession, q: AdminQue
         "total": total,
         "pages": pages,
     })))
-}
-
-/// 现场缩图约 70ms/张，翻页回来不再重算；约 400×55KB ≈ 22MB。
-/// 进程级缓存——按数据库路径区分实例（同进程里并存多个网关时互不串图）。
-struct ThumbCache {
-    map: HashMap<(PathBuf, i64), Vec<u8>>,
-    order: VecDeque<(PathBuf, i64)>,
-}
-
-static THUMBS: LazyLock<Mutex<ThumbCache>> = LazyLock::new(|| {
-    Mutex::new(ThumbCache {
-        map: HashMap::new(),
-        order: VecDeque::new(),
-    })
-});
-const THUMB_CACHE_MAX: usize = 400;
-
-impl ThumbCache {
-    fn get(&mut self, k: &(PathBuf, i64)) -> Option<Vec<u8>> {
-        let v = self.map.get(k)?.clone();
-        self.order.retain(|x| x != k);
-        self.order.push_back(k.clone());
-        Some(v)
-    }
-    fn put(&mut self, k: (PathBuf, i64), v: Vec<u8>) {
-        self.order.retain(|x| *x != k);
-        self.order.push_back(k.clone());
-        self.map.insert(k, v);
-        while self.order.len() > THUMB_CACHE_MAX {
-            if let Some(old) = self.order.pop_front() {
-                self.map.remove(&old);
-            }
-        }
-    }
-    fn clear_db(&mut self, db: &std::path::Path) {
-        self.map.retain(|(p, _), _| p != db);
-        self.order.retain(|(p, _)| p != db);
-    }
-}
-
-fn jpeg_cache_headers() -> [(&'static str, String); 1] {
-    [("cache-control", "private, max-age=3600".to_string())]
-}
-
-/// 画廊用的小图：不再另存缩略图，从原图现场缩小（浏览器缓存 1 小时）；旧记录仍有存好的缩略图就直接用。
-async fn audit_thumb(
-    State(state): State<AppState>,
-    _s: AdminSession,
-    AdminPath(audit_id): AdminPath<i64>,
-) -> R {
-    let st = state.clone();
-    let key = (st.db.path().to_path_buf(), audit_id);
-    let cached = THUMBS.lock().expect("thumbs").get(&key);
-    let mut data = match cached {
-        Some(d) => Some(d),
-        None => st.db.audit_thumb(audit_id).await?,
-    };
-    if data.is_none() {
-        let (image, _) = st.db.audit_image(audit_id).await?;
-        if let Some(image) = image {
-            data = tokio::task::spawn_blocking(move || crate::audit::make_thumbnail(&image))
-                .await
-                .map_err(internal)?;
-            if let Some(d) = &data {
-                THUMBS.lock().expect("thumbs").put(key, d.clone());
-            }
-        }
-    }
-    let Some(data) = data else {
-        return Err(http(404, "没有图片（原图已过期或未记录）"));
-    };
-    Ok(bytes_response(data, "image/jpeg", &jpeg_cache_headers()))
-}
-
-/// 原图（清晰版）。没有原图时回退到缩略图。
-async fn audit_image(
-    State(state): State<AppState>,
-    _s: AdminSession,
-    AdminPath(audit_id): AdminPath<i64>,
-) -> R {
-    let st = state.clone();
-    let (mut data, mut ctype) = st.db.audit_image(audit_id).await?;
-    if data.is_none() {
-        data = st.db.audit_thumb(audit_id).await?;
-        ctype = "image/jpeg".into();
-    }
-    let Some(data) = data else {
-        return Err(http(404, "没有图片"));
-    };
-    let ctype = if ctype.is_empty() {
-        "image/png".to_string()
-    } else {
-        ctype
-    };
-    Ok(bytes_response(data, &ctype, &jpeg_cache_headers()))
-}
-
-/// 导出文件名的净化：只留字母数字 `_.-`，其余字符换成 `_`，去掉两头的 `_.`，最长 40 个字符，空了叫 member。
-fn safe_filename(name: &str) -> String {
-    let cleaned: String = name
-        .chars()
-        .map(|c| {
-            if c.is_ascii_alphanumeric() || matches!(c, '_' | '.' | '-') {
-                c
-            } else {
-                '_'
-            }
-        })
-        .collect();
-    let trimmed = cleaned.trim_matches(|c| c == '_' || c == '.');
-    let cut = pyc::take_chars(trimmed, 40);
-    if cut.is_empty() {
-        "member".into()
-    } else {
-        cut.to_string()
-    }
-}
-
-/// 把某成员的全部原图打包成 zip 下载（附 prompts.txt）。
-async fn audit_export(State(state): State<AppState>, _s: AdminSession, q: AdminQuery) -> R {
-    let key_id = q.get("key_id").map(str::to_string);
-    let Some(key_id) = key_id else {
-        return Err(http(400, "缺少 key_id"));
-    };
-    let st = state.clone();
-
-    // 多个 key_id（逗号分隔，多个成员 / 合并成员的多把 Key）：每个账号各查一遍，合并成一个按账号分文件夹的 zip。
-    let ids: Vec<String> = key_id
-        .split(',')
-        .map(|s| s.trim().to_string())
-        .filter(|s| !s.is_empty())
-        .collect();
-    if ids.len() > 1 {
-        const TOTAL_BUDGET: i64 = 300 * 1024 * 1024; // 原图合计上限，避免一次吃太多内存；提示词不受限
-        let mut remaining = TOTAL_BUDGET;
-        let mut groups: Vec<crate::exporter::ExportGroup> = Vec::new();
-        let mut total_imgs = 0usize;
-        for id in &ids {
-            // 每个选中的账号都进 zip：原图过期的也把提示词列出来
-            // 不是整数的编号当作没有记录
-            let Some(key) = parse_key_id(id) else {
-                continue;
-            };
-            let records = st.db.audit_records_for_key(key).await?;
-            if records.is_empty() {
-                continue;
-            }
-            let with_image = records.iter().filter(|r| r.has_image).count();
-            let images = if remaining > 0 && with_image > 0 {
-                st.db.audit_images_for_key(key, remaining, 0.0).await?
-            } else {
-                Vec::new()
-            };
-            remaining -= images.iter().map(|r| r.image.len() as i64).sum::<i64>();
-            let name = st
-                .db
-                .key_name(key)
-                .await?
-                .filter(|n| !n.is_empty())
-                .unwrap_or_default();
-            let label = if name.is_empty() {
-                format!("Key{id}")
-            } else {
-                format!("{name}-{id}")
-            };
-            total_imgs += images.len();
-            groups.push(crate::exporter::ExportGroup {
-                label,
-                images_truncated: images.len() < with_image,
-                records,
-                images,
-            });
-        }
-        if groups.is_empty() {
-            return Err(http(404, "选中的成员没有生成记录"));
-        }
-        let ngroups = groups.len();
-        let st2 = st.clone();
-        let blob = tokio::task::spawn_blocking(move || {
-            crate::exporter::build_zip_groups(&groups, &st2.clock, st2.now())
-        })
-        .await
-        .map_err(internal)?;
-        log_action(
-            &st.db,
-            "站长",
-            "导出原图",
-            &key_id,
-            &format!("{ngroups} 人 / {total_imgs} 张"),
-            true,
-            st.now(),
-        )
-        .await;
-        let enc = py_quote(&format!("owl-选中{ngroups}人-{total_imgs}.zip"));
-        return Ok(bytes_response(
-            blob,
-            "application/zip",
-            &[
-                (
-                    "content-disposition",
-                    format!(
-                        "attachment; filename=\"owl-selected-{ngroups}.zip\"; filename*=UTF-8''{enc}"
-                    ),
-                ),
-                ("cache-control", "no-store".to_string()),
-            ],
-        ));
-    }
-
-    // 单成员走这条；`key_id` 不是整数（含 `3,` 这种带逗号的残片）就当没有原图
-    let Some(key) = parse_key_id(&key_id) else {
-        return Err(http(404, "该成员没有可导出的原图"));
-    };
-    let rows = st
-        .db
-        .audit_images_for_key(key, 200 * 1024 * 1024, 0.0)
-        .await?;
-    if rows.is_empty() {
-        return Err(http(404, "该成员没有可导出的原图"));
-    }
-    let who = st
-        .db
-        .key_name(key)
-        .await?
-        .filter(|n| !n.is_empty())
-        .unwrap_or_else(|| key_id.clone());
-    let n = rows.len();
-    let st2 = st.clone();
-    let who2 = who.clone();
-    let blob = tokio::task::spawn_blocking(move || {
-        crate::exporter::build_zip(&rows, &who2, &st2.clock, st2.now())
-    })
-    .await
-    .map_err(internal)?;
-    log_action(
-        &st.db,
-        "站长",
-        "导出原图",
-        &key_id,
-        &format!("{n} 张"),
-        true,
-        st.now(),
-    )
-    .await;
-    let fname = format!("owl-{}-{n}.zip", safe_filename(&who));
-    let enc = py_quote(&format!("owl-{who}-{n}.zip"));
-    Ok(bytes_response(
-        blob,
-        "application/zip",
-        &[
-            (
-                "content-disposition",
-                format!("attachment; filename=\"{fname}\"; filename*=UTF-8''{enc}"),
-            ),
-            ("cache-control", "no-store".to_string()),
-        ],
-    ))
-}
-
-/// 站长手动清空服务器上的全部原图（只删原图，提示词和参数照留）。必须带 `{"confirm": "清空"}`。
-async fn audit_purge_images(State(state): State<AppState>, _s: AdminSession, req: Request) -> R {
-    let (_, body) = json_of(req).await?;
-    if body.get("confirm") != Some(&json!("清空")) {
-        return Err(http(422, "需要 confirm=清空"));
-    }
-    let st = state.clone();
-    let n = st.db.purge_audit_images_before_id(1_i64 << 62).await?;
-    THUMBS.lock().expect("thumbs").clear_db(st.db.path());
-    log_action(
-        &st.db,
-        "站长",
-        "清空原图",
-        "",
-        &format!("{n} 张"),
-        true,
-        st.now(),
-    )
-    .await;
-    let resp = ok_json(&json!({"ok": true, "purged": n}));
-    Ok(mark_logged(resp))
 }
 
 // ----------------------------------------------------------------------------- CSV

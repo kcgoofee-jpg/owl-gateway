@@ -1,6 +1,6 @@
 //! 上游 Token 的每日计数与逐 Token 设置（V5 日上限 / 启停 / 出图并发）。
 
-use super::PyMap;
+use super::OrderedPairs;
 use crate::{Db, Result, value};
 use rusqlite::params;
 use serde::Serialize;
@@ -55,7 +55,7 @@ impl Db {
         .await
     }
 
-    pub async fn get_upstream_token_limits(&self) -> Result<PyMap<String, i64>> {
+    pub async fn get_upstream_token_limits(&self) -> Result<OrderedPairs<String, i64>> {
         self.read(|c| {
             let mut stmt =
                 c.prepare("SELECT token_id, v5_daily_limit FROM upstream_token_settings")?;
@@ -80,7 +80,7 @@ impl Db {
         .await
     }
 
-    pub async fn get_upstream_token_enabled(&self) -> Result<PyMap<String, bool>> {
+    pub async fn get_upstream_token_enabled(&self) -> Result<OrderedPairs<String, bool>> {
         self.read(|c| {
             let mut stmt = c.prepare("SELECT token_id, enabled FROM upstream_token_enabled")?;
             stmt.query_map([], |r| Ok((value::text_or(r, 0, "")?, value::flag(r, 1)?)))?
@@ -102,7 +102,7 @@ impl Db {
         .await
     }
 
-    pub async fn get_upstream_token_image_concurrency(&self) -> Result<PyMap<String, i64>> {
+    pub async fn get_upstream_token_image_concurrency(&self) -> Result<OrderedPairs<String, i64>> {
         self.read(|c| {
             let mut stmt =
                 c.prepare("SELECT token_id, concurrency FROM upstream_token_image_concurrency")?;

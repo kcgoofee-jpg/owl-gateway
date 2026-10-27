@@ -6,15 +6,12 @@
 //! 参数只认规范写法：整数是十进制（可带正负号），布尔是 `true` / `false`；同名参数取最后一个。
 
 use crate::body::{JsonObject, read_json_body};
-use crate::error::{ApiError, ApiResult, HttpError, InternalError};
+use crate::error::{ApiError, ApiResult, HttpError};
 use crate::state::AppState;
-use axum::body::Body;
 use axum::extract::path::ErrorKind;
 use axum::extract::rejection::PathRejection;
 use axum::extract::{FromRequestParts, Path, Query, RawPathParams, Request};
 use axum::http::request::Parts;
-use axum::response::Response;
-use gate_core::{pyext, pyval};
 use serde::de::DeserializeOwned;
 use serde_json::Value;
 
@@ -111,77 +108,25 @@ pub async fn json_of(req: Request) -> Result<(Parts, JsonObject), HttpError> {
     Ok((parts, body))
 }
 
-// ----------------------------------------------------------------------------- 下载响应
-
-/// `urllib.parse.quote(s)`（默认 safe="/"）：字母数字和 `_.-~/` 原样，其余按 UTF-8 百分号编码。
-pub fn py_quote(s: &str) -> String {
-    let mut out = String::new();
-    for b in s.bytes() {
-        if b.is_ascii_alphanumeric() || matches!(b, b'_' | b'.' | b'-' | b'~' | b'/') {
-            out.push(b as char);
-        } else {
-            out.push_str(&format!("%{b:02X}"));
-        }
-    }
-    out
-}
-
-/// 二进制下载 / 图片响应。
-pub fn bytes_response(data: Vec<u8>, media_type: &str, headers: &[(&str, String)]) -> Response {
-    let mut resp = Response::new(Body::from(data));
-    let h = resp.headers_mut();
-    if let Ok(v) = axum::http::HeaderValue::from_str(media_type) {
-        h.insert("content-type", v);
-    }
-    for (k, v) in headers {
-        if let (Ok(name), Ok(val)) = (
-            axum::http::HeaderName::from_bytes(k.as_bytes()),
-            axum::http::HeaderValue::from_str(v),
-        ) {
-            h.insert(name, val);
-        }
-    }
-    resp
-}
-
 /// 带状态码的错误（`{"detail": ...}`）。
 pub fn http(status: u16, detail: impl Into<String>) -> ApiError {
     HttpError::new(status, detail).into()
 }
 
 /// `str(v or default)`：缺省、null、false、0、空串都取默认值。
-pub fn py_str_or(v: Option<&Value>, default: &str) -> String {
-    match v {
-        Some(v) if pyval::truthy(v) => pyext::py_str(v),
-        _ => default.to_string(),
-    }
+pub fn text_or(v: Option<&Value>, default: &str) -> String {
+    v.and_then(Value::as_str)
+        .filter(|s| !s.is_empty())
+        .unwrap_or(default)
+        .to_owned()
 }
 
 /// `str(body.get(key) or "")`
 pub fn pstr(body: &JsonObject, key: &str) -> String {
-    py_str_or(body.get(key), "")
+    text_or(body.get(key), "")
 }
 
 /// `str(body.get(key) or default)`
 pub fn pstr_or(body: &JsonObject, key: &str, default: &str) -> String {
-    py_str_or(body.get(key), default)
-}
-
-/// 数据库 / 内部错误统一成 500（带请求编号）。
-pub fn internal(msg: impl std::fmt::Display) -> ApiError {
-    InternalError(msg.to_string()).into()
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn quote_keeps_slash_and_tilde() {
-        assert_eq!(
-            py_quote("owl-月见草-3.zip"),
-            "owl-%E6%9C%88%E8%A7%81%E8%8D%89-3.zip"
-        );
-        assert_eq!(py_quote("a b/c~d"), "a%20b/c~d");
-    }
+    text_or(body.get(key), default)
 }

@@ -36,8 +36,8 @@ use axum::http::HeaderValue;
 use axum::response::Response;
 use axum::routing::post;
 use bytes::Bytes;
-use gate_core::pyc::take_chars;
-use gate_core::pyval::py_str;
+use gate_core::primitives::take_chars;
+use gate_core::values::text;
 use gate_upstream::client::{BoxFuture, UpstreamError};
 use serde_json::Value;
 use std::future::Future;
@@ -89,7 +89,7 @@ pub(super) fn up_to_gate(e: UpstreamError) -> GateError {
 pub(super) fn local(e: ApiError) -> UpstreamError {
     match e {
         ApiError::Gate(g) => UpstreamError::local(g.status, g.message, g.code),
-        ApiError::Http(h) => UpstreamError::local(h.status, py_str(&h.detail), ""),
+        ApiError::Http(h) => UpstreamError::local(h.status, text(&h.detail), ""),
         ApiError::Internal(i) => UpstreamError::local(500, i.0, ""),
     }
 }
@@ -97,7 +97,7 @@ pub(super) fn local(e: ApiError) -> UpstreamError {
 /// 用量日志里的尺寸文案：`{宽}x{高}/{步数}step`（取自请求体的 parameters）。
 pub(super) fn size_text(body: &Value) -> String {
     let g = |k: &str| {
-        py_str(
+        text(
             body.get("parameters")
                 .and_then(|p| p.get(k))
                 .unwrap_or(&Value::Null),

@@ -59,7 +59,7 @@ async fn image_success_counts_and_body_is_python_json() {
     assert!(resp.body.starts_with(b"PK"));
     let req = &up.requests_to("/ai/generate-image")[0];
     // 发出的正文与 Python json.dumps(separators=(",", ":"), ensure_ascii=False) 逐字节一致
-    assert_eq!(req.body.as_ref(), gate_core::pyjson::wire(&body).as_slice());
+    assert_eq!(req.body.as_ref(), gate_core::json::wire(&body).as_slice());
     assert_eq!(
         req.header("authorization"),
         Some(format!("Bearer {T1}").as_str())

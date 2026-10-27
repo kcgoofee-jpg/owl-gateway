@@ -13,7 +13,7 @@ use axum::extract::{Request, State};
 use axum::http::HeaderMap;
 use axum::response::Response;
 use axum::routing::{get, post, put};
-use gate_core::pyval::py_str;
+use gate_core::values::text;
 use serde_json::{Value, json};
 
 pub fn router() -> Router<AppState> {
@@ -25,7 +25,7 @@ pub fn router() -> Router<AppState> {
 }
 
 fn field(body: &serde_json::Map<String, Value>, name: &str) -> String {
-    body.get(name).map(py_str).unwrap_or_default()
+    body.get(name).map(text).unwrap_or_default()
 }
 
 async fn login(State(state): State<AppState>, req: Request) -> Result<Response, ApiError> {

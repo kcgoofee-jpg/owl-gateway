@@ -16,7 +16,7 @@ use crate::state::AppState;
 use axum::Router;
 use axum::extract::{Request, State};
 use axum::routing::post;
-use gate_core::{guard, paid_v5, pyc, pyjson, pyval};
+use gate_core::{guard, json, paid_v5, primitives, values};
 use serde_json::{Map, Value, json};
 
 const BODY_LIMIT: usize = 64 * 1024;
@@ -39,7 +39,7 @@ fn bad(msg: impl Into<String>) -> ApiError {
 }
 
 fn non_neg_int(v: &Value, name: &str) -> Result<i64, ApiError> {
-    pyval::strict_int(v)
+    values::strict_int(v)
         .filter(|n| *n >= 0)
         .ok_or_else(|| bad(format!("{name} 必须是非负整数")))
 }
@@ -61,7 +61,10 @@ fn validate(key: &str, v: &Value, now: f64, tokens: &[String]) -> Result<String,
         if tokens.iter().any(|t| t == id) {
             Ok(())
         } else {
-            Err(bad(format!("令牌池里没有账号 {}", pyc::take_chars(id, 24))))
+            Err(bad(format!(
+                "令牌池里没有账号 {}",
+                primitives::take_chars(id, 24)
+            )))
         }
     };
     match key {
@@ -84,7 +87,7 @@ fn validate(key: &str, v: &Value, now: f64, tokens: &[String]) -> Result<String,
         }
         _ => return Err(bad(format!("不支持的设置 {key}"))),
     }
-    Ok(pyjson::dumps(v))
+    Ok(json::dumps(v))
 }
 
 fn shown(v: Option<&str>) -> String {
@@ -99,7 +102,7 @@ async fn manual(State(state): State<AppState>, _s: AdminSession, req: Request) -
     let text = |k: &str| {
         body.get(k)
             .and_then(Value::as_str)
-            .map(|s| pyc::strip(s).to_string())
+            .map(|s| primitives::strip(s).to_string())
             .unwrap_or_default()
     };
     let why = text("why");
@@ -117,9 +120,9 @@ async fn manual(State(state): State<AppState>, _s: AdminSession, req: Request) -
             .db
             .add_admin_action(
                 &who,
-                pyc::take_chars(&action, 60),
-                pyc::take_chars(&target, 60),
-                pyc::take_chars(&why, 600),
+                primitives::take_chars(&action, 60),
+                primitives::take_chars(&target, 60),
+                primitives::take_chars(&why, 600),
                 true,
                 now,
             )
@@ -160,7 +163,7 @@ async fn manual(State(state): State<AppState>, _s: AdminSession, req: Request) -
             &who,
             action,
             target,
-            pyc::take_chars(&detail, 600),
+            primitives::take_chars(&detail, 600),
             now,
         )
         .await?;

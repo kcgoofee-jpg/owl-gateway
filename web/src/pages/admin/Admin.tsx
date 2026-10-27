@@ -9,7 +9,6 @@ import { signal } from "@preact/signals";
 import {
   Activity,
   Gauge,
-  Images,
   ListTree,
   LogOut,
   Menu as MenuIcon,
@@ -33,7 +32,7 @@ import { memberLabel } from "./sections/members/logic";
 import type { Member } from "./sections/members/types";
 
 /* ---------------- 分区注册表 ---------------- */
-export type SectionId = "members" | "audit" | "logs" | "upstream" | "onboarding" | "limits" | "system";
+export type SectionId = "members" | "logs" | "upstream" | "onboarding" | "limits" | "system";
 
 type Section = {
   id: SectionId;
@@ -52,14 +51,6 @@ export const SECTIONS: Section[] = [
     path: "/admin/members",
     icon: Users,
     view: lazy(() => import("./sections/members")),
-  },
-  {
-    id: "audit",
-    label: "生成记录",
-    group: "日常",
-    path: "/admin/audit",
-    icon: Images,
-    view: lazy(() => import("./sections/audit")),
   },
   {
     id: "logs",

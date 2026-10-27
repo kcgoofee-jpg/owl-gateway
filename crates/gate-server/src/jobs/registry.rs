@@ -11,7 +11,7 @@ use crate::error::{ApiError, InternalError};
 use crate::state::AppState;
 use futures::FutureExt;
 use futures::future::BoxFuture;
-use gate_core::pyc::take_chars;
+use gate_core::primitives::take_chars;
 use serde_json::{Map, Value, json};
 use std::future::Future;
 use std::panic::AssertUnwindSafe;
@@ -185,7 +185,7 @@ impl std::error::Error for JobError {}
 
 impl From<gate_core::quota::DecideError> for JobError {
     fn from(e: gate_core::quota::DecideError) -> Self {
-        let ty = e.py_type();
+        let ty = e.error_kind();
         let text = e.to_string();
         let msg = text
             .strip_prefix(&format!("{ty}: "))

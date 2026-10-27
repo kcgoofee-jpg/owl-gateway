@@ -13,8 +13,8 @@
 //! [`Effect::UpdateKeys`] 的执行：`UPDATE api_keys SET daily_images=?, daily_v5=?`
 //! WHERE quota_auto=1`。后台手动设过额度的 Key（`quota_auto=-1`）不动。
 
-use crate::pyext::PyErr;
-use crate::{pyc, pyval};
+use crate::validation::ValidationError;
+use crate::{primitives, values};
 use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value};
 
@@ -29,7 +29,7 @@ pub const V5_FULL_PERCENT: f64 = 99.5;
 // 错误与副作用
 // ---------------------------------------------------------------------------
 
-/// 额度判定失败，按异常类型分类（错误文案以 [`DecideError::py_type`] 的类型名开头）。
+/// 额度判定失败，按异常类型分类（错误文案以 [`DecideError::error_kind`] 的类型名开头）。
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
 pub enum DecideError {
     #[error("ValueError: {0}")]
@@ -52,29 +52,28 @@ pub enum DecideError {
 }
 
 impl DecideError {
-    /// Python 异常类名。
-    pub fn py_type(&self) -> &'static str {
+    pub fn error_kind(&self) -> &'static str {
         match self {
-            Self::Value(_) => "ValueError",
+            Self::Value(_) => "invalid_value",
             Self::Json(_) => "JSONDecodeError",
-            Self::Type(_) => "TypeError",
+            Self::Type(_) => "invalid_type",
             Self::Key(_) => "KeyError",
-            Self::Attribute(_) => "AttributeError",
-            Self::Overflow(_) => "OverflowError",
-            Self::ZeroDivision(_) => "ZeroDivisionError",
+            Self::Attribute(_) => "invalid_structure",
+            Self::Overflow(_) => "out_of_range",
+            Self::ZeroDivision(_) => "division_by_zero",
             Self::MissingInput(_) => "MissingInput",
         }
     }
 }
 
-impl From<PyErr> for DecideError {
-    fn from(e: PyErr) -> Self {
+impl From<ValidationError> for DecideError {
+    fn from(e: ValidationError) -> Self {
         match e {
-            PyErr::Value(m) => Self::Value(m),
-            PyErr::Type(m) => Self::Type(m),
-            PyErr::Attribute(m) => Self::Attribute(m),
-            PyErr::Overflow(m) => Self::Overflow(m),
-            PyErr::ZeroDivision(m) => Self::ZeroDivision(m),
+            ValidationError::InvalidValue(m) => Self::Value(m),
+            ValidationError::InvalidType(m) => Self::Type(m),
+            ValidationError::InvalidStructure(m) => Self::Attribute(m),
+            ValidationError::OutOfRange(m) => Self::Overflow(m),
+            ValidationError::DivisionByZero(m) => Self::ZeroDivision(m),
         }
     }
 }
@@ -225,9 +224,9 @@ pub struct Quiet {
 impl Quiet {
     pub fn to_value(&self) -> Value {
         let mut m = Map::new();
-        m.insert("rate".into(), pyval::float(self.rate));
-        m.insert("hours".into(), pyval::float(self.hours));
-        m.insert("gain".into(), pyval::float(self.gain));
+        m.insert("rate".into(), values::float(self.rate));
+        m.insert("hours".into(), values::float(self.hours));
+        m.insert("gain".into(), values::float(self.gain));
         Value::Object(m)
     }
 }
@@ -277,8 +276,8 @@ pub fn quiet_recovery(q: &QuietInputs) -> Option<Quiet> {
         return None;
     }
     Some(Quiet {
-        rate: pyc::round(gain / hours * 24.0, 2),
-        hours: pyc::round(hours, 1),
+        rate: primitives::round(gain / hours * 24.0, 2),
+        hours: primitives::round(hours, 1),
         gain,
     })
 }
@@ -298,7 +297,7 @@ pub fn allowance_summary(accounts: &[AccountAllowance]) -> (Option<f64>, Option<
     if rows.is_empty() {
         return (None, None);
     }
-    let pct = pyc::sum(rows.iter().filter_map(|a| a.percent)) / rows.len() as f64;
+    let pct = primitives::sum(rows.iter().filter_map(|a| a.percent)) / rows.len() as f64;
     // `if a.get("recharge_per_day")`：0 / None 不算
     let rates: Vec<f64> = rows
         .iter()
@@ -308,7 +307,7 @@ pub fn allowance_summary(accounts: &[AccountAllowance]) -> (Option<f64>, Option<
     let rate = if rates.is_empty() {
         None
     } else {
-        Some(pyc::sum(rates.iter().copied()) / rates.len() as f64)
+        Some(primitives::sum(rates.iter().copied()) / rates.len() as f64)
     };
     (Some(pct), rate)
 }

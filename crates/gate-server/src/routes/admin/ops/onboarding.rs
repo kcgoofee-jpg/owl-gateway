@@ -2,7 +2,6 @@
 
 use super::super::BODY_LIMIT;
 use super::upstream_health;
-use crate::audit::{audit_flags, audit_image_cap_mb, audit_image_keep_hours};
 use crate::body::read_json_body;
 use crate::defaults;
 use crate::error::{ApiError, ApiResult, HttpError, ok_json};
@@ -20,7 +19,7 @@ pub(super) fn router() -> Router<AppState> {
         .route("/admin/api/ops", get(ops_get))
         .route("/admin/api/ops/registration", put(set_registration))
         .route("/admin/api/ops/features", put(set_features))
-        .route("/admin/api/ops/audit", put(set_audit))
+        .route("/admin/api/ops/log-retention", put(set_log_retention))
 }
 
 /// 后台「新建 Key」弹窗的默认功能：沿用「新成员默认开通的功能」（默认只有文生图），而不是全部功能。
@@ -42,7 +41,6 @@ async fn snapshot(state: &AppState) -> Result<Value, ApiError> {
         "active".into(),
         json!(state.db.registered_member_count(state.now()).await?),
     );
-    let (prompts, thumbs, days) = audit_flags(&state.db).await?;
     let labels: Map<String, Value> = FEATURES
         .iter()
         .map(|(n, l)| ((*n).to_string(), json!(l)))
@@ -62,15 +60,7 @@ async fn snapshot(state: &AppState) -> Result<Value, ApiError> {
             "daily_anlas": defaults::MANUAL_KEY_DAILY_ANLAS,
             "monthly_anlas": defaults::MANUAL_KEY_MONTHLY_ANLAS,
         },
-        "audit": {
-            "prompts": prompts,
-            "thumbs": thumbs,
-            "retention_days": days,
-            "image_cap_mb": audit_image_cap_mb(&state.db).await?,
-            "image_bytes": state.db.audit_image_bytes().await?,
-            "image_keep_hours": audit_image_keep_hours(&state.db).await?,
-            "origin_keep_days": crate::audit::usage_origin_keep_days(&state.db).await?,
-        },
+        "log_retention": {"origin_keep_days": crate::settings::usage_origin_keep_days(&state.db).await?},
         "upstream": upstream_health(state),
     }))
 }
@@ -119,9 +109,13 @@ async fn set_features(State(state): State<AppState>, _s: AdminSession, req: Requ
 }
 
 /// 开关生成记录与保留天数。
-async fn set_audit(State(state): State<AppState>, _s: AdminSession, req: Request) -> ApiResult {
+async fn set_log_retention(
+    State(state): State<AppState>,
+    _s: AdminSession,
+    req: Request,
+) -> ApiResult {
     let (parts, body) = req.into_parts();
     let body = read_json_body(&parts.headers, body, BODY_LIMIT).await?;
-    ops::set_audit(&state, &body).await?;
+    ops::set_log_retention(&state, &body).await?;
     Ok(ok_json(&snapshot(&state).await?))
 }

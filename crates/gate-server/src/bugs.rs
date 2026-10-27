@@ -19,7 +19,6 @@ pub struct Bugs {
 #[derive(Default, Clone)]
 pub struct Report<'a> {
     pub source: &'a str,
-    /// (错误类型名, 消息)；Rust 里没有 Python 的堆栈帧，位置用错误类型所在模块代替。
     pub error: Option<(&'a str, &'a str)>,
     pub title: &'a str,
     pub detail: &'a str,

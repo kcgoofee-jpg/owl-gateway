@@ -299,9 +299,8 @@ test("系统：改密码先在本地校验；清空原图 / 测试告警有保�
 
   // 没配置告警渠道时「测试告警」不可点
   await expect(page.getByRole("button", { name: "发送测试告警" })).toBeDisabled();
-  // 清空原图搬到了「生成记录 › 设置」：没有原图时不可点
-  await page.goto("/admin/audit/settings");
-  await expect(page.getByRole("button", { name: "清空服务器上的全部原图" })).toBeDisabled();
+  await expect(page.getByRole("button", { name: "清空服务器上的全部原图" })).toHaveCount(0);
+  await expect(page.getByRole("spinbutton", { name: "IP / UA 保留天数" })).toBeVisible();
 });
 
 test("领 Key 与功能：改名额直接保存；开放领 Key / 关功能要先确认", async ({ page }) => {

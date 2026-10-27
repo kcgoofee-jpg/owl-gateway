@@ -16,7 +16,7 @@ use axum::Router;
 use axum::extract::State;
 use axum::response::Response;
 use axum::routing::get;
-use gate_core::{pyval, quota};
+use gate_core::{quota, values};
 use serde_json::{Value, json};
 
 pub fn router() -> Router<AppState> {
@@ -85,7 +85,7 @@ async fn manual_raises(state: &AppState) -> Result<Value, ApiError> {
         .iter()
         .filter(|(_, (_, until))| now < *until)
         .map(|(id, (cap, until))| {
-            json!({"position": position(id), "cap": cap, "base": base, "until": pyval::float(*until)})
+            json!({"position": position(id), "cap": cap, "base": base, "until": values::float(*until)})
         })
         .collect();
     let raw_paid = state.db.get_setting(gate_core::paid_v5::KEY).await?;
@@ -98,9 +98,9 @@ async fn manual_raises(state: &AppState) -> Result<Value, ApiError> {
                 .await?;
             paid.push(json!({
                 "position": f.position,
-                "max_anlas": pyval::float(g.max_anlas),
-                "spent": pyval::float(spent),
-                "until": pyval::float(g.until),
+                "max_anlas": values::float(g.max_anlas),
+                "spent": values::float(spent),
+                "until": values::float(g.until),
             }));
         }
     }

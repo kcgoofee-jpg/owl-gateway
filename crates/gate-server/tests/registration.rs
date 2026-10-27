@@ -10,8 +10,6 @@ use axum::extract::{Request, State};
 use axum::http::{HeaderMap, StatusCode};
 use axum::response::Response;
 use common::{Call, Env, set_setting, setup, setup_registration};
-use gate_db::repo::audit::NewAudit;
-use gate_db::repo::usage::{NewLog, Success};
 use gate_server::registration::{DiscordUser, Issued, RegErr};
 use serde_json::{Value, json};
 use std::net::SocketAddr;
@@ -336,11 +334,7 @@ async fn bridge_checks_body_first_then_secret_then_guild() {
             .await,
     );
     assert_eq!(miss.0, 422);
-    assert_eq!(
-        miss.2,
-        json!({"detail": [{"type": "missing", "loc": ["body", "guild_id"], "msg": "Field required",
-                           "input": partial}]})
-    );
+    assert_eq!(miss.2, json!({"detail":"guild_id: Field required"}));
     let no_body = parse(
         Call::new("POST", "/self-register/resetkey")
             .bearer(SECRET)
@@ -349,14 +343,12 @@ async fn bridge_checks_body_first_then_secret_then_guild() {
     );
     assert_eq!(
         no_body.2,
-        json!({"detail": [{"type": "missing", "loc": ["body"], "msg": "Field required", "input": null}]})
+        json!({"detail":gate_core::json_body::MSG_INVALID_JSON})
     );
     let list = bridge(&e, "/self-register/resetkey", json!([1])).await;
     assert_eq!(
         list.2,
-        json!({"detail": [{"type": "model_attributes_type", "loc": ["body"],
-                           "msg": "Input should be a valid dictionary or object to extract fields from",
-                           "input": [1]}]})
+        json!({"detail":gate_core::json_body::MSG_NOT_OBJECT})
     );
     let num = bridge(
         &e,
@@ -366,8 +358,7 @@ async fn bridge_checks_body_first_then_secret_then_guild() {
     .await;
     assert_eq!(
         num.2,
-        json!({"detail": [{"type": "string_type", "loc": ["body", "discord_id"],
-                           "msg": "Input should be a valid string", "input": 5}]})
+        json!({"detail":"discord_id: Input should be a valid string"})
     );
     // 服务器不对 / ID 不是数字 → 403
     let wrong_guild = bridge(
@@ -476,7 +467,7 @@ async fn idle_recycled_member_is_told_why_when_registering_again() {
 
 // ------------------------------------------------------------------ 桥接：发 Key
 
-const WELCOME: &str = "🦉 **欢迎来到猫头鹰公益站！** 这是你的 API Key（只发这一次，请先保存）：\n`<KEY>`\n\n**三步开始出图（以柏宝绘为例）**\n1. 打开柏宝绘 → 渠道 → 配置 → 新建接入点\n2. 接口地址填 `https://gate.test`（**不要**加 /v1）\n3. API Key 填上面 `nai-` 开头的整串，保存后随便生成一张图试试\n其他支持自定义 NovelAI 地址的客户端同样这样填。\n\n**不确定填对没有？** 在 https://gate.test 用 Discord 登录，能看到自己的额度就说明 Key 正常。首次登录未提交使用体验问卷时，网站会自动打开问卷。\n\n**规则**\n• 每日额度：每人每天最多 V4.5 及以下 150 张；V5 9999 张，全站共用额度池；每天 7 点重置\n• 已开通功能：文生图\n• 连续 3 天没有成功出图会被自动回收（不另行提醒），之后可以再 /register 领新的\n• 每把 Key 同时生成 1 张、最多再排 2 张，多发的会被退回，等前面的出完再发\n• 只提供免费出图：V4.5 及以下总像素 ≤1024×1024（宽高取 64 的倍数，超出自动等比缩小）；V5 只有 832×1216、1216×832、1024×1024 三种尺寸，其他尺寸会自动换成最接近的一种；≤28 步、每次 1 张；图生图 / 局部重绘不开放；Vibe 在「已开通功能」里时可用，消耗每日 Anlas 额度\n• Key 只给本服务器成员：退出服务器后 Key 自动失效\n• 一人一把，请勿分享：共用或转售会被回收\n\n**常用命令**：`/resetkey` Key 丢了或泄露时换新；额度在 https://gate.test 登录后查看\n遇到问题到 🛠️｜问题反馈 发截图（记得打码 Key）。";
+const WELCOME: &str = "🦉 **欢迎来到猫头鹰公益站！** 这是你的 API Key（只发这一次，请先保存）：\n`<KEY>`\n\n**三步开始出图（以柏宝绘为例）**\n1. 打开柏宝绘 → 渠道 → 配置 → 新建接入点\n2. 接口地址填 `https://gate.test`（**不要**加 /v1）\n3. API Key 填上面 `nai-` 开头的整串，保存后随便生成一张图试试\n其他支持自定义 NovelAI 地址的客户端同样这样填。\n\n**不确定填对没有？** 在 https://gate.test 用 Discord 登录，能看到自己的额度就说明 Key 正常。首次登录未提交使用体验问卷时，网站会自动打开问卷。\n\n**规则**\n• 每日额度：每人每天最多 V4.5 及以下 150 张；V5 9999 张，全站共用额度池；每天 7 点重置\n• 已开通功能：文生图\n• 连续 3 天没有成功出图会被自动回收（不另行提醒），之后可以再 /register 领新的\n• 每把 Key 同时生成 1 张、最多再排 2 张，多发的会被退回，等前面的出完再发\n• 只提供免费出图：V4.5 及以下总像素 ≤1024×1024（宽高取 64 的倍数，超出自动等比缩小）；V5 只有 832×1216、1216×832、1024×1024 三种尺寸，其他尺寸会自动换成最接近的一种；≤28 步、每次 1 张；图生图 / 局部重绘不开放；Vibe 在「已开通功能」里时可用，消耗每日 Anlas 额度\n• Key 只给本服务器成员：退出服务器后 Key 自动失效\n• 一人一把，请勿分享：共用或转售会被回收\n• 提示词和生成参数保留 30 天用于排障和防滥用；本站不保存生成图片\n\n**常用命令**：`/resetkey` Key 丢了或泄露时换新；额度在 https://gate.test 登录后查看\n遇到问题到 🛠️｜问题反馈 发截图（记得打码 Key）。";
 
 /// 没配 `REGISTER_EXPIRES_DAYS`：新 Key 不过期，欢迎私信里也没有「有效期」那一行
 #[tokio::test]
@@ -1351,8 +1342,7 @@ async fn bot_report_keeps_only_the_heartbeat() {
     let bad = bridge(&e, "/self-register/bot/report", json!({"status": "x"})).await;
     assert_eq!(
         bad.2,
-        json!({"detail": [{"type": "dict_type", "loc": ["body", "status"],
-                           "msg": "Input should be a valid dictionary", "input": "x"}]})
+        json!({"detail":"status: Input should be a valid dictionary"})
     );
 }
 
@@ -2525,12 +2515,7 @@ async fn public_me_matches_legacy_and_coupons_work() {
             .send(&e.state)
             .await,
     );
-    assert_eq!(
-        bad.2,
-        json!({"detail": [{"type": "int_parsing", "loc": ["path", "coupon_id"],
-                           "msg": "Input should be a valid integer, unable to parse string as an integer",
-                           "input": "abc"}]})
-    );
+    assert_eq!(bad.2, json!({"detail":"coupon_id 必须是整数"}));
     let log: Vec<_> = actions(&e).await.iter().map(action_tuple).collect();
     assert!(log.contains(&(
         format!("Discord:{MEMBER}"),
@@ -2563,439 +2548,6 @@ async fn public_me_matches_legacy_and_coupons_work() {
         json!({"logged_in": true, "discord": {"id": MEMBER, "username": "alice",
         "display_name": "Alice", "avatar": "a1b2"}, "has_key": false})
     );
-}
-
-#[tokio::test]
-async fn member_image_download_is_scoped_to_session_key_even_when_rid_collides() {
-    let (e, _d) = setup_reg(&[]).await;
-    open_registration(&e).await;
-    issue(&e, MEMBER).await;
-    issue(&e, OTHER).await;
-    let key_for = |id: &'static str| async {
-        e.state.db.key_row_for_discord(id).await.unwrap().unwrap()["id"]
-            .as_i64()
-            .unwrap()
-    };
-    let member_key = key_for(MEMBER).await;
-    let other_key = key_for(OTHER).await;
-    let clock = e.state.clock.clone();
-    for (request_id, key_id, name, rid, image) in [
-        (
-            "00000000000000000000000000000001",
-            member_key,
-            "member",
-            "same-rid",
-            b"member image".as_slice(),
-        ),
-        (
-            "00000000000000000000000000000002",
-            other_key,
-            "other",
-            "same-rid",
-            b"other image".as_slice(),
-        ),
-        (
-            "00000000000000000000000000000003",
-            member_key,
-            "member",
-            "same-rid",
-            b"second member image".as_slice(),
-        ),
-        (
-            "00000000000000000000000000000004",
-            member_key,
-            "member",
-            "member-only-rid",
-            b"private image".as_slice(),
-        ),
-    ] {
-        e.state
-            .db
-            .reserve_request_settlement(
-                request_id,
-                rid,
-                key_id,
-                &e.state.day(),
-                &e.state.month(),
-                false,
-                false,
-                0.0,
-                0,
-                1,
-                e.state.now(),
-            )
-            .await
-            .unwrap();
-        e.state
-            .db
-            .dispatch_request_settlement(
-                request_id,
-                "ABC123",
-                &e.state.day(),
-                &e.state.month(),
-                false,
-                false,
-                0.0,
-                0,
-                1,
-                e.state.now(),
-            )
-            .await
-            .unwrap();
-        e.state
-            .db
-            .record_success_settled(
-                &Success {
-                    key_id,
-                    key_name: name.into(),
-                    kind: "image".into(),
-                    model: "model".into(),
-                    day: e.state.day(),
-                    rid: rid.into(),
-                    images: 1,
-                    ..Default::default()
-                },
-                request_id,
-                e.state.now(),
-            )
-            .await
-            .unwrap();
-        e.state
-            .db
-            .add_audit(
-                &NewAudit {
-                    key_id: Some(key_id),
-                    key_name: name,
-                    kind: "image",
-                    model: "model",
-                    status: "ok",
-                    rid,
-                    image: Some(image),
-                    image_type: "image/png",
-                    request_id,
-                    ..Default::default()
-                },
-                e.state.now(),
-                &clock,
-            )
-            .await
-            .unwrap();
-    }
-    e.state
-        .db
-        .add_log(
-            &NewLog {
-                key_id: Some(member_key),
-                key_name: "member".into(),
-                kind: "image".into(),
-                status: "ok".into(),
-                rid: "legacy-rid".into(),
-                images: 1,
-                ..Default::default()
-            },
-            e.state.now(),
-        )
-        .await
-        .unwrap();
-    e.state
-        .db
-        .add_audit(
-            &NewAudit {
-                key_id: Some(member_key),
-                key_name: "member",
-                kind: "image",
-                model: "model",
-                status: "ok",
-                rid: "legacy-rid",
-                image: Some(b"legacy image"),
-                image_type: "image/png",
-                ..Default::default()
-            },
-            e.state.now(),
-            &clock,
-        )
-        .await
-        .unwrap();
-    let member_cookie = login_member(&e, MEMBER).await;
-    let other_cookie = login_member(&e, OTHER).await;
-    let member_rows: Value = serde_json::from_slice(
-        &Call::new("GET", "/public/me/requests")
-            .header("cookie", member_cookie.clone())
-            .send(&e.state)
-            .await
-            .2,
-    )
-    .unwrap();
-    let same_rid_urls: Vec<String> = member_rows["items"]
-        .as_array()
-        .unwrap()
-        .iter()
-        .filter(|r| r["rid"] == "same-rid")
-        .map(|r| {
-            r["image_url"]
-                .as_str()
-                .unwrap_or_else(|| panic!("request has no image URL: {r}"))
-                .to_owned()
-        })
-        .collect();
-    assert_eq!(same_rid_urls.len(), 2);
-    let legacy = member_rows["items"]
-        .as_array()
-        .unwrap()
-        .iter()
-        .find(|r| r["rid"] == "legacy-rid")
-        .unwrap();
-    assert_eq!(
-        legacy["image_available"], false,
-        "legacy RID alone is not a safe image association"
-    );
-    assert_eq!(legacy["image_url"], Value::Null);
-    assert!(
-        same_rid_urls
-            .contains(&"/public/me/requests/image/00000000000000000000000000000001".to_string())
-    );
-    assert!(
-        same_rid_urls
-            .contains(&"/public/me/requests/image/00000000000000000000000000000003".to_string())
-    );
-    let (status, _, member_image) = Call::new(
-        "GET",
-        "/public/me/requests/image/00000000000000000000000000000001",
-    )
-    .header("cookie", member_cookie.clone())
-    .send(&e.state)
-    .await;
-    assert_eq!(status, 200);
-    assert_eq!(member_image, b"member image");
-    let (status, _, second_member_image) = Call::new(
-        "GET",
-        "/public/me/requests/image/00000000000000000000000000000003",
-    )
-    .header("cookie", member_cookie.clone())
-    .send(&e.state)
-    .await;
-    assert_eq!(status, 200);
-    assert_eq!(second_member_image, b"second member image");
-    let other_rows: Value = serde_json::from_slice(
-        &Call::new("GET", "/public/me/requests")
-            .header("cookie", other_cookie.clone())
-            .send(&e.state)
-            .await
-            .2,
-    )
-    .unwrap();
-    let other_url = other_rows["items"][0]["image_url"].as_str().unwrap();
-    let (status, _, other_image) = Call::new("GET", other_url)
-        .header("cookie", other_cookie.clone())
-        .send(&e.state)
-        .await;
-    assert_eq!(status, 200);
-    assert_eq!(other_image, b"other image");
-    let (status, _, private_image) = Call::new(
-        "GET",
-        "/public/me/requests/image/00000000000000000000000000000004",
-    )
-    .header("cookie", member_cookie)
-    .send(&e.state)
-    .await;
-    assert_eq!(status, 200);
-    assert_eq!(private_image, b"private image");
-    let (status, _, _) = Call::new(
-        "GET",
-        "/public/me/requests/image/00000000000000000000000000000004",
-    )
-    .header("cookie", other_cookie.clone())
-    .send(&e.state)
-    .await;
-    assert_eq!(status, 404, "another member cannot fetch a retained image");
-    let (status, _, _) = Call::new(
-        "GET",
-        "/public/me/requests/image/ffffffffffffffffffffffffffffffff",
-    )
-    .header("cookie", other_cookie)
-    .send(&e.state)
-    .await;
-    assert_eq!(status, 404, "unknown or expired images are not returned");
-}
-
-#[tokio::test]
-async fn overlapping_image_and_stream_responses_keep_prompt_images_with_their_owners() {
-    async fn pair(e: &Env, stream: bool) {
-        let member = e
-            .state
-            .db
-            .key_row_for_discord(MEMBER)
-            .await
-            .unwrap()
-            .unwrap();
-        let other = e
-            .state
-            .db
-            .key_row_for_discord(OTHER)
-            .await
-            .unwrap()
-            .unwrap();
-        let member_token = member["token"].as_str().unwrap().to_string();
-        let other_token = other["token"].as_str().unwrap().to_string();
-        let (path, seed_a, seed_b) = if stream {
-            ("/ai/generate-image-stream", 17u8, 91u8)
-        } else {
-            ("/ai/generate-image", 31u8, 122u8)
-        };
-        let body = |prompt: &str| json!({"input":prompt,"model":"nai-diffusion-4-5-full","action":"generate","parameters":{"width":832,"height":1216,"steps":28,"n_samples":1,"scale":5,"sampler":"k_euler_ancestral","stream":if stream {"sse"} else {""}}});
-        let reply = |seed: u8, slow: bool| {
-            let delay = if slow {
-                std::time::Duration::from_millis(70)
-            } else {
-                std::time::Duration::from_millis(1)
-            };
-            let chunks = if stream {
-                gate_testkit::image_stream_variant(1, "sse", seed)
-                    .into_iter()
-                    .map(|(_, bytes)| (delay, bytes))
-                    .collect()
-            } else {
-                vec![(
-                    delay,
-                    axum::body::Bytes::from(gate_testkit::zip_of_png_variant(seed)),
-                )]
-            };
-            gate_testkit::Reply::Chunks {
-                status: 200,
-                content_type: if stream {
-                    "text/event-stream"
-                } else {
-                    "application/zip"
-                }
-                .into(),
-                chunks,
-            }
-        };
-        e.mock.push(path, reply(seed_a, true));
-        e.mock.push(path, reply(seed_b, false));
-        let state_a = e.state.clone();
-        let body_a = body("prompt member A");
-        let task_a = tokio::spawn(async move {
-            Call::new("POST", path)
-                .bearer(&member_token)
-                .json(body_a)
-                .send(&state_a)
-                .await
-        });
-        tokio::time::timeout(std::time::Duration::from_secs(1), async {
-            while e.mock.requests_to(path).is_empty() {
-                tokio::time::sleep(std::time::Duration::from_millis(2)).await;
-            }
-        })
-        .await
-        .unwrap();
-        let state_b = e.state.clone();
-        let body_b = body("prompt member B");
-        let task_b = tokio::spawn(async move {
-            Call::new("POST", path)
-                .bearer(&other_token)
-                .json(body_b)
-                .send(&state_b)
-                .await
-        });
-        tokio::time::timeout(std::time::Duration::from_secs(1), async {
-            while e.mock.requests_to(path).len() < 2 {
-                tokio::time::sleep(std::time::Duration::from_millis(2)).await;
-            }
-        })
-        .await
-        .unwrap();
-        let fast = tokio::time::timeout(std::time::Duration::from_millis(500), &mut { task_b })
-            .await
-            .unwrap()
-            .unwrap();
-        assert!(
-            !task_a.is_finished(),
-            "the second prompt must finish before the deliberately delayed first response"
-        );
-        let slow = tokio::time::timeout(std::time::Duration::from_secs(3), task_a)
-            .await
-            .unwrap()
-            .unwrap();
-        assert_eq!((fast.0, slow.0), (StatusCode::OK, StatusCode::OK));
-        if stream {
-            assert!(
-                fast.2
-                    .windows(gate_testkit::base64_tiny_png_variant(seed_b).len())
-                    .any(|w| w == gate_testkit::base64_tiny_png_variant(seed_b).as_bytes())
-            );
-            assert!(
-                slow.2
-                    .windows(gate_testkit::base64_tiny_png_variant(seed_a).len())
-                    .any(|w| w == gate_testkit::base64_tiny_png_variant(seed_a).as_bytes())
-            );
-        } else {
-            assert_eq!(fast.2, gate_testkit::zip_of_png_variant(seed_b));
-            assert_eq!(slow.2, gate_testkit::zip_of_png_variant(seed_a));
-        }
-        common::settle().await;
-        let member_cookie = login_member(e, MEMBER).await;
-        let other_cookie = login_member(e, OTHER).await;
-        let member_rid = slow.1["x-request-id"].to_str().unwrap();
-        let other_rid = fast.1["x-request-id"].to_str().unwrap();
-        let member_rows: Value = serde_json::from_slice(
-            &Call::new("GET", "/public/me/requests")
-                .header("cookie", member_cookie.clone())
-                .send(&e.state)
-                .await
-                .2,
-        )
-        .unwrap();
-        let member_image_path = member_rows["items"]
-            .as_array()
-            .unwrap()
-            .iter()
-            .find(|r| r["rid"].as_str() == Some(member_rid))
-            .unwrap()["image_url"]
-            .as_str()
-            .unwrap()
-            .to_owned();
-        let member_image = Call::new("GET", &member_image_path);
-        let (status, _, bytes) = member_image
-            .header("cookie", member_cookie)
-            .send(&e.state)
-            .await;
-        assert_eq!(status, StatusCode::OK);
-        assert_eq!(bytes, gate_testkit::tiny_png_variant(seed_a));
-        let other_rows: Value = serde_json::from_slice(
-            &Call::new("GET", "/public/me/requests")
-                .header("cookie", other_cookie.clone())
-                .send(&e.state)
-                .await
-                .2,
-        )
-        .unwrap();
-        let other_image_path = other_rows["items"]
-            .as_array()
-            .unwrap()
-            .iter()
-            .find(|r| r["rid"].as_str() == Some(other_rid))
-            .unwrap()["image_url"]
-            .as_str()
-            .unwrap()
-            .to_owned();
-        let other_image = Call::new("GET", &other_image_path);
-        let (status, _, bytes) = other_image
-            .header("cookie", other_cookie)
-            .send(&e.state)
-            .await;
-        assert_eq!(status, StatusCode::OK);
-        assert_eq!(bytes, gate_testkit::tiny_png_variant(seed_b));
-    }
-
-    for stream in [false, true] {
-        let (e, _d) = setup_reg(&[("NAI_TOKENS", "pst-synthetic-a,pst-synthetic-b")]).await;
-        open_registration(&e).await;
-        issue(&e, MEMBER).await;
-        issue(&e, OTHER).await;
-        set_setting(&e, "audit_thumbs", "1").await;
-        pair(&e, stream).await;
-    }
 }
 
 // ------------------------------------------------------------------ 已移除的捐赠入口
@@ -3103,130 +2655,6 @@ fn member_label_writing() {
             "{user:?}"
         );
     }
-}
-
-fn archive(bytes: Vec<u8>) -> (Vec<String>, serde_json::Map<String, Value>) {
-    let mut z = zip::ZipArchive::new(std::io::Cursor::new(bytes)).unwrap();
-    let (mut names, mut files) = (Vec::new(), serde_json::Map::new());
-    for i in 0..z.len() {
-        let mut f = z.by_index(i).unwrap();
-        let name = f.name().unwrap().into_owned();
-        let mut data = Vec::new();
-        std::io::Read::read_to_end(&mut f, &mut data).unwrap();
-        let v = if [".png", ".jpg", ".webp"].iter().any(|e| name.ends_with(e)) {
-            json!(data.len())
-        } else {
-            json!(String::from_utf8(data).unwrap())
-        };
-        names.push(name.clone());
-        files.insert(name, v);
-    }
-    (names, files)
-}
-
-/// 后台导出的 zip：条目按顺序编号并带时间，类型串不认识的按 png；`prompts.txt` 列出每张图的正面 / 负面和参数
-/// （`extra` 里的 `params` 不是 JSON、是 `null` 或缺项时，对应的参数行就省略）。
-#[test]
-fn export_zip_entries_and_prompt_list() {
-    let row =
-        |id: i64, ts: f64, ty: &str, prompt: &str, negative: &str, extra: &str, image: &str| {
-            gate_db::repo::audit::AuditImage {
-                id,
-                ts,
-                image_type: ty.into(),
-                prompt: prompt.into(),
-                negative: negative.into(),
-                extra: extra.into(),
-                image: image.as_bytes().to_vec(),
-            }
-        };
-    let rows = vec![
-        row(
-            1,
-            1759996400.0,
-            "image/png",
-            "1girl, <forest> & 'mist'",
-            "lowres \"bad\"",
-            r#"{"params":{"seed":42,"sampler":"k_euler","steps":28,"scale":5,"width":832,"height":1216}}"#,
-            "PNG-ONE",
-        ),
-        row(
-            2,
-            1759996500.0,
-            "image/jpeg",
-            "1boy",
-            "",
-            r#"{"params":{"seed":0,"scale":5.5,"steps":0,"width":832}}"#,
-            "JPEG-TWO",
-        ),
-        row(
-            3,
-            1759996600.0,
-            "image/webp",
-            "plain",
-            "neg",
-            "not json",
-            "WEBP-THREE",
-        ),
-        row(
-            4,
-            1759996700.0,
-            "image/gif",
-            "unknown type",
-            "",
-            "",
-            "GIF-FOUR",
-        ),
-        row(
-            5,
-            1759996800.0,
-            "image/png",
-            "null params",
-            "",
-            r#"{"params":null}"#,
-            "PNG-FIVE",
-        ),
-    ];
-    let clock = gate_core::clock::Clock::new("Asia/Shanghai", 7);
-    let (names, files) = archive(gate_server::exporter::build_zip(
-        &rows,
-        "小明",
-        &clock,
-        1760000000.0,
-    ));
-    assert_eq!(
-        names,
-        [
-            "0001_20251009-155320.png",
-            "0002_20251009-155500.jpg",
-            "0003_20251009-155640.webp",
-            "0004_20251009-155820.png",
-            "0005_20251009-160000.png",
-            "prompts.txt",
-        ]
-    );
-    // 图片条目：原样写入（这里只看字节数）
-    for (name, len) in [
-        ("0001_20251009-155320.png", 7),
-        ("0002_20251009-155500.jpg", 8),
-        ("0003_20251009-155640.webp", 10),
-        ("0004_20251009-155820.png", 8),
-        ("0005_20251009-160000.png", 8),
-    ] {
-        assert_eq!(files[name], json!(len), "{name}");
-    }
-    assert_eq!(
-        files["prompts.txt"],
-        json!(
-            "小明 的作品 · 共 5 张 · 导出于 2025-10-09 16:53\n\n\
-             [0001_20251009-155320.png]\n正面：1girl, <forest> & 'mist'\n负面：lowres \"bad\"\n\
-             参数：种子 42 · k_euler · 28步 · CFG 5 · 832×1216\n\n\
-             [0002_20251009-155500.jpg]\n正面：1boy\n负面：\n参数：种子 0 · CFG 5.5\n\n\
-             [0003_20251009-155640.webp]\n正面：plain\n负面：neg\n\n\
-             [0004_20251009-155820.png]\n正面：unknown type\n负面：\n\n\
-             [0005_20251009-160000.png]\n正面：null params\n负面：\n"
-        )
-    );
 }
 
 // ------------------------------------------------------------------ 设置：名额 × V5 提示、校验、欢迎文案变体、记录开关（对拍旧版 ops.py）
@@ -3337,18 +2765,6 @@ async fn registration_settings_ops_match_legacy() {
         .set_setting("quota_modes_v1", &quota_modes.to_string())
         .await
         .unwrap();
-    // 记录开关：提示词记录 5 天
-    let audit = gate_server::ops::set_audit(
-        &e.state,
-        &obj(json!({"prompts": true, "thumbs": false, "retention_days": 5})),
-    )
-    .await
-    .unwrap();
-    assert_eq!(
-        audit,
-        json!({"prompts": true, "thumbs": false, "retention_days": 5,
-               "image_cap_mb": 0, "image_keep_hours": 24, "origin_keep_days": 0})
-    );
     // 欢迎文案：每人最多 100 张、全部功能、没有有效期这一行、带记录声明
     let r = bridge(
         &e,
@@ -3387,18 +2803,6 @@ async fn registration_settings_ops_match_legacy() {
         json!({"configured": true, "open": true, "max_users": 50, "features": null, "daily_images": 100,
                "daily_v5": 0, "image_scope": "all", "expires_days": 0, "role_guild": "",
                "role_id": "", "role_note": "", "role_extra": []})
-    );
-    // 数值被夹在范围里
-    let audit = gate_server::ops::set_audit(
-        &e.state,
-        &obj(json!({"retention_days": 9999, "image_cap_mb": 7, "image_keep_hours": 99999})),
-    )
-    .await
-    .unwrap();
-    assert_eq!(
-        audit,
-        json!({"prompts": true, "thumbs": false, "retention_days": 3650,
-               "image_cap_mb": 7, "image_keep_hours": 8760, "origin_keep_days": 0})
     );
 }
 

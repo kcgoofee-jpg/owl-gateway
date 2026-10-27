@@ -4,7 +4,7 @@
 //! 建表在 [`crate::bootstrap`]（`status_schema.sql`）。这里只放查询 / 写入；快照、可用率条、页面都在 gate-server。
 
 use crate::{Db, Result};
-use gate_core::pyjson;
+use gate_core::json;
 use rusqlite::{OptionalExtension, params};
 use serde_json::Value;
 
@@ -109,7 +109,7 @@ impl Db {
             body.to_string(),
         );
         // json.dumps(components, ensure_ascii=False)：默认分隔符 ", "
-        let components = pyjson::dumps(&Value::from(components.to_vec()));
+        let components = json::dumps(&Value::from(components.to_vec()));
         self.write(move |tx| {
             let resolved_at: Option<f64> = (status == "resolved").then_some(at);
             tx.execute(

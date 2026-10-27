@@ -299,7 +299,7 @@ async fn admin_routes_match_snapshot() {
     gate_server::time::freeze(None);
     // 快照没被意外截短
     assert!(
-        main >= 207 && merge == 1 && early == 2,
+        main >= 170 && merge == 1 && early == 2,
         "{main} {merge} {early}"
     );
 }

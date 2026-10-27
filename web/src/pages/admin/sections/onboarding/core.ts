@@ -22,21 +22,12 @@ export type RoleRule = { guild: string; role: string; note: string };
 
 /** 额外身份组最多几条（与后端 ops::MAX_ROLE_EXTRA 一致） */
 export const MAX_ROLE_EXTRA = 5;
-export type AuditInfo = {
-  prompts: boolean;
-  thumbs: boolean;
-  retention_days: number;
-  image_cap_mb: number;
-  image_bytes: number;
-  image_keep_hours: number;
-  origin_keep_days: number;
-};
 export type Ops = {
   registration: RegistrationInfo;
   features: { global: Record<string, boolean>; labels: Record<string, string>; new_key: string[] | null };
   /** 没有数据库设置的几项默认值（服务端 defaults.rs）；新建 Key 的表单不自己写一套 */
   new_key: { rpm: number; daily_anlas: number; monthly_anlas: number };
-  audit: AuditInfo;
+  log_retention: { origin_keep_days: number };
 };
 
 /** 消耗官方 Anlas（付费点数）的功能：开启前要确认（接口没有给出这个清单，与 crates/gate-core/src/features.rs 的 ANLAS_FEATURES 对应） */
@@ -138,47 +129,6 @@ export function regBody(
     body.role_id = String(raw("role_id")).trim();
   }
   return body;
-}
-
-export const AUDIT_SPECS: Record<string, FieldSpec> = {
-  prompts: { kind: "bool", label: "记录提示词" },
-  thumbs: { kind: "bool", label: "保存原图" },
-  image_keep_hours: {
-    kind: "int",
-    label: "原图保存时长",
-    min: 0,
-    max: 8760,
-    unit: "小时",
-    hint: "到点自动删；0 = 只按容量上限删",
-  },
-  retention_days: { kind: "int", label: "提示词保留", min: 0, max: 3650, unit: "天", hint: "0 = 永久" },
-  origin_keep_days: {
-    kind: "int",
-    label: "IP / UA 保留",
-    min: 0,
-    max: 365,
-    unit: "天",
-    hint: "0 = 永久",
-  },
-  image_cap_mb: {
-    kind: "int",
-    label: "原图容量上限",
-    min: 0,
-    max: 500_000,
-    unit: "MB",
-    hint: "超过删最旧的；0 = 不限",
-  },
-};
-
-export function auditServer(a: AuditInfo): Record<string, unknown> {
-  return {
-    prompts: a.prompts,
-    thumbs: a.thumbs,
-    image_keep_hours: a.image_keep_hours,
-    retention_days: a.retention_days,
-    origin_keep_days: a.origin_keep_days,
-    image_cap_mb: a.image_cap_mb,
-  };
 }
 
 /** 额外身份组的表单问题（空行忽略）：服务器 ID、身份组 ID 都要是 15～21 位数字；最多 5 条 */

@@ -7,7 +7,7 @@
 //! - 机器人每分钟上报一次心跳：服务层把 `status` 交给 [`status_to_store`]，结果写进 `bot_status`；
 //! - 后台「机器人状态」卡片：服务层读 `bot_status`（缺省 `"{}"`），交给 [`snapshot`]。
 
-use crate::pyval;
+use crate::values;
 use serde_json::{Map, Value};
 
 /// `site_settings` 里存心跳的键。
@@ -40,8 +40,8 @@ pub fn status_to_store(status: &Map<String, Value>, now: f64) -> String {
             keep.insert(k.to_string(), v.clone());
         }
     }
-    keep.insert("seen_at".into(), pyval::float(now));
-    crate::pyjson::dumps(&Value::Object(keep))
+    keep.insert("seen_at".into(), values::float(now));
+    crate::json::dumps(&Value::Object(keep))
 }
 
 /// 在线判断：`bool(seen and now - seen < 180)`。`seen` 是状态里的 `seen_at`（没有 = None）。
@@ -50,10 +50,10 @@ pub fn online(seen_at: Option<&Value>, now: f64) -> Result<bool, BotConfigError>
     let Some(seen) = seen_at else {
         return Ok(false);
     };
-    if !pyval::truthy(seen) {
+    if !values::enabled(seen) {
         return Ok(false);
     }
-    match pyval::number_like(seen) {
+    match values::number(seen) {
         Some(s) => Ok(now - s < ONLINE_WINDOW),
         None => Err(BotConfigError::Type(
             "unsupported operand type(s) for -: 'float' and ...".into(),
@@ -95,8 +95,8 @@ mod tests {
         });
         let stored = status_to_store(status.as_object().unwrap(), 1000.0);
         assert_eq!(
-            stored,
-            r#"{"user": "naimei", "guild": "测试服", "latency_ms": 42, "ready_at": 1.5, "version": "3.0", "seen_at": 1000.0}"#
+            serde_json::from_str::<Value>(&stored).unwrap(),
+            json!({"user":"naimei","guild":"测试服","latency_ms":42,"ready_at":1.5,"version":"3.0","seen_at":1000.0})
         );
     }
 

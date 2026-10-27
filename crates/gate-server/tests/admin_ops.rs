@@ -169,7 +169,7 @@ async fn settings_get_put_and_stored_strings() {
         (json!({"global_daily_v5": true}), "global_daily_v5 不能为空"),
         (
             json!({"global_monthly_anlas": 2e6}),
-            "global_monthly_anlas 必须在 0.0～99999.0 之间",
+            "global_monthly_anlas 必须在 0～99999 之间",
         ),
         (
             json!({"global_monthly_anlas": null}),
@@ -782,7 +782,7 @@ async fn discord_bot_status_only() {
 fn ops_fixed(v: &Value) -> Value {
     json!({
         "registration": v["registration"], "features": v["features"], "new_key": v["new_key"],
-        "audit": v["audit"],
+        "log_retention": v["log_retention"],
     })
 }
 
@@ -806,8 +806,7 @@ async fn ops_snapshot_defaults() {
             },
             // 后台「新建 Key」弹窗里没有数据库设置的默认值
             "new_key": {"rpm": 10, "daily_anlas": 0.0, "monthly_anlas": 2500.0},
-            "audit": {"prompts": false, "thumbs": false, "retention_days": 7, "image_cap_mb": 0,
-                "image_bytes": 0, "image_keep_hours": 24, "origin_keep_days": 0},
+            "log_retention": {"origin_keep_days": 0},
         })
     );
     assert_eq!(
@@ -818,7 +817,13 @@ async fn ops_snapshot_defaults() {
     let keys: Vec<&str> = v.as_object().unwrap().keys().map(String::as_str).collect();
     assert_eq!(
         keys,
-        ["registration", "features", "new_key", "audit", "upstream"]
+        [
+            "registration",
+            "features",
+            "new_key",
+            "log_retention",
+            "upstream"
+        ]
     );
     let reg_keys: Vec<&str> = v["registration"]
         .as_object()
@@ -1171,7 +1176,7 @@ async fn ops_features_put() {
     assert_eq!(v["features"]["global"]["upscale"], false);
     assert_eq!(
         settings(&e).await["features_global"],
-        r#"{"image": true, "upscale": false, "augment": true, "vibe": true, "tags": true}"#
+        r#"{"image":true,"upscale":false,"augment":true,"vibe":true,"tags":true}"#
     );
     // 多项一起改，库里始终按功能顺序、Python 的默认分隔符
     api.json(
@@ -1182,7 +1187,7 @@ async fn ops_features_put() {
     .await;
     assert_eq!(
         settings(&e).await["features_global"],
-        r#"{"image": true, "upscale": false, "augment": true, "vibe": true, "tags": false}"#
+        r#"{"image":true,"upscale":false,"augment":true,"vibe":true,"tags":false}"#
     );
     let frozen = settings(&e).await;
     for body in [
@@ -1226,78 +1231,30 @@ async fn ops_features_corrupt_store_is_a_server_error() {
 }
 
 #[tokio::test]
-async fn ops_audit_put() {
+async fn log_retention_put() {
     let e = setup(&[]).await;
     let api = Admin::login_bare(&e.state).await;
-    let audit = |v: &Value| v["audit"].clone();
-
-    let before = settings(&e).await;
-    let (s, v) = api
-        .json("PUT", "/ops/audit", Some(json!({"prompts": true})))
+    let (status, value) = api
+        .json(
+            "PUT",
+            "/ops/log-retention",
+            Some(json!({"origin_keep_days":7})),
+        )
         .await;
-    assert_eq!((s, audit(&v)["prompts"].clone()), (200, json!(true)));
-    // 每次都把记录相关的全部开关写回（含默认值）
-    assert_eq!(
-        changed(&before, &settings(&e).await),
-        map(&[
-            ("audit_prompts", "1"),
-            ("audit_thumbs", "0"),
-            ("audit_retention_days", "7"),
-            ("audit_image_cap_mb", "0"),
-            ("audit_image_keep_hours", "24"),
-            ("usage_origin_keep_days", "0"),
-        ])
-    );
-    // 夹到范围内；浮点取整（IP / 客户端保留天数可以是 0 = 永久）
-    let (_, v) = api
-        .json("PUT", "/ops/audit", Some(json!({"thumbs": 1, "retention_days": 99999, "image_cap_mb": -5, "image_keep_hours": 100000, "origin_keep_days": 0})))
-        .await;
-    assert_eq!(
-        audit(&v),
-        json!({"prompts": true, "thumbs": true, "retention_days": 3650, "image_cap_mb": 0,
-               "image_bytes": 0, "image_keep_hours": 8760, "origin_keep_days": 0})
-    );
-    let s = settings(&e).await;
-    assert_eq!(
-        [
-            &s["audit_retention_days"],
-            &s["audit_image_cap_mb"],
-            &s["audit_image_keep_hours"],
-        ],
-        ["3650", "0", "8760"]
-    );
-    api.json(
-        "PUT",
-        "/ops/audit",
-        Some(json!({"image_cap_mb": 10.9, "prompts": 0})),
-    )
-    .await;
-    let s = settings(&e).await;
-    assert_eq!(
-        (
-            s["audit_image_cap_mb"].as_str(),
-            s["audit_prompts"].as_str()
-        ),
-        ("10", "0")
-    );
-
-    let frozen = settings(&e).await;
+    assert_eq!(status, 200);
+    assert_eq!(value["log_retention"]["origin_keep_days"], 7);
     for body in [
-        json!({"retention_days": "x"}),
-        json!({"retention_days": null}),
-        json!({"image_keep_hours": [1]}),
+        json!({"origin_keep_days":-1}),
+        json!({"origin_keep_days":366}),
+        json!({"origin_keep_days":1.5}),
+        json!({"origin_keep_days":true}),
     ] {
-        api.fails("PUT", "/ops/audit", Some(body), 422, "参数无效")
-            .await;
+        let (status, _) = api.json("PUT", "/ops/log-retention", Some(body)).await;
+        assert_eq!(status, 422);
     }
-    assert_eq!(settings(&e).await, frozen);
-    // 空请求体：不改任何值，操作日志对象为空（旧版没有为 /ops/audit 登记对象名）
-    api.json("PUT", "/ops/audit", Some(json!({}))).await;
-    let rows = actions(&e).await;
-    let (action, target, detail, ok) = last_action(&rows);
     assert_eq!(
-        (action, target, detail, ok),
-        ("修改生成记录设置", "", "", true)
+        api.get_ok("/ops").await["log_retention"]["origin_keep_days"],
+        7
     );
 }
 
@@ -1901,10 +1858,7 @@ async fn reconciliation_requests_are_guarded() {
         .parts();
     assert_eq!(
         (s, t.as_str()),
-        (
-            400,
-            r#"{"detail":"请求格式错误，未处理。请更新或更换客户端。开发者参考：请求体必须是 JSON 对象"}"#
-        )
+        (400, r#"{"detail":"请求体必须是 JSON 对象"}"#)
     );
     let (s, _, t) = api
         .raw(
@@ -1935,7 +1889,7 @@ async fn reconciliation_requests_are_guarded() {
         (s, t.as_str()),
         (
             400,
-            r#"{"detail":"请求格式错误，未处理。请更新或更换客户端。开发者参考：请求体不是合法 JSON"}"#
+            r#"{"detail":"请求体不是合法的 UTF-8 JSON，或嵌套超过 32 层"}"#
         )
     );
     let (s, _, t) = api.raw("POST", "/reconciliation", None, &h).await.parts();
@@ -2354,23 +2308,13 @@ async fn overview_is_only_the_token_pool() {
 
 /// 「系统」页只剩告警渠道；生成记录页读 audit。服务器状态卡片（磁盘 / 上游健康 / 防爆破）删了，字段跟着删。
 #[tokio::test]
-async fn server_status_reports_alerts_and_audit() {
+async fn server_status_reports_alerts() {
     let e = setup(&[]).await;
     let api = Admin::login_bare(&e.state).await;
-    let v = api.get_ok("/status").await;
-    let keys: Vec<&str> = v.as_object().unwrap().keys().map(String::as_str).collect();
-    assert_eq!(keys, ["alerts", "audit"]);
-    assert_eq!(v["alerts"], json!({"configured": false, "sent": 0}));
     assert_eq!(
-        v["audit"],
-        json!({"prompts": false, "thumbs": false, "retention_days": 7, "image_cap_mb": 0,
-               "image_bytes": 0, "image_keep_hours": 24})
+        api.get_ok("/status").await,
+        json!({"alerts":{"configured":false,"sent":0}})
     );
-    // 记录开关改了，状态里跟着变
-    api.json("PUT", "/ops/audit", Some(json!({"prompts": true})))
-        .await;
-    let v = api.get_ok("/status").await;
-    assert_eq!(v["audit"]["prompts"], json!(true));
 }
 
 #[tokio::test]

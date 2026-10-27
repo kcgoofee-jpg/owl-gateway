@@ -45,7 +45,7 @@ impl Http {
             .headers(map)
             .orig_headers(orig);
         if let Some(b) = body {
-            req = req.body(gate_core::pyjson::wire(b));
+            req = req.body(gate_core::json::wire(b));
         }
         req
     }

@@ -247,7 +247,8 @@ pub async fn error_ledger(State(state): State<AppState>, req: Request, next: Nex
         {
             let key = Key(serde_json::json!({"id": key_id, "name": key_name}));
             let detail =
-                gate_core::pyc::take_chars(&format!("{} {}", e.status, e.message), 160).to_string();
+                gate_core::primitives::take_chars(&format!("{} {}", e.status, e.message), 160)
+                    .to_string();
             state.record(
                 &ctx,
                 &key,
@@ -258,7 +259,8 @@ pub async fn error_ledger(State(state): State<AppState>, req: Request, next: Nex
         }
         if e.status >= 500 && !e.upstream {
             let title =
-                gate_core::pyc::take_chars(&format!("{} {}", e.status, e.message), 200).to_string();
+                gate_core::primitives::take_chars(&format!("{} {}", e.status, e.message), 200)
+                    .to_string();
             state.bugs.capture(Report {
                 source: if matches!(e.status, 502..=504) {
                     "upstream"
@@ -319,7 +321,7 @@ pub async fn error_ledger(State(state): State<AppState>, req: Request, next: Nex
 }
 
 impl AppState {
-    /// 生成记录：按后台开关记录提示词和原图（缩略图编码较慢，放后台任务；任何失败都不得影响生图结果）。
+    /// Save prompt metadata independently from image delivery.
     #[allow(clippy::too_many_arguments)]
     pub async fn audit_generation(
         &self,
@@ -329,34 +331,8 @@ impl AppState {
         model: &str,
         status: &str,
         body: &serde_json::Value,
-        content: Option<bytes::Bytes>,
     ) {
-        let Ok((want_prompts, want_images, _days)) = crate::audit::audit_flags(&self.db).await
-        else {
-            return;
-        };
-        if !(want_prompts || want_images) {
-            return;
-        }
-        let prompts = if want_prompts {
-            match crate::audit::capture_prompts(body) {
-                Ok(p) => p,
-                Err(e) => {
-                    self.bug("audit", Some((e.type_name(), e.message())), ctx);
-                    return;
-                }
-            }
-        } else {
-            Default::default()
-        };
-        // 「记录生成结果」开关就是存原图的开关；只存成功的图
-        let (image, image_type) =
-            match content.filter(|c| want_images && !c.is_empty() && status == "ok") {
-                Some(c) => tokio::task::spawn_blocking(move || crate::audit::full_image(&c))
-                    .await
-                    .unwrap_or((None, String::new())),
-                None => (None, String::new()),
-            };
+        let prompts = crate::audit::capture_prompts(body);
         let row = NewAudit {
             key_id: Some(key.id()),
             key_name: key.name(),
@@ -365,10 +341,7 @@ impl AppState {
             status,
             prompt: &prompts.0,
             negative: &prompts.1,
-            thumb: None,
             extra: &prompts.2,
-            image: image.as_deref(),
-            image_type: &image_type,
             rid: &ctx.rid(),
             request_id: &ctx.internal_id(),
         };
@@ -387,12 +360,11 @@ impl AppState {
         model: &str,
         status: &str,
         body: serde_json::Value,
-        content: Option<bytes::Bytes>,
     ) {
         let (s, c, k) = (self.clone(), ctx.clone(), key.clone());
         let (kind, model, status) = (kind.to_string(), model.to_string(), status.to_string());
         self.tasks.spawn(async move {
-            s.audit_generation(&c, &k, &kind, &model, &status, &body, content)
+            s.audit_generation(&c, &k, &kind, &model, &status, &body)
                 .await;
         });
     }

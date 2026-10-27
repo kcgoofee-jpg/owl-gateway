@@ -11,8 +11,8 @@ mod common;
 
 use common::{Tally, obj};
 use gate_core::guard::{FIELDS, GuardCore, parse_setting_float};
-use gate_core::pyext::PyErr;
 use gate_core::reasons::Reason;
+use gate_core::validation::ValidationError;
 use gate_snapshot::snapshot::check;
 use gate_snapshot::{Case, f};
 use serde_json::{Map, Value, json};
@@ -48,9 +48,9 @@ fn pair(r: Option<Reason>) -> Value {
 }
 
 /// 异常的记法：类型，ValueError 再带上面向用户的消息。
-fn err_json(e: &PyErr) -> Value {
+fn err_json(e: &ValidationError) -> Value {
     match e {
-        PyErr::Value(m) => json!({"err": e.type_name(), "msg": m}),
+        ValidationError::InvalidValue(m) => json!({"err": e.type_name(), "msg": m}),
         _ => json!({"err": e.type_name()}),
     }
 }
@@ -113,19 +113,14 @@ fn setting_float_table() {
         (Some("125.0"), 125.0),
         (Some(" 7 "), 7.0),
         (Some("1e3"), 1000.0),
-        (Some("1_0"), 10.0),
         (Some("1790000000.123456"), 1790000000.123456),
         (Some("-5"), -5.0),
-        (Some("５"), 5.0),
-        (Some("inf"), f64::INFINITY),
-        (Some("-inf"), f64::NEG_INFINITY),
     ] {
         assert_eq!(parse_setting_float(raw).unwrap(), want, "{raw:?}");
     }
-    assert!(parse_setting_float(Some("nan")).unwrap().is_nan());
-    for bad in ["abc", "0x1", "1,5"] {
+    for bad in ["abc", "0x1", "1,5", "1_0", "５", "nan", "inf", "-inf"] {
         let e = parse_setting_float(Some(bad)).unwrap_err();
-        assert_eq!(e.type_name(), "ValueError", "{bad}");
+        assert_eq!(e.type_name(), "invalid_value", "{bad}");
     }
 }
 
@@ -181,12 +176,7 @@ fn settings_snapshot() {
         }
         other => panic!("未知 {other}"),
     });
-    tally.assert_at_least(&[
-        ("load", 20),
-        ("load_overflow", 3),
-        ("save", 10),
-        ("save_error", 20),
-    ]);
+    tally.assert_at_least(&[("load", 20), ("save", 10), ("save_error", 20)]);
 }
 
 // ----------------------------------------------------------------------------- 网格

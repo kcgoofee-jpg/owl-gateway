@@ -13,8 +13,8 @@ use crate::state::AppState;
 use axum::extract::Request;
 use axum::response::Response;
 use gate_core::policy::{self, VIBE_ENCODING_ANLAS};
-use gate_core::pyval::py_str;
 use gate_core::reasons;
+use gate_core::values::text;
 use gate_upstream::client::{Callbacks, RequestOpts};
 use serde_json::{Value, json};
 use std::sync::Arc;
@@ -60,7 +60,7 @@ pub(super) async fn tool(
     let model = payload
         .get("model")
         .or_else(|| payload.get("req_type"))
-        .map(py_str)
+        .map(text)
         .unwrap_or_default();
     let est = Est {
         anlas: cost as f64,
@@ -107,7 +107,7 @@ pub(super) async fn tool(
                 ));
             }
             let content = resp.body.clone();
-            let req_type = py_str(
+            let req_type = text(
                 payload
                     .get("req_type")
                     .unwrap_or(&Value::String(String::new())),
@@ -193,7 +193,7 @@ pub(super) async fn vibe(state: AppState, req: Request) -> Result<Response, ApiE
     if let Some(img) = body["image"].as_str().filter(|s| !s.is_empty()) {
         state.record_ref_images(&ctx, key.id(), vec![("vibe_encode", img.to_string())]);
     }
-    let model = py_str(&body["model"]);
+    let model = text(&body["model"]);
     let payload = json!({
         "image": body["image"],
         "model": body["model"],

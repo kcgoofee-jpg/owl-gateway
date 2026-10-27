@@ -127,7 +127,7 @@ pub fn check_admin_cookie(state: &AppState, raw: &str) -> bool {
     ) {
         return false;
     }
-    gate_core::pyc::parse_int(payload).is_some_and(|exp| exp as f64 > state.now())
+    gate_core::primitives::parse_int(payload).is_some_and(|exp| exp as f64 > state.now())
 }
 
 /// `scrypt$<salt hex>$<digest hex>`
@@ -291,7 +291,7 @@ pub fn verify_login_state(secret_key: &str, raw: &str, now: i64) -> Option<(Logi
     let mut it = payload.splitn(4, '.');
     let (mode, nonce, exp) = (it.next()?, it.next()?, it.next()?);
     let dev = it.next().unwrap_or("");
-    if nonce.is_empty() || gate_core::pyc::parse_int(exp)? <= now {
+    if nonce.is_empty() || gate_core::primitives::parse_int(exp)? <= now {
         return None;
     }
     let mode = match mode {
@@ -305,7 +305,7 @@ pub fn verify_login_state(secret_key: &str, raw: &str, now: i64) -> Option<(Logi
 /// 会话绑定的 Key 指纹：Key 一换（/resetkey、回收后重领），旧会话立刻失效。没有 Key 时为 "-"。
 pub fn key_tag(key: Option<&Key>) -> String {
     match key {
-        Some(k) => sha256_hex(&gate_core::pyval::py_str(k.get("token")))[..16].to_string(),
+        Some(k) => sha256_hex(&gate_core::values::text(k.get("token")))[..16].to_string(),
         None => "-".into(),
     }
 }
@@ -330,7 +330,7 @@ pub fn parse_member(state: &AppState, raw: &str) -> Option<(String, String)> {
     if discord_id.is_empty() || !discord_id.chars().all(|c| c.is_numeric()) {
         return None;
     }
-    let exp = gate_core::pyc::parse_int(exp)?;
+    let exp = gate_core::primitives::parse_int(exp)?;
     (exp as f64 > state.now()).then(|| (discord_id.to_string(), tag.to_string()))
 }
 

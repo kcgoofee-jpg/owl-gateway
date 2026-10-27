@@ -11,7 +11,7 @@ use axum::Router;
 use axum::extract::{Request, State};
 use axum::routing::{get, post};
 use gate_core::anlas_estimate::{self, Projection, SnapshotAccount, Usage};
-use gate_core::pyval;
+use gate_core::values;
 use gate_db::repo::account_stats::AccountLogRow;
 use serde_json::{Value, json};
 
@@ -246,7 +246,7 @@ async fn sitepaid_hints(State(state): State<AppState>, _s: AdminSession) -> ApiR
         }));
     }
     Ok(ok_json(&json!({
-        "generated_at": pyval::float(now),
+        "generated_at": values::float(now),
         "hints": hints,
         "min_anlas": HINT_MIN_ANLAS,
         "within_days": HINT_DAYS,

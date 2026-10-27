@@ -47,7 +47,7 @@ impl Db {
     }
 
     /// 写设置。值必须是字符串：调用方负责把数字 / 布尔转成约定的字符串形式
-    /// （浮点用 `pyc::float_repr`，布尔用 `pyc::bool_str`）。
+    /// （浮点用 `primitives::float_text`，布尔用 `primitives::bool_text`）。
     pub async fn set_setting(&self, key: &str, value: &str) -> Result<()> {
         let (key, value) = (key.to_string(), value.to_string());
         self.write(move |tx| {

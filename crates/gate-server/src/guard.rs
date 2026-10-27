@@ -2,8 +2,8 @@
 //! `load` / `save` / `token_block_reason` 这类要碰库的方法在这里。核心状态放在同步 Mutex 里，从不跨 await 持锁：先查库，再算。
 
 use gate_core::guard::GuardCore;
-use gate_core::pyext::PyErr;
 use gate_core::reasons::Reason;
+use gate_core::validation::ValidationError;
 use gate_db::Db;
 use serde_json::{Map, Value};
 use std::collections::BTreeMap;
@@ -21,11 +21,11 @@ pub enum GuardIoError {
     #[error(transparent)]
     Db(#[from] gate_db::DbError),
     #[error("{0:?}")]
-    Guard(PyErr),
+    Guard(ValidationError),
 }
 
-impl From<PyErr> for GuardIoError {
-    fn from(e: PyErr) -> Self {
+impl From<ValidationError> for GuardIoError {
+    fn from(e: ValidationError) -> Self {
         GuardIoError::Guard(e)
     }
 }

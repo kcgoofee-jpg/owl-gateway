@@ -1,7 +1,7 @@
 //! Discord 领取记录与黑名单。
 
 use crate::{Db, Result, value};
-use gate_core::pyc;
+use gate_core::primitives;
 use rusqlite::params;
 use serde_json::Value;
 
@@ -87,7 +87,7 @@ impl Db {
     /// 黑名单列表（新→旧）；`q` 非空时按 discord_id / username / display_name / reason 模糊匹配
     /// （LIKE 通配符不转义）。
     pub async fn list_bans(&self, q: &str) -> Result<Vec<Value>> {
-        let q = pyc::strip(q).to_string();
+        let q = primitives::strip(q).to_string();
         self.read(move |c| {
             if q.is_empty() {
                 let mut stmt = c.prepare(

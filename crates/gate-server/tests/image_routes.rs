@@ -1543,7 +1543,15 @@ async fn accounting_identity_across_counters_logs_and_audit() {
     let clients = common::query(&e.state.db, "SELECT DISTINCT client FROM usage_log").await;
     assert_eq!(clients, [json!({"client": UA})]);
     // 开了记录原图：原图确实存下来了
-    assert!(e.state.db.audit_image_bytes().await.unwrap() > 0);
+    assert!(
+        !e.state
+            .db
+            .path()
+            .parent()
+            .unwrap()
+            .join("audit_images")
+            .exists()
+    );
     let counter = e
         .state
         .db
