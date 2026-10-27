@@ -340,3 +340,6 @@
   flex-direction: column;
   gap: var(--sp-1);
 }
+.queue-status {
+  white-space: nowrap;
+}

@@ -563,7 +563,7 @@ function AccountsCard() {
                   {agoText(a.last_429, now)}
                   {a.cooling ? `（冷却还剩 ${a.cooling} 秒）` : ""}
                 </td>
-                <td>
+                <td class="queue-status">
                   {a.waiting ?? 0} 在等
                   {typeof a.queue_cap === "number" ? `，最多 ${a.queue_cap}` : ""}
                 </td>
