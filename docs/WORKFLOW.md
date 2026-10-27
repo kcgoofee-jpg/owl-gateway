@@ -20,12 +20,12 @@ git config core.hooksPath tools/hooks
   - Fixtures: `tools/ci/check-fixtures.sh` (the repository is public, so fixtures may only hold synthetic data).
   - End to end: start `cargo xtask dev` and `pnpm vite --port 5174`, then `cd web && E2E_BASE=http://localhost:5174 pnpm exec playwright test`. `web/e2e/layout.spec.ts` holds the hard layout rules: at every width no page may end a paragraph with one or two orphan characters, and controls on one row must be equally tall and aligned.
   - Snapshot updates: inputs and current outputs live in each crate's `tests/snapshots/**/*.jsonl`, one case per line. When a behaviour change is intended, run `UPDATE_SNAPSHOT=1 cargo test -p <crate> --test <name>` locally only, read the diff, and say in the commit body which snapshots changed and why (CI forbids updates).
-- Record behaviour changes in `CHANGELOG.md` in the same commit.
+- 更新日志用简单中文，按日期说明改了什么即可，不要求固定分类、版本号或技术细节。
 - The 2.x Python code and the byte-for-byte comparison fixtures used during the cutover are kept under the git tags `py-final` and `v3-deviations-final`.
 
 ## 3. Commit messages and other public text
 
-The repository is public. Commit messages, docs, comments and the changelog are English and technical.
+The repository is public. Commit messages, docs and comments use clear technical language. 更新日志使用简单中文描述功能变化。
 
 Never write any of the following into the repository or a commit message:
 
