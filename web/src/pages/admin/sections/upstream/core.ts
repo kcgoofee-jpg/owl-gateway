@@ -131,9 +131,9 @@ export const TOKEN_SPECS: Record<string, FieldSpec> = {
     kind: "int",
     label: "免费 V5 日限",
     min: 0,
-    max: 100_000,
+    max: 9999,
     unit: "张",
-    hint: "0 = 不限；只限制这把上游 Token",
+    hint: "0 = 停用这把 Token 的免费 V5；上限 9999",
   },
 };
 
