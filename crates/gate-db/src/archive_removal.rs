@@ -3,6 +3,8 @@ use crate::{DbError, Result};
 use rusqlite::Connection;
 use std::path::Path;
 
+const VACUUM_PENDING: &str = "records_removal_v1_vacuum_pending";
+
 fn copy_tree(source: &Path, target: &Path) -> std::io::Result<()> {
     if std::fs::symlink_metadata(source)?.file_type().is_symlink() {
         return Err(std::io::Error::other(
@@ -99,20 +101,20 @@ pub fn run(conn: &mut Connection, path: &Path) -> Result<()> {
         DELETE FROM abuse_signals WHERE kind='behavior' AND instr(detail,'冷门负面串')>0;
         DELETE FROM site_settings WHERE key IN ('audit_prompts','audit_thumbs','audit_retention_days','audit_image_cap_mb','audit_image_keep_hours','prompts_only_v1_vacuum_pending');")?;
     if archived {
-        tx.execute("INSERT OR REPLACE INTO site_settings(key,value) VALUES('records_removal_v1_vacuum_pending','1')", [])?;
+        tx.execute(
+            "INSERT OR REPLACE INTO site_settings(key,value) VALUES(?,'1')",
+            [VACUUM_PENDING],
+        )?;
     }
     tx.commit()?;
     let compact: bool = conn.query_row(
-        "SELECT EXISTS(SELECT 1 FROM site_settings WHERE key='records_removal_v1_vacuum_pending')",
-        [],
+        "SELECT EXISTS(SELECT 1 FROM site_settings WHERE key=?)",
+        [VACUUM_PENDING],
         |r| r.get(0),
     )?;
     if compact {
         conn.execute_batch("VACUUM;")?;
-        conn.execute(
-            "DELETE FROM site_settings WHERE key='records_removal_v1_vacuum_pending'",
-            [],
-        )?;
+        conn.execute("DELETE FROM site_settings WHERE key=?", [VACUUM_PENDING])?;
     }
     Ok(())
 }
