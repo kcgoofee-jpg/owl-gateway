@@ -143,7 +143,7 @@ impl AppState {
         let clock = Clock::service();
         let alerter = Arc::new(Alerter::owner(&env));
         let tasks = TaskTracker::new();
-        let bugs = Arc::new(Bugs::new(db.clone(), tasks.clone()));
+        let bugs = Arc::new(Bugs::new());
         let guard = Arc::new(Guard::new(
             db.clone(),
             gate_core::clock::TZ,

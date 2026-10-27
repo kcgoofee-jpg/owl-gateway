@@ -10,9 +10,10 @@ export type LiveMine = { mine?: MineItem[]; waiting?: number; running?: number }
 export type Blocked = { code?: string; text?: string };
 
 export type Live = {
-  /** 图例只说「今天重置以来各生成了多少张」；上限与暂停只在拒绝原因里出现 */
   quota?: {
     images_today?: number;
+    /** 弧线的比例尺：各账号今日上限合计（手动数字相加）。缺省 = 没有可接图的账号 */
+    images_cap?: number;
     v5_today?: number;
   };
   /** full：网关此刻会不会以「排队满」拒绝新图 */

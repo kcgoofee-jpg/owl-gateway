@@ -55,35 +55,42 @@ afterEach(() => {
   };
 });
 
+/** 「V5 授权主体」搜索框：聚焦打开下拉，点一个成员行加入 */
+async function pickBeta() {
+  const input = host?.querySelector<HTMLInputElement>(".ss__input");
+  if (!input) throw new Error("missing member search input");
+  await act(() => {
+    input.focus();
+  });
+  const option = [...(host?.querySelectorAll('[role="option"]') ?? [])].find((o) =>
+    o.textContent?.includes("Beta User"),
+  );
+  if (!option) throw new Error("missing Beta member option");
+  await act(() => {
+    option.dispatchEvent(new MouseEvent("mousedown", { bubbles: true, cancelable: true }));
+  });
+}
+
+const saveButton = () =>
+  [...(host?.querySelectorAll("button") ?? [])].find((b) => b.textContent?.includes("保存访问策略"));
+
 describe("V5 访问策略草稿", () => {
   it("后台刷新保留未保存选择；保存成功后接受服务端值", async () => {
     await mount();
-    const select = host?.querySelector("select[multiple]") as HTMLSelectElement;
-    const beta = select.options.item(1);
-    if (!beta) throw new Error("missing Beta member option");
-    beta.selected = true;
-    select.dispatchEvent(new Event("change", { bubbles: true }));
-    await act(() => Promise.resolve());
+    await pickBeta();
     expect(host?.textContent ?? "").toContain("Beta User");
-    expect(
-      [...(host?.querySelectorAll("button") ?? [])].find((b) => b.textContent?.includes("保存访问策略"))
-        ?.disabled,
-    ).toBe(false);
+    expect(saveButton()?.disabled).toBe(false);
 
     mock.settings = { ...mock.settings };
     await mount(); // 模拟 SSE/15 秒 tick 后的新数据
     expect(host?.textContent ?? "").toContain("Beta User");
 
-    const save = [...(host?.querySelectorAll("button") ?? [])].find((b) =>
-      b.textContent?.includes("保存访问策略"),
-    );
     await act(async () => {
-      save?.click();
+      saveButton()?.click();
       await Promise.resolve();
     });
     await mount();
     expect(host?.textContent ?? "").toContain("Beta User");
-    const latestSelect = host?.querySelector("select[multiple]") as HTMLSelectElement | null;
-    expect(latestSelect?.options.item(1)?.selected).toBe(true);
+    expect(mock.settings.v5_authorized_discord_ids).toEqual(["900000000000000001", "900000000000000002"]);
   });
 });

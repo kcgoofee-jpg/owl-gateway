@@ -45,11 +45,6 @@ const PAGES: Array<{ name: string; path: string; ready: (p: Page) => ReturnType<
     ready: (p) => p.getByText("暂无记录").or(p.locator(".lg-listcard")),
   },
   { name: "logs-actions", path: "/admin/logs/actions", ready: (p) => p.getByLabel("操作者") },
-  {
-    name: "logs-bugs",
-    path: "/admin/logs/bugs",
-    ready: (p) => p.getByRole("button", { name: "全部标记已处理" }),
-  },
 ];
 
 async function open(
@@ -88,15 +83,12 @@ test.describe("已登录", () => {
     await context.addCookies(SESSION);
   });
 
-  test("逐页打开：无控制台报错，导航角标显示未处理 Bug 数", async ({ page }) => {
+  test("逐页打开：无控制台报错", async ({ page }) => {
     const errs = watchConsole(page, "/admin/api/events");
     for (const p of PAGES) {
       await open(page, p.path, p.ready);
       await expect(page.getByRole("heading", { level: 1 })).toBeVisible();
     }
-    // 总览页 10-23 删除：/admin 就是成员页；导航「日志」照样有未处理 Bug 数的角标
-    await open(page, "/admin", PAGES[0]?.ready as never);
-    await expect(page.getByRole("link", { name: /^日志/ }).locator(".admin-nav__badge")).toBeVisible();
     expect(errs).toEqual([]);
   });
 
@@ -630,21 +622,9 @@ test.describe("已登录", () => {
         await expect(page.getByRole("searchbox", { name: /^IP/ })).toHaveValue(fullIp);
       }
     }
-    await page.getByRole("link", { name: "Bug 追踪" }).click();
-    await expect(page).toHaveURL(/\/admin\/logs\/bugs$/);
-    await expect(page.getByRole("link", { name: "Bug 追踪" })).toHaveAttribute("aria-current", "page");
   });
 
-  test("日志：Bug 全部标记已处理有确认框；生成记录能放大查看（点画廊砖）", async ({ page }) => {
-    await open(page, "/admin/logs/bugs", PAGES[4]?.ready as never);
-    const all = page.getByRole("button", { name: "全部标记已处理" });
-    if (await all.isEnabled()) {
-      await all.click();
-      const dlg = page.getByRole("dialog", { name: "全部标记已处理" });
-      await expect(dlg).toBeVisible();
-      await dlg.getByRole("button", { name: "取消" }).click();
-      await expect(dlg).toBeHidden();
-    }
+  test("日志：生成记录能放大查看（点画廊砖）", async ({ page }) => {
     await open(page, "/admin/audit/records", PAGES[1]?.ready as never);
     const first = page.getByRole("button", { name: /^查看 .* 的.*记录$/ }).first();
     await first.waitFor({ state: "visible", timeout: 5000 }).catch(() => undefined);

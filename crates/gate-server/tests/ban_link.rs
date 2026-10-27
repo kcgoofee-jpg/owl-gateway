@@ -3,7 +3,7 @@
 //! 待审接口列出每个涉及账号（含没有 Key 的）。合成数据：Discord ID 一律 9000000000000004xx。
 
 mod common;
-use common::{Admin, bug_sources, query, run_job, set_setting, setup_registration};
+use common::{Admin, query, run_job, set_setting, setup_registration};
 use gate_server::ban_link::{self, BLOCK_NOTICE};
 use gate_server::registration::{DiscordUser, Issued, RegErr};
 use serde_json::{Value, json};
@@ -107,7 +107,7 @@ async fn same_browser_blocks_register_and_invite_and_alerts() {
     // 无关账号照常领
     assert!(matches!(issue(&e, Y).await, Ok(Issued::Provisioned(_))));
 
-    // 登录时写进待审 + 记一条「注意」级 Bug；同一对再登录不重复记
+    // 登录时写进待审；同一对再登录不重复记
     ban_link::on_login(&e.state, X).await;
     ban_link::on_login(&e.state, X).await;
     let s = signal(&e, X).await.expect("banned_link");
@@ -120,18 +120,6 @@ async fn same_browser_blocks_register_and_invite_and_alerts() {
         d["evidence"],
         json!([{"k": "关联的封禁号", "v": "坏人"}, {"k": "方式", "v": "同浏览器"}, {"k": "封禁理由", "v": "倒卖 Key"}])
     );
-    let bugs = bug_sources(&e.state).await;
-    assert_eq!(
-        bugs.iter().filter(|b| *b == "banned_link").count(),
-        1,
-        "{bugs:?}"
-    );
-    let rows = query(
-        &e.state.db,
-        "SELECT level, count FROM error_events WHERE source='banned_link'",
-    )
-    .await;
-    assert_eq!(rows, vec![json!({"level": "warn", "count": 1})]);
 }
 
 #[tokio::test]
@@ -152,12 +140,6 @@ async fn non_apple_device_blocks_but_apple_only_notifies() {
         (Some(60.0), Some("open"))
     );
     assert!(y["detail"].as_str().unwrap().contains("同设备（苹果）"));
-    let bugs = bug_sources(&e.state).await;
-    assert_eq!(
-        bugs.iter().filter(|b| *b == "banned_link").count(),
-        1,
-        "同一类 Bug 归并成一行"
-    );
     // Y 已有的 Key 不受影响
     let k = query(&e.state.db, &format!("SELECT k.enabled FROM api_keys k JOIN discord_registrations r ON r.key_id=k.id WHERE r.discord_id='{Y}'")).await;
     assert_eq!(k, vec![json!({"enabled": 1})]);
@@ -228,7 +210,6 @@ async fn scan_writes_banned_link_but_skips_keyless_signals() {
             json!({"kind": "banned_link", "subject": ban_link::subject(X, BANNED), "status": "open"}),
         ]
     );
-    assert_eq!(bug_sources(&e.state).await, vec!["banned_link".to_string()]);
 }
 
 /// 待审接口：每条信号附上涉及的每个账号（没有 Key 的也在），带 Key、封禁、账号注册时间、在共用浏览器上的首次 / 最近登录；不含 IP。

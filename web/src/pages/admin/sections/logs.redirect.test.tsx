@@ -11,9 +11,7 @@ vi.mock("preact-iso", async (orig) => ({
   ...(await orig<typeof import("preact-iso")>()),
   useLocation: () => loc,
 }));
-vi.mock("./members/shared", () => ({ useOpenBugs: () => 0 }));
 vi.mock("./logs/Actions", () => ({ Actions: () => <div>Actions</div> }));
-vi.mock("./logs/Bugs", () => ({ Bugs: () => <div>Bugs</div> }));
 vi.mock("./logs/Usage", () => ({ Usage: () => <div>Usage</div> }));
 
 import Logs, { inLogs } from "./logs";

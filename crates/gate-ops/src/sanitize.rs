@@ -50,8 +50,8 @@ pub fn sanitize(path: &Path) -> Result<usize> {
     // req_features（已随防分享体系移除，2026-10-13）的 toks 是提示词词条的无盐短哈希，能还原词条。
     // 新库不再有这张表；老快照里若还带着，整张删掉（比清空 toks 更干净，也不依赖表是否存在）。
     tx.execute("DROP TABLE IF EXISTS req_features", [])?;
-    // 报错堆栈可能夹带请求内容，清空
-    tx.execute("UPDATE error_events SET detail=''", [])?;
+    // Bug 追踪（error_events，10-27 删除）的详情可能夹带请求内容：老快照里若还带着，整张删掉。
+    tx.execute("DROP TABLE IF EXISTS error_events", [])?;
     tx.execute(
         "UPDATE generation_audit SET prompt='', negative='', extra='', thumb=NULL",
         [],

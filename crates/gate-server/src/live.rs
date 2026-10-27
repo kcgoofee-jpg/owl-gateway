@@ -116,6 +116,8 @@ pub const DEFAULT_CYCLE: f64 = 10.0;
 pub async fn build(state: &AppState, now: f64) -> Result<Map<String, Value>, InternalError> {
     struct Acct {
         usable: bool,
+        /// 这个账号今天的出图上限（`account_daily_cap` 或临时调整）。
+        cap: i64,
         /// 这个账号两次开始出图的平均间距（出图耗时 + 出完后平均歇的秒数）。
         cycle: f64,
         /// 今天出满了（单号每日上限）：账号本身可用，但不会再接图。
@@ -135,12 +137,14 @@ pub async fn build(state: &AppState, now: f64) -> Result<Map<String, Value>, Int
         let c = state.db.get_upstream_counter(&t.token_id, &day).await?;
         images_today += c.images;
         let pacing = state.nai.pacing(t);
+        let (usable, cap) = state
+            .guard
+            .with(|g| (t.usable(now), g.daily_cap_for(&t.token_id, now)));
         accounts.push(Acct {
-            usable: t.usable(now),
+            usable,
+            cap,
             cycle: pacing.cycle,
-            full: state
-                .guard
-                .with(|g| g.at_daily_cap(&t.token_id, c.images, now)),
+            full: cap != 0 && c.images >= cap,
         });
     }
     let values = state.guard.with(|g| g.values.clone());
@@ -213,12 +217,14 @@ pub async fn build(state: &AppState, now: f64) -> Result<Map<String, Value>, Int
         "auth".into(),
         json!({"requests": requests, "rejected": rejected}),
     );
-    // 首页图例只说「今天重置以来各生成了多少张」，不再折算剩余额度：
-    // 上限、暂停、访问策略是准入逻辑（guard / me payload）的事，不在看板上重复。
+    // 首页图例只说「今天重置以来各生成了多少张」；`images_cap` 只给弧线当比例尺
+    // （各账号今日上限合计，纯手动数字相乘，不是旧版的额度折算）。
+    let images_cap: i64 = accounts.iter().filter(|a| a.open()).map(|a| a.cap).sum();
     body.insert(
         "quota".into(),
         json!({
             "images_today": images_today,
+            "images_cap": images_cap,
             "v5_today": state.db.day_v5_total(&day).await?,
         }),
     );
@@ -534,8 +540,7 @@ pub struct Hub {
     /// 每个 IP 当前打开的 SSE 连接数（公开/后台共用同一个 IP 计数，上限按 kind 细分）。
     streams_ip: Mutex<HashMap<String, usize>>,
     keepalive_ms: AtomicU64,
-    client_err: Mutex<ClientErr>,
-    /// 设备指纹上报的独立预算：不能和脚本报错抢同一个桶（匿名可先打满让真错误丢失）。
+    /// 设备指纹上报的限流：每 IP 每 10 分钟 10 条，全站每 10 分钟 200 条。
     device_fp: Mutex<ClientErr>,
 }
 
@@ -556,7 +561,6 @@ impl Hub {
             streams: [AtomicUsize::new(0), AtomicUsize::new(0)],
             streams_ip: Mutex::new(HashMap::new()),
             keepalive_ms: AtomicU64::new(KEEPALIVE.as_millis() as u64),
-            client_err: Mutex::new(ClientErr::default()),
             device_fp: Mutex::new(ClientErr::default()),
         }
     }
@@ -695,26 +699,7 @@ impl Hub {
             .store(d.as_millis().max(1) as u64, Ordering::Relaxed);
     }
 
-    /// 前端脚本报错上报的限流：每 IP 每 10 分钟 10 条，全站每 10 分钟 100 条。
-    /// 计数发生在解析请求体之前：乱发的请求也占名额。
-    pub fn client_error_slot(&self, ip: &str, now: f64) -> bool {
-        let mut c = self.client_err.lock().expect("client_err");
-        if now - c.window > 600.0 {
-            *c = ClientErr {
-                window: now,
-                ..Default::default()
-            };
-        }
-        if c.total >= 100 || c.ip.get(ip).copied().unwrap_or(0) >= 10 {
-            return false;
-        }
-        c.total += 1;
-        *c.ip.entry(ip.to_string()).or_insert(0) += 1;
-        true
-    }
-
     /// 设备指纹上报的限流：每 IP 每 10 分钟 10 条，全站每 10 分钟 200 条。
-    /// 和脚本报错分开计数；匿名请求不能通过打满 device-fp 把 /public/client-error 的预算吃掉。
     pub fn device_fp_slot(&self, ip: &str, now: f64) -> bool {
         let mut c = self.device_fp.lock().expect("device_fp");
         if now - c.window > 600.0 {
@@ -740,7 +725,6 @@ impl Hub {
         if let Ok(mut s) = self.status.try_lock() {
             *s = None;
         }
-        *self.client_err.lock().expect("client_err") = ClientErr::default();
         *self.device_fp.lock().expect("device_fp") = ClientErr::default();
     }
 }
@@ -811,47 +795,21 @@ mod tests {
     }
 
     #[test]
-    fn client_error_budget() {
+    fn device_fp_budget() {
         let hub = Hub::new();
-        for _ in 0..10 {
-            assert!(hub.client_error_slot("203.0.113.9", 1000.0));
-        }
-        assert!(!hub.client_error_slot("203.0.113.9", 1001.0));
-        assert!(hub.client_error_slot("203.0.113.10", 1001.0));
-        // 超过 10 分钟窗口就重置
-        assert!(hub.client_error_slot("203.0.113.9", 1601.0));
-    }
-
-    #[test]
-    fn client_error_global_cap() {
-        let hub = Hub::new();
-        // 10 个来源 × 10 条 = 全站 100 条；再换新来源也不收
-        for ip in 0..10 {
-            for _ in 0..10 {
-                assert!(hub.client_error_slot(&format!("198.51.100.{ip}"), 5000.0));
-            }
-        }
-        assert!(!hub.client_error_slot("198.51.100.99", 5001.0));
-        assert!(hub.client_error_slot("198.51.100.99", 5601.1));
-    }
-
-    #[test]
-    fn device_fp_budget_is_independent_from_client_errors() {
-        let hub = Hub::new();
-        for ip in 0..10 {
-            for _ in 0..10 {
-                assert!(hub.client_error_slot(&format!("198.51.100.{ip}"), 1000.0));
-            }
-        }
-        assert!(
-            !hub.client_error_slot("203.0.113.10", 1001.0),
-            "client-error 全站 100 条已满"
-        );
-        // device-fp 有自己的桶，不会被 client-error 打满
+        // 单 IP 上限 10 条
         for _ in 0..10 {
             assert!(hub.device_fp_slot("203.0.113.9", 1000.0));
         }
         assert!(!hub.device_fp_slot("203.0.113.9", 1001.0));
         assert!(hub.device_fp_slot("203.0.113.10", 1001.0));
+        // 全站上限 200 条：20 个来源 × 10 条打满后，新来源也不收；窗口过了就重置
+        for ip in 0..20 {
+            for _ in 0..10 {
+                assert!(hub.device_fp_slot(&format!("198.51.100.{ip}"), 5000.0));
+            }
+        }
+        assert!(!hub.device_fp_slot("198.51.100.99", 5001.0));
+        assert!(hub.device_fp_slot("198.51.100.99", 5601.1));
     }
 }

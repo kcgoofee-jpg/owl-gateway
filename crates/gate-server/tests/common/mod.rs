@@ -623,16 +623,3 @@ pub async fn setup_registration(base: &str, extra: &[(&str, &str)]) -> Env {
     refs.extend_from_slice(extra);
     setup(&refs).await
 }
-
-/// 已经写进库的 Bug 的来源（等 Bug 写完再读）。
-pub async fn bug_sources(state: &AppState) -> Vec<String> {
-    state.bugs.idle().await;
-    state
-        .db
-        .list_error_events(true, 100)
-        .await
-        .unwrap()
-        .iter()
-        .map(|r| r["source"].as_str().unwrap_or("").to_string())
-        .collect()
-}

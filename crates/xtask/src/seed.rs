@@ -2,7 +2,7 @@
 //!
 //! 只通过 gate-db 的方法写库（整个项目只有 gate-db 写 SQL）。内容是旧版 `seed_demo.py`（见标签 py-final）的超集：
 //! 它建了 8 把带名字的 Key、各自的 Discord 领取记录和 400 条用量日志；这里在此之上补了计数器、
-//! 生成记录、捐赠、券、黑名单、状态页事件、Bug、操作日志和状态码统计，让后台每一页都有东西可看。
+//! 生成记录、捐赠、券、黑名单、状态页事件、操作日志和状态码统计，让后台每一页都有东西可看。
 //!
 //! 约定（Playwright 端到端依赖，别随手改）：
 //! - 第 0 号成员「月见草」（Discord `900000000000000000`）是 `cookies.json` 里的成员会话；它**没有**问卷记录、
@@ -17,12 +17,10 @@
 
 use anyhow::{Context, Result};
 use gate_core::clock::Clock;
-use gate_core::errors::AutoReason;
 use gate_core::reasons;
 use gate_db::Db;
 use gate_db::repo::audit::NewAudit;
 use gate_db::repo::discord::BanInfo;
-use gate_db::repo::errors::{AutoResolve, ErrorRow};
 use gate_db::repo::keys::NewKey;
 use gate_db::repo::registration::NewRegistration;
 use gate_db::repo::usage::{NewLog, Success};
@@ -118,7 +116,7 @@ pub async fn seed(db: &Db, clock: &Clock, now: f64) -> Result<Seeded> {
         gate_server::audit::make_thumbnail(&gate_testkit::tiny_png()).context("生成缩略图失败")?;
     seed_usage(db, clock, now, &keys, &thumb, &mut rng).await?;
     seed_member_extras(db, now, &keys).await?;
-    seed_records(db, now, &keys, &mut rng).await?;
+    seed_records(db, now).await?;
     seed_site(db, now).await?;
     seed_reconciliation(db, now).await?;
     Ok(Seeded { keys })
@@ -454,7 +452,7 @@ async fn seed_member_extras(db: &Db, now: f64, keys: &[SeededKey]) -> Result<()>
 
 // ------------------------------------------------------------------ 操作日志 / Bug
 
-async fn seed_records(db: &Db, now: f64, keys: &[SeededKey], rng: &mut StdRng) -> Result<()> {
+async fn seed_records(db: &Db, now: f64) -> Result<()> {
     // 操作日志
     for (ago, actor, action, target, detail) in [
         (
@@ -497,71 +495,6 @@ async fn seed_records(db: &Db, now: f64, keys: &[SeededKey], rng: &mut StdRng) -
             .await?;
     }
 
-    // Bug：一条还没处理（重复出现 3 次）、一条已处理
-    for (i, (sig, source, title, detail)) in [
-        (
-            "DiscordHttpError@registrar.sync_roles",
-            "maintenance:sync_roles",
-            "同步身份组失败：连接 Discord 被拒绝",
-            "ConnectError: connection refused（演示数据：开发环境的 Discord 地址是个死端口）",
-        ),
-        (
-            "TimeoutError@image.upstream_read",
-            "upstream",
-            "读取上游图片响应超时",
-            "TimeoutError: 上游 60 秒没有返回（演示数据）",
-        ),
-    ]
-    .into_iter()
-    .enumerate()
-    {
-        let repeat = if i == 0 { 3 } else { 1 };
-        for r in 0..repeat {
-            db.store_error_event(&ErrorRow {
-                sig: sig.into(),
-                source: source.into(),
-                level: "error".into(),
-                title: title.into(),
-                detail: detail.into(),
-                path: if i == 0 {
-                    String::new()
-                } else {
-                    "/ai/generate-image".into()
-                },
-                key_id: (i == 1).then_some(keys[2].id),
-                rid: rid(rng),
-                ts: now - 3600.0 * (4.0 - f64::from(r)) - 86400.0 * i as f64,
-            })
-            .await?;
-        }
-        if i == 1 {
-            db.resolve_error_event(sig, now - 43200.0).await?;
-        }
-    }
-    // 一条网关自动关闭的（注意级超过 24 小时没再出现）：「含已处理」里带「自动处理」徽标和原因
-    let seen = now - 30.0 * 3600.0;
-    db.store_error_event(&ErrorRow {
-        sig: "TypeError@web.landing.render".into(),
-        source: "web:landing".into(),
-        level: "warn".into(),
-        title: "TypeError: Cannot read properties of null（演示数据）".into(),
-        detail: "https://owl.example/_owl/landing-demo.js:1\nMozilla/5.0 (synthetic)\n演示数据"
-            .into(),
-        path: "landing".into(),
-        key_id: None,
-        rid: String::new(),
-        ts: seen,
-    })
-    .await?;
-    db.auto_resolve_errors(
-        &[AutoResolve {
-            sig: "TypeError@web.landing.render".into(),
-            last_seen: seen,
-            reason: AutoReason::StaleWarn.code(),
-        }],
-        now - 6.0 * 3600.0,
-    )
-    .await?;
     Ok(())
 }
 

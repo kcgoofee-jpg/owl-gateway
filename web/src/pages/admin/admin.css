@@ -67,17 +67,6 @@
   background: var(--accent-soft);
   color: var(--accent-text);
 }
-.admin-nav__badge {
-  margin-left: auto;
-  min-width: 20px;
-  padding: 0 6px;
-  border-radius: 999px;
-  background: var(--danger);
-  color: #fff;
-  font-size: var(--fs-xs);
-  line-height: 20px;
-  text-align: center;
-}
 .admin-side__foot {
   margin-top: auto;
   display: flex;

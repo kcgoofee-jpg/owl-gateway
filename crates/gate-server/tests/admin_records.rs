@@ -298,112 +298,14 @@ async fn admin_actions_filters() {
 
 #[tokio::test]
 async fn bug_tracker_lists_resolves_and_names_keys() {
-    let (e, a) = ready().await;
-    a.sql(
-        "INSERT INTO api_keys(id, name, token, created_at) VALUES (2, '', 'nai-t-2', 1.0);\
-         INSERT INTO error_events(sig, source, level, title, detail, count, first_seen, last_seen, last_rid, last_key, last_path, resolved_at) VALUES \
-         ('aaaaaaaaaaaa', 'request', 'error', 'A', 'd', 3, 1.0, 50.0, 'r1', 1, '/x', NULL), \
-         ('bbbbbbbbbbbb', 'upstream', 'error', 'B', 'd', 1, 1.0, 40.0, '', 99, '', NULL), \
-         ('cccccccccccc', 'web:landing', 'warn', 'C', 'd', 1, 1.0, 30.0, '', NULL, '', NULL), \
-         ('dddddddddddd', 'request', 'error', 'D', 'd', 2, 1.0, 20.0, '', 2, '', 5.0);",
-    )
-    .await;
-    let v = a.get(&format!("{A}/errors")).await.json();
-    assert_eq!(v["open"], 3);
-    let names: Vec<(&str, &str)> = v["errors"]
-        .as_array()
-        .unwrap()
-        .iter()
-        .map(|r| {
-            (
-                r["title"].as_str().unwrap(),
-                r["key_name"].as_str().unwrap(),
-            )
-        })
-        .collect();
-    assert_eq!(
-        names,
-        [("A", "测试成员"), ("B", "Key #99 (已删除)"), ("C", "")],
-        "已处理的默认不列；没有 Key 为空串"
-    );
-    let all = a.get(&format!("{A}/errors?all=true")).await.json();
-    let last = &all["errors"][3];
-    assert_eq!(last["title"], "D");
-    assert_eq!(
-        last["key_name"], "Key #2 (已删除)",
-        "名字是空串也当作已删除（旧版如此）"
-    );
-    let order: Vec<&str> = last
-        .as_object()
-        .unwrap()
-        .keys()
-        .map(String::as_str)
-        .collect();
-    assert_eq!(
-        order,
-        [
-            "sig",
-            "source",
-            "level",
-            "title",
-            "detail",
-            "count",
-            "first_seen",
-            "last_seen",
-            "last_rid",
-            "last_key",
-            "last_path",
-            "resolved_at",
-            "auto_resolved", // 3.0 新增
-            "key_name"
-        ]
-    );
-    a.post(&format!("{A}/errors/nonexistent/resolve"), json!({}))
-        .await
-        .assert_detail(404, "没有这条错误记录");
-    // sig 只取前 12 个字符；重复标记也成功
-    assert_eq!(
-        a.post(&format!("{A}/errors/aaaaaaaaaaaaZZZZ/resolve"), json!({}))
-            .await
-            .json(),
-        json!({"ok": true})
-    );
-    assert_eq!(
-        a.post(&format!("{A}/errors/aaaaaaaaaaaa/resolve"), json!({}))
-            .await
-            .json(),
-        json!({"ok": true})
-    );
-    assert_eq!(a.get(&format!("{A}/errors")).await.json()["open"], 2);
+    let (_e, a) = ready().await;
+    // 10-27 起 Bug 追踪整个删除：列表 / 标记接口都不在了
+    assert_eq!(a.get(&format!("{A}/errors")).await.status, 404);
     assert_eq!(
         a.post(&format!("{A}/errors/resolve-all"), json!({}))
             .await
-            .json(),
-        json!({"ok": true, "count": 2})
-    );
-    assert_eq!(
-        a.post(&format!("{A}/errors/resolve-all"), json!({}))
-            .await
-            .json(),
-        json!({"ok": true, "count": 0})
-    );
-    assert_eq!(
-        query(
-            &e.state.db,
-            "SELECT COUNT(*) AS n FROM error_events WHERE resolved_at IS NULL"
-        )
-        .await,
-        [json!({"n": 0})]
-    );
-    let acts = a.actions().await;
-    assert!(
-        acts.iter()
-            .any(|(act, t, ..)| act == "标记 Bug 已处理" && t == "Bug aaaaaaaaaaaa"),
-        "{acts:?}"
-    );
-    assert!(
-        acts.iter()
-            .any(|(act, t, ..)| act == "全部标记 Bug 已处理" && t == "全部未处理 Bug")
+            .status,
+        405
     );
 }
 

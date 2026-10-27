@@ -97,7 +97,6 @@ const ADMIN = [
   "/admin/audit/settings",
   "/admin/logs/usage",
   "/admin/logs/actions",
-  "/admin/logs/bugs",
   "/admin/upstream",
   "/admin/onboarding",
   "/admin/limits",

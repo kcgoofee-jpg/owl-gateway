@@ -108,8 +108,6 @@ export const SECTIONS: Section[] = [
 export const tick = signal(0);
 /** 用户正在编辑表单 / 打开对话框时暂停自动刷新，避免把输入冲掉。 */
 export const busy = signal(0);
-/** 导航角标：分区 id → 数字。 */
-export const navBadges = signal<Partial<Record<SectionId, number | string>>>({});
 
 function startTicker(): () => void {
   let es: EventSource | null = null;
@@ -217,31 +215,6 @@ export async function act<T = unknown>(
     toast(e instanceof Error ? e.message : String(e), { error: true });
     return null;
   }
-}
-
-/* ---------------- 侧栏角标（任何分区都在提醒，直到问题处理掉） ---------------- */
-function setNav(id: SectionId, value: number | string | null): void {
-  const next = { ...navBadges.value };
-  if (value === null || value === 0 || value === "") delete next[id];
-  else next[id] = value;
-  navBadges.value = next;
-}
-
-/** 侧栏角标的唯一来源：每次刷新节拍都看一次未处理 Bug。 */
-function BadgePoller() {
-  const t = tick.value;
-  useEffect(() => {
-    let alive = true;
-    const quiet = <T,>(url: string) => getShared<T>(url, t).catch(() => null);
-    void quiet<{ open?: number }>("/admin/api/errors").then((bugs) => {
-      if (!alive) return;
-      if (bugs) setNav("logs", bugs.open ?? 0);
-    });
-    return () => {
-      alive = false;
-    };
-  }, [t]);
-  return null;
 }
 
 /* ---------------- 登录 ---------------- */
@@ -447,7 +420,6 @@ function Nav() {
       {SECTIONS.map((s) => {
         const header = s.group && s.group !== lastGroup ? s.group : "";
         lastGroup = s.group;
-        const badge = navBadges.value[s.id];
         const Icon = s.icon;
         return (
           <div key={s.id}>
@@ -462,7 +434,6 @@ function Nav() {
             >
               <Icon size={17} aria-hidden={true} />
               <span>{s.label}</span>
-              {badge != null && badge !== 0 && <span class="admin-nav__badge">{badge}</span>}
             </a>
           </div>
         );
@@ -553,7 +524,6 @@ function Shell(props: { children: ComponentChildren; dataLive?: boolean }) {
         </main>
       </div>
       <CommandPalette open={palette} onClose={() => setPalette(false)} />
-      {dataLive && <BadgePoller />}
     </div>
   );
 }

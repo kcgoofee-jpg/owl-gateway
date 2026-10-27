@@ -82,6 +82,31 @@
   font-weight: 600;
 }
 
+/* 行式字段：左边标题与说明，右边控件；字段少、要对照着读的表单（额度页）用 */
+.field-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(150px, 220px);
+  gap: var(--sp-2) var(--sp-5);
+  align-items: center;
+}
+.field-row__label {
+  display: grid;
+  gap: 2px;
+  min-width: 0;
+}
+.field-row__name {
+  font-weight: 600;
+}
+.field-row__hint {
+  color: var(--muted);
+  font-size: var(--fs-xs);
+}
+@media (max-width: 560px) {
+  .field-row {
+    grid-template-columns: 1fr;
+  }
+}
+
 /* 保存条 */
 .savebar {
   display: flex;

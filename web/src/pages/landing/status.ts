@@ -121,12 +121,12 @@ export function deriveStatus(live: Live | null, opts: DeriveOpts = {}): StatusVi
   return out;
 }
 
-/** 今天重置以来各生成了多少张：图例只显示这个，不再折算「剩余额度」。 */
-export function generatedToday(live: Live | null): { total: number; v45: number; v5: number } {
+/** 今天重置以来各生成了多少张 + 弧线的比例尺（各账号今日上限合计）。 */
+export function generatedToday(live: Live | null): { total: number; v45: number; v5: number; cap: number } {
   const q = live?.quota ?? {};
   const total = Math.max(0, num(q.images_today));
   const v5 = Math.max(0, Math.min(total, num(q.v5_today)));
-  return { total, v45: total - v5, v5 };
+  return { total, v45: total - v5, v5, cap: Math.max(0, num(q.images_cap)) };
 }
 
 /** 站长手动暂停 V5 时的说明（成员页圆环用） */

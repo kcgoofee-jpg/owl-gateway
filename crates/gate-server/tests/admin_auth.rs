@@ -28,9 +28,6 @@ const ENDPOINTS: &[(&str, &str)] = &[
     // 日志 / 记录 / 导出
     ("GET", "/logs"),
     ("GET", "/actions"),
-    ("GET", "/errors"),
-    ("POST", "/errors/abc/resolve"),
-    ("POST", "/errors/resolve-all"),
     ("GET", "/audit"),
     ("GET", "/audit/1/thumb"),
     ("GET", "/audit/1/image"),

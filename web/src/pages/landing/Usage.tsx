@@ -9,11 +9,14 @@ export function toneFor(used: number, cap: number): Tone {
   return undefined;
 }
 
-/** 首页图例（站长 10-27）：只说今天重置以来 V4.5 / V5 各生成了多少张，不再折算剩余额度。 */
-export function StatRows(props: { generated: { total: number; v45: number; v5: number } }) {
+/**
+ * 首页图例（站长 10-27）：图例只说今天重置以来 V4.5 / V5 各生成了多少张；
+ * 弧线是「今日已出 ÷ 各账号今日上限合计」的比例尺（纯手动数字相加），不是额度折算。
+ */
+export function StatRows(props: { generated: { total: number; v45: number; v5: number; cap: number } }) {
   const rows = [
     { kind: "v45" as const, value: props.generated.v45 },
     { kind: "v5" as const, value: props.generated.v5 },
   ];
-  return <SiteGauge rows={rows} total={props.generated.total} />;
+  return <SiteGauge rows={rows} total={props.generated.total} cap={props.generated.cap} />;
 }

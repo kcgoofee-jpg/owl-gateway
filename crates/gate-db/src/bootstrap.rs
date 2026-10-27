@@ -62,8 +62,6 @@ pub const RUST_ADDED_COLUMNS: &[&str] = &[
     // 防小号（「刚进服就领 Key」「退了又进」）和新号额度爬坡用。
     "ALTER TABLE discord_registrations ADD COLUMN guild_joined_at REAL",
     "ALTER TABLE discord_registrations ADD COLUMN member_flags INTEGER",
-    // Bug 自动处理的原因码（gate_core::errors::AutoReason::code）；站长手动处理 / 未处理为 NULL。
-    "ALTER TABLE error_events ADD COLUMN auto_resolved TEXT",
     // Key 的停用原因（gate_core::key_status）；启用中 / 2.x 停用的为 NULL。
     "ALTER TABLE api_keys ADD COLUMN disabled_reason TEXT",
     // 这条请求最后由哪个上游账号（token_id）处理；没发到上游（鉴权 / 准入阶段就被拒）和 3.0 之前的老行为 NULL。
@@ -227,7 +225,6 @@ const INDEXES: &[&str] = &[
     "CREATE INDEX IF NOT EXISTS idx_log_rid ON usage_log (rid)",
     "CREATE INDEX IF NOT EXISTS idx_audit_key_id ON generation_audit (key_id, id DESC)",
     "CREATE INDEX IF NOT EXISTS idx_admin_actions_action ON admin_actions (action)",
-    "CREATE INDEX IF NOT EXISTS idx_error_events_resolved_last_seen ON error_events (resolved_at, last_seen DESC)",
 ];
 
 /// 本版本写入 `PRAGMA user_version` 的值。Python 版从不读它，所以写它不影响回滚。
@@ -259,7 +256,8 @@ fn has_column(conn: &Connection, table: &str, column: &str) -> rusqlite::Result<
 }
 
 /// 已下线功能的表：启动时顺手清掉（建表语句已不在 `schema.sql`，线上库里的旧表留着无用）。
-const REMOVED_TABLES: &[&str] = &["member_survey", "feedback"];
+/// `error_events` 是删掉的 Bug 追踪（10-27）：表里的历史错误随表一起删除。
+pub const REMOVED_TABLES: &[&str] = &["member_survey", "feedback", "error_events"];
 
 /// 建表 + 迁移。
 pub fn run(conn: &mut Connection) -> rusqlite::Result<()> {

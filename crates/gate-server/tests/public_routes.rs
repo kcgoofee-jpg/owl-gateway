@@ -244,10 +244,12 @@ async fn public_live_shape_and_key_order() {
     assert_eq!(v["auth"], json!({"requests": 2, "rejected": 1}));
     assert_eq!(
         keys(&v["quota"]),
-        // 10-27 起图例只显示「今天各生成了多少张」：上限、暂停、访问策略都不再看板重复
-        ["images_today", "v5_today"]
+        // 10-27 起图例只显示「今天各生成了多少张」；images_cap 只是弧线的比例尺（账号上限合计）
+        ["images_today", "images_cap", "v5_today"]
     );
     assert_eq!(v["quota"]["images_today"], 0);
+    // 单账号、上限 2400：比例尺 = 2400
+    assert_eq!(v["quota"]["images_cap"], 2400);
     assert_eq!(
         v["queue"],
         json!({"waiting": 0, "running": 0, "full": false})
@@ -800,54 +802,6 @@ async fn user_information_uses_key_expiry() {
     assert_eq!(v["naiGate"].get("isAdmin"), None);
 }
 
-// ------------------------------------------------------------------ 网页报错上报
-
-const CLIENT_ERR: &[u8] = br#"{"page":"landing","msg":"TypeError: x is undefined","line":3}"#;
-
-async fn web_bugs(state: &AppState) -> Vec<Value> {
-    settle().await;
-    state
-        .db
-        .list_error_events(true, 100)
-        .await
-        .unwrap()
-        .into_iter()
-        .filter(|r| r["source"].as_str().is_some_and(|s| s.starts_with("web:")))
-        .collect()
-}
-
-#[tokio::test]
-async fn client_error_report_is_bounded() {
-    let e = setup(&[]).await;
-    for i in 0..15 {
-        let (status, _, body) = raw(
-            &e.state,
-            "POST",
-            "/public/client-error",
-            &[
-                ("host", "gate.example.top"),
-                ("origin", "https://gate.example.top"),
-            ],
-            CLIENT_ERR,
-        )
-        .await;
-        assert_eq!(status, 204, "第 {i} 次");
-        assert!(body.is_empty());
-    }
-    // 不是 JSON 的也 204
-    let (status, _, _) = raw(&e.state, "POST", "/public/client-error", &[], b"not json").await;
-    assert_eq!(status, 204);
-    e.state.bugs.idle().await; // 报错是后台任务异步入库的：等写完再读，不靠固定睡眠
-    let bugs = web_bugs(&e.state).await;
-    assert_eq!(bugs.len(), 1, "同一个报错归并成一行：{bugs:?}");
-    assert_eq!(bugs[0]["source"], "web:landing");
-    assert_eq!(bugs[0]["level"], "warn");
-    assert!(bugs[0]["title"].as_str().unwrap().starts_with("TypeError"));
-    assert_eq!(bugs[0]["count"], 10, "每 IP 每 10 分钟只收 10 条");
-    let detail = bugs[0]["detail"].as_str().unwrap();
-    assert!(detail.starts_with(":3\n"), "{detail:?}"); // `{src}:{line}`，没有来源
-}
-
 /// 设备指纹 id 由服务端按各项算：同样的项（顺序、数字 / 字符串写法不同）得到同一个 id；
 /// 前端自带的 id 一律不认；别的网站发来的不收。
 #[tokio::test]
@@ -1019,73 +973,6 @@ async fn device_fp_sets_and_keeps_browser_cookie() {
     assert!(is_bid(&got) && got != "XYZ", "{got}");
 }
 
-#[tokio::test]
-async fn client_error_filters() {
-    let e = setup(&[]).await;
-    let post = |headers: Vec<(&'static str, &'static str)>, body: &'static [u8]| {
-        let state = e.state.clone();
-        async move {
-            let (s, _, b) = raw(&state, "POST", "/public/client-error", &headers, body).await;
-            assert_eq!(s, 204);
-            assert!(b.is_empty());
-        }
-    };
-    // 别的网站的页面：丢弃，且不占限流名额
-    for _ in 0..12 {
-        post(
-            vec![
-                ("host", "gate.example.top"),
-                ("origin", "https://evil.example"),
-            ],
-            CLIENT_ERR,
-        )
-        .await;
-    }
-    post(
-        vec![
-            ("host", "gate.example.top"),
-            ("referer", "https://evil.example/page"),
-        ],
-        CLIENT_ERR,
-    )
-    .await;
-    assert!(web_bugs(&e.state).await.is_empty());
-
-    // 浏览器 / 插件注入的脚本：堆栈里没有一帧来自本站
-    post(
-        vec![("host", "gate.example.top")],
-        br#"{"page":"landing","msg":"boom","stack":"Error: boom\n    at hit_test (<anonymous>:1:2)\n    at native_call (chrome-extension://abc/x.js:3:4)"}"#,
-    )
-    .await;
-    // 没有来源的「Script error.」
-    post(
-        vec![("host", "gate.example.top")],
-        br#"{"page":"admin","msg":"Script error.","line":0}"#,
-    )
-    .await;
-    // 不是对象
-    post(vec![], b"[1,2]").await;
-    assert!(web_bugs(&e.state).await.is_empty());
-
-    // 来自本站文件的报错才记；页面名只认 landing / admin，其余归 other；来源与堆栈截断
-    post(
-        vec![("host", "gate.example.top"), ("user-agent", "Mozilla/5.0 (synthetic)")],
-        "{\"page\":\"docs\",\"msg\":\"ReferenceError: y\",\"src\":\"/_owl/assets/app-abc.js\",\"line\":7,\
-          \"stack\":\"ReferenceError: y\\n    at f (https://gate.example.top/_owl/assets/app-abc.js:7:1)\"}"
-            .as_bytes(),
-    )
-    .await;
-    let bugs = web_bugs(&e.state).await;
-    assert_eq!(bugs.len(), 1, "{bugs:?}");
-    assert_eq!(bugs[0]["source"], "web:other");
-    assert_eq!(bugs[0]["title"], "ReferenceError: y");
-    let detail = bugs[0]["detail"].as_str().unwrap();
-    assert!(
-        detail.starts_with("/_owl/assets/app-abc.js:7\nMozilla/5.0 (synthetic)\nReferenceError: y"),
-        "{detail:?}"
-    );
-}
-
 // ------------------------------------------------------------------ SSE
 
 #[tokio::test]
@@ -1230,7 +1117,7 @@ async fn admin_events_stream_snapshot_and_badges() {
         .await
         .expect("第一条事件");
     assert_eq!(keys(&first), ["live", "badges"]);
-    assert_eq!(first["badges"], json!({"bugs": 0}));
+    assert_eq!(first["badges"], json!({}));
     // live 是同一份看板快照（不含任何成员的 me）
     let (_, _, polled) = get_json(&e.state, "/public/live", &[]).await;
     let live = without_t(first["live"].clone());

@@ -146,8 +146,6 @@ pub async fn maintenance_once(state: &AppState) -> Vec<(&'static str, JobError)>
         };
     }
     step!("purge", "清理过期记录", purge(state));
-    // 清理之后再自动关 Bug：先关再清的话，久未出现的旧 Bug 会在同一轮里直接被删，来不及留下「自动处理」的痕迹
-    step!("bug_triage", "自动关闭 Bug", bug_triage(state));
     // 同步身份组 / 补全资料 / 退群回收（注册服务自己逐步记错；没配齐就什么都不做）
     if state.shutdown.is_cancelled() {
         return failed;
@@ -172,15 +170,6 @@ pub(crate) async fn maintenance_job(state: &AppState) -> Result<String, JobError
         return Ok("正在关停，本轮没做完".to_string());
     }
     Ok("全部完成".to_string())
-}
-
-/// 自动关闭不需要人处理的 Bug（见 [`crate::bugs::Bugs::auto_triage`]）。最多 10 分钟一次，启动后的第一轮维护就会跑。
-pub async fn bug_triage(state: &AppState) -> Result<(), JobError> {
-    let now = state.now();
-    if state.bugs.triage_due(now) {
-        state.bugs.auto_triage(now).await?;
-    }
-    Ok(())
 }
 
 /// 清理过期记录。站长 10-22：后台的记录一律留存，不再按天数自动删除——请求日志（含 UA / IP）、操作日志、

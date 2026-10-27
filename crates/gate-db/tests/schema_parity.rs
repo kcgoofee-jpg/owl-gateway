@@ -74,6 +74,11 @@ fn python_schema_plus_rust_additions() -> Value {
     for ddl in gate_db::bootstrap::RUST_ADDED_TABLE_COLUMNS {
         con.execute(ddl, []).unwrap();
     }
+    // 下线的表和全新库一样随启动删除（error_events 等），基线这边也要丢掉再比
+    for t in gate_db::bootstrap::REMOVED_TABLES {
+        con.execute(&format!("DROP TABLE IF EXISTS {t}"), [])
+            .unwrap();
+    }
     dump_conn(&con)
 }
 

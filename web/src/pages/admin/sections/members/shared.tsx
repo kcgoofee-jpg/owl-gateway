@@ -50,12 +50,6 @@ export function usePageData<T>(url: string): { data: T | null; error: string | n
   return { data: r.data, error: r.error, pending };
 }
 
-/** 未处理 Bug 数（日志页子导航的角标用）。侧栏「日志」角标由外壳的 BadgePoller 统一维护，这里只读。 */
-export function useOpenBugs(): number {
-  const { data } = useAdmin<{ open: number }>("/admin/api/errors");
-  return data?.open ?? 0;
-}
-
 /* ---------------- 分段按钮 ---------------- */
 export function Seg<T extends string>(props: {
   label: string;

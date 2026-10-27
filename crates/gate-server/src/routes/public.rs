@@ -1,7 +1,6 @@
 //! 公开页面、实时看板、状态与客户端兼容视图。
 //!
 //! - `/public/live`（JSON）、`/public/live/stream`（SSE，3.0 新增）、`/public/status`、`/queue-status`；
-//! - `POST /public/client-error`：网页脚本报错上报；
 //! - `/user/*`、`/ai/user/*`：给原生 NAI 客户端的虚拟订阅 / 数据 / 优先级 / 密钥库 / 账户信息；
 //! - `GET /admin/api/events`（3.0 新增）：后台 SSE（实时快照 + 角标数字）；
 //! - 首页首屏数据（[`landing_boot`]，由 pages.rs 的 `/` 使用）。
@@ -9,7 +8,7 @@
 //! `/healthz`、`/`、`/admin*`、`/_owl/*`、图标在 pages.rs。
 
 use super::registration::no_store;
-use crate::auth::{authenticate, client_ip, ctx_of, header_str};
+use crate::auth::{authenticate, client_ip, header_str};
 use crate::error::{ApiResult, HttpError, InternalError, ok_json};
 use crate::key::Key;
 use crate::live::{self, Snapshot, StreamKind, StreamSlot, wire_text};
@@ -23,7 +22,7 @@ use axum::response::sse::{Event, KeepAlive, Sse};
 use axum::response::{IntoResponse, Response};
 use axum::routing::{get, post};
 use futures::StreamExt;
-use gate_core::pyc::{strip, take_chars};
+use gate_core::pyc::take_chars;
 use serde_json::{Map, Value, json};
 use std::convert::Infallible;
 use std::hash::{Hash, Hasher};
@@ -35,7 +34,6 @@ pub fn router() -> Router<AppState> {
     let mut r = Router::new()
         .route("/public/live", get(public_live))
         .route("/public/live/stream", get(public_live_stream))
-        .route("/public/client-error", post(client_error))
         .route("/public/device-fp", post(device_fp))
         .route("/public/status", get(public_status))
         .route("/queue-status", get(queue_status))
@@ -86,42 +84,6 @@ async fn head_bytes(body: Body, n: usize) -> Vec<u8> {
     }
     buf.truncate(n);
     buf
-}
-
-/// 请求体解析成 JSON 对象；读不懂或不是对象返回 None。
-fn loads_object(raw: &[u8]) -> Option<serde_json::Map<String, Value>> {
-    match serde_json::from_slice::<Value>(raw).ok()? {
-        Value::Object(d) => Some(d),
-        _ => None,
-    }
-}
-
-/// 假值：null / false / 0 / "" / [] / {}。
-fn falsy(v: &Value) -> bool {
-    match v {
-        Value::Null => true,
-        Value::Bool(b) => !*b,
-        Value::Number(n) => n.as_f64() == Some(0.0),
-        Value::String(s) => s.is_empty(),
-        Value::Array(a) => a.is_empty(),
-        Value::Object(o) => o.is_empty(),
-    }
-}
-
-/// 值转文本：字符串原样，其它用 JSON 写法。
-fn value_text(v: &Value) -> String {
-    match v {
-        Value::String(s) => s.clone(),
-        other => other.to_string(),
-    }
-}
-
-/// 字段文本：缺失或假值给空串。
-fn text_of(d: &serde_json::Map<String, Value>, name: &str) -> String {
-    d.get(name)
-        .filter(|v| !falsy(v))
-        .map(value_text)
-        .unwrap_or_default()
 }
 
 // ------------------------------------------------------------------ 实时看板
@@ -322,66 +284,6 @@ fn foreign_page(h: &HeaderMap) -> bool {
     !theirs.is_empty() && !host.is_empty() && theirs != host
 }
 
-/// 钱包类浏览器扩展（MetaMask 等）往每个页面注入 window.ethereum，断线时抛出的错：没有堆栈，文字固定，跟本站无关。
-const EXTENSION_MESSAGES: &[&str] = &[
-    "disconnected from all chains", // EIP-1193 错误 4901，MetaMask / 各类钱包
-    "metamask",
-    "chrome-extension://",
-    "moz-extension://",
-];
-
-/// 手机自带浏览器（荣耀 / 华为 / 小米等）、翻译、广告和钱包插件往页面注入的脚本出的错：我们修不了，不进 Bug 追踪。
-/// 特征：堆栈里有调用帧，但没有一帧来自本站文件（全是 <anonymous> / 扩展协议）；或者是没有来源的「Script error.」；
-/// 或者是已知的钱包扩展报错文字（没有堆栈，只能按文字认）。
-fn injected_script_error(msg: &str, stack: &str, host: &str) -> bool {
-    if strip(msg) == "Script error." {
-        return true;
-    }
-    let lower = msg.to_lowercase();
-    if EXTENSION_MESSAGES.iter().any(|m| lower.contains(m)) {
-        return true;
-    }
-    let frames: Vec<&str> = stack
-        .lines()
-        .map(strip)
-        .filter(|l| l.starts_with("at ") || l.contains('@'))
-        .collect();
-    if frames.is_empty() {
-        return false;
-    }
-    // 前端文件在 /_owl/（/static/ 也会一起查，老链接不 404）
-    let ours: Vec<&str> = [
-        "/static/",
-        "/_owl/",
-        "/admin",
-        host,
-        "127.0.0.1",
-        "localhost",
-    ]
-    .into_iter()
-    .filter(|x| !x.is_empty())
-    .collect();
-    !frames.iter().any(|f| ours.iter().any(|o| f.contains(o)))
-}
-
-/// 报错上报里的文本：连续的控制字符（`\x00-\x1f` `\x7f`）换成一个空格，去首尾空白，最多 256 个字符。
-fn one_line(text: &str) -> String {
-    let mut out = String::with_capacity(text.len());
-    let mut in_ctrl = false;
-    for c in text.chars() {
-        if c <= '\u{1f}' || c == '\u{7f}' {
-            if !in_ctrl {
-                out.push(' ');
-                in_ctrl = true;
-            }
-        } else {
-            out.push(c);
-            in_ctrl = false;
-        }
-    }
-    take_chars(strip(&out), 256).to_string()
-}
-
 /// 网页登录前，前端把设备指纹的各项（显卡 / 屏幕 / 时区 / 硬件 / Canvas 与 WebGL 的哈希 …）发到这里：
 /// `{"data": {...}}`。服务端把各项规整成固定格式（键排序、值一律转成字符串、限长限个数），
 /// 指纹 id = 规整结果 sha256 的前 32 位十六进制，按 id 存一份明细，回 `{"id": id, "bid": 浏览器标记}`；前端拿 id 带去 /login?dev=。
@@ -526,65 +428,6 @@ fn canonical_parts(data: &serde_json::Map<String, Value>) -> Option<(String, Str
     Some((id, canonical))
 }
 
-/// 首页 / 后台网页的脚本报错上报（只收本站页面的错误；每 IP 每 10 分钟 10 条，全站每 10 分钟 100 条）。
-///
-/// 3.0 起另外丢弃两类：浏览器网络失败（断网 / 请求被取消，不是我们的缺陷），
-/// 以及出错脚本不在 `/_owl/` 下的 `Uncaught …`（多半是浏览器插件）。
-async fn client_error(State(state): State<AppState>, req: Request) -> Response {
-    let (parts, body) = req.into_parts();
-    let h = &parts.headers;
-    if foreign_page(h) {
-        return no_content();
-    }
-    let host = header_str(h, "host").to_lowercase();
-    let ip = client_ip(&parts, &state.env.forwarded_allow_ips);
-    if !state.live.client_error_slot(&ip, state.now()) {
-        return no_content();
-    }
-    let raw = head_bytes(body, 4096).await;
-    let raw = if raw.is_empty() { b"{}".to_vec() } else { raw };
-    let Some(d) = loads_object(&raw) else {
-        return no_content();
-    };
-    let d = &d;
-    let page = take_chars(&text_of(d, "page"), 20).to_string();
-    let page = if page == "landing" || page == "admin" {
-        page
-    } else {
-        "other".to_string()
-    };
-    let msg = one_line(&text_of(d, "msg"));
-    let msg = take_chars(&msg, 200);
-    let msg = if msg.is_empty() { "unknown" } else { msg };
-    let src = text_of(d, "src");
-    let place = one_line(&format!("{src}:{}", text_of(d, "line")));
-    let stack = take_chars(&text_of(d, "stack"), 1500).to_string();
-    // 3.0 前端对脚本错误（ErrorEvent）带 `filename`，Promise 拒绝没有
-    let filename = match d.get("filename") {
-        Some(Value::String(f)) => Some(f.as_str()),
-        _ => None,
-    };
-    if gate_core::errors::is_network_failure(msg)
-        || injected_script_error(msg, &stack, &host)
-        || gate_core::errors::is_foreign_script_report(msg, filename, &src, &stack)
-    {
-        return no_content();
-    }
-    let ua = one_line(&header_str(h, "user-agent"));
-    let source = format!("web:{page}");
-    let detail = format!("{place}\n{ua}\n{stack}");
-    state.bugs.capture(crate::bugs::Report {
-        source: &source,
-        title: msg,
-        detail: &detail,
-        path: &page,
-        rid: &ctx_of(&parts).rid(),
-        level: "warn",
-        ..Default::default()
-    });
-    no_content()
-}
-
 // ------------------------------------------------------------------ 客户端兼容视图（/user/*）
 
 /// 虚拟订阅视图：数字由 gate_core 算（纯函数），这里只负责把库里的数查好。
@@ -702,8 +545,7 @@ async fn badges(c: &mut AdminConn) -> String {
     {
         return text.clone();
     }
-    let bugs = c.state.db.open_error_count().await.unwrap_or(0);
-    let text = format!("{{\"bugs\":{bugs}}}");
+    let text = "{}".to_string();
     c.badges = Some((Instant::now(), text.clone()));
     text
 }
@@ -925,43 +767,5 @@ mod tests {
         assert_eq!(netloc("//h.test/x"), "h.test");
         assert_eq!(netloc("h.test/x"), "");
         assert_eq!(netloc(" \thttps://h.te\nst/x"), "h.test");
-    }
-
-    #[test]
-    fn injected_scripts_are_recognised() {
-        let host = "gate.example.top";
-        assert!(injected_script_error("Script error.", "", host));
-        assert!(injected_script_error(
-            "x",
-            "TypeError: x\n    at hit_test (<anonymous>:1:2)\n    at native_call (<anonymous>:3:4)",
-            host
-        ));
-        assert!(!injected_script_error(
-            "x",
-            "TypeError: x\n    at f (https://gate.example.top/_owl/assets/app-abc.js:1:2)",
-            host
-        ));
-        assert!(!injected_script_error("x", "no frames here", host));
-        // 钱包扩展的报错：没有堆栈，按文字认（线上 10-17 晚就是这条把总览顶出「1 个 Bug 没处理」）
-        assert!(injected_script_error(
-            "The provider is disconnected from all chains.",
-            "",
-            host
-        ));
-        assert!(injected_script_error(
-            "Failed to connect to MetaMask",
-            "",
-            host
-        ));
-        assert!(!injected_script_error(
-            "Cannot read properties of undefined",
-            "",
-            host
-        ));
-        assert!(!injected_script_error(
-            "x",
-            "f@https://other.test/_owl/a.js:1:1",
-            host
-        ));
     }
 }

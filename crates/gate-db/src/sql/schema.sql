@@ -162,21 +162,6 @@ CREATE TABLE IF NOT EXISTS coupons (       -- 成员的券（现在只有「重�
     used_at REAL
 );
 CREATE INDEX IF NOT EXISTS idx_coupons_key ON coupons(key_id, used_at);
-CREATE TABLE IF NOT EXISTS error_events (
-    sig TEXT PRIMARY KEY,          -- 错误特征：异常类型 + 出错位置（或来源 + 去掉数字的消息）
-    source TEXT NOT NULL,          -- request / upstream / maintenance:xxx / web:landing / disconnect ...
-    level TEXT NOT NULL DEFAULT 'error',
-    title TEXT NOT NULL DEFAULT '',
-    detail TEXT NOT NULL DEFAULT '',   -- 最近一次的堆栈 / 上下文（只给站长看）
-    count INTEGER NOT NULL DEFAULT 0,
-    first_seen REAL NOT NULL,
-    last_seen REAL NOT NULL,
-    last_rid TEXT NOT NULL DEFAULT '',
-    last_key INTEGER,
-    last_path TEXT NOT NULL DEFAULT '',
-    resolved_at REAL               -- 站长标记已处理；之后再出现视为「复发」
-);
-CREATE INDEX IF NOT EXISTS idx_error_events_resolved_last_seen ON error_events (resolved_at, last_seen DESC);
 -- key_idle_reminders 已随「闲置提醒」移除（改为 3 天不生图直接拉黑，不发提醒）；share_confirm 是更早的防分享遗留。
 -- 老库在 connect() 里 DROP TABLE IF EXISTS 清理，见下方 waitlist / key_sources 一组。
 CREATE TABLE IF NOT EXISTS admin_actions (

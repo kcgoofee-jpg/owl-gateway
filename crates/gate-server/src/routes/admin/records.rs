@@ -24,9 +24,6 @@ pub fn router() -> Router<AppState> {
     Router::new()
         .route("/admin/api/logs", get(logs))
         .route("/admin/api/actions", get(admin_actions))
-        .route("/admin/api/errors", get(errors_list))
-        .route("/admin/api/errors/resolve-all", post(errors_resolve_all))
-        .route("/admin/api/errors/{sig}/resolve", post(errors_resolve))
         .route("/admin/api/audit", get(audit_list))
         .route("/admin/api/audit/export", get(audit_export))
         .route("/admin/api/audit/purge-images", post(audit_purge_images))
@@ -215,62 +212,6 @@ async fn admin_actions(State(state): State<AppState>, _s: AdminSession, q: Admin
         "pages": pages,
         "action_kinds": kinds,
     })))
-}
-
-// ----------------------------------------------------------------------------- Bug 追踪
-
-/// Bug 追踪：按特征归并的错误（未处理的在前）。detail 含堆栈，只在后台显示。
-async fn errors_list(State(state): State<AppState>, _s: AdminSession, q: AdminQuery) -> R {
-    let all = q.flag("all")?;
-    let st = state.clone();
-    let mut items = st.db.list_error_events(all, 100).await?;
-    let mut ids: Vec<i64> = items
-        .iter()
-        .filter_map(|r| r.get("last_key").and_then(Value::as_i64))
-        .filter(|k| *k != 0)
-        .collect();
-    ids.sort_unstable();
-    ids.dedup();
-    let names: HashMap<i64, String> = st.db.key_names_for(&ids).await?.into_iter().collect();
-    for r in &mut items {
-        let key_name = match r
-            .get("last_key")
-            .and_then(Value::as_i64)
-            .filter(|k| *k != 0)
-        {
-            // 名字查不到（或空串）就显示「Key #N (已删除)」
-            Some(k) => names
-                .get(&k)
-                .filter(|n| !n.is_empty())
-                .cloned()
-                .unwrap_or_else(|| format!("Key #{k} (已删除)")),
-            None => String::new(),
-        };
-        if let Some(o) = r.as_object_mut() {
-            o.insert("key_name".into(), Value::String(key_name));
-        }
-    }
-    let open = st.db.open_error_count().await?;
-    Ok(ok_json(&json!({"errors": items, "open": open})))
-}
-
-/// 标记已处理；之后再出现会作为「复发」重新提醒。
-async fn errors_resolve(
-    State(state): State<AppState>,
-    _s: AdminSession,
-    AdminPath(sig): AdminPath<String>,
-) -> R {
-    let sig = pyc::take_chars(&sig, 12).to_string();
-    if !state.db.resolve_error_event(&sig, state.now()).await? {
-        return Err(http(404, "没有这条错误记录"));
-    }
-    Ok(ok_json(&json!({"ok": true})))
-}
-
-/// 一键标记所有未处理 Bug 为已处理。
-async fn errors_resolve_all(State(state): State<AppState>, _s: AdminSession) -> R {
-    let count = state.db.resolve_all_error_events(state.now()).await?;
-    Ok(ok_json(&json!({"ok": true, "count": count})))
 }
 
 // ----------------------------------------------------------------------------- 生成记录

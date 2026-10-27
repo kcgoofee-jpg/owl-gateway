@@ -628,15 +628,6 @@ async fn patch_quota_auto_hands_the_key_to_the_algorithm() {
         e.state.db.get_key(1).await.unwrap().unwrap()["daily_images"],
         150
     );
-    // 算法出错时（比如读不到上游额度）请求本身不失败，只记 Bug：这条路径由 kernel 的测试覆盖
-    assert!(
-        query(
-            &e.state.db,
-            "SELECT 1 FROM error_events WHERE source='quota_algo'"
-        )
-        .await
-        .is_empty()
-    );
 }
 
 #[tokio::test]

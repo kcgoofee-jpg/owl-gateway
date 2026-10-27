@@ -267,8 +267,6 @@ async fn maintenance_round_purges_and_flushes() {
         format!("INSERT INTO admin_actions (ts, actor, action, target, detail, ok) VALUES ({}, 'a', '旧', '', '', 1)", now - 200.0 * DAY),
         format!("INSERT INTO admin_actions (ts, actor, action, target, detail, ok) VALUES ({}, 'a', '新', '', '', 1)", now - 2.0 * DAY),
         format!("INSERT INTO status_hourly (hour, code, n) VALUES ({old_hour}, 200, 5)"),
-        format!("INSERT INTO error_events (sig, source, first_seen, last_seen, resolved_at, count) VALUES ('old', 's', 1.0, {0}, {0}, 1)", now - 40.0 * DAY),
-        format!("INSERT INTO error_events (sig, source, first_seen, last_seen, resolved_at, count) VALUES ('open', 's', 1.0, {0}, NULL, 1)", now - 40.0 * DAY),
     ])
     .await
     .unwrap();
@@ -279,8 +277,8 @@ async fn maintenance_round_purges_and_flushes() {
     assert_eq!(run_job(s, "maintenance").await.unwrap(), "全部完成");
     settle().await;
 
-    // 明细日志按 USAGE_LOG_RETENTION_DAYS 只留 10 天内（设置了才清）；操作日志、状态码统计、旧 Bug 一律留存（站长 10-22）
-    let (usage_rows, actions, errors) =
+    // 明细日志按 USAGE_LOG_RETENTION_DAYS 只留 10 天内（设置了才清）；操作日志、状态码统计一律留存（站长 10-22）
+    let (usage_rows, actions) =
         s.db.read(|c| {
             let usage_rows: i64 =
                 c.query_row("SELECT COUNT(*) FROM usage_log", [], |r| r.get(0))?;
@@ -288,20 +286,12 @@ async fn maintenance_round_purges_and_flushes() {
                 .prepare("SELECT action FROM admin_actions ORDER BY rowid")?
                 .query_map([], |r| r.get::<_, String>(0))?
                 .collect::<Result<Vec<_>, _>>()?;
-            let errors = c
-                .prepare("SELECT sig FROM error_events ORDER BY rowid")?
-                .query_map([], |r| r.get::<_, String>(0))?
-                .collect::<Result<Vec<_>, _>>()?;
-            Ok((usage_rows, actions, errors))
+            Ok((usage_rows, actions))
         })
         .await
         .unwrap();
     assert_eq!(usage_rows, 1);
     assert_eq!(actions, ["旧", "新"]);
-    assert!(
-        errors.iter().any(|e| e == "open") && errors.iter().any(|e| e == "old"),
-        "{errors:?}"
-    );
     // 内存里的状态码统计落库并清空
     let hour = (now / 3600.0).floor() as i64 * 3600;
     let totals = s.db.status_totals_since(hour).await.unwrap();
@@ -358,8 +348,6 @@ async fn a_failing_maintenance_step_is_shown_but_filed_only_once() {
     assert!(err.to_string().starts_with("清理过期记录出错："), "{err}");
     let last = Value::Object(s.jobs.last().await);
     assert_eq!(last["maintenance"]["ok"], false);
-    // 只有那一步自己的 Bug（来源 maintenance:purge），不再另记一条 job:maintenance
-    assert_eq!(bug_sources(s).await, ["maintenance:purge"]);
 }
 
 // ------------------------------------------------------------------ 启动 / 关停
@@ -456,12 +444,6 @@ async fn a_failing_or_panicking_job_keeps_its_loop_alive() {
         tokio::time::sleep(Duration::from_millis(10)).await;
     }
     assert!(FLAKY_CALLS.load(Ordering::SeqCst) >= 3);
-    // panic 和报错各记一条 Bug（来源 job:<名字>）
-    let mut sources = bug_sources(&e.state).await;
-    sources.dedup();
-    assert_eq!(sources, ["job:flaky_test"]);
-    let events = e.state.db.list_error_events(true, 10).await.unwrap();
-    assert_eq!(events.len(), 2, "{events:?}");
     jobs::shutdown(&e.state).await;
     assert!(e.state.tasks.is_empty(), "关停后循环退出");
 }

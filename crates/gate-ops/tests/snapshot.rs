@@ -82,12 +82,9 @@ fn seed_source(path: &Path) {
         set_setting(&c, k, v);
     }
     c.execute(
-        "INSERT INTO error_events(sig, source, level, title, detail, count, first_seen, last_seen) \
-         VALUES ('sig-1', 'request', 'error', 'synthetic title', 'Traceback: synthetic prompt A leaked here', 2, 1.0, 2.0)",
-        [],
+        "INSERT INTO discord_registrations(discord_id, key_id, created_at, avatar) VALUES ('900000000000000001', 1, 1.0, 'avatar-hash-synthetic-1')", [],
     )
     .unwrap();
-    c.execute("INSERT INTO discord_registrations(discord_id, key_id, created_at, avatar) VALUES ('900000000000000001', 1, 1.0, 'avatar-hash-synthetic-1')", []).unwrap();
     c.execute(
         "INSERT INTO discord_bans(discord_id, created_at, reason, avatar) VALUES ('900000000000000009', 1.0, 'synthetic', 'avatar-hash-synthetic-ban')",
         [],
@@ -420,10 +417,10 @@ fn sanitize_replaces_keys_and_drops_secrets_and_content() {
         ]
     );
 
-    // 报错堆栈、提示词、缩略图、头像
+    // Bug 追踪（error_events）已删：脱敏后的快照里不允许再出现这张表
     assert_eq!(
         d.query_row::<i64, _, _>(
-            "SELECT COUNT(*) FROM error_events WHERE detail!=''",
+            "SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name='error_events'",
             [],
             |r| r.get(0)
         )
@@ -540,9 +537,11 @@ fn sanitize_failure_rolls_back_everything() {
     let src = new_db(dir.path());
     seed_source(&src);
     let (out, _) = make(&src, dir.path(), "ro.db");
-    rw(&out).execute_batch("DROP TABLE error_events").unwrap(); // 缺表 → 脱敏中途失败
+    rw(&out)
+        .execute_batch("DROP TABLE generation_audit")
+        .unwrap(); // 缺表 → 脱敏中途失败
     let err = sanitize::sanitize(&out).unwrap_err();
-    assert!(format!("{err:#}").contains("error_events"), "{err:#}");
+    assert!(format!("{err:#}").contains("generation_audit"), "{err:#}");
     // 整个事务回滚：不会留下「Key 已换哈希、提示词还在」这种半脱敏的文件
     let d = ro(&out);
     let tok: String = d

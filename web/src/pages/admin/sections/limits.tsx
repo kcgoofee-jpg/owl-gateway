@@ -1,9 +1,12 @@
-/** 额度与保护：每个数都是站长手动设的（10-23 起没有自动额度算法）；最后一张「记录」只显示。 */
+/** 额度与保护：每个数都是站长手动设的（10-23 起没有自动额度算法）；「上游账号现状」只显示。 */
+
+import { X } from "lucide-preact";
 import { useEffect, useMemo, useRef, useState } from "preact/hooks";
 import { fullTime, withUnit } from "../../../lib/format";
-import { Button, Card } from "../../../ui";
+import { Badge, Button, Card, SearchMultiSelect, type SearchOption } from "../../../ui";
 import { act, useAdmin } from "../Admin";
 import { CardPending, SectionHead, TableWrap, useBusy } from "./_kit";
+import type { QuotaMode } from "./limits/core";
 import {
   agoText,
   DAILY_CAP_MAX,
@@ -17,190 +20,176 @@ import {
   RUNTIME_SPECS,
   type Settings,
 } from "./limits/core";
-import type { FieldSpec } from "./system/core";
+import { Seg } from "./members/shared";
+import type { NumSpec } from "./system/core";
 import { NumField, SaveBar, Sect, SelectField, SwitchRow, useForm } from "./system/forms";
 
-/** 一张手动设置卡：字段、保存。 */
-function FormCard(props: {
-  title: string;
-  sub?: string;
-  url: string;
-  specs: Record<string, FieldSpec>;
-  server: Record<string, unknown> | null;
-  done: string;
-  saveLabel: string;
-  /** 暂时不能改的字段 → 说明（输入框变灰，说明顶替原来的提示） */
-  disabled?: Record<string, string>;
-}) {
-  const form = useForm(props.specs, props.server);
+type ModeName = Exclude<keyof GlobalQuotaModes, "public_vibe_enabled">;
+
+/** 迁移前的旧数据可能是 unlimited：显示与编辑都折算成上限值（9999 / 每月池 99999）。 */
+const boundMode = (name: ModeName, mode: QuotaMode) =>
+  mode.mode === "unlimited"
+    ? { mode: "limit" as const, value: name === "global_monthly_anlas" ? MONTHLY_CAP_MAX : DAILY_CAP_MAX }
+    : mode;
+
+const capMax = (name: string): number => (name === "global_monthly_anlas" ? MONTHLY_CAP_MAX : DAILY_CAP_MAX);
+
+/* ---------------------------------------------------------------- V5 总开关 */
+
+/** V5 暂停（立即生效）+ V5 Full 转 Medium（保存生效）。 */
+function V5Card() {
+  const { data, error, loading } = useAdmin<Settings>("/admin/api/settings");
+  const specs = useMemo(
+    () => Object.fromEntries(Object.entries(QUOTA_SPECS).filter(([k]) => k === "v5_medium_mode")),
+    [],
+  );
+  const form = useForm(specs, data as unknown as Record<string, unknown> | null);
   const [saving, setSaving] = useState(false);
+  if (!data) return <CardPending title="V5 总开关" loading={loading} error={error} />;
   const save = async () => {
     setSaving(true);
-    const ok = await act("PUT", props.url, form.changes(), props.done);
+    const ok = await act("PUT", "/admin/api/settings", form.changes(), "模型转换已保存");
     setSaving(false);
     if (ok) form.commit();
   };
+  const setPaused = (on: boolean) =>
+    act("PUT", "/admin/api/settings", { v5_paused: on }, on ? "V5 已暂停" : "V5 已恢复");
   return (
-    <Card title={props.title} {...(props.sub ? { sub: props.sub } : {})}>
-      <form {...form.formProps} onSubmit={(e) => e.preventDefault()}>
-        <div class="form-grid">
-          {Object.keys(props.specs).map((n) =>
-            props.specs[n]?.kind === "select" ? (
-              <SelectField key={n} form={form} name={n} />
-            ) : (
-              <NumField
-                key={n}
-                form={form}
-                name={n}
-                {...(props.disabled?.[n] ? { disabled: true, hint: props.disabled[n] } : {})}
-              />
-            ),
-          )}
-        </div>
-        <SaveBar form={form} onSave={save} saving={saving} label={props.saveLabel} />
+    <Card title="V5 总开关" sub="暂停立即生效；转换保存后生效">
+      <SwitchRow
+        title="暂停 V5"
+        desc={
+          data.v5_paused
+            ? "已暂停：V5 请求直接拒（不扣费），首页和客户端都显示暂停"
+            : "V5 照常开放，受「每日额度」和访问策略管"
+        }
+        checked={data.v5_paused}
+        onChange={(v) => void setPaused(v)}
+      />
+      <form class="form-section" {...form.formProps} onSubmit={(e) => e.preventDefault()}>
+        <SelectField form={form} name="v5_medium_mode" hint="上游 V5 电量紧张时把 Full 降为 Medium 出。" />
+        <SaveBar form={form} onSave={save} saving={saving} label="保存模型转换" />
       </form>
     </Card>
   );
 }
 
-function QuotaCard() {
-  const { data, error, loading } = useAdmin<Settings>("/admin/api/settings");
-  const {
-    data: modes,
-    error: modesError,
-    loading: modesLoading,
-  } = useAdmin<GlobalQuotaModes>("/admin/api/quota-modes");
-  if (!data || !modes)
-    return <CardPending title="额度" loading={loading || modesLoading} error={error || modesError} />;
-  const setPaused = (on: boolean) =>
-    act("PUT", "/admin/api/settings", { v5_paused: on }, on ? "V5 已暂停" : "V5 已恢复");
+/* ---------------------------------------------------------------- 每日额度 */
+
+/** 行式字段：左边标题与说明，右边一个数（额度页就这几项，这样更好对照着读）。 */
+function QuotaRow(props: { name: ModeName; value: number; onChange: (v: number) => void }) {
+  // 这六个名字在 QUOTA_SPECS 里都是数字规格
+  const spec = QUOTA_SPECS[props.name] as NumSpec;
   return (
-    <>
-      <Card title="V5 暂停（手动）">
-        <SwitchRow
-          title="暂停 V5"
-          desc={
-            data.v5_paused
-              ? "已暂停：V5 请求直接拒（不扣费），首页和客户端都显示暂停"
-              : "V5 照常开放，受下面的每人 / 全站上限管"
-          }
-          checked={data.v5_paused}
-          onChange={(v) => void setPaused(v)}
+    <div class="field-row">
+      <div class="field-row__label">
+        <span class="field-row__name">{spec.label}</span>
+        <small class="field-row__hint">{spec.hint}</small>
+      </div>
+      <div class="inputwrap">
+        <input
+          class="input"
+          type="number"
+          min="0"
+          max={capMax(props.name)}
+          step={spec.kind === "float" ? "any" : 1}
+          aria-label={`${spec.label} 限额（0 = 停用）`}
+          value={props.value}
+          onInput={(e) => props.onChange(Number(e.currentTarget.value))}
         />
-      </Card>
-      <AccessPolicyCard />
-      <QuotaModesCard
-        title="成员统一额度"
-        data={modes}
-        names={["register_daily_images", "register_daily_v5", "member_daily_anlas"]}
-        done="额度已保存并同步"
-      />
-      <QuotaModesCard
-        title="全站预算"
-        data={modes}
-        names={["global_daily_v5", "global_daily_anlas", "global_monthly_anlas"]}
-        done="全站预算已保存"
-      />
-      <FormCard
-        title="模型转换"
-        url="/admin/api/settings"
-        specs={Object.fromEntries(Object.entries(QUOTA_SPECS).filter(([k]) => k === "v5_medium_mode"))}
-        server={data as unknown as Record<string, unknown>}
-        done="模型转换已保存"
-        saveLabel="保存模型转换"
-      />
-    </>
+        {spec.unit && (
+          <span class="inputwrap__unit" aria-hidden="true">
+            {spec.unit}
+          </span>
+        )}
+      </div>
+    </div>
   );
 }
 
-const MODE_LABELS: Record<
-  keyof Omit<GlobalQuotaModes, "public_vibe_enabled">,
-  { label: string; unit: string }
-> = {
-  register_daily_images: { label: "V4.5 每人每天", unit: "张" },
-  register_daily_v5: { label: "V5 每人每天", unit: "张" },
-  global_daily_v5: { label: "V5 全站每天", unit: "张" },
-  global_daily_anlas: { label: "Anlas 全站每天付费池", unit: "Anlas" },
-  member_daily_anlas: { label: "Anlas 每人每天", unit: "Anlas" },
-  global_monthly_anlas: { label: "Anlas 全站每月", unit: "Anlas" },
-};
+const QUOTA_GROUPS: Array<{ title: string; names: ModeName[] }> = [
+  { title: "成员每人", names: ["register_daily_images", "register_daily_v5", "member_daily_anlas"] },
+  { title: "全站预算", names: ["global_daily_v5", "global_daily_anlas", "global_monthly_anlas"] },
+];
 
-/** 迁移前的旧数据可能是 unlimited：显示与编辑都折算成上限值（9999 / 每月池 99999）。 */
-const boundMode = (name: keyof typeof MODE_LABELS, mode: GlobalQuotaModes[keyof typeof MODE_LABELS]) =>
-  mode.mode === "unlimited"
-    ? { mode: "limit" as const, value: name === "global_monthly_anlas" ? MONTHLY_CAP_MAX : DAILY_CAP_MAX }
-    : mode;
+function QuotaCard() {
+  const { data, error, loading } = useAdmin<GlobalQuotaModes>("/admin/api/quota-modes");
+  if (!data) return <CardPending title="每日额度" loading={loading} error={error} />;
+  return <QuotaModesForm data={data} />;
+}
 
-function QuotaModesCard(props: {
-  title: string;
-  data: GlobalQuotaModes;
-  names: Array<keyof typeof MODE_LABELS>;
-  done: string;
-}) {
-  // 10-27 规范化：全局额度就是一个数字（0 = 停用，上限 9999 / 每月池 99999），没有「不限」档
+/** 10-27 规范化：全局额度就是一个数字（0 = 停用，上限 9999 / 每月池 99999），没有「不限」档。 */
+function QuotaModesForm(props: { data: GlobalQuotaModes }) {
   const normalize = (d: GlobalQuotaModes): GlobalQuotaModes => {
     const out = { ...d };
-    for (const name of props.names) out[name] = boundMode(name, d[name]);
+    for (const g of QUOTA_GROUPS) for (const name of g.names) out[name] = boundMode(name, d[name]);
     return out;
   };
-  const [modes, setModes] = useState(() => normalize(props.data));
+  // 草稿 = 显示值 + 它基于的服务端快照签名。服务端来新值时：一致（保存的回声也算）不动；
+  // 没在编辑就跟随；正在编辑就保留草稿（自动刷新不许把输入冲掉）。
+  const [draft, setDraft] = useState(() => {
+    const n = normalize(props.data);
+    return { modes: n, sig: JSON.stringify(n) };
+  });
   const [saving, setSaving] = useState(false);
-  useEffect(() => setModes(normalize(props.data)), [props.data]);
-  const changed = JSON.stringify(modes) !== JSON.stringify(normalize(props.data));
+  useEffect(() => {
+    const n = normalize(props.data);
+    const sig = JSON.stringify(n);
+    setDraft((d) => {
+      if (sig === d.sig) return d;
+      return JSON.stringify(d.modes) === d.sig ? { modes: n, sig } : d;
+    });
+  }, [props.data]);
+  const changed = JSON.stringify(draft.modes) !== draft.sig;
   const save = async () => {
     setSaving(true);
-    const ok = await act("PUT", "/admin/api/settings", { quota_modes: modes }, props.done);
+    const ok = await act("PUT", "/admin/api/settings", { quota_modes: draft.modes }, "额度已保存并同步");
     setSaving(false);
-    if (ok) setModes(modes);
+    if (ok) setDraft({ modes: draft.modes, sig: JSON.stringify(draft.modes) });
   };
-  const setMode = (name: keyof typeof MODE_LABELS, value: GlobalQuotaModes[keyof typeof MODE_LABELS]) => {
-    setModes((current) => ({ ...current, [name]: value }));
+  const setMode = (name: ModeName, value: number) => {
+    setDraft((d) => ({ ...d, modes: { ...d.modes, [name]: { mode: "limit", value } } }));
   };
+  const modes = draft.modes;
   return (
-    <Card title={props.title}>
-      <div class="form-grid">
-        {props.names.map((name) => {
-          const mode = modes[name];
-          const spec = MODE_LABELS[name];
-          const max = name === "global_monthly_anlas" ? MONTHLY_CAP_MAX : DAILY_CAP_MAX;
-          return (
-            <div class="field" key={name}>
-              <span>{spec.label}</span>
-              <div class="field__control">
-                <input
-                  class="input"
-                  type="number"
-                  min="0"
-                  max={max}
-                  step={name === "global_monthly_anlas" ? "any" : 1}
-                  aria-label={`${spec.label} 限额（0 = 停用）`}
-                  value={mode.mode === "limit" ? mode.value : 0}
-                  onInput={(e) => setMode(name, { mode: "limit", value: Number(e.currentTarget.value) })}
+    <Card title="每日额度" sub="0 = 停用；保存后立即同步给全部成员">
+      <form onSubmit={(e) => e.preventDefault()}>
+        {QUOTA_GROUPS.map((g) => (
+          <div class="form-section" key={g.title}>
+            <div class="form-section__title">{g.title}</div>
+            {g.names.map((name) => {
+              const m = modes[name];
+              return (
+                <QuotaRow
+                  key={name}
+                  name={name}
+                  value={m.mode === "limit" ? m.value : 0}
+                  onChange={(v) => setMode(name, v)}
                 />
-                <small>
-                  {spec.unit}；0 = 停用，上限 {max.toLocaleString("en-US")}
-                </small>
-              </div>
-            </div>
-          );
-        })}
-        {props.names.includes("global_daily_anlas") && (
+              );
+            })}
+          </div>
+        ))}
+        <div class="form-section">
           <SwitchRow
             title="公共 Vibe / 精确参考"
             desc="该开关独立于付费 Anlas 全站日池；关闭时仅 allow_anlas 成员可使用。"
             checked={modes.public_vibe_enabled}
-            onChange={(v) => setModes((current) => ({ ...current, public_vibe_enabled: v }))}
+            onChange={(v) => setDraft((d) => ({ ...d, modes: { ...d.modes, public_vibe_enabled: v } }))}
           />
-        )}
-      </div>
-      <div class="savebar">
-        <Button type="button" variant="primary" disabled={!changed || saving} onClick={() => void save()}>
-          {saving ? "保存中…" : "保存额度模式"}
-        </Button>
-      </div>
+        </div>
+        <div class="savebar">
+          <Button type="submit" variant="primary" disabled={!changed || saving} onClick={() => void save()}>
+            {saving ? "保存中…" : "保存额度模式"}
+          </Button>
+          {changed && !saving && <span class="savebar__state">有未保存的额度改动</span>}
+        </div>
+      </form>
     </Card>
   );
 }
+
+/* ---------------------------------------------------------------- V5 访问策略 */
 
 type SubjectMember = {
   discord_id: string | null;
@@ -208,48 +197,68 @@ type SubjectMember = {
   discord: { username: string | null; display_name: string | null } | null;
 };
 
-function MemberPicker(props: {
+const ACCESS_MODES: Array<{
+  id: Settings["v5_access_mode"];
+  label: string;
+  title: string;
+}> = [
+  { id: "legacy", label: "兼容旧设置", title: "按旧模型权限与额度规则" },
+  { id: "closed", label: "关闭", title: "所有成员均拒绝" },
+  { id: "restricted", label: "仅授权主体", title: "只有授权列表里的成员能用 V5" },
+  { id: "everyone", label: "全体成员", title: "普通成员、号主、站长都能用（仍受额度与暂停约束）" },
+];
+
+/** 一个授权列表：搜索挑人 + 已选 chips（替掉原来难用的原生多选框）。 */
+function MemberField(props: {
   title: string;
   members: SubjectMember[];
   selected: string[];
   onChange: (ids: string[]) => void;
 }) {
-  const selectedSet = new Set(props.selected);
-  const mapped = props.members.filter((m) => m.discord_id).map((m) => m.discord_id as string);
-  const ids = [...new Set([...mapped, ...props.selected])];
-  const label = (id: string) => {
-    const member = props.members.find((m) => m.discord_id === id);
-    if (!member) return `${id}（未关联成员）`;
-    const who = member.discord?.display_name || member.discord?.username || "Discord 成员";
-    return `${who} · ${member.name} · ${id}`;
-  };
+  const options: SearchOption[] = useMemo(() => {
+    const out: SearchOption[] = props.members
+      .filter((m) => m.discord_id)
+      .map((m) => {
+        const who = m.discord?.display_name || m.discord?.username || "Discord 成员";
+        return { value: m.discord_id as string, label: `${who} · ${m.name}` };
+      });
+    // 已选但已不在成员列表里的（退群 / 未关联）也要能显示和移除
+    for (const id of props.selected) {
+      if (!out.some((o) => o.value === id)) out.push({ value: id, label: `${id}（未关联成员）` });
+    }
+    return out;
+  }, [props.members, props.selected]);
+  const labelOf = (id: string) => options.find((o) => o.value === id)?.label ?? id;
   return (
-    <label class="field">
-      <span>{props.title}</span>
-      <select
-        multiple
-        size={Math.min(Math.max(ids.length, 4), 10)}
-        ref={(el) => {
-          if (!el) return;
-          for (const option of el.options) option.selected = selectedSet.has(option.value);
-        }}
-        onChange={(e) => {
-          const select = e.currentTarget as HTMLSelectElement;
-          props.onChange(Array.from(select.selectedOptions, (option) => option.value));
-        }}
-      >
-        {ids.map((id) => (
-          <option key={id} value={id}>
-            {label(id)}
-            {selectedSet.has(id) ? " ✓" : ""}
-          </option>
-        ))}
-      </select>
-      <small>
-        按住 Shift 或 Command 可多选；已选：
-        {props.selected.length ? props.selected.map(label).join("、") : "无"}
-      </small>
-    </label>
+    <div class="form-section">
+      <div class="form-section__title">{props.title}</div>
+      <SearchMultiSelect
+        label={`搜索成员加入${props.title}`}
+        values={props.selected}
+        options={options}
+        allLabel="搜索 Discord 成员…"
+        onChange={props.onChange}
+      />
+      {props.selected.length > 0 && (
+        <div class="xa-chips">
+          {props.selected.map((id) => (
+            <span key={id} class="xa-chip">
+              {labelOf(id)}
+              <button
+                type="button"
+                aria-label={`从${props.title}移除 ${labelOf(id)}`}
+                onClick={() => props.onChange(props.selected.filter((x) => x !== id))}
+              >
+                <X size={12} aria-hidden="true" />
+              </button>
+            </span>
+          ))}
+          <button type="button" class="xa-chips__clear" onClick={() => props.onChange([])}>
+            清空
+          </button>
+        </div>
+      )}
+    </div>
   );
 }
 
@@ -333,10 +342,7 @@ export function AccessPolicyCard() {
     baselineRef.current = signature(current);
     setExternalUpdate(false);
   };
-  const mode = draft.mode;
-  const allowed = draft.allowed;
-  const owners = draft.owners;
-  const admins = draft.admins;
+  const { mode, allowed, owners, admins } = draft;
   const allowedByPolicy = (ids: string[]) =>
     mode === "everyone" ||
     mode === "legacy" ||
@@ -347,47 +353,37 @@ export function AccessPolicyCard() {
       : mode === "restricted"
         ? `普通成员：未列入授权集合则拒绝；号主：${allowedByPolicy(owners) ? "有号主同时列入授权集合，可使用" : "拒绝（身份本身不授权）"}；站长：${allowedByPolicy(admins) ? "有站长同时列入授权集合，可使用" : "拒绝（身份本身不授权）"}`
         : mode === "everyone"
-          ? "普通成员、号主、站长均允许（仍受配额、上游状态和紧急暂停约束）"
+          ? "普通成员、号主、站长均允许（仍受额度、上游状态和紧急暂停约束）"
           : "按旧模型权限与额度规则";
   return (
     <Card title="V5 访问策略" sub="主体身份独立于成员 Key；站长会话仍需后台认证，身份本身也不绕过紧急暂停。">
-      <div class="form-grid">
-        <label class="field">
-          <span>谁可以使用 V5</span>
-          <select
-            value={mode}
-            onChange={(e) =>
-              setDraft((d) => ({
-                ...d,
-                mode: (e.currentTarget as HTMLSelectElement).value as Settings["v5_access_mode"],
-              }))
-            }
-          >
-            <option value="legacy">兼容旧设置</option>
-            <option value="closed">关闭</option>
-            <option value="restricted">仅授权主体</option>
-            <option value="everyone">全体成员</option>
-          </select>
-        </label>
-        <MemberPicker
-          title="V5 授权主体"
-          members={members.data.members}
-          selected={allowed}
-          onChange={(allowed) => setDraft((d) => ({ ...d, allowed }))}
-        />
-        <MemberPicker
-          title="号主身份"
-          members={members.data.members}
-          selected={owners}
-          onChange={(owners) => setDraft((d) => ({ ...d, owners }))}
-        />
-        <MemberPicker
-          title="站长身份"
-          members={members.data.members}
-          selected={admins}
-          onChange={(admins) => setDraft((d) => ({ ...d, admins }))}
+      <div class="form-section">
+        <div class="form-section__title">谁可以使用 V5</div>
+        <Seg
+          label="谁可以使用 V5"
+          value={mode}
+          options={ACCESS_MODES}
+          onChange={(m) => setDraft((d) => ({ ...d, mode: m }))}
         />
       </div>
+      <MemberField
+        title="V5 授权主体"
+        members={members.data.members}
+        selected={allowed}
+        onChange={(allowed) => setDraft((d) => ({ ...d, allowed }))}
+      />
+      <MemberField
+        title="号主身份"
+        members={members.data.members}
+        selected={owners}
+        onChange={(owners) => setDraft((d) => ({ ...d, owners }))}
+      />
+      <MemberField
+        title="站长身份"
+        members={members.data.members}
+        selected={admins}
+        onChange={(admins) => setDraft((d) => ({ ...d, admins }))}
+      />
       <p class="muted">
         最终效果预览：{preview}。只有 V5 授权列表决定模型访问；身份角色不会隐式获得 V5。派发前会重新检查策略。
       </p>
@@ -399,14 +395,29 @@ export function AccessPolicyCard() {
           </button>
         </p>
       )}
-      <button class="button" type="button" disabled={!dirty || saving} onClick={() => void save()}>
-        {saving ? "正在保存…" : "保存访问策略"}
-      </button>
+      <div class="savebar">
+        <button
+          class="btn btn--primary"
+          type="button"
+          disabled={!dirty || saving}
+          onClick={() => void save()}
+        >
+          {saving ? "正在保存…" : "保存访问策略"}
+        </button>
+      </div>
     </Card>
   );
 }
 
-/** 账号保护、排队、出图节奏与冷却：两个接口的手动设置合在一张卡里，保存时各自提交。 */
+/* ------------------------------------------------- 账号保护与节奏（手动） */
+
+/** 保护字段按用途分组；接口以后加了新字段也能落到「其他」组里，不会丢。 */
+const GUARD_GROUPS: Array<{ title: string; names: string[] }> = [
+  { title: "出图节奏", names: ["account_daily_cap", "post_jitter_min", "post_jitter_max"] },
+  { title: "排队", names: ["queue_per_member", "queue_per_account", "queue_timeout"] },
+  { title: "故障冷却", names: ["image_429_cooldown_seconds"] },
+];
+
 function GuardCard() {
   const guard = useAdmin<Guard>("/admin/api/guard");
   const runtime = useAdmin<Record<string, number>>("/admin/api/runtime-limits");
@@ -420,11 +431,10 @@ function GuardCard() {
   );
   const form = useForm(specs, server);
   const [saving, setSaving] = useState(false);
-  const data = guard.data;
-  if (!data || !runtime.data)
+  if (!guard.data || !runtime.data)
     return (
       <CardPending
-        title="账号保护、排队与出图节奏（手动）"
+        title="账号保护与节奏（手动）"
         loading={guard.loading || runtime.loading}
         error={guard.error ?? runtime.error}
       />
@@ -443,120 +453,145 @@ function GuardCard() {
     setSaving(false);
     if (ok) form.commit();
   };
-  const now = Date.now();
+  const names = Object.keys(specs);
+  const grouped = new Set(GUARD_GROUPS.flatMap((g) => g.names));
+  const rest = names.filter((n) => !grouped.has(n));
   return (
-    <>
-      <Card title="账号保护、排队与出图节奏（手动）" sub="保存即生效">
-        <form {...form.formProps} onSubmit={(e) => e.preventDefault()}>
-          <div class="form-grid">
-            {Object.keys(specs).map((n) => (
-              <NumField key={n} form={form} name={n} />
-            ))}
+    <Card title="账号保护与节奏（手动）" sub="保存即生效">
+      <form {...form.formProps} onSubmit={(e) => e.preventDefault()}>
+        {GUARD_GROUPS.map((group) => (
+          <div class="form-section" key={group.title}>
+            <div class="form-section__title">{group.title}</div>
+            <div class="form-grid">
+              {group.names
+                .filter((n) => n in specs)
+                .map((n) => (
+                  <NumField key={n} form={form} name={n} />
+                ))}
+            </div>
           </div>
-          <SaveBar form={form} onSave={save} saving={saving} label="保存账号保护" />
-        </form>
-      </Card>
-      <Card title="每个账号现在（只显示）">
-        <TableWrap label="每个账号现在">
-          <table class="table" data-testid="guard-pace">
-            <thead>
-              <tr>
-                <th>账号</th>
-                <th>今天</th>
-                <th>周期</th>
-                <th>最近 429</th>
-                <th>并发锁（今天）</th>
-                <th>排队</th>
-              </tr>
-            </thead>
-            <tbody>
-              {(data.accounts ?? []).map((a) => (
-                <tr key={a.position}>
-                  <td>
-                    #{a.position}
-                    {!a.usable ? "（不可用）" : a.full ? "（今日已满）" : ""}
-                  </td>
-                  <td>{withUnit(a.today, "张")}</td>
-                  <td>{dash(a.cycle, " 秒")}</td>
-                  <td>
-                    {agoText(a.last_429, now)}
-                    {a.cooling ? `（冷却还剩 ${withUnit(a.cooling, "秒")}）` : ""}
-                  </td>
-                  <td>{a.locked_today ?? 0} 次</td>
-                  <td>
-                    {withUnit(a.waiting ?? 0, "张")}在等
-                    {typeof a.queue_cap === "number" ? `，最多 ${withUnit(a.queue_cap, "张")}` : ""}
-                  </td>
-                </tr>
+        ))}
+        {rest.length > 0 && (
+          <div class="form-section">
+            <div class="form-section__title">其他</div>
+            <div class="form-grid">
+              {rest.map((n) => (
+                <NumField key={n} form={form} name={n} />
               ))}
-            </tbody>
-          </table>
-        </TableWrap>
-        <p class="muted small">
-          全站排队上限：{typeof data.queue_cap === "number" ? withUnit(data.queue_cap, "张") : "不限"}
-        </p>
-      </Card>
-    </>
+            </div>
+          </div>
+        )}
+        <SaveBar form={form} onSave={save} saving={saving} label="保存账号保护" />
+      </form>
+    </Card>
   );
 }
 
-function RecordsCard() {
-  const { data, error, loading } = useAdmin<Records>("/admin/api/quota-records");
-  if (!data) return <CardPending title="记录（只显示）" loading={loading} error={error} />;
+/* ------------------------------------------------- 上游账号现状（只显示） */
+
+/** 保护状态（/admin/api/guard）和电量记录（/admin/api/quota-records）按账号合成一张表。 */
+function AccountsCard() {
+  const guard = useAdmin<Guard>("/admin/api/guard");
+  const records = useAdmin<Records>("/admin/api/quota-records");
+  if (!guard.data || !records.data)
+    return (
+      <CardPending
+        title="上游账号现状（只显示）"
+        loading={guard.loading || records.loading}
+        error={guard.error ?? records.error}
+      />
+    );
+  const rec = new Map(records.data.accounts.map((a) => [a.position, a]));
+  const rows = (guard.data.accounts ?? []).map((a) => ({ a, r: rec.get(a.position) }));
+  const caps = records.data.manual.account_caps;
+  const paid = records.data.manual.paid_v5;
+  const now = Date.now();
   return (
-    <Card title="记录（只显示）" sub="上游账号的 V5 电量、Anlas 余额和出图量；不参与任何限额">
-      <TableWrap label="上游账号记录">
-        <table class="table" data-testid="quota-records">
+    <Card
+      title="上游账号现状（只显示）"
+      sub="左半是保护与节奏的实时状态，右半是电量与出图量；都不参与任何限额"
+    >
+      <TableWrap label="上游账号现状">
+        <table class="table" data-testid="guard-pace">
           <thead>
             <tr>
               <th>账号</th>
-              <th>V5 电量</th>
-              <th>官方恢复</th>
-              <th>Anlas</th>
+              <th>状态</th>
               <th>今天 出图 / V5</th>
               <th>昨天 出图 / V5</th>
+              <th>V5 电量</th>
+              <th>Anlas</th>
+              <th>周期</th>
+              <th>最近 429</th>
+              <th>排队</th>
             </tr>
           </thead>
           <tbody>
-            {data.accounts.map((a) => (
+            {rows.map(({ a, r }) => (
               <tr key={a.position}>
                 <td>#{a.position}</td>
-                <td>{dash(a.v5_percent, "%")}</td>
                 <td>
-                  {dash(a.v5_recharge_per_day, "%/天")}
-                  {a.quiet_rate ? (
-                    <span class="muted" title="相邻两次主动读之间该账号没出过 V5 图时，余量的上涨就是纯恢复">
-                      （实测 {a.quiet_rate.rate}）
-                    </span>
+                  {!a.usable ? (
+                    <Badge tone="warn">不可用</Badge>
+                  ) : a.full ? (
+                    <Badge tone="warn">今日已满</Badge>
                   ) : (
-                    ""
+                    <Badge tone="ok">可用</Badge>
                   )}
-                </td>
-                <td>{dash(a.anlas)}</td>
-                <td>
-                  {a.today.images} / {a.today.v5}
+                  {(a.locked_today ?? 0) > 0 && <span class="muted small"> 锁 {a.locked_today} 次</span>}
                 </td>
                 <td>
-                  {a.yesterday.images} / {a.yesterday.v5}
+                  {withUnit(a.today, "张")} / {r ? r.today.v5 : "—"}
+                </td>
+                <td>{r ? `${r.yesterday.images} / ${r.yesterday.v5}` : "—"}</td>
+                <td>
+                  {dash(r?.v5_percent, "%")}
+                  {r?.quiet_rate && (
+                    <span
+                      class="muted small"
+                      title="相邻两次主动读之间该账号没出过 V5 图时，余量的上涨就是纯恢复"
+                    >
+                      （实测 {r.quiet_rate.rate}）
+                    </span>
+                  )}
+                  <br />
+                  <span class="muted small">{dash(r?.v5_recharge_per_day, "%/天")}</span>
+                </td>
+                <td>{dash(r?.anlas)}</td>
+                <td>{dash(a.cycle, " 秒")}</td>
+                <td>
+                  {agoText(a.last_429, now)}
+                  {a.cooling ? `（冷却还剩 ${a.cooling} 秒）` : ""}
+                </td>
+                <td>
+                  {a.waiting ?? 0} 在等
+                  {typeof a.queue_cap === "number" ? `，最多 ${a.queue_cap}` : ""}
                 </td>
               </tr>
             ))}
           </tbody>
         </table>
       </TableWrap>
-      <ul class="muted small">
-        {data.manual.account_caps.map((c) => (
-          <li key={`cap-${c.position}`}>
-            手动临时：账号 {c.position ?? "?"} 每天 {withUnit(c.cap, "张")}，到 {fullTime(c.until)}
-          </li>
-        ))}
-        {data.manual.paid_v5.map((p) => (
-          <li key={`paid-${p.position}`}>
-            手动站付 V5：账号 {p.position ?? "?"} 已用 {Math.round(p.spent)} / {Math.round(p.max_anlas)}{" "}
-            Anlas，到 {fullTime(p.until)}
-          </li>
-        ))}
-      </ul>
+      <div class="form-section" data-testid="quota-records">
+        {caps.length === 0 && paid.length === 0 ? (
+          <p class="muted small">没有手动临时上限或站付 V5。</p>
+        ) : (
+          <div class="xa-chips">
+            <span class="xa-chips__lead">手动临时</span>
+            {caps.map((c) => (
+              <span key={`cap-${c.position}`} class="xa-chip">
+                账号 {c.position ?? "?"} 每天 {c.cap} 张 · 到 {fullTime(c.until)}
+              </span>
+            ))}
+            {paid.map((p) => (
+              <span key={`paid-${p.position}`} class="xa-chip">
+                账号 {p.position ?? "?"} 站付 V5 已用 {Math.round(p.spent)} / {Math.round(p.max_anlas)} Anlas
+                · 到 {fullTime(p.until)}
+              </span>
+            ))}
+          </div>
+        )}
+      </div>
     </Card>
   );
 }
@@ -564,10 +599,15 @@ function RecordsCard() {
 export default function Limits() {
   return (
     <Sect>
-      <SectionHead title="额度与保护" desc="这一页的数都是手动设的，没有自动算法。" />
+      <SectionHead
+        title="额度与保护"
+        desc="这一页的数都是手动设的，没有自动算法。V5 总开关与暂停立即生效；额度保存后同步给全部成员。"
+      />
+      <V5Card />
       <QuotaCard />
+      <AccessPolicyCard />
       <GuardCard />
-      <RecordsCard />
+      <AccountsCard />
     </Sect>
   );
 }

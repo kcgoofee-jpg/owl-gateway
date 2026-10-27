@@ -90,22 +90,3 @@ export type ActionRow = {
   kind?: "manual" | "auto" | "member" | "";
 };
 export type ActionsResp = Paged & { actions: ActionRow[]; action_kinds: string[] };
-
-export type BugRow = {
-  sig: string;
-  source: string;
-  level: "error" | "warn";
-  title: string;
-  detail: string;
-  count: number;
-  first_seen: number;
-  last_seen: number;
-  last_rid: string;
-  last_key: number | null;
-  last_path: string;
-  resolved_at: number | null;
-  /** 自动处理的原因码（见 format.ts 的 autoReason）；站长手动处理 / 未处理为空 */
-  auto_resolved?: string | null;
-  key_name: string;
-};
-export type BugsResp = { errors: BugRow[]; open: number };

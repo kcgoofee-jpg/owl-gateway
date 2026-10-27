@@ -163,11 +163,12 @@ describe("deriveStatus：我的图优先", () => {
 });
 
 describe("generatedToday：图例只报今天各生成了多少张", () => {
-  it("V4.5 = 总数 − V5，不出现负数", () => {
-    expect(generatedToday(idle({ quota: { images_today: 10, v5_today: 3 } }))).toEqual({
+  it("V4.5 = 总数 − V5，不出现负数；cap 是弧线比例尺", () => {
+    expect(generatedToday(idle({ quota: { images_today: 10, v5_today: 3, images_cap: 4800 } }))).toEqual({
       total: 10,
       v45: 7,
       v5: 3,
+      cap: 4800,
     });
   });
   it("V5 大于总数时按总数封顶（脏数据不产生负的 V4.5）", () => {
@@ -175,10 +176,11 @@ describe("generatedToday：图例只报今天各生成了多少张", () => {
       total: 2,
       v45: 0,
       v5: 2,
+      cap: 0,
     });
   });
   it("没有数据全是 0", () => {
-    expect(generatedToday(null)).toEqual({ total: 0, v45: 0, v5: 0 });
-    expect(generatedToday(idle({ quota: {} }))).toEqual({ total: 0, v45: 0, v5: 0 });
+    expect(generatedToday(null)).toEqual({ total: 0, v45: 0, v5: 0, cap: 0 });
+    expect(generatedToday(idle({ quota: {} }))).toEqual({ total: 0, v45: 0, v5: 0, cap: 0 });
   });
 });

@@ -84,7 +84,7 @@ async fn send(state: &AppState, step: &Value, cookie: &str) -> Resp {
 
 // ------------------------------------------------------------------ 库内容：按行记录变化
 
-const SNAP_TABLES: [&str; 12] = [
+const SNAP_TABLES: [&str; 11] = [
     "api_keys",
     "key_tags",
     "discord_registrations",
@@ -96,7 +96,6 @@ const SNAP_TABLES: [&str; 12] = [
     "daily_quota_offsets",
     "counters",
     "key_donations",
-    "error_events",
 ];
 
 /// 每张表：rowid → 行（行里第一列是 `_rowid`）。随机串已归一化。
@@ -300,7 +299,7 @@ async fn admin_routes_match_snapshot() {
     gate_server::time::freeze(None);
     // 快照没被意外截短
     assert!(
-        main >= 210 && merge == 1 && early == 2,
+        main >= 207 && merge == 1 && early == 2,
         "{main} {merge} {early}"
     );
 }
