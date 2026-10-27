@@ -50,134 +50,6 @@ compose 的 `stop_grace_period` 是 120 秒，所以发布时进行中的图不�
 |---|---|---|
 | 3.0 新版本有问题 | `cutover.sh previous` | 回到上一版 3.0 镜像；坏的那版标成 `owl-gate:failed` |
 
-## 巡检
-
-`nai-patrol.timer` 每 5 分钟跑一次宿主机上的 `/opt/owl/nai-ops patrol --oneline --alert`
-（CI 产出的静态二进制 `nai-ops-linux-musl`，用 `cutover.sh install-ops` 安装；巡检要看宿主机的 docker、磁盘和 `.env`）。
-单元文件在仓库 `deploy/ops/systemd/`：
-
-```bash
-sudo cp deploy/ops/systemd/nai-patrol.* /etc/systemd/system/
-sudo systemctl daemon-reload && sudo systemctl enable --now nai-patrol.timer
-```
-
-- 退出码 0 正常 / 1 注意 / 2 危险：都算执行成功；退出码 3 = 巡检自身出错。
-- **只有「危险」才私信站长**（同一批危险项 6 小时提醒一次，出现新的立刻发，解除后补一条「已恢复」）；
-  「注意」只记在巡检日志里，（后台总览页 10-23 删除；要看什么直接查日志）。网关自己的告警同理：
-  只有上游 Token 失效 / 连续 403 / Token 被改动 / 磁盘不足 10% 会私信，其余只写日志。
-- 默认检查的容器 `owl-gate,owl-naimei,caddy`（第一个是网关），环境变量 `NAI_GATE_CONTAINERS` 可改。
-
-## 巡检的扩展检查
-
-`nai-ops patrol` 在原有的容器 / 健康检查 / 内存磁盘 / 429 / 领 Key 之外，还会（全部只读，输出格式、退出码 0/1/2/3 不变，新行追加在报告末尾）：
-
-| 区域 | 看什么 | 注意 | 危险 |
-|---|---|---|---|
-| 队列 | 近 35 分钟图片请求的等待均值 / p90、拒绝比例、`queue_full` / `queue_timeout` 次数（少于 5 个请求不判断） | p90 ≥ 45 秒；两类拒绝合计 ≥ 5；拒绝比例 ≥ 25% | p90 ≥ 100 秒；两类拒绝合计 ≥ 40 |
-| 账号 | 近 24 小时各上游账号出图占比（需要 `usage_log.token_id` 列，没有就显示 `n/a`） | 最忙账号份额 ≥ 平均份额的 1.8 倍（至少 40 张、2 个账号） | — |
-| Anlas | 最近一次对账快照的余额，减去快照之后的记账消耗，估算当前余额（**近似**）；订阅到期倒计时 | 对账超过 3 天；到期不足 3 天；按近 3 天日均会在到期前耗尽；估算 ≤ 0 | — |
-| 原图 | `audit_images` 目录大小 / `audit_image_cap_mb`，近 1 小时新增 | ≥ 上限的 90% | ≥ 上限的 150%（自动清理没起作用） |
-| 证书 | Caddy 数据目录里站点证书的剩余天数（读 `.crt` 文件，不联网；目录取 `CADDY_DATA_DIR`，没设就用 `docker inspect caddy` 里挂到 `/data` 的目录；域名取 `PUBLIC_HOST` 或 `SITE_URL`） | < 15 天 | < 5 天 |
-| 成员 | 有启用的 Key 但 `role_granted=0` 的人数（只报人数） | ≥ 5 人 | — |
-| 通道 | 近 60 分钟上游 401 / 403 次数（429 由原来的「通道」行单独报） | 401 + 403 ≥ 1 | 401 + 403 ≥ 5 |
-| V5 方案 | 输入核对：用 `usage_log` 独立重算活跃人数并与 `quota_v5_day_plan` 比对；池子不超过出过图的账号数能撑起的上界 | 不一致 | — |
-| 系统 | 网关容器近期启动过的提示（仅供参考，不影响放行） | — | — |
-
-找不到的东西（没有对账快照、没有证书目录、没有 `token_id` 列）一律写 `n/a` 并跳过，不报警。阈值都是 `crates/gate-ops/src/checks.rs` 顶部的具名常量。
-这些检查里的「危险」同样会触发原有的 `patrol --alert` 私信，所以危险只留给真正的事故。
-
-```text
-$ cd /opt/service-tools && /opt/owl/nai-ops patrol
-=== 巡检 2026-10-16 14:20:01 → OK ===
-  ...（原有各行）
-  [ok  ] 排队：近 35 分钟 42 张 · 等待均值 3.1s / p90 8.0s · 拒绝 1（2%）· queue_full 0 · queue_timeout 0
-  [ok  ] 账号均衡：近 24 小时 880 张分布在 2 个账号，最多的 acct-a 占 52%（均分 50%）
-  [ok  ] Anlas 估算（近似）：0.8 天前对账余额 4200，之后记账消耗 310，约剩 3890 · 距到期约 19.5 天
-  [ok  ] 原图目录：1.2G / 上限 8.0G（15%）· 近 1 小时新增约 38M
-  [ok  ] 证书 owl.example：剩 61.3 天
-  [ok  ] 领了 Key 但身份组还没授予：0 人（只报人数）
-  [ok  ] 近 60 分钟上游 401 × 0 · 403 × 0
-=== 结论：OK（0 项需要关注）===
-```
-
-## 改设置（`nai-ops set` / `get`）
-
-后台设置接口的薄客户端：登录 `/admin/api/login`（密码取环境变量 `ADMIN_PASSWORD`，其次 `/opt/service-tools/.env`；接口地址 `ADMIN_API_BASE`，默认 `http://127.0.0.1:3003/admin/api`），再调后台已有的 `PUT` 接口，所以校验、后台操作日志、网关内存的即时生效和后台页面一模一样。不写数据库、不绕过后台。密码和 Cookie 不会出现在任何输出里。后台改过登录密码的话，以库里保存的为准，`.env` 里的值只是初始值，登录会失败并提示。
-
-```text
-$ nai-ops set --list                      # 白名单（只认这些名字）
-$ nai-ops get global_daily_anlas
-global_daily_anlas = 5000
-$ nai-ops set global_daily_anlas 8000     # 没有 --yes：只显示改前 → 改后，不写，退出码 2
-global_daily_anlas: 5000 → 8000
-没有写入：要真的修改请加 --yes（先预览用 --dry-run）
-$ nai-ops set global_daily_anlas 8000 --yes
-global_daily_anlas: 5000 → 8000
-已写入（后台操作日志里可见，网关内存已即时生效）
-```
-
-| 名字 | 走的接口 | 说明 |
-|---|---|---|
-| `register_daily_images` `register_daily_v5` `v5_paused` `global_daily_v5` `global_daily_anlas` `global_monthly_anlas` `member_daily_anlas` `v5_medium_mode` | `PUT /settings` | 全部手动；改每人额度 / V5 暂停会立即同步给成员 Key |
-| `register_max_users` `register_open` `role_note` `role_guild` `role_id` `role_gate` | `PUT /ops/registration` | 领 Key；`role_guild` 和 `role_id` 必须同时有或同时空，推荐用 `role_gate 服务器ID:身份组ID`（传 `""` 清空两者） |
-| `account_daily_cap` `queue_per_account` `queue_per_member` `post_jitter_min` `post_jitter_max` | `PUT /guard` | 账号保护与排队（每小时上限 10-22 删除；`queue_per_member` 10-22 取代 `key_image_queue`）；`post_jitter_min` / `_max` = 每张出完后这个账号歇 N～M 秒（出图节奏唯一的旋钮，最少 1） |
-| `queue_timeout` | `PUT /runtime-limits` | 排队超时（秒）；账号出图间隔 `image_min_interval` 10-23 删除 |
-| `issue_hourly_cap` | **不支持** | 后台没有这项的修改接口；`nai-ops` 不会直接写数据库，需要先在网关加后台接口 |
-
-`nai-ops` 的每个请求都带 `x-owl-actor: claude`，后台操作日志里记「手动（Claude）」，不记「后台 + 打码 IP」（站长 10-20：站长和 Claude 的改动都算「手动」，算法和定时任务算「自动」，后台操作日志每行都有这个标签）。
-
-## 手动临时设置（`nai-ops manual`）
-
-后台页面上没有的临时设置（账号日上限临时值、站付 V5；V5 临时加量和改当天 V5 方案随 V5 自动方案在 10-23 删除）以前是直接改库，没有记录。现在一律走 `POST /admin/api/ops/manual`：网关校验后在**同一个事务**里改设置、写操作日志（操作者「手动（Claude）」，详情是「旧值 → 新值；原因」）。`--why` 必填；每一项都要有还没到的 `until`；账号必须在令牌池里。
-
-```text
-$ nai-ops manual --list
-$ nai-ops manual guard_token_daily_caps '{"token-…": {"cap": 2200, "until": <Unix 秒>}}' --why '…' --yes
-$ nai-ops manual v5_paid_tokens null --why '到期收回' --yes          # null = 删除这项
-$ nai-ops manual --action '重启网关' --why '…' --yes                   # 只补记一笔
-```
-
-| 名字 | 生效 |
-|---|---|
-| `guard_token_daily_caps` | 网关内存即时生效，不用重启 |
-| `v5_paid_tokens` | 下一张 V5 就按新上限判断 |
-
-未知名字退出码 2。范围以服务端为准（类型不对本地先拒，范围不对原样转述服务端的 422 原因，退出码 1）。`--dry-run` 也会登录一次（后台操作日志里有一条「登录后台」）。
-
-## 周报（`nai-ops report`）
-
-只读。统计最近 N 天（`--days`，默认 7）每把 Key 的滥用 / 健康信号。**输出里只有 Key 编号、显示名和计数**：没有提示词、UA 原文、IP、Discord ID（相同的长提示词只显示 8 位哈希）。测试 Key（含已删的）不计入。
-
-小号 / 共用两节按 **Discord 账号**算，同一账号换过的新旧 Key 合并成一行（「#新 Key 显示名（旧 Key #a）」）。Key 的归属依次看 `api_keys.discord_id` → `deleted_key_owners`（删 Key 前留下，保留 14 天）→ `discord_registrations` → 显示名里的 `(@用户名)`；再认不出的，没账号的 Key 之间完全同名的算一个账号，其余各自算一个。完整 IP 从 3.0（10-18）才开始记，2.x 留下的 `a.b.*.*` 不参与 IP 比对。
-
-| 一节 | 阈值 |
-|---|---|
-| 重试轰炸 | `key_rate` + `key_busy`（含 10-22 起的 `member_queue_full`）拒绝 ≥ 20 次，附中位间隔 |
-| 最长连续使用 | 相邻请求间隔 ≤ 120 秒算连续，最长一段 ≥ 180 分钟 |
-| 个人额度打满的天数 | 有 `member_quota` 拒绝的天数 ≥ 3 |
-| 同一天多种设备类别 | 同一天出现 ≥ 2 类（ios / android / windows / mac / linux；认不出的不算） |
-| 不同账号共用罕见设备或同一完整 IP + 同一 UA | 罕见设备 = UA 摘要 ≥ 24 字符、窗口内被 ≤ 3 个账号用过；两个账号共用 ≥ 2 个罕见设备，或有一组「完整 IP + UA」相同。附两边的活跃小时数和同一小时都活跃的小时数 |
-| 不同账号相同的长提示词 | 提示词 ≥ 80 字且出现在 ≥ 2 个账号 |
-| 提示词相似且设备或 IP 有重合 | 每个账号的提示词按逗号切成词集合（小写、去括号和 `1.2::` 权重），去掉只有一个账号用过的词，算两两 Jaccard；账号要有 ≥ 3 条提示词、去掉后 ≥ 5 个词。相似度 ≥ 全站两两的 p99.9，并且共用 ≥ 1 个罕见设备或 ≥ 1 个完整 IP 才列出 |
-| 领 Key 时 Discord 账号不足 7 天 | 由 Discord ID 的雪花时间算账号年龄 |
-| 领取突发 | 10 分钟内领了 ≥ 5 把 |
-| 目前被暂停的 Key | `share_state.paused_until` 还没到 |
-| 内容风险 | 见下 |
-
-**内容风险词表放在服务器上，不进仓库**：默认 `/opt/owl/risk-terms.txt`（`NAI_RISK_TERMS` 或 `--terms` 可改，建议权限 600）。格式：`# 分类名` 开一个分类，其后每行一条正则（不区分大小写）；`##` 开头是注释。仓库只带空示例 `deploy/risk-terms.example.txt`（全是注释）。文件不存在就跳过这一节；报告里只有每个分类的命中条数和 Key 编号，不显示提示词。
-
-```text
-$ nai-ops report --days 7
-=== 周报：近 7 天（2026-09-14 22:13 ~ 2026-09-21 22:13）===
-有请求的 Key：3 把
-
-[重试轰炸：key_rate + key_busy ≥ 20]
-  #1 alpha  key_rate=22 key_busy=3 中位间隔=2.0s
-...
-[内容风险（只列分类计数和 Key，不显示提示词）]
-  分类甲：1 条 · 1 把 Key：#3 gamma
-```
-
 ## 流量（`nai-ops traffic`）
 
 汇总 Caddy 的 JSON 访问日志：按路径分组（`image-gen` / `gate-api` / `admin-api` / `admin-ui` / `public` / `bridge` / `static` / `member` / `other`）的请求数、状态码分类、p50 / p95 耗时、每分钟峰值。只解析时间、状态码、耗时、请求路径，**不读 IP、请求头**，路径在 `?` 处截断，输出里没有查询参数。
@@ -234,11 +106,8 @@ cd /opt/owl && docker compose -p owl --env-file /opt/service-tools/.env -f compo
 ```bash
 docker logs --since 1h owl-gate                     # 网关日志（不含 Key、提示词、IP）
 docker logs --since 1h owl-naimei                   # 奶妹日志（出错会带 [bug] 前缀）
-journalctl -u nai-patrol -n 20 --no-pager           # 巡检日志
-cd /opt/service-tools && /opt/owl/nai-ops patrol    # 手动跑一次，完整报告（读同一份 .env 和 data/）
 /opt/owl/nai-ops snapshot <目标.db.gz>               # 一致快照（备份脚本用）
 /opt/owl/nai-ops get queue_timeout                 # 读后台设置；改用 set <名字> <值> --yes
-/opt/owl/nai-ops report                            # 只读周报（滥用 / 健康信号）
 /opt/owl/nai-ops traffic --since 1h                # Caddy 访问日志汇总
 docker exec owl-gate nai-ops smoke http://127.0.0.1:8000   # 线上冒烟（不出图）；地址必填，也可设环境变量 SITE_URL
 curl -s http://127.0.0.1:3003/healthz
@@ -249,7 +118,7 @@ curl -s http://127.0.0.1:3003/healthz
 ## 安全红线
 
 - 仓库是公开的：不提交 `.env`、数据库、快照、成员数据；夹具和测试只用合成数据（CI 有 gitleaks 和 `check-fixtures.sh`）；文档里也不写真实 Discord ID、App ID、IP、域名。
-- **不私信成员**：机器人没有任何私信出口，不群发、不批量发消息；给站长的告警只在重大事故时发（上面「巡检」一节）。
+- **不私信成员**：机器人没有任何私信出口，不群发、不批量发消息；给站长的告警只在重大事故时发（网关 `alerts.rs`：上游 Token 失效 / 连续 403 / Token 被改动 / 磁盘不足；部署完成通知走 `tools/deploy.sh` 的可选 webhook）。宿主机巡检 10-27 删除，站点可达性由 GitHub 的「站点探测」workflow 每 5 分钟外测。
 - 上游请求的指纹 / 节奏改动要站长点头。
 
 ### 平台 / 第三方依赖中断预案（通用）

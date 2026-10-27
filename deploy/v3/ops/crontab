@@ -1,7 +1,6 @@
 # 线上 root 的 crontab（`crontab -l` 看到的就是这三条；脚本放在服务器 /opt/owl/ops/，源在本目录）。
-# 不在这里的：每晚 03:30 的本机 GFS 备份是 /etc/cron.d/naigate-backup（deploy/harden.sh 装的），
-# 巡检是 systemd 定时器 nai-patrol.timer（deploy/ops/systemd/）。
-# 备份、快照、巡检和镜像各自的说明见 docs/OPERATIONS.md。
+# 不在这里的：每晚 03:30 的本机 GFS 备份是 /etc/cron.d/naigate-backup（deploy/harden.sh 装的）。
+# 备份、快照和镜像各自的说明见 docs/OPERATIONS.md。（巡检定时器 10-27 删除。）
 
 # 每天 05:10：脱敏只读快照 → /opt/backups/ro/（保留 7 份，本机用 deploy/ops/pull-ro-snapshot.sh 拉取）
 10 5 * * * bash /opt/owl/ops/ro-snapshot.sh >> /var/log/ro-snapshot.log 2>&1

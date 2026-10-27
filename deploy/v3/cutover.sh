@@ -2,7 +2,7 @@
 # 3.0 部署 / 重启 / 回上一版（在服务器上以 root 运行）。
 #
 #   deploy/v3/cutover.sh load <owl-gate.tar.gz>   载入并暂存 CI 镜像，不改 current / previous
-#   deploy/v3/cutover.sh install-ops <nai-ops>     安装宿主机用的运维命令（静态二进制，巡检要用宿主机的 docker / 磁盘 / .env）
+#   deploy/v3/cutover.sh install-ops <nai-ops>     安装宿主机用的运维命令（静态二进制，快照脚本要用宿主机的 docker / 磁盘 / .env）
 #   deploy/v3/cutover.sh restart                   先停后起换上 owl-gate:current（tools/deploy.sh 用它）：旧网关在途的图收尾、
 #                                                  完全退出后再起新的。网站断 1–2 分钟（Caddy 显示「网关自检中」），但同一时刻只有一个网关在用账号
 #   deploy/v3/cutover.sh previous                  3.0 回到上一版 3.0 镜像（owl-gate:previous），同样走 restart

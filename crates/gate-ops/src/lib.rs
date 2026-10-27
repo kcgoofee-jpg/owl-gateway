@@ -1,14 +1,8 @@
 //! 运维命令集合（二进制 `nai-ops`）。每个子命令一个模块，`main.rs` 只做参数解析与退出码。
 //!
-//! 约定：
-//! - 巡检只读：用 `mode=ro` 直接打开数据库，不写任何业务表；
-//! - Discord REST 的基地址读环境变量 `DISCORD_API_BASE`，测试里指向本机假服务，不会真的发消息；
-//! - 只给站长发告警（巡检「危险」），没有任何面向成员的消息出口。
+//! 约定：只读命令（traffic / snapshot）用 `mode=ro` 直接打开数据库，不写任何业务表。
+//! 巡检与周报 10-27 删除：告警出口只剩网关自己的 `alerts.rs`（事件驱动）与 GitHub 的站点探测 workflow。
 
-pub mod checks;
-pub mod discord;
-pub mod patrol;
-pub mod report;
 pub mod sanitize;
 pub mod setting;
 pub mod smoke;

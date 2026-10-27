@@ -1,6 +1,6 @@
 //! 二进制 `nai-ops` 的命令行层：参数解析、退出码。
-//! 所有子进程都清掉 Discord 相关环境变量，并把 `DISCORD_API_BASE` 指向本机一个没人监听的端口——
-//! 就算代码出错也不可能真的发出消息。
+//! 子进程清掉 Discord 相关环境变量；`DISCORD_API_BASE` 本身已无消费者（巡检删除后 nai-ops 不再发消息），
+//! 这里保留「指向本机没人监听的端口」的兜底，代码出错也不可能外发。
 
 mod common;
 
@@ -17,9 +17,6 @@ fn nai(dir: &Path) -> Command {
         .env_remove("SITE_URL")
         .env("DISCORD_API_BASE", "http://127.0.0.1:1")
         .env("DATA_DIR", dir.join("data"))
-        // 巡检：健康检查地址、状态目录都指向沙盒
-        .env("NAI_GATE_HEALTH", "http://127.0.0.1:1/healthz")
-        .env("PATROL_STATE_DIR", dir.join("state"))
         .env("NAI_GATE_ENV", dir.join("missing.env"));
     c
 }
@@ -40,80 +37,21 @@ fn help_lists_every_subcommand() {
     let o = nai(dir.path()).arg("--help").output().unwrap();
     assert_eq!(code(&o), 0);
     let text = out(&o);
-    for sub in [
-        "patrol",
-        "set",
-        "get",
-        "report",
-        "traffic",
-        "snapshot",
-        "ro-sanitize",
-        "smoke",
-    ] {
+    for sub in ["set", "get", "traffic", "snapshot", "ro-sanitize", "smoke"] {
         assert!(text.contains(sub), "--help 里没有 {sub}：{text}");
     }
-    // 群发私信、公告、状态页事件、提示词统计都已删除（后台已无入口，事件直接写库）
-    for gone in ["dm-broadcast", "announce", "incident", "prompt-stats"] {
+    // 群发私信、公告、状态页事件、提示词统计都已删除（后台已无入口，事件直接写库）；
+    // 周报与巡检 10-27 删除（站长不需要，扩展检查里的统计后台都有）。
+    for gone in [
+        "dm-broadcast",
+        "announce",
+        "incident",
+        "prompt-stats",
+        "patrol",
+        "report",
+    ] {
         assert!(!text.contains(gone), "--help 里不该再有 {gone}：{text}");
     }
-}
-
-#[test]
-fn patrol_exit_codes_distinguish_danger_from_its_own_crash() {
-    let dir = tempfile::tempdir().unwrap();
-    // 打不开数据库 = 危险（旧版也是 2），输出写在 stdout
-    let o = nai(dir.path())
-        .args(["patrol", "--oneline", "--db"])
-        .arg(dir.path().join("none.db"))
-        .output()
-        .unwrap();
-    assert_eq!(code(&o), 2);
-    assert!(out(&o).starts_with("[patrol] 打不开数据库 "), "{}", out(&o));
-
-    // 库能打开但缺表 = 巡检自己出错：退出码 3（旧版是 1，systemd 分不出和「有警告」的区别）
-    let bad = dir.path().join("bad.db");
-    rusqlite::Connection::open(&bad)
-        .unwrap()
-        .execute_batch("CREATE TABLE other(x)")
-        .unwrap();
-    let o = nai(dir.path())
-        .args(["patrol", "--oneline", "--db"])
-        .arg(&bad)
-        .output()
-        .unwrap();
-    assert_eq!(code(&o), 3, "stdout={} stderr={}", out(&o), err(&o));
-    assert!(
-        err(&o).contains("[patrol] 内部错误") && err(&o).contains("no such table"),
-        "{}",
-        err(&o)
-    );
-}
-
-#[test]
-fn patrol_runs_on_a_database_without_the_dropped_tables() {
-    let dir = tempfile::tempdir().unwrap();
-    let db = new_db(dir.path());
-    let o = nai(dir.path())
-        .args(["patrol", "--json", "--db"])
-        .arg(&db)
-        .output()
-        .unwrap();
-    // 空库 + 没有桥接密钥 + 连不上网关：一定是「注意」或「危险」，但绝不能是崩溃（3）
-    assert!(
-        matches!(code(&o), 1 | 2),
-        "exit={} stderr={}",
-        code(&o),
-        err(&o)
-    );
-    let v: serde_json::Value = serde_json::from_str(&out(&o)).unwrap();
-    assert!(v["data"].get("waitlist").is_none());
-    assert!(
-        v["rows"]
-            .as_array()
-            .unwrap()
-            .iter()
-            .all(|r| !r["text"].as_str().unwrap().contains("候补"))
-    );
 }
 
 #[test]

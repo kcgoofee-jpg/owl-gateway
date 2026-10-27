@@ -101,6 +101,11 @@ async fn change_password(
     let stored = hash_password(&new);
     state.db.set_setting("admin_password_hash", &stored).await?;
     *state.admin_pw_hash.write().expect("pw") = Some(stored);
+    // 改密码把所有会话（含攻击者可能持有的）一起踢掉；立刻私信站长，别让人被踢下线了还毫不知情
+    // （NewAPI 事件的教训：管理员账号被盗后改密码 / 绑定验证器，站长全程无感知）。
+    state
+        .alerter
+        .notify("admin_password_changed", "后台密码已被修改，所有登录会话已失效。如果是你本人操作可忽略；否则立刻检查服务器（passwd、.env、后台操作日志）。", 0.0);
     let mut resp = ok_json(&json!({"ok": true, "relogin": true}));
     resp.headers_mut().append(
         "set-cookie",

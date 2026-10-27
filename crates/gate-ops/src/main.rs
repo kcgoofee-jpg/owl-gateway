@@ -1,11 +1,11 @@
 //! `nai-ops`：猫头鹰公益站运维命令行。子命令见 `nai-ops --help`；各命令的行为说明在对应模块的文档里。
 //!
-//! 退出码：`patrol` 为 0 正常 / 1 注意 / 2 危险 / 3 巡检自己出错；其它命令 0 成功、非 0 失败
-//! （参数错误 2，运行错误 1）。
+//! 退出码：0 成功、非 0 失败（参数错误 2，运行错误 1）。
+//! 周报与巡检 10-27 删除：站长不需要，巡检扩展检查里的统计后台都有。
 
 use anyhow::Result;
 use clap::{Parser, Subcommand};
-use gate_ops::{patrol, report, sanitize, setting, smoke, snapshot, traffic, util};
+use gate_ops::{sanitize, setting, smoke, snapshot, traffic, util};
 use std::path::PathBuf;
 use std::time::Duration;
 
@@ -18,21 +18,6 @@ struct Cli {
 
 #[derive(Subcommand)]
 enum Cmd {
-    /// 只读体检：系统 / 上游容量 / 成员请求 / 数据一致性；退出码 0 正常 · 1 注意 · 2 危险 · 3 巡检自身出错
-    Patrol {
-        /// 有问题时给站长发 Discord 告警（同一问题 30 分钟只发一次）
-        #[arg(long)]
-        alert: bool,
-        /// 输出 JSON
-        #[arg(long)]
-        json: bool,
-        /// 只输出一行摘要
-        #[arg(long)]
-        oneline: bool,
-        /// 数据库路径（默认 $NAI_GATE_DB，其次 $DATA_DIR/nai_gate.db）
-        #[arg(long)]
-        db: Option<PathBuf>,
-    },
     /// 改一项后台设置（走后台接口，校验与操作日志同后台页面）；先看 `set --list`，没有 --yes 不写
     Set {
         /// 设置名（见 --list）
@@ -77,17 +62,6 @@ enum Cmd {
         #[arg(long)]
         dry_run: bool,
     },
-    /// 只读周报：每把 Key 的滥用 / 健康信号（只输出 Key 编号、显示名和计数，不输出提示词）
-    Report {
-        /// 统计最近几天
-        #[arg(long, default_value_t = report::DEFAULT_DAYS)]
-        days: i64,
-        /// 内容风险词表（默认 $NAI_RISK_TERMS，其次 /opt/owl/risk-terms.txt；不存在就跳过这一节）
-        #[arg(long)]
-        terms: Option<PathBuf>,
-        #[arg(long)]
-        db: Option<PathBuf>,
-    },
     /// 汇总 Caddy JSON 访问日志：路径分组、状态码、p50 / p95、每分钟峰值（不读 IP，不输出查询参数）
     Traffic {
         /// 日志文件或目录，可重复（默认 $CADDY_ACCESS_LOG，其次 /var/log/caddy/access.log）
@@ -125,14 +99,6 @@ enum Cmd {
 
 fn main() {
     let cli = Cli::parse();
-    let is_patrol = matches!(cli.cmd, Cmd::Patrol { .. });
-    if is_patrol {
-        // 巡检自己 panic 也要退出码 3（systemd 才分得出「巡检坏了」与「有警告」）
-        std::panic::set_hook(Box::new(|info| {
-            eprintln!("[patrol] 内部错误（panic）：{info}");
-            std::process::exit(3);
-        }));
-    }
     let rt = match tokio::runtime::Builder::new_current_thread()
         .enable_all()
         .build()
@@ -140,19 +106,14 @@ fn main() {
         Ok(rt) => rt,
         Err(e) => {
             eprintln!("错误：创建运行时失败：{e}");
-            std::process::exit(if is_patrol { 3 } else { 1 });
+            std::process::exit(1);
         }
     };
     let code = match rt.block_on(dispatch(cli)) {
         Ok(code) => code,
         Err(e) => {
-            if is_patrol {
-                eprintln!("[patrol] 内部错误：{e:#}");
-                3
-            } else {
-                eprintln!("错误：{e:#}");
-                1
-            }
+            eprintln!("错误：{e:#}");
+            1
         }
     };
     std::process::exit(code);
@@ -160,23 +121,6 @@ fn main() {
 
 async fn dispatch(cli: Cli) -> Result<i32> {
     match cli.cmd {
-        Cmd::Patrol {
-            alert,
-            json,
-            oneline,
-            db,
-        } => {
-            let cfg = patrol::Config::from_env(db.as_deref())?;
-            patrol::run(
-                &cfg,
-                &patrol::Args {
-                    alert,
-                    json,
-                    oneline,
-                },
-            )
-            .await
-        }
         Cmd::Set {
             name,
             value,
@@ -231,13 +175,6 @@ async fn dispatch(cli: Cli) -> Result<i32> {
             let (code, text) = setting::run_manual(body, yes, dry_run).await?;
             print!("{text}");
             Ok(code)
-        }
-        Cmd::Report { days, terms, db } => {
-            print!(
-                "{}",
-                report::run(&util::resolve_db(db.as_deref()), days, terms)?
-            );
-            Ok(0)
         }
         Cmd::Traffic { logs, since, until } => {
             let Some(span) = traffic::parse_span(&since) else {

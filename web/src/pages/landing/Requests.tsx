@@ -1,4 +1,4 @@
-import { useEffect, useState } from "preact/hooks";
+import { useEffect, useRef, useState } from "preact/hooks";
 import { ApiError, getJSON } from "../../lib/api";
 import { secTime } from "../../lib/format";
 import { Badge, Button, Card, Skeleton, Tabs } from "../../ui";
@@ -122,10 +122,13 @@ function List({ status, onSummary }: { status: Status; onSummary: (s: MyRequests
   const [next, setNext] = useState<number | null>(null);
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState("");
+  /** 点过「再看 50 条」就不再自动刷新，避免打乱正在看的历史位置 */
+  const paged = useRef(false);
 
   const load = async (before?: number) => {
     setBusy(true);
     setErr("");
+    if (before) paged.current = true;
     try {
       const q = new URLSearchParams();
       if (status) q.set("status", status);
@@ -144,6 +147,25 @@ function List({ status, onSummary }: { status: Status; onSummary: (s: MyRequests
 
   useEffect(() => {
     void load();
+  }, [status]);
+
+  // 自动刷新（站长 10-27）：页面可见时每 60 秒重读第一页；切回标签页 / 窗口聚焦时立刻读一次。
+  useEffect(() => {
+    let alive = true;
+    const refresh = () => {
+      if (!alive || paged.current || busy || document.visibilityState !== "visible") return;
+      void load();
+    };
+    const timer = setInterval(refresh, 60_000);
+    const onVis = () => document.visibilityState === "visible" && refresh();
+    document.addEventListener("visibilitychange", onVis);
+    window.addEventListener("focus", refresh);
+    return () => {
+      alive = false;
+      clearInterval(timer);
+      document.removeEventListener("visibilitychange", onVis);
+      window.removeEventListener("focus", refresh);
+    };
   }, [status]);
 
   if (items === null && !err) return <Skeleton h="120px" />;

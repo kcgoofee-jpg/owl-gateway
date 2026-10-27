@@ -3,7 +3,8 @@
 //! - 同一 kind 在冷却期内只发一次；
 //! - **只有重大事故才私信**（站长 10-15：有后台，非重大事故不私信）——成员现在用不了、
 //!   或账号 / 数据有风险，且需要站长动手：上游 Token 失效（`upstream_401`）、连续 403 冷却
-//!   （`upstream_403_cooldown`）、上游 Token 被改动（`upstream_token_changed`）、磁盘剩余不足 10%（`disk_low`）、
+//!   （`upstream_403_cooldown`）、上游 Token 被改动（`upstream_token_changed`）、后台密码被修改（`admin_password_changed`）、
+//!   磁盘剩余不足 10%（`disk_low`）、
 //!   后台「发送测试告警」（`test`）。其余事件在发生的地方直接写一行日志，后台总览能看到同样的情况。
 
 use serde_json::json;
