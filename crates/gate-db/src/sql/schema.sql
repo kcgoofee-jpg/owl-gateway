@@ -59,23 +59,6 @@ CREATE TABLE IF NOT EXISTS counters (
     v5 INTEGER NOT NULL DEFAULT 0,
     PRIMARY KEY (key_id, day)
 );
-CREATE TABLE IF NOT EXISTS generation_audit (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    ts REAL NOT NULL,
-    key_id INTEGER,
-    key_name TEXT NOT NULL DEFAULT '',
-    kind TEXT NOT NULL DEFAULT 'image',
-    model TEXT NOT NULL DEFAULT '',
-    status TEXT NOT NULL DEFAULT '',
-    prompt TEXT NOT NULL DEFAULT '',
-    negative TEXT NOT NULL DEFAULT '',
-    extra TEXT NOT NULL DEFAULT '',
-    rid TEXT NOT NULL DEFAULT '',
-    request_id TEXT NOT NULL DEFAULT ''
-);
-CREATE INDEX IF NOT EXISTS idx_audit_ts ON generation_audit(ts);
-CREATE INDEX IF NOT EXISTS idx_audit_key ON generation_audit(key_id, ts);
-CREATE INDEX IF NOT EXISTS idx_audit_key_id ON generation_audit(key_id, id DESC);
 -- usage_log 表内的行尾注释会原样存进 sqlite_master（tests/schema_parity.rs 逐字对拍），所以不改；
 -- 以这里为准：client = 原始 User-Agent（截到 160 字符），src = 来源 IP 原文（不打码），
 -- 两者按 usage_origin_keep_days（后台可调）保留，到期由维护任务清成空串（Db::purge_usage_origin）。

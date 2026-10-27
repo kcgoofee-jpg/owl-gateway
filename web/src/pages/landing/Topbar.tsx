@@ -156,7 +156,7 @@ export function SiteFooter(props: { note?: string }) {
         猫头鹰公益站 · 非商业公益服务，不保证可用性
         {props.note ? ` · ${props.note}` : ""}
       </p>
-      <p>提示词和生成参数保留 30 天，用于排障和防滥用；本站不保存生成图片。</p>
+      <p>本站不保存提示词或生成图片；请求结果与额度记录用于排障和防滥用。</p>
     </footer>
   );
 }

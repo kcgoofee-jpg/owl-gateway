@@ -2,7 +2,7 @@
 //!
 //! | kind | 信号 | 分数 |
 //! |---|---|---|
-//! | `behavior` | 两个账号近 14 天的行为：同一出口 IP、同网络里一分钟内交替出图、全站 ≤3 人用的冷门负面串、额度用完换号续图、Discord 账号注册时间挨着 | 0–100，见 [`pair_score`] |
+//! | `behavior` | 两个账号近 14 天的行为：同一出口 IP、同网络里一分钟内交替出图、额度用完换号续图、Discord 账号注册时间挨着 | 0–100，见 [`pair_score`] |
 //! | `device_exact` | 网页登录时同一个设备指纹下有多个 Discord 账号 | 60（苹果设备 30：同型号 iPhone 指纹几乎一样） |
 //! | `device_fuzzy` | 指纹 ID 不同，但显卡 / 屏幕 / 核数 / 内存 / 时区 / Canvas 都一样（换浏览器、浏览器升级） | 45（苹果 20） |
 //! | `fp_unknown` | 登录时交了服务端不认得的指纹 = 疑似伪造 | 50 |
@@ -24,7 +24,7 @@
 //! 在它涉及的信号里补一条「机房 IP 登录」证据（国内开代理很普遍，单独不算信号）。
 //!
 //! 判定参考（站长 10-22 定）：至少 3 条强证据、设备类与行为类各至少 1 条、跨 2 天以上才封；
-//! 只有「同 IP + 同提示词」（典型的室友）不封。这里只出证据，封不封由站长决定。
+//! 只有同 IP（典型的室友）不封。这里只出证据，封不封由站长决定。
 
 mod linkage;
 
@@ -40,8 +40,6 @@ use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
 const DAY: f64 = 86400.0;
 /// 行为比对看最近几天
 const BEHAVIOR_DAYS: f64 = 14.0;
-/// 冷门负面串：全站用它的 Key 不超过这么多把（排除大家都在用的分享预设）
-const RARE_NEG_MAX_KEYS: usize = 3;
 /// ASN 数据文件（iptoasn.com 的 ip2asn-combined.tsv.gz，宿主机每周更新一次）
 const ASN_FILE: &str = "ip2asn-combined.tsv.gz";
 
@@ -66,7 +64,6 @@ pub struct PairEvidence {
     pub shared_ip: usize,
     pub simul_same_net: usize,
     pub simul_diff_net: usize,
-    pub rare_neg: usize,
     pub handoffs: usize,
     /// 两个 Discord 账号注册时间差（小时）
     pub created_gap_h: Option<f64>,
@@ -74,10 +71,10 @@ pub struct PairEvidence {
     pub switches: usize,
 }
 
-/// 行为分（0–100）。门槛：至少有一条「强」行为证据（冷门负面串、换号续图 ≥3）才出信号；
+/// 行为分（0–100）。门槛：至少有三次换号续图才出信号；
 /// 只有同 IP、同时在线的（典型的室友 / 一家人）不进队列，不管同了几个 IP。
 pub fn pair_score(e: &PairEvidence) -> Option<f64> {
-    let strong = e.rare_neg >= 1 || e.handoffs >= 3;
+    let strong = e.handoffs >= 3;
     if !strong {
         return None;
     }
@@ -88,7 +85,6 @@ pub fn pair_score(e: &PairEvidence) -> Option<f64> {
     if e.simul_same_net >= 3 {
         s += 15.0;
     }
-    s += 10.0 * e.rare_neg.min(3) as f64;
     s += 5.0 * e.handoffs.min(4) as f64;
     if e.created_gap_h.is_some_and(|h| h <= 48.0) {
         s += 15.0;
@@ -322,27 +318,6 @@ pub async fn run(state: &AppState) -> Result<String, JobError> {
                     }
                 }
             }
-            let mut negs: HashMap<String, HashSet<i64>> = HashMap::new();
-            {
-                let mut st = c.prepare(
-                    "SELECT key_id, negative FROM generation_audit WHERE ts>=? AND COALESCE(negative,'')!=''",
-                )?;
-                let rows = st.query_map([now - 30.0 * DAY], |r| {
-                    Ok((r.get::<_, i64>(0)?, r.get::<_, String>(1)?))
-                })?;
-                for row in rows {
-                    let (k, n) = row?;
-                    negs.entry(n.trim().to_string()).or_default().insert(k);
-                }
-            }
-            let mut rare_of: HashMap<i64, HashSet<&str>> = HashMap::new();
-            for (n, ks) in &negs {
-                if ks.len() >= 2 && ks.len() <= RARE_NEG_MAX_KEYS {
-                    for k in ks {
-                        rare_of.entry(*k).or_default().insert(n.as_str());
-                    }
-                }
-            }
             let ips: HashMap<i64, HashSet<&str>> = events
                 .iter()
                 .map(|(k, es)| (*k, es.iter().filter(|e| !e.ip.is_empty()).map(|e| e.ip.as_str()).collect()))
@@ -359,12 +334,8 @@ pub async fn run(state: &AppState) -> Result<String, JobError> {
                         continue;
                     }
                     let shared_ip = ips[&a].intersection(&ips[&b]).count();
-                    let rare_neg = match (rare_of.get(&a), rare_of.get(&b)) {
-                        (Some(x), Some(y)) => x.intersection(y).count(),
-                        _ => 0,
-                    };
-                    // 便宜的先筛：没有同 IP、没有冷门串的，不再算贵的
-                    if shared_ip == 0 && rare_neg == 0 {
+                    // 便宜的先筛：没有同 IP 的，不再算贵的
+                    if shared_ip == 0 {
                         continue;
                     }
                     let (ea, eb) = (&events[&a], &events[&b]);
@@ -373,7 +344,6 @@ pub async fn run(state: &AppState) -> Result<String, JobError> {
                         shared_ip,
                         simul_same_net,
                         simul_diff_net,
-                        rare_neg,
                         handoffs: handoffs(ea, eb) + handoffs(eb, ea),
                         switches: switches(ea, eb),
                         created_gap_h: match (snowflake_created_at(da), snowflake_created_at(db)) {
@@ -386,7 +356,6 @@ pub async fn run(state: &AppState) -> Result<String, JobError> {
                     let mut evidence = vec![
                         ev("同 IP", format!("{} 个", e.shared_ip)),
                         ev("同网同时", format!("{} 次", e.simul_same_net)),
-                        ev("冷门负面串", format!("{} 种", e.rare_neg)),
                         ev("换号续图", format!("{} 次", e.handoffs)),
                     ];
                     if let Some(h) = e.created_gap_h {
@@ -818,14 +787,14 @@ mod tests {
     }
 
     #[test]
-    fn rare_strings_plus_shared_ip_score_high() {
+    fn repeated_handoffs_plus_shared_ip_score_high() {
         let e = PairEvidence {
             shared_ip: 3,
             simul_same_net: 5,
-            rare_neg: 2,
+            handoffs: 4,
             ..Default::default()
         };
-        assert!(pair_score(&e).unwrap() >= 60.0);
+        assert!(pair_score(&e).unwrap() >= 50.0);
         // 同时从不同城市的网络在用：扣分
         let e2 = PairEvidence {
             simul_diff_net: 5,

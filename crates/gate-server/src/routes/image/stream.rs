@@ -557,16 +557,6 @@ async fn perform_stream(
             }
         }
         let ok = completed > 0 && failure.is_none();
-        state
-            .audit_generation(
-                ctx,
-                &key,
-                "image_stream",
-                &model,
-                if ok { "ok" } else { "error" },
-                &prep.body,
-            )
-            .await;
         state.record_upstream(ok);
         if completed == 0 && (failure.is_some() || was_dispatched) {
             state

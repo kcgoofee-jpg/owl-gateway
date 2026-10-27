@@ -171,11 +171,9 @@ pub(crate) async fn maintenance_job(state: &AppState) -> Result<String, JobError
     Ok("全部完成".to_string())
 }
 
-/// Remove prompt metadata after 30 days and apply request log retention.
+/// Apply request log retention.
 pub async fn purge(state: &AppState) -> Result<(), JobError> {
     let db = &state.db;
-    db.purge_audit(state.now() - crate::audit::RETENTION_DAYS as f64 * 86400.0)
-        .await?;
     let keep = state.env.usage_log_retention_days;
     if keep > 0 {
         db.purge_usage_log(state.now() - std::cmp::max(7, keep) as f64 * 86400.0)

@@ -11,8 +11,8 @@
 //! 事务失败即整体回滚：由 `rusqlite::Transaction` 的 Drop 自动完成，不会出现「一条语句失败后
 //! 事务挂着、之后所有写都 locked」。
 
+mod archive_removal;
 pub mod bootstrap;
-mod prompt_migration;
 pub mod repo;
 pub mod value;
 
@@ -84,7 +84,7 @@ impl Db {
         let path = path.as_ref().to_path_buf();
         let mut writer_conn = Connection::open(&path)?;
         bootstrap::run(&mut writer_conn)?;
-        prompt_migration::run(&mut writer_conn, &path)?;
+        archive_removal::run(&mut writer_conn, &path)?;
 
         let mut pool = Vec::with_capacity(READERS);
         for _ in 0..READERS {

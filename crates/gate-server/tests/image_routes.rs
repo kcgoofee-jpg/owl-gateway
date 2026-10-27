@@ -1518,12 +1518,10 @@ async fn cors_preflight_allows_authorization_and_fallbacks_are_json() {
 }
 
 /// 记账恒等式（原「观测」「容量」模块在线上核对的，现在由测试守住）：每个成功的出图请求，
-/// 今日计数器、用量日志、生成记录三处的张数一致；内存里的每小时计数等于本小时日志里的张数，且不超过上限。
+/// 今日计数器与用量日志的张数一致；内存里的每小时计数等于本小时日志里的张数，且不超过上限。
 #[tokio::test]
-async fn accounting_identity_across_counters_logs_and_audit() {
+async fn accounting_identity_across_counters_and_logs() {
     let e = setup(&[]).await;
-    e.state.db.set_setting("audit_prompts", "1").await.unwrap();
-    e.state.db.set_setting("audit_thumbs", "1").await.unwrap();
     const UA: &str = "DSH-Tavern-Image/1.2 (Windows NT 10.0)";
     for n in [1, 2] {
         let mut body = image_body("nai-diffusion-4-5-full", n);
@@ -1542,7 +1540,7 @@ async fn accounting_identity_across_counters_logs_and_audit() {
     // 10-18 起记下原始 User-Agent（不「识别」客户端，只存原文供站长筛查；保留天数按后台设置，默认永久）
     let clients = common::query(&e.state.db, "SELECT DISTINCT client FROM usage_log").await;
     assert_eq!(clients, [json!({"client": UA})]);
-    // 开了记录原图：原图确实存下来了
+    // 成功生成后没有图片目录。
     assert!(
         !e.state
             .db
@@ -1566,16 +1564,16 @@ async fn accounting_identity_across_counters_logs_and_audit() {
     .await[0]["n"]
         .as_i64()
         .unwrap();
-    let audited = common::query(
-        &e.state.db,
-        "SELECT COUNT(*) AS n FROM generation_audit WHERE status='ok'",
-    )
-    .await[0]["n"]
-        .as_i64()
-        .unwrap();
-    // 每张成功出图一条生成记录（一次请求多张时网关按实际出的张数记）
     assert!(logged >= 2, "{logged}");
-    assert_eq!((counter, audited), (logged, logged));
+    assert_eq!(counter, logged);
+    assert!(
+        common::query(
+            &e.state.db,
+            "SELECT name FROM sqlite_master WHERE name='generation_audit'"
+        )
+        .await
+        .is_empty()
+    );
 }
 
 // ---------------------------------------------------------------- V5 Medium 降档

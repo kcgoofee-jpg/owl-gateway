@@ -16,8 +16,8 @@ Findings, each reported once per cooldown or once per service day:
             a reset message saying 明天 between midnight and the reset
   storm     one key hammering the gateway while being rejected (client retry loop)
   capacity  site daily total exhausted, site V5 exhausted, an account at its daily cap, queue timeouts,
-            long queue waits, no successful image for 15 minutes outside quiet hours
-  plan      no V5 plan for the service day after 07:15; site-paid V5 started
+            long queue waits, no successful image for 15 minutes
+  plan      site-paid V5 started
 
 Needs ~/.config/owl/owl.env (OWL_IP, never printed) and ~/.ssh/naigate_ed25519.
 STATE (default ~/.cache/owl-watch.json) keeps dedupe state across runs.
@@ -34,7 +34,7 @@ INTERVAL = int(os.environ.get("INTERVAL", "120"))
 STATE = os.path.expanduser(os.environ.get("STATE", "~/.cache/owl-watch.json"))
 MEM_WARN_KB = int(os.environ.get("MEM_WARN_KB", "460000"))
 BJ = timezone(timedelta(hours=8))
-RESET_HOUR, QUIET = 7, (3, 7)
+RESET_HOUR = 7
 
 # The remote half: one read-only pass over the database and container state, printed as JSON.
 REMOTE = r'''
@@ -62,8 +62,6 @@ setting = lambda k: (q("SELECT value FROM site_settings WHERE key = ?", k) or [[
 out["caps"] = {"default": setting("guard_account_daily_cap"), "tokens": setting("guard_token_daily_caps")}
 out["counters"] = q("SELECT token_id, day, images, v5 FROM upstream_token_counters WHERE day >= date(?, 'unixepoch', '-1 day')", until)
 out["disabled"] = [r[0] for r in q("SELECT token_id FROM upstream_token_enabled WHERE enabled = 0")]
-out["errev"] = q("""SELECT source, substr(title, 1, 90), count FROM error_events WHERE last_seen > ? AND last_seen <= ?
-                    AND source NOT IN ('disconnect') AND source NOT LIKE 'web:%'""", since, until)
 if infra:
     sh = lambda c: subprocess.run(c, shell=True, capture_output=True, text=True).stdout.strip()
     pid = sh("docker inspect -f '{{.State.Pid}}' owl-gate")
@@ -207,10 +205,8 @@ class Watch:
         p90 = d.get("p90wait")
         if p90 and p90 > 75000 and self.once("wait", now, 3600):
             say("capacity", f"queue wait p90 {p90 / 1000:.0f}s over 15 min ({n_ok} images, avg {avg_wait / 1000:.0f}s)")
-        hour = datetime.fromtimestamp(now, BJ).hour
-        quiet_near = any(QUIET[0] <= datetime.fromtimestamp(t, BJ).hour < QUIET[1] for t in (now, now - 900))
         capped = any(r["reason"] == "daily_cap" for r in last30)
-        if not quiet_near and not capped and n_ok == 0 and d["req15"] >= 5 and self.once("no_ok", now, 1800):
+        if not capped and n_ok == 0 and d["req15"] >= 5 and self.once("no_ok", now, 1800):
             say("capacity", f"no successful image in 15 min while {d['req15']} requests arrived")
         caps = d["caps"]
         default = int(float(caps["default"] or 0))
@@ -229,10 +225,6 @@ class Watch:
 
         if d["paid"] and self.day_once("paid", now):
             say("plan", f"site-paid V5 started ({d['paid']} so far this poll)")
-        for src, title, cnt in d["errev"]:
-            if self.once(f"err:{src}:{title}", now, 3600):
-                say("infra", f"error event {src}: {title} (x{cnt})")
-
         if infra and "infra" in d:
             i = d["infra"]
             if self.s.get("started") and i["started"] != self.s["started"]:

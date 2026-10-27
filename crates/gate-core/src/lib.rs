@@ -36,6 +36,3 @@ pub mod errors;
 pub mod image_events;
 pub mod json_body;
 pub mod sse;
-
-/// Prompt content has a fixed retention period; it is not configurable.
-pub const PROMPT_RETENTION_DAYS: i64 = 30;

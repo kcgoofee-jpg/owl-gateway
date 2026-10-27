@@ -50,3 +50,8 @@ export function shortModel(model: string | null | undefined): string {
 export function timing(waitMs: number, durMs: number): { gen: string; wait: string } {
   return { gen: durMs ? secondsText(durMs) : "", wait: waitMs >= 100 ? secondsText(waitMs) : "" };
 }
+
+export const STATUS_TEXT: Record<string, string> = { ok: "成功", rejected: "拒绝", error: "错误" };
+export const statusText = (s: string | null | undefined): string => STATUS_TEXT[s ?? ""] ?? (s || "错误");
+export const statusTone = (s: string): "ok" | "warn" | "danger" =>
+  s === "ok" ? "ok" : s === "rejected" ? "warn" : "danger";

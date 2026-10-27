@@ -299,7 +299,6 @@ export function MemberDetail(props: { m: MemberRow; now: number; act: DetailActi
           重置今日额度{m.reset_today?.count ? `（${m.reset_today.count}）` : ""}
         </Button>
         {/* 生成记录 / 请求只是跳转，降成文字链接（站内链接样式），按钮留给要点的操作 */}
-        <a href={`/admin/logs/prompts?key=${m.all_key_ids.join(",")}`}>提示词记录</a>
         <a href={`/admin/logs/usage?key=${m.all_key_ids.join(",")}`}>请求</a>
         <Button size="sm" onClick={() => act.coupon(m)}>
           发重置券

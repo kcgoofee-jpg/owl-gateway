@@ -12,7 +12,6 @@ use crate::state::AppState;
 use axum::extract::{Request, State};
 use axum::middleware::Next;
 use axum::response::Response;
-use gate_db::repo::audit::NewAudit;
 use gate_db::repo::usage::{NewLog, Success};
 
 /// 一条用量记录。
@@ -318,56 +317,6 @@ pub async fn error_ledger(State(state): State<AppState>, req: Request, next: Nex
         }
     }
     resp
-}
-
-impl AppState {
-    /// Save prompt metadata independently from image delivery.
-    #[allow(clippy::too_many_arguments)]
-    pub async fn audit_generation(
-        &self,
-        ctx: &ReqCtx,
-        key: &Key,
-        kind: &str,
-        model: &str,
-        status: &str,
-        body: &serde_json::Value,
-    ) {
-        let prompts = crate::audit::capture_prompts(body);
-        let row = NewAudit {
-            key_id: Some(key.id()),
-            key_name: key.name(),
-            kind,
-            model,
-            status,
-            prompt: &prompts.0,
-            negative: &prompts.1,
-            extra: &prompts.2,
-            rid: &ctx.rid(),
-            request_id: &ctx.internal_id(),
-        };
-        if let Err(e) = self.db.add_audit(&row, self.now(), &self.clock).await {
-            self.bug("audit", Some(("DbError", &e.to_string())), ctx);
-        }
-    }
-
-    /// 不等结果的版本（成功出图后）。
-    #[allow(clippy::too_many_arguments)]
-    pub fn schedule_audit(
-        &self,
-        ctx: &ReqCtx,
-        key: &Key,
-        kind: &str,
-        model: &str,
-        status: &str,
-        body: serde_json::Value,
-    ) {
-        let (s, c, k) = (self.clone(), ctx.clone(), key.clone());
-        let (kind, model, status) = (kind.to_string(), model.to_string(), status.to_string());
-        self.tasks.spawn(async move {
-            s.audit_generation(&c, &k, &kind, &model, &status, &body)
-                .await;
-        });
-    }
 }
 
 #[cfg(test)]

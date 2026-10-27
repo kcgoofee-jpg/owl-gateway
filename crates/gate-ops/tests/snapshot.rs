@@ -30,7 +30,9 @@ fn seed_source(path: &Path) {
     for (i, t) in TOKENS.iter().enumerate() {
         add_key(&c, i as i64 + 1, t, true);
     }
-    // 审计：3 行带 1MB 原图，再删掉第 3 行 → 自增序号 3 > 最大 id 2，快照必须原样保留序号
+    // A legacy offline archive is still copied intact and removed by sanitization.
+    c.execute_batch("CREATE TABLE generation_audit(id INTEGER PRIMARY KEY AUTOINCREMENT,ts REAL,key_id INTEGER,key_name TEXT,kind TEXT,model TEXT,status TEXT,prompt TEXT,negative TEXT,extra TEXT);").unwrap();
+    // 自增序号 3 > 最大 id 2，快照必须原样保留序号
     for i in 1..=3 {
         c.execute(
             "INSERT INTO generation_audit(ts,key_id,key_name,kind,model,status,prompt,negative,extra) VALUES(?,?,?,?,?,?,?,?,?)",
@@ -398,14 +400,7 @@ fn sanitize_replaces_keys_and_drops_secrets_and_content() {
         .unwrap(),
         0
     );
-    let (p, n_, e): (i64, i64, i64) = d
-        .query_row(
-            "SELECT SUM(prompt!=''), SUM(negative!=''), SUM(extra!='') FROM generation_audit",
-            [],
-            |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)),
-        )
-        .unwrap();
-    assert_eq!((p, n_, e), (0, 0, 0));
+    assert!(!table_names(&d).contains(&"generation_audit".to_string()));
     assert_eq!(
         d.query_row::<String, _, _>("SELECT avatar FROM discord_registrations", [], |r| r.get(0))
             .unwrap(),
@@ -508,10 +503,13 @@ fn sanitize_failure_rolls_back_everything() {
     seed_source(&src);
     let (out, _) = make(&src, dir.path(), "ro.db");
     rw(&out)
-        .execute_batch("DROP TABLE generation_audit")
+        .execute_batch("DROP TABLE discord_registrations")
         .unwrap(); // 缺表 → 脱敏中途失败
     let err = sanitize::sanitize(&out).unwrap_err();
-    assert!(format!("{err:#}").contains("generation_audit"), "{err:#}");
+    assert!(
+        format!("{err:#}").contains("discord_registrations"),
+        "{err:#}"
+    );
     // 整个事务回滚：不会留下「Key 已换哈希、提示词还在」这种半脱敏的文件
     let d = ro(&out);
     let tok: String = d

@@ -1,4 +1,4 @@
-//! 小号扫描：两个账号同 IP、同一分钟交替出图、共用一条冷门负面串，又在同一台设备上网页登录过 →
+//! 小号扫描：两个账号同 IP、多次换号续图，又在同一台设备上网页登录过 →
 //! 待审队列里出现「行为相似」和「同设备」；登录时交了服务端不认得的指纹 → 「指纹异常」；只同 IP 的室友不进队列。
 
 mod common;
@@ -34,12 +34,10 @@ async fn scan_writes_review_signals() {
             ));
         }
     }
-    // a 和 b 共用一条只有他们俩在用的负面串；c 只是同 IP 的「室友」
-    for k in [a, b] {
-        sql.push(format!(
-            "INSERT INTO generation_audit(ts, key_id, key_name, kind, model, status, prompt, negative, extra) \
-             VALUES ({now}, {k}, 'x', 'image', 'm', 'ok', '1girl', 'very rare negative string zz', '')"
-        ));
+    // a 多次撞额度后 b 在同网段续图；c 只是同 IP 的室友。
+    for i in 0..3 {
+        let t = now - 200.0 + f64::from(i) * 50.0;
+        sql.push(format!("INSERT INTO usage_log(ts,key_id,kind,status,src,reason) VALUES ({t},{a},'image','rejected','203.0.113.7','member_quota'),({},{b},'image','ok','203.0.113.8','')",t+10.0));
     }
     sql.push(format!(
         "INSERT INTO device_logins(discord_id, device_id, ip, ts) VALUES ('{da}', 'dev1', '1.1.1.1', {now}), ('{db_}', 'dev1', '1.1.1.1', {now})"

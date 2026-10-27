@@ -63,13 +63,13 @@ Changes that need follow-up on the host (cron, scripts under `deploy/v3/ops/`) a
 
 `tools/watch-prod.py` reads the usage log every two minutes and prints one line per finding, nothing when healthy:
 
-- infra: restarts, `/healthz`, bot container, memory, disk, new error events;
+- infra: restarts, `/healthz`, bot container, memory, disk;
 - upstream: any 401 / 403 / 429, bursts of 5xx or connection drops, a disabled account;
 - repeat: one key failing the same way three times in an hour (usually a parameter worth rejecting up front);
 - new: a rejection or error text not seen in the previous seven days, and reset messages that say 明天 before 07:00;
 - storm: one key rejected 30 times in 30 minutes for reasons other than a site-wide stop;
 - capacity: site daily total or V5 exhausted (with the time), an account at its daily cap, queue timeouts, long waits, no successful image for 15 minutes;
-- plan: no V5 plan after 07:15, site-paid V5 started.
+- plan: site-paid V5 started.
 
 By default it exits after the first batch of findings, so a background job wakes whoever is watching; `--forever` keeps running under a line-based monitor. `--replay START END` re-runs the log checks over a past window, which is how the thresholds were tuned.
 

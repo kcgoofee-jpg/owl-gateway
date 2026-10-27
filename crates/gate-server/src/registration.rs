@@ -232,7 +232,7 @@ pub fn welcome_message(w: &Welcome) -> String {
     ));
     rules.push("• Key 只给本服务器成员：退出服务器后 Key 自动失效".into());
     rules.push("• 一人一把，请勿分享：共用或转售会被回收".into());
-    rules.push("• 提示词和生成参数保留 30 天用于排障和防滥用；本站不保存生成图片".into());
+    rules.push("• 本站不保存提示词或生成图片；请求结果与额度记录用于排障和防滥用".into());
     let text = format!(
         "🦉 **欢迎来到猫头鹰公益站！** 这是你的 API Key（只发这一次，请先保存）：\n`{key}`\n\n\
          **三步开始出图（以柏宝绘为例）**\n\

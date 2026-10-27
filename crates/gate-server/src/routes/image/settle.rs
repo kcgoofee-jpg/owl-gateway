@@ -240,9 +240,6 @@ pub(super) async fn perform_generation(
                         ),
                 )
                 .await;
-            state
-                .audit_generation(ctx, &key, "image", &model, "error", &prep.body)
-                .await;
             state.record_upstream(false);
             return Err(exc.into());
         }
@@ -284,9 +281,6 @@ pub(super) async fn perform_generation(
                     ),
             )
             .await;
-        state
-            .audit_generation(ctx, &key, "image", &model, "error", &prep.body)
-            .await;
         state.record_upstream(resp.status < 500);
         return Err(
             GateError::new(resp.status, upstream_error_message(i64::from(resp.status)))
@@ -311,7 +305,6 @@ pub(super) async fn perform_generation(
             },
         )
         .await;
-    state.schedule_audit(ctx, &key, "image", &model, "ok", prep.body.clone());
     state.record_upstream(true);
     let media = resp
         .headers

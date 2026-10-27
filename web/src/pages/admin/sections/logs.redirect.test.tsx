@@ -14,8 +14,6 @@ vi.mock("preact-iso", async (orig) => ({
 vi.mock("./logs/Actions", () => ({ Actions: () => <div>Actions</div> }));
 vi.mock("./logs/Usage", () => ({ Usage: () => <div>Usage</div> }));
 
-vi.mock("./logs/Prompts", () => ({ Prompts: () => <div>Prompts</div> }));
-
 import Logs, { inLogs } from "./logs";
 
 let host: HTMLElement | null = null;
@@ -52,10 +50,10 @@ describe("日志页的默认子页跳转", () => {
     expect(loc.route).toHaveBeenCalledWith("/admin/logs/usage", true);
   });
 
-  it("提示词记录作为日志子页展示", async () => {
+  it("已删除的提示词记录入口跳到请求日志", async () => {
     await mount("/admin/logs/prompts");
-    expect(host?.textContent).toContain("Prompts");
-    expect(loc.route).not.toHaveBeenCalled();
+    expect(host?.textContent).not.toContain("提示词记录");
+    expect(loc.route).toHaveBeenCalledWith("/admin/logs/usage", true);
   });
 
   it("已经点去别的栏目（地址变了、旧日志页还没卸载）：不能再跳回日志页", async () => {

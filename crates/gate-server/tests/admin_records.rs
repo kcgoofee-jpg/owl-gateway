@@ -367,111 +367,24 @@ async fn reset_all_keys_disables_everyone_but_invites() {
         && *ok));
 }
 
-/// 生成记录列表默认瘦身：`prompt` / `negative` 各截到 200 字符，截断的行在末尾带 `"truncated": true`；
-/// `extra` 保持完整（前端要 JSON 解析角色提示词与参数）；`?full=1` 关闭截断拿原文（详情/复制用）。
-/// 导出路径本来就不走这个接口，格式不受影响。
 #[tokio::test]
-async fn audit_list_truncates_prompts_unless_full() {
+async fn creative_content_records_are_removed() {
     let (e, a) = ready().await;
-    let now = e.state.now();
-    let long_prompt = "正".repeat(450);
-    let long_negative = "负".repeat(300);
-    a.sql(&format!(
-        "INSERT INTO generation_audit(ts, key_id, key_name, prompt, negative, extra) VALUES \
-         ({now}, 1, '测试成员', '{long_prompt}', '{long_negative}', '{{\"params\":{{\"seed\":1}},\"char_prompts\":[\"a\"]}}'), \
-         ({now}, 1, '测试成员', '短提示词', '短负面', 'not json');"
-    ))
-    .await;
-
-    let v = a.get(&format!("{A}/prompts")).await.json();
-    let items = v["items"].as_array().unwrap();
-    assert_eq!(v["total"], 2);
-    // id 倒序：第 1 条是「短提示词」，第 2 条是长提示词
-    assert_eq!(items[0]["prompt"], "短提示词");
-    assert!(
-        items[0].get("truncated").is_none(),
-        "没截断的行不加 truncated，旧前端读 undefined"
-    );
-    let long = &items[1];
-    let prompt = long["prompt"].as_str().unwrap();
-    let negative = long["negative"].as_str().unwrap();
-    assert_eq!(
-        (prompt.chars().count(), negative.chars().count()),
-        (200, 200),
-        "按 Unicode 字符截断，不是字节"
-    );
-    assert!(prompt.chars().all(|c| c == '正'), "截的是前 200 字");
-    assert_eq!(long["truncated"], true);
-    // 截断字段追加在键末尾，原有键顺序不变
-    let keys: Vec<&str> = long
-        .as_object()
-        .unwrap()
-        .keys()
-        .map(String::as_str)
-        .collect();
-    assert_eq!(
-        keys,
-        [
-            "id",
-            "ts",
-            "rid",
-            "key_id",
-            "key_name",
-            "kind",
-            "model",
-            "status",
-            "prompt",
-            "negative",
-            "extra",
-            "truncated"
-        ]
-    );
-    assert_eq!(
-        long["extra"], "{\"params\":{\"seed\":1},\"char_prompts\":[\"a\"]}",
-        "extra 不截断（截了就不是 JSON）"
-    );
-
-    // ?full=1 / full=true 拿完整原文
-    for q in ["full=1", "full=true"] {
-        let full = a.get(&format!("{A}/prompts?{q}")).await.json();
-        let long_full = full["items"]
-            .as_array()
-            .unwrap()
-            .iter()
-            .find(|it| it["id"] == 1)
-            .unwrap();
-        assert_eq!(
-            long_full["prompt"].as_str().unwrap().chars().count(),
-            450,
-            "?{q} 完整"
-        );
-        assert!(long_full.get("truncated").is_none());
-    }
-    let bad = a.get(&format!("{A}/prompts?full=maybe")).await;
-    assert_eq!(bad.status, 422, "{}", bad.text());
-    assert_eq!(bad.json()["detail"], "full 只能是 true 或 false");
-    let _ = e;
-}
-
-#[tokio::test]
-async fn prompt_records_are_text_only_and_expire_after_thirty_days() {
-    let (e, a) = ready().await;
-    let now = e.state.now();
-    a.sql(&format!("INSERT INTO generation_audit(ts,key_id,key_name,model,prompt,negative,extra) VALUES ({},1,'member','nai-diffusion-4-5-full','recent','bad','{{\"params\":{{\"seed\":7}}}}'),({},1,'member','nai-diffusion-4-5-full','expired','','');",now-29.0*86400.0,now-31.0*86400.0)).await;
-    let value = a.get(&format!("{A}/prompts?full=1&key_id=1")).await.json();
-    assert_eq!(value["total"], 1);
-    assert_eq!(value["items"][0]["prompt"], "recent");
-    assert!(value["items"][0].get("has_image").is_none());
     for path in [
+        "/prompts",
         "/audit",
         "/audit/1/image",
         "/audit/1/thumb",
         "/audit/export?key_id=1",
+        "/ops/audit",
     ] {
         assert_eq!(a.get(&format!("{A}{path}")).await.status, 404, "{path}");
     }
     gate_server::jobs::purge(&e.state).await.unwrap();
-    let rows = query(&e.state.db, "SELECT prompt FROM generation_audit").await;
-    assert_eq!(rows.len(), 1);
-    assert_eq!(rows[0]["prompt"], "recent");
+    let rows = query(
+        &e.state.db,
+        "SELECT name FROM sqlite_master WHERE name IN ('generation_audit','audit_request_links')",
+    )
+    .await;
+    assert!(rows.is_empty());
 }

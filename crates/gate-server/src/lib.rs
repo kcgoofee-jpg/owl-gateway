@@ -6,7 +6,6 @@ pub mod admission;
 pub mod alerts;
 pub mod allowance;
 pub mod asn;
-pub mod audit;
 pub mod auth;
 pub mod ban_link;
 pub mod body;

@@ -288,53 +288,6 @@
   overflow-wrap: anywhere;
 }
 
-.lg-alist {
-  list-style: none;
-  margin: 0;
-  padding: 0;
-  display: grid;
-  gap: var(--sp-3);
-}
-.prompt-record {
-  padding: var(--sp-4);
-  border: 1px solid var(--border);
-  border-radius: var(--radius-sm);
-  background: var(--surface);
-}
-.prompt-record summary {
-  cursor: pointer;
-  overflow-wrap: anywhere;
-  line-height: 1.6;
-}
-.prompt-record[open] {
-  display: grid;
-  gap: var(--sp-3);
-}
-
-/* 提示词块 */
-.lg-blk {
-  display: grid;
-  gap: 4px;
-}
-.lg-blk__h {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: var(--sp-2);
-}
-.lg-blk__t {
-  margin: 0;
-  padding: var(--sp-3);
-  border-radius: var(--radius-sm);
-  background: var(--surface-2);
-  font-size: var(--fs-sm);
-  line-height: 1.5;
-  white-space: pre-wrap;
-  overflow-wrap: anywhere;
-  max-height: 220px;
-  overflow: auto;
-}
-
 .table td > .copy {
   min-width: 190px;
 }

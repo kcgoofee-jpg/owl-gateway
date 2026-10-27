@@ -2,36 +2,6 @@
 
 export type Paged = { page: number; per_page: number; total: number; pages: number };
 
-export type PromptRecord = {
-  id: number;
-  ts: number;
-  /** 请求编号（与请求日志的「编号」相同）；10-23 之前的记录为空串 */
-  rid: string;
-  key_id: number | null;
-  key_name: string;
-  kind: string;
-  model: string;
-  status: string;
-  prompt: string;
-  negative: string;
-  /** JSON 字符串：{params, char_prompts, char_negatives} */
-  extra: string;
-};
-export type PromptsResp = Paged & { items: PromptRecord[] };
-
-export type PromptMetadata = {
-  params?: {
-    width?: number;
-    height?: number;
-    seed?: number;
-    sampler?: string;
-    steps?: number;
-    scale?: number;
-  };
-  char_prompts?: string[];
-  char_negatives?: string[];
-};
-
 export type UsageLog = {
   id: number;
   ts: number;

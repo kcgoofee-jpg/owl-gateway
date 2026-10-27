@@ -56,10 +56,7 @@ export function LogRetentionCard() {
   if (!data) return null;
   const value = days ?? String(data.log_retention.origin_keep_days);
   return (
-    <Card
-      title="请求来源保留"
-      sub="只影响请求日志里的 IP 和客户端信息；0 表示长期保留。提示词固定保存 30 天。"
-    >
+    <Card title="请求来源保留" sub="只影响请求日志里的 IP 和客户端信息；0 表示长期保留。">
       <form
         onSubmit={async (e) => {
           e.preventDefault();

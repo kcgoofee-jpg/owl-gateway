@@ -18,7 +18,6 @@ use anyhow::{Context, Result};
 use gate_core::clock::Clock;
 use gate_core::reasons;
 use gate_db::Db;
-use gate_db::repo::audit::NewAudit;
 use gate_db::repo::discord::BanInfo;
 use gate_db::repo::keys::NewKey;
 use gate_db::repo::registration::NewRegistration;
@@ -50,24 +49,6 @@ const MODELS: [&str; 3] = [
     "nai-diffusion-4-5-full",
     "nai-diffusion-4-5-curated",
     "nai-diffusion-5-full",
-];
-const PROMPTS: [(&str, &str); 4] = [
-    (
-        "1girl, solo, silver hair, night sky, stars, looking at viewer",
-        "lowres, bad anatomy",
-    ),
-    (
-        "2girls, tea party, garden, soft light, watercolor",
-        "lowres, bad hands",
-    ),
-    (
-        "cat ears, hoodie, rainy street, neon lights, from side",
-        "lowres, blurry",
-    ),
-    (
-        "scenery, mountain lake, sunrise, mist, no humans",
-        "lowres, text",
-    ),
 ];
 
 pub struct SeededKey {
@@ -226,8 +207,7 @@ fn events(now: f64, clock: &Clock, rng: &mut StdRng) -> Vec<Event> {
     out
 }
 
-/// 用量日志与计数器；顺带写生成记录——和线上一样，今天每一张成功出图都有一条生成记录
-/// （记账恒等式，见文件末尾的测试），所以生成记录跟着成功出图一起写，只有缩略图、没有原图。
+/// 用合成请求写入用量日志和计数器。
 async fn seed_usage(
     db: &Db,
     clock: &Clock,
@@ -235,10 +215,6 @@ async fn seed_usage(
     keys: &[SeededKey],
     rng: &mut StdRng,
 ) -> Result<()> {
-    let audit_from = clock
-        .local_midnight(&clock.day(now))
-        .context("算不出今天的本地 0 点")?;
-    let mut audited = 0usize;
     let rejects = [
         (reasons::KEY_RATE, "请求过于频繁，请放慢一点再试"),
         (reasons::QUEUE_FULL, "现在排队的人太多了，请稍后再试"),
@@ -309,25 +285,6 @@ async fn seed_usage(
                     e.ts,
                 )
                 .await?;
-                if image && e.ts >= audit_from {
-                    let (prompt, negative) = PROMPTS[audited % PROMPTS.len()];
-                    audited += 1;
-                    db.add_audit(
-                        &NewAudit {
-                            key_id: Some(key.id),
-                            key_name: key.name,
-                            kind: "image",
-                            model,
-                            status: "ok",
-                            prompt,
-                            negative,
-                            ..Default::default()
-                        },
-                        e.ts,
-                        clock,
-                    )
-                    .await?;
-                }
             }
             Outcome::Rejected => {
                 let (reason, detail) = *pick(rng, &rejects);
@@ -586,7 +543,7 @@ mod tests {
             assert_eq!(today[0].1, "Kestrel", "{today:?}");
             assert!(today[0].0 > today[1].0 + 5, "领先要足够多：{today:?}");
 
-            // 记账恒等式：今天的生成记录条数 = 成功出图张数；而且只有缩略图、没有原图
+            // 合成数据包含成功出图，不创建图片目录。
             let start = clock.local_midnight(&day).unwrap();
             let count = |sql: &'static str| {
                 db.read(move |c| c.query_row(sql, [start], |r| r.get::<usize, i64>(0)))
@@ -597,11 +554,6 @@ mod tests {
             .await
             .unwrap();
             assert!(logged > 0);
-            let audited =
-                count("SELECT COUNT(*) FROM generation_audit WHERE ts>=? AND status='ok'")
-                    .await
-                    .unwrap();
-            assert_eq!(audited, logged);
             assert!(!db.path().parent().unwrap().join("audit_images").exists());
 
             // 会话成员没有券

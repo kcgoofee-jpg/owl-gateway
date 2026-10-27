@@ -51,10 +51,8 @@ pub fn sanitize(path: &Path) -> Result<usize> {
     tx.execute("DROP TABLE IF EXISTS req_features", [])?;
     // Bug 追踪（error_events，10-27 删除）的详情可能夹带请求内容：老快照里若还带着，整张删掉。
     tx.execute("DROP TABLE IF EXISTS error_events", [])?;
-    tx.execute(
-        "UPDATE generation_audit SET prompt='', negative='', extra=''",
-        [],
-    )?;
+    tx.execute("DROP TABLE IF EXISTS generation_audit", [])?;
+    tx.execute("DROP TABLE IF EXISTS audit_request_links", [])?;
     tx.execute("UPDATE discord_registrations SET avatar=''", [])?;
 
     // —— 以下是相对旧版新增的（见模块文档）——

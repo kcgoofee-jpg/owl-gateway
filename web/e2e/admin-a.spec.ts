@@ -35,11 +35,6 @@ const PAGES: Array<{ name: string; path: string; ready: (p: Page) => ReturnType<
     ready: (p) => p.getByRole("button", { name: /展开.*的详情/ }).first(),
   },
   {
-    name: "logs-audit",
-    path: "/admin/logs/prompts",
-    ready: (p) => p.getByRole("combobox", { name: "成员（可多选）" }),
-  },
-  {
     name: "logs-usage",
     path: "/admin/logs/usage",
     ready: (p) => p.getByText("暂无记录").or(p.locator(".lg-listcard")),
@@ -128,43 +123,6 @@ test.describe("已登录", () => {
     expect(layout.display).toBe("flex");
     expect(layout.bodyOverflow).toBe("auto");
     await page.keyboard.press("Escape");
-  });
-
-  test("日志：成员可多选——打字过滤、勾选不关下拉、chips 展示与移除", async ({ page }) => {
-    await open(page, "/admin/logs/prompts", PAGES.find((x) => x.name === "logs-audit")?.ready as never);
-    const box = page.getByRole("combobox", { name: "成员（可多选）" });
-    await box.click();
-    const list = page.getByRole("listbox", { name: "成员（可多选）" });
-    await expect(list).toBeVisible();
-    const total = await list.getByRole("option").count();
-    // 不存在的名字：没有可选项，提示没有匹配
-    await box.fill("这个名字肯定不存在zzzz");
-    await expect(list.getByRole("option")).toHaveCount(0);
-    await expect(list).toContainText("没有匹配");
-    await box.fill("");
-    if (total >= 2) {
-      const opts = list.getByRole("option");
-      await expect(opts).toHaveCount(total);
-      const chips = page.locator(".xa-chips");
-      // 勾第一个：下拉保持打开、输入框清空、导出可用、出现一个 chip
-      await opts.nth(0).click();
-      await expect(list).toBeVisible();
-      await expect(box).toHaveValue("");
-      await expect(chips.locator(".xa-chip")).toHaveCount(1);
-      // 勾第二个：两个 chip，按钮变「导出 2 人」
-      await opts.nth(1).click();
-      await expect(chips.locator(".xa-chip")).toHaveCount(2);
-      // 关掉下拉浮层再管理 chips（浮层会盖住下面的 chips 行）
-      await box.press("Escape");
-      await expect(list).toHaveCount(0);
-      // 移除一个 chip：回到一个
-      await chips.locator(".xa-chip button").first().click();
-      await expect(chips.locator(".xa-chip")).toHaveCount(1);
-    }
-    // 手机宽度不撑出横向滚动
-    await page.setViewportSize(MOBILE);
-    await box.click();
-    expect(await noHorizontalScroll(page, { loose: true })).toBe(true);
   });
 
   test("成员：展开详情、Key 编辑框校验（空值 / 负数 / Anlas 规则）", async ({ page }) => {
@@ -500,7 +458,7 @@ test.describe("已登录", () => {
     // 「请求」= 这位成员（全部 Key）的请求日志；详情里降成了文字链接（站内链接样式）
     await expect(row.getByText("最近来源")).toHaveCount(0);
     await expect(row.getByRole("link", { name: "请求", exact: true })).toBeVisible();
-    await expect(row.getByRole("link", { name: "提示词记录", exact: true })).toBeVisible();
+    await expect(row.getByRole("link", { name: "提示词记录", exact: true })).toHaveCount(0);
 
     // 发重置券：天数 1～30
     await row.getByRole("button", { name: "发重置券" }).click();
@@ -582,7 +540,7 @@ test.describe("已登录", () => {
   test("日志：子页是路由，筛选条件在地址栏里，可直接打开", async ({ page }) => {
     await page.goto("/admin/logs");
     await expect(page).toHaveURL(/\/admin\/logs\/usage$/);
-    await open(page, "/admin/logs/usage?feature=image&per=50", PAGES[2]?.ready as never);
+    await open(page, "/admin/logs/usage?feature=image&per=50", PAGES[1]?.ready as never);
     await expect(page.getByRole("combobox", { name: /^功能/ })).toHaveValue("image");
     await expect(page.getByRole("combobox", { name: /^每页/ })).toHaveValue("50");
     await expect(page.getByRole("link", { name: "请求日志" })).toHaveAttribute("aria-current", "page");
@@ -591,7 +549,7 @@ test.describe("已登录", () => {
     await open(
       page,
       "/admin/logs/usage?status=rejected&reason=queue_full&ip=203.0.113.9",
-      PAGES[2]?.ready as never,
+      PAGES[1]?.ready as never,
     );
     await expect(page.getByRole("combobox", { name: /^状态/ })).toHaveValue("rejected");
     await expect(page.getByRole("combobox", { name: /^原因/ })).toHaveValue("queue_full");
@@ -601,7 +559,7 @@ test.describe("已登录", () => {
     await expect(page).not.toHaveURL(/reason=/);
     await expect(page.getByRole("combobox", { name: /^原因/ })).toHaveCount(0);
     // 展开一行看编号 / 上游账号 / 完整 UA
-    await open(page, "/admin/logs/usage", PAGES[2]?.ready as never);
+    await open(page, "/admin/logs/usage", PAGES[1]?.ready as never);
     const exp = page.getByRole("button", { name: "展开" }).first();
     if (await exp.isVisible()) {
       await exp.click();
@@ -622,16 +580,12 @@ test.describe("已登录", () => {
     }
   });
 
-  test("日志：提示词详情、复制与参数，不出现图片和导出", async ({ page }) => {
-    await open(page, "/admin/logs/prompts", PAGES[1]?.ready as never);
-    const record = page.locator(".prompt-record").first();
-    await expect(record).toBeVisible();
-    await record.locator("summary").click();
-    await expect(record.getByText("生成参数与角色坐标")).toBeVisible();
-    await expect(record.getByRole("button", { name: "复制提示词" })).toBeEnabled();
-    await expect(page.locator("main img, .prompt-record img")).toHaveCount(0);
-    await expect(page.getByRole("button", { name: /导出/ })).toHaveCount(0);
-    expect(await seriousViolations(page)).toEqual([]);
+  test("提示词记录已删除：旧链接回到请求日志，接口返回 404", async ({ page }) => {
+    await page.goto("/admin/logs/prompts");
+    await expect(page).toHaveURL(/\/admin\/logs\/usage$/);
+    await expect(page.getByRole("navigation", { name: "日志类型" }).getByRole("link")).toHaveCount(2);
+    await expect(page.getByRole("link", { name: "提示词记录", exact: true })).toHaveCount(0);
+    expect((await page.request.get("/admin/api/prompts")).status()).toBe(404);
   });
 
   for (const [vp, size] of [

@@ -337,27 +337,6 @@ async fn action_log_filters() {
     assert_eq!(db.action_kinds().await.unwrap().len(), 4);
 }
 
-#[tokio::test]
-async fn audit_queries_filter_by_integer_key_id() {
-    let (db, _d) = open().await;
-    let a = key(&db, "甲 乙").await;
-    sql(
-        &db,
-        &format!(
-            "INSERT INTO generation_audit(ts, key_id, key_name, prompt, negative, extra) VALUES (10.0,{a},'甲 乙','p1','n1',''),(20.0,{a},'甲 乙','p2','','');"
-
-        ),
-    )
-    .await;
-    for (ids, n) in [(vec![a], 2), (vec![a + 1], 0), (vec![a, a + 1], 2)] {
-        let (rows, total) = db.list_audit_ids(24, 0, &ids, 0.0).await.unwrap();
-        assert_eq!((total, rows.len() as i64), (n, n), "{ids:?}");
-    }
-    let (rows, total) = db.list_audit_ids(24, 0, &[], 0.0).await.unwrap();
-    assert_eq!((total, rows[0]["id"].clone()), (2, json!(2)));
-    assert!(rows.iter().all(|r| r.get("has_image").is_none()));
-}
-
 /// 浏览器标记登录记录：同账号同浏览器只留一行（刷新 IP / 时间）。
 #[tokio::test]
 async fn browser_logins_upsert() {

@@ -1,13 +1,13 @@
-# Native backend and prompt metadata
+# Native backend and request records
 
-The gateway returns generated images to the requesting client and never archives them. Prompt text, negative and character prompts, model, seed, sampling parameters and role coordinates are available to administrators for 30 days under **Logs → Prompt records**. The member request list remains available without image retrieval.
+The gateway returns generated images to the requesting client without saving images, prompt text, character prompts or detailed generation-parameter archives. Request logs retain the model, result, timings, specification adjustments and quota usage for troubleshooting and accounting. The member request list remains available without image retrieval.
 
 ## Interfaces
 
-- `GET /admin/api/prompts`: authenticated prompt metadata, filtered by `key_id` (comma-separated decimal IDs, at most 50); `page` and `per_page` (24, 48 or 96); `full=1` includes full text. Records older than 30 days are excluded even before periodic cleanup runs.
-- Removed: `/admin/api/audit`, image/thumbnail endpoints, image purge and export endpoints, and `/public/me/requests/image/{request_id}`. Member request objects no longer contain `image_available` or `image_url`.
-- Removed: `/admin/api/ops/audit` and image/record retention controls. Prompts are always recorded and automatically expire after 30 days.
+- Removed: `/admin/api/prompts`, `/admin/api/audit`, image/thumbnail endpoints, purge/export endpoints, and `/public/me/requests/image/{request_id}`. Member request objects do not contain `image_available` or `image_url`.
+- Removed: `/admin/api/ops/audit` and image/prompt retention controls. The admin Logs page contains request and operation logs only.
 - `GET /admin/api/ops` exposes `log_retention.origin_keep_days`; `PUT /admin/api/ops/log-retention` accepts `{"origin_keep_days": N}` where N is an integer from 0 to 365. This independent IP/User-Agent policy is edited under System. `GET /admin/api/status` contains alert status only.
+- Anti-abuse scans no longer compare negative prompts. Device, browser, network, quota-handoff and key-sharing signals remain; obsolete prompt-derived behavior signals are cleared during migration and surviving behavior evidence is recomputed on the next scan.
 
 ## Client changes
 
@@ -19,8 +19,8 @@ Multipart attachments use multer's MIME parameter handling and UTF-8 text. Uploa
 
 ## Migration and rollback
 
-Before removing any historical images, startup writes `<database-name>.before-prompts-only/database.sqlite` using SQLite VACUUM INTO, verifies its integrity, copies `audit_images/` and writes a completion marker. The backup directory is private (0700). If backup fails, the old image-bearing table is preserved and startup fails. The database migration preserves prompt IDs, metadata and durable request links, drops image columns and compacts the live database. Live image files are removed only after that verified backup. File deletion failures fail startup and are retried on the next startup; prompt rows are retained.
+Before removing historical creative-content records, startup writes `<database-name>.before-records-removal/database.sqlite` using SQLite VACUUM INTO and verifies its integrity. Any remaining `audit_images/` files are copied into the same private backup directory (0700, database 0600). Backup or file cleanup failure stops startup before prompt rows are deleted. Retrying verifies the recovery database again. The transaction drops `generation_audit` and `audit_request_links`, removes their settings and obsolete negative-prompt signals, then VACUUM removes freed pages. Interrupted compaction is retried at the next startup. Request logs, quota counters and durable settlements remain intact.
 
-Existing prompt records older than 30 days and image-only rows without meaningful prompt metadata are removed. The backup is an offline recovery archive and is never used by the gateway. Keep it until the release is verified, then delete it explicitly according to the operator's backup policy.
+Recovery backups, including older `before-prompts-only` archives, are offline operator archives and are never served or read by the gateway. They can still contain historical prompts and images. Delete them explicitly according to the operator's backup policy after verifying the release.
 
-Rollback across this schema change requires both the previous image and the database backup: stop the gateway, preserve the failed live database separately, restore `database.sqlite` as the gateway database without carrying over the failed version's WAL/SHM files, restore `audit_images/` if needed, and start the previous image. A normal image-only rollback is insufficient after the image columns have been removed.
+Rollback across this schema change requires both the previous image and a database backup: stop the gateway, preserve the failed live database separately, restore `database.sqlite` as the gateway database without carrying over the failed version's WAL/SHM files, and start the previous image. A normal image-only rollback is insufficient after the record tables have been removed.

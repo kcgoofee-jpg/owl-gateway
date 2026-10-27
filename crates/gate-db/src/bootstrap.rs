@@ -30,7 +30,6 @@ const ADD_COLUMNS: &[&str] = &[
     "ALTER TABLE api_keys ADD COLUMN quota_auto INTEGER NOT NULL DEFAULT 1",
     "ALTER TABLE usage_log ADD COLUMN src TEXT NOT NULL DEFAULT ''",
     "ALTER TABLE usage_log ADD COLUMN ver TEXT NOT NULL DEFAULT ''",
-    "ALTER TABLE generation_audit ADD COLUMN extra TEXT NOT NULL DEFAULT ''",
     "ALTER TABLE usage_log ADD COLUMN reason TEXT NOT NULL DEFAULT ''",
     "ALTER TABLE upstream_snapshots ADD COLUMN fresh INTEGER NOT NULL DEFAULT 0",
     "ALTER TABLE discord_registrations ADD COLUMN member_checked_at REAL NOT NULL DEFAULT 0",
@@ -64,8 +63,6 @@ pub const RUST_ADDED_COLUMNS: &[&str] = &[
     // 重置券 / 重置今日额度要重置哪几项：逗号分隔的 v45 / v5 / anlas（v45 一定在）。
     // 站长 10-18：默认只重置 V4.5；10-18 之前发出的券按当时的说法（三项都重置）保留。
     "ALTER TABLE coupons ADD COLUMN scope TEXT NOT NULL DEFAULT 'v45,v5,anlas'",
-    // 生成记录对应的请求编号（usage_log.rid，同一个 ctx.rid）；10-23 之前的老记录为空串。
-    "ALTER TABLE generation_audit ADD COLUMN rid TEXT NOT NULL DEFAULT ''",
     // 请求的客户端特征（站长 10-23，防一人多号 / 共用 Key 举证；见 `repo::usage::ClientHints`）：
     // App 包名（X-Requested-With）、Accept-Language、Sec-CH-UA 三项、请求头指纹、浏览器标记哈希、Origin。
     // 不存 Authorization / Cookie 原文；保留期和 client / src 相同：按后台设置 usage_origin_keep_days（0 = 永久，默认永久），到期由 `purge_usage_origin` 清成 NULL。
@@ -212,7 +209,6 @@ const INDEXES: &[&str] = &[
     "CREATE INDEX IF NOT EXISTS idx_log_ts_upstatus ON usage_log (ts, up_status)",
     "CREATE INDEX IF NOT EXISTS idx_log_key_id ON usage_log (key_id, id DESC)",
     "CREATE INDEX IF NOT EXISTS idx_log_rid ON usage_log (rid)",
-    "CREATE INDEX IF NOT EXISTS idx_audit_key_id ON generation_audit (key_id, id DESC)",
     "CREATE INDEX IF NOT EXISTS idx_admin_actions_action ON admin_actions (action)",
 ];
 

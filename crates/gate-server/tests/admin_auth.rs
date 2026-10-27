@@ -28,7 +28,6 @@ const ENDPOINTS: &[(&str, &str)] = &[
     // 日志 / 记录 / 导出
     ("GET", "/logs"),
     ("GET", "/actions"),
-    ("GET", "/prompts"),
     ("POST", "/ops/reset-all-keys"),
     // 待审（防滥用）
     ("GET", "/abuse"),
