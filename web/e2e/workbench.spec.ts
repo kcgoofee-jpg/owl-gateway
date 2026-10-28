@@ -2,7 +2,7 @@
  * 生图工作台（Beta）端到端：成员从首页入口跳到 /workbench，走完整出图与批量链路（xtask dev 的假上游），
  * 再做窄屏布局探针；游客只看到登录引导。成员会话来自 cookies.json，没有就整组跳过。
  */
-import { expect, test, type Page } from "@playwright/test";
+import { expect, type Page, test } from "@playwright/test";
 import { readCreds } from "./devEnv";
 import { asMember, misalignedControls, noHorizontalScroll, seriousViolations, watchConsole } from "./helpers";
 import { orphans } from "./orphans";
