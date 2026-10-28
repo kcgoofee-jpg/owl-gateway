@@ -13,6 +13,7 @@
 
 mod archive_removal;
 pub mod bootstrap;
+pub mod policy_migration;
 pub mod repo;
 pub mod value;
 
@@ -80,11 +81,32 @@ const WRITE_ATTEMPTS: u32 = 4;
 impl Db {
     /// 打开（不存在则创建）数据库并执行建表迁移；读连接固定 2 条。
     pub fn open(path: impl AsRef<Path>) -> Result<Self> {
+        Self::open_inner(path.as_ref(), None)
+    }
+
+    /// 网关启动专用：在写线程、请求和任务启动前完成规则迁移。
+    pub fn open_for_gateway(path: impl AsRef<Path>, now: f64, idle_days: i64) -> Result<Self> {
+        Self::open_inner(path.as_ref(), Some((now, idle_days)))
+    }
+
+    fn open_inner(path: &Path, member_migration: Option<(f64, i64)>) -> Result<Self> {
         const READERS: usize = 2;
-        let path = path.as_ref().to_path_buf();
+        let path = path.to_path_buf();
         let mut writer_conn = Connection::open(&path)?;
+        if member_migration.is_none() {
+            let legacy = writer_conn
+                .prepare("SELECT 1 FROM pragma_table_info('api_keys') WHERE name='daily_images'")?
+                .exists([])?;
+            if legacy {
+                return Err(DbError::Invalid(
+                    "旧权限库必须使用网关启动迁移并显式提供时间与宽限期".into(),
+                ));
+            }
+        }
         bootstrap::run(&mut writer_conn)?;
         archive_removal::run(&mut writer_conn, &path)?;
+        let (now, idle_days) = member_migration.unwrap_or((0.0, 0));
+        policy_migration::run(&mut writer_conn, &path, now, idle_days)?;
 
         let mut pool = Vec::with_capacity(READERS);
         for _ in 0..READERS {

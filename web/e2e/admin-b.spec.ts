@@ -27,8 +27,8 @@ const COOKIE = process.env.E2E_ADMIN_COOKIE ?? creds.admin ?? "";
 
 const SECTIONS = [
   { id: "upstream", title: "上游" },
-  { id: "onboarding", title: "领 Key 与功能" },
-  { id: "limits", title: "额度与保护" },
+  { id: "onboarding", title: "成员规则" },
+  { id: "limits", title: "运行保护" },
   { id: "system", title: "系统" },
 ] as const;
 
@@ -106,7 +106,7 @@ test("字号手机与桌面一致（正文 / 卡片标题 / 提示）", async ({
       return [fs("h1"), fs(".card__title"), fs(".field__label"), fs(".field__hint"), fs(".btn")];
     });
   await page.setViewportSize({ width: 1280, height: 900 });
-  await visit(page, "limits", "额度与保护");
+  await visit(page, "limits", "运行保护");
   const desktop = await sizes();
   await page.setViewportSize({ width: 375, height: 812 });
   await page.waitForTimeout(300);
@@ -114,7 +114,7 @@ test("字号手机与桌面一致（正文 / 卡片标题 / 提示）", async ({
 });
 
 test("额度与保护：改一项运行限制并保存（不合法时不能保存）", async ({ page }) => {
-  await visit(page, "limits", "额度与保护");
+  await visit(page, "limits", "运行保护");
   const field = page.getByLabel("排队超时");
   const original = await field.inputValue();
   const save = page.getByRole("button", { name: "保存账号保护" });
@@ -145,67 +145,25 @@ test("额度与保护：改一项运行限制并保存（不合法时不能保�
 });
 
 test("额度与保护：全是手动表单 + 只读记录；没有算法说明", async ({ page }) => {
-  await visit(page, "limits", "额度与保护");
-  // 10-27：全局额度没有「模式」下拉了——就是一个数字，0 = 停用
-  const imagesLimit = page.getByLabel("V4.5 每人每天 限额（0 = 停用）");
-  await expect(imagesLimit).toHaveValue("150");
-  await expect(page.getByLabel("单号每天上限", { exact: false })).toHaveValue("2400");
-  await expect(page.getByLabel("每人排队", { exact: false })).toHaveValue("2");
-  await expect(page.getByLabel("V5 Full 转为 Medium").locator("option")).toHaveCount(2);
+  await visit(page, "limits", "运行保护");
+  await expect(page.getByLabel("V5 全站每天", { exact: true })).toBeVisible();
+  await expect(page.getByLabel("V5 模型").locator("option")).toHaveCount(2);
   await expect(page.getByRole("switch", { name: "暂停 V5" })).toBeVisible();
   await expect(page.getByTestId("guard-pace")).toBeVisible();
   await expect(page.getByTestId("quota-records")).toBeVisible();
-  // 删除的自动算法不再出现
-  for (const gone of ["今天的额度怎么来的", "出图间隔自动调整", "429 倍数", "动态额度"])
-    await expect(page.getByText(gone, { exact: false })).toHaveCount(0);
-  // 出图节奏只剩一对手动旋钮：每张出完后歇 N～M 秒；开始到开始的出图间隔、间隔抖动已删除
-  await expect(page.getByLabel("每张出完后歇（最少）", { exact: false })).toHaveValue("1");
-  await expect(page.getByLabel("每张出完后歇（最多）", { exact: false })).toHaveValue("3");
-  for (const gone of ["出图间隔", "间隔抖动", "静默最少", "静默最多"])
-    await expect(page.getByLabel(gone, { exact: false })).toHaveCount(0);
-  // 429 冷却是全站的（那个账号另按上游要求单独冷却），说明要说准
-  await expect(page.getByText("上游返回 429 后，全站暂停出图多久", { exact: false })).toBeVisible();
-  // 改 V4.5 每人每天并还原
-  await imagesLimit.fill("120");
-  const saveQuota = page.getByRole("button", { name: "保存额度模式" }).first();
-  const save120 = page.waitForResponse(
-    (response) =>
-      response.url().endsWith("/admin/api/settings") &&
-      response.request().method() === "PUT" &&
-      response.status() === 200,
-  );
-  await saveQuota.click();
-  const saved120 = await save120;
-  expect((await saved120.json()).register_daily_images).toBe(120);
-  const readback120 = await page.evaluate(async () => {
-    const [settings, modes] = await Promise.all([
-      fetch("/admin/api/settings").then((r) => r.json()),
-      fetch("/admin/api/quota-modes").then((r) => r.json()),
-    ]);
-    return { legacyProjection: settings.register_daily_images, mode: modes.register_daily_images };
-  });
-  expect(readback120).toEqual({ legacyProjection: 120, mode: { mode: "limit", value: 120 } });
-  await expect(saveQuota).toBeDisabled();
-
-  await imagesLimit.fill("150");
-  const restore150 = page.waitForResponse(
-    (response) =>
-      response.url().endsWith("/admin/api/settings") &&
-      response.request().method() === "PUT" &&
-      response.status() === 200,
-  );
-  await saveQuota.click();
-  const restored = await restore150;
-  expect((await restored.json()).register_daily_images).toBe(150);
-  const readback150 = await page.evaluate(async () => {
-    const [settings, modes] = await Promise.all([
-      fetch("/admin/api/settings").then((r) => r.json()),
-      fetch("/admin/api/quota-modes").then((r) => r.json()),
-    ]);
-    return { legacyProjection: settings.register_daily_images, mode: modes.register_daily_images };
-  });
-  expect(readback150).toEqual({ legacyProjection: 150, mode: { mode: "limit", value: 150 } });
-  await expect(saveQuota).toBeDisabled();
+  await expect(page.getByText("额度来源", { exact: true })).toHaveCount(0);
+  const budget = page.getByRole("region", { name: "全站预算（0 停用）" });
+  const field = budget.getByLabel("Anlas 全站每天", { exact: true });
+  const original = await field.inputValue();
+  await field.fill("0");
+  await budget.getByRole("button", { name: "保存", exact: true }).click();
+  await expect(page.getByText("运行保护已保存").first()).toBeVisible();
+  const current = await (await page.request.get("/admin/api/settings")).json();
+  expect(current.budgets.daily_anlas).toBe(0);
+  expect(current).not.toHaveProperty("quota_modes");
+  await field.fill(original);
+  await budget.getByRole("button", { name: "保存", exact: true }).click();
+  await expect(budget.getByRole("button", { name: "保存", exact: true })).toBeDisabled();
 });
 
 test("系统：只剩告警渠道和后台密码；没有服务器状态、定时任务", async ({ page }) => {
@@ -221,50 +179,47 @@ test("系统：只剩告警渠道和后台密码；没有服务器状态、定�
 });
 
 test("领 Key 与功能：改有效期并保存", async ({ page }) => {
-  await visit(page, "onboarding", "领 Key 与功能");
-  const field = page.getByLabel("Key 有效期");
+  await visit(page, "onboarding", "成员规则");
+  const field = page.getByLabel("Key 有效期（0 永久）", { exact: true });
   const original = await field.inputValue();
-  const next = String(Number(original) + 1);
+  const next = String(Number(original) === 17 ? 18 : 17);
   await field.fill(next);
-  await page.getByRole("button", { name: "保存", exact: true }).first().click();
-  await expect(page.getByText("领 Key 设置已保存")).toBeVisible();
+  await page.getByRole("button", { name: "保存领取条件", exact: true }).click();
+  await expect(page.getByText("领取条件已保存").first()).toBeVisible();
   await page.reload();
-  await expect(page.getByLabel("Key 有效期")).toHaveValue(next);
-  await page.getByLabel("Key 有效期").fill(original);
-  await page.getByRole("button", { name: "保存", exact: true }).first().click();
-  await expect(page.getByText("领 Key 设置已保存").first()).toBeVisible();
-
-  // 高危操作只在「成员 › 更多」里，这一页不再有第二个入口
-  await expect(page.getByRole("button", { name: "全站重置 Key" })).toHaveCount(0);
+  await expect(field).toHaveValue(next);
+  await field.fill(original);
+  await page.getByRole("button", { name: "保存领取条件", exact: true }).click();
+  await expect(page.getByRole("button", { name: "保存领取条件", exact: true })).toBeDisabled();
 });
 
 test("领 Key 与功能：领 Key 门槛一张卡——添加一条、校验 ID、一次保存、刷新还在、删除后还原", async ({
   page,
 }) => {
-  await visit(page, "onboarding", "领 Key 与功能");
-  // 主身份组和额外身份组合成一张卡、共用一个「保存」
-  const gate = page.getByRole("region", { name: "领 Key 门槛" });
-  await expect(gate.getByText(/满足任意一个即可，可来自不同服务器/)).toBeVisible();
-  await expect(gate.getByRole("button", { name: "保存", exact: true })).toBeDisabled();
-  await gate.getByRole("button", { name: "添加一个身份组" }).click();
-  const guild = gate.getByLabel("额外身份组 1 的服务器 ID");
-  const role = gate.getByLabel("额外身份组 1 的身份组 ID");
-  await guild.fill("123");
+  await visit(page, "onboarding", "成员规则");
+  const gate = page.getByRole("region", { name: "领取条件", exact: true });
+  await gate.getByRole("button", { name: "添加身份组", exact: true }).click();
+  const guild = gate.getByLabel("服务器 ID", { exact: true });
+  const role = gate.getByLabel("身份组 ID", { exact: true });
+  const save = gate.getByRole("button", { name: "保存领取条件", exact: true });
+  await guild.fill("0");
   await role.fill("900000000000000333");
-  await expect(gate.getByRole("alert").filter({ hasText: "第 1 条：服务器 ID" })).toBeVisible();
+  await expect(save).toBeDisabled();
   await guild.fill("900000000000000222");
-  await gate.getByLabel("额外身份组 1 的显示名").fill("棱镜「创作者」");
-  await gate.getByRole("button", { name: "保存", exact: true }).click();
-  await expect(page.getByText("领 Key 门槛已保存")).toBeVisible();
+  await gate.getByLabel("显示名", { exact: true }).fill("测试资格");
+  await save.click();
+  await expect(save).toBeDisabled();
   await page.reload();
-  await expect(gate.getByLabel("额外身份组 1 的服务器 ID")).toHaveValue("900000000000000222");
-  await expect(gate.getByLabel("额外身份组 1 的显示名")).toHaveValue("棱镜「创作者」");
-  // 删掉并保存：回到没有额外身份组
-  await gate.getByRole("button", { name: "删除额外身份组 1" }).click();
-  await gate.getByRole("button", { name: "保存", exact: true }).click();
-  await expect(page.getByText("领 Key 门槛已保存").first()).toBeVisible();
+  await expect(guild).toHaveValue("900000000000000222");
+  const stored = await (await page.request.get("/admin/api/ops")).json();
+  expect(stored.registration.roles).toEqual([
+    { guild: "900000000000000222", role: "900000000000000333", note: "测试资格" },
+  ]);
+  await gate.getByRole("button", { name: "删除身份组条件 1", exact: true }).click();
+  await save.click();
+  await expect(save).toBeDisabled();
   await page.reload();
-  await expect(gate.getByLabel("额外身份组 1 的服务器 ID")).toHaveCount(0);
+  await expect(guild).toHaveCount(0);
 });
 
 test("上游：令牌只显示掩码；没有并发设置；添加 Token 校验格式", async ({ page }) => {
@@ -304,36 +259,36 @@ test("系统：改密码先在本地校验；清空原图 / 测试告警有保�
 });
 
 test("领 Key 与功能：改名额直接保存；开放领 Key / 关功能要先确认", async ({ page }) => {
-  await visit(page, "onboarding", "领 Key 与功能");
-  // 改名额上限
-  const seats = page.getByLabel("名额上限", { exact: true });
+  await visit(page, "onboarding", "成员规则");
+  const seats = page.getByLabel("名额上限（0 不限）", { exact: true });
   const original = await seats.inputValue();
   await seats.fill(String(Number(original) + 1));
-  await page.getByRole("button", { name: "保存", exact: true }).first().click();
-  // 发名额公告 10-23 删除：保存就是保存，不再问要不要公告
-  await expect(page.getByText("领 Key 设置已保存").first()).toBeVisible();
-  await expect(page.getByRole("dialog", { name: "名额上限有变化" })).toHaveCount(0);
+  const save = page.getByRole("button", { name: "保存领取条件", exact: true });
+  await save.click();
+  await expect(save).toBeDisabled();
   await seats.fill(original);
-  await page.getByRole("button", { name: "保存", exact: true }).first().click();
-  await expect(page.getByLabel("名额上限", { exact: true })).toHaveValue(original);
-
-  // 开放 / 暂停领 Key：先确认；没有「公告」选项
-  await page.getByRole("switch", { name: /开放自助领取/ }).click();
-  const openDialog = page.getByRole("dialog", { name: /自助领 Key？/ });
-  await expect(openDialog.getByRole("button", { name: /^(开放|暂停)$/ })).toBeVisible();
-  await expect(openDialog.getByRole("button", { name: /公告/ })).toHaveCount(0);
-  await openDialog.getByRole("button", { name: "取消" }).click();
-  await expect(openDialog).toBeHidden();
-
-  // 功能开关：关一项再保存，要确认；取消后撤销（保存按钮按卡作用域取，中间插着「领 Key 门槛」卡）
-  const feats = page.getByRole("region", { name: "功能开关" });
-  const vibe = feats.getByRole("switch", { name: /Vibe 编码/ });
-  const wasOn = (await vibe.getAttribute("aria-checked")) === "true";
+  await save.click();
+  await expect(save).toBeDisabled();
+  const open = page.getByRole("switch", { name: "开放领取", exact: true });
+  const previous = await open.getAttribute("aria-checked");
+  await open.click();
+  await save.click();
+  await expect(save).toBeDisabled();
+  await page.reload();
+  await expect(open).toHaveAttribute("aria-checked", String(previous !== "true"));
+  await open.click();
+  await save.click();
+  await expect(save).toBeDisabled();
+  await visit(page, "limits", "运行保护");
+  const flags = page.getByRole("region", { name: "全站功能", exact: true });
+  const vibe = flags.getByRole("switch", { name: "Vibe 编码", exact: true });
+  const on = await vibe.getAttribute("aria-checked");
   await vibe.click();
-  await feats.getByRole("button", { name: "保存", exact: true }).click();
-  const featDialog = page.getByRole("dialog", { name: "确认修改功能开关？" });
-  await expect(featDialog).toBeVisible();
-  await featDialog.getByRole("button", { name: "取消" }).click();
-  await feats.getByRole("button", { name: "撤销修改" }).click();
-  await expect(vibe).toHaveAttribute("aria-checked", String(wasOn));
+  await flags.getByRole("button", { name: "保存", exact: true }).click();
+  await expect(flags.getByRole("button", { name: "保存", exact: true })).toBeDisabled();
+  await page.reload();
+  await expect(vibe).toHaveAttribute("aria-checked", String(on !== "true"));
+  await vibe.click();
+  await flags.getByRole("button", { name: "保存", exact: true }).click();
+  await expect(flags.getByRole("button", { name: "保存", exact: true })).toBeDisabled();
 });

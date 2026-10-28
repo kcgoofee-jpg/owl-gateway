@@ -104,7 +104,7 @@ pub fn ctx_of(parts: &Parts) -> ReqCtx {
 /// Key 已停用或已过期时的拒绝（403）；正常返回 None。`authenticate` 和成员会话分支共用，文案只此一份。
 pub fn key_status_error(key: &Key, now: f64) -> Option<GateError> {
     if !key.enabled() {
-        let why = key.get("disabled_reason").as_str();
+        let why = key.disabled_reason();
         return Some(GateError::with_code(
             403,
             gate_core::key_status::disabled_message(why),
@@ -170,13 +170,21 @@ pub async fn authenticate(state: &AppState, parts: &Parts, passive: bool) -> Res
         )
         .into());
     };
-    let key = Key(row);
+    let key = Key::load(&state.db, row).await?;
     ctx.set_key(key.id(), key.name());
     if let Some(e) = key_status_error(&key, now) {
         return Err(e.into());
     }
     if passive {
         return Ok(key);
+    }
+    if key.subject().is_empty() {
+        return Err(GateError::with_code(
+            403,
+            "请先用 Discord 领取或绑定这把 Key。",
+            reasons::KEY_INVALID,
+        )
+        .into());
     }
     if let Some((until, reason)) = state.pauses.paused(key.id(), now) {
         let until = state.clock.format(until, "%m-%d %H:%M");
@@ -190,7 +198,7 @@ pub async fn authenticate(state: &AppState, parts: &Parts, passive: bool) -> Res
     // 站长要求每位成员到网页用 Discord 登录一次（设置 web_login_required_since = 开始时刻，0 = 不要求）：
     // 这之后还没在网页登录过的 Key 先拦下，登录一次立即恢复。没绑 Discord 的 Key 不拦。
     if let Some(since) = web_login_required_since(state).await {
-        let discord_id = key.get("discord_id").as_str().unwrap_or("").to_string();
+        let discord_id = key.subject().to_string();
         if !discord_id.is_empty() && !web_logged_in_since(state, &discord_id, since).await {
             return Err(GateError::with_code(
                 403,
@@ -333,25 +341,25 @@ pub async fn site_flag_f64(state: &AppState, spec: &Spec) -> Result<f64, gate_db
 
 /// 功能开关（站长全局开关 + 这把 Key 的功能列表）。
 pub async fn require_feature(state: &AppState, key: &Key, name: &str) -> Result<(), ApiError> {
-    use gate_core::features::{GLOBAL_KEY, VibeAnlas, check_decision, needs_vibe_site_flags};
-    let global = state.db.get_setting(GLOBAL_KEY).await?;
-    let vibe = if needs_vibe_site_flags(global.as_deref(), &key.0, name) {
-        let public_vibe_enabled = crate::ops::global_quota_modes(&state.db)
-            .await?
-            .public_vibe_enabled;
-        Some(VibeAnlas {
-            // Feature gating checks whether free Vibe is open; admission checks the canonical
-            // Anlas pool mode and usage. Legacy numeric zero can represent an unlimited pool.
-            daily_cap: i64::from(public_vibe_enabled),
-        })
-    } else {
-        None
-    };
-    match check_decision(global.as_deref(), &key.0, name, vibe) {
-        Ok(None) => Ok(()),
-        Ok(Some(reason)) => Err(GateError::with_code(403, reason, reasons::FEATURE_OFF).into()),
-        Err(e) => Err(InternalError(e.to_string()).into()),
+    let global = state
+        .db
+        .get_setting(gate_core::features::GLOBAL_KEY)
+        .await?;
+    let flags = gate_core::features::parse_global_flags(global.as_deref())
+        .map_err(|e| InternalError(e.to_string()))?;
+    if !flags.get(name).copied().unwrap_or(false) || !key.policy.allows(name) {
+        let label = gate_core::features::FEATURES
+            .iter()
+            .find(|(id, _)| *id == name)
+            .map_or(name, |(_, label)| *label);
+        return Err(GateError::with_code(
+            403,
+            format!("未开放此功能：{label}，未扣费。"),
+            reasons::FEATURE_OFF,
+        )
+        .into());
     }
+    Ok(())
 }
 
 /// 每分钟请求数。

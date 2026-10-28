@@ -90,6 +90,35 @@ enum Outcome {
 pub const DEV_UPSTREAM_TOKEN: &str = "pst-devdevdevdevdevdevdev";
 
 pub async fn seed(db: &Db, clock: &Clock, now: f64) -> Result<Seeded> {
+    db.set_member_defaults(&gate_core::member_policy::MemberPolicy {
+        daily_images: 104,
+        daily_v5: 10,
+        daily_anlas: 50,
+        monthly_anlas: 500.0,
+        rpm: 5,
+        image: true,
+        v5: true,
+        vibe: true,
+        tags: true,
+        upscale: false,
+        augment: false,
+        img2img: false,
+        paid_parameters: false,
+    })
+    .await?;
+    db.set_shared_budgets(&gate_core::member_policy::SharedBudgets {
+        daily_v5: 150,
+        daily_anlas: 200,
+        monthly_anlas: 10000.0,
+    })
+    .await?;
+    db.set_claim_rules(&gate_core::member_policy::ClaimRules {
+        open: true,
+        max_users: 20,
+        expires_days: 0,
+        roles: vec![],
+    })
+    .await?;
     let mut rng = StdRng::seed_from_u64(7);
     let keys = seed_members(db, now).await?;
     seed_usage(db, clock, now, &keys, &mut rng).await?;
@@ -108,9 +137,7 @@ async fn seed_members(db: &Db, now: f64) -> Result<Vec<SeededKey>> {
         let created = now - DAY * (i as f64 + 2.0);
         let (token, did) = (token(i), discord_id(i));
         let key: NewKey = serde_json::from_value(serde_json::json!({
-            "name": name, "token": token, "daily_images": 104, "daily_anlas": 50.0, "daily_v5": 10,
-            "monthly_anlas": 500.0, "daily_text_tokens": 150000, "rpm": 5,
-            "expires_at": now + DAY * 20.0, "features": "image,vibe,tags", "discord_id": did,
+            "name":name,"token":token,"expires_at":now+DAY*20.0,"discord_id":did,
         }))?;
         let row = db.create_key(&key, created).await?;
         let id = row["id"].as_i64().context("新建的 Key 没有 id")?;
@@ -123,6 +150,7 @@ async fn seed_members(db: &Db, now: f64) -> Result<Vec<SeededKey>> {
             avatar: None,
             key_name: name,
             member_role: false,
+            expires_at: Some(now + DAY * 20.0),
         })
         .await?;
         keys.push(SeededKey {
@@ -529,7 +557,7 @@ mod tests {
         let today0 = clock.day_start(1_792_000_000.0);
         for now in [today0 + 30.0, today0 + 12.0 * 3600.0, today0 + DAY - 30.0] {
             let dir = tempfile::tempdir().unwrap();
-            let db = Db::open(dir.path().join("nai_gate.db")).unwrap();
+            let db = Db::open_for_gateway(dir.path().join("nai_gate.db"), now, 3).unwrap();
             let seeded = seed(&db, &clock, now).await.unwrap();
             let day = clock.day(now);
 

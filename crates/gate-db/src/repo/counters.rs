@@ -18,20 +18,13 @@ pub struct Counter {
     pub v5: i64,
 }
 
-/// 「全站 V5 池」：`counters` 连上 Key（或已删 Key 的墓碑标记），`exclude_global_v5=0` 的才算进池
-/// （Key 和墓碑都找不到就按「不计」）。规则只写在这里。
-const V5_POOL_FROM: &str = "FROM counters AS c \
-     LEFT JOIN api_keys AS k ON k.id = c.key_id \
-     LEFT JOIN deleted_key_usage_flags AS d ON d.key_id = c.key_id";
-const V5_IN_POOL: &str = "COALESCE(k.exclude_global_v5, d.exclude_global_v5, 1)=0";
-
 /// 全站当日 Anlas 消耗 / 全站本月 Anlas 消耗（`day_anlas_total` 和后台总览共用）。
 const DAY_ANLAS_SQL: &str = "SELECT COALESCE(SUM(anlas), 0) AS a FROM counters WHERE day=?";
 const MONTH_ANLAS_ALL_SQL: &str =
     "SELECT COALESCE(SUM(anlas),0) AS a FROM counters WHERE substr(day,1,7)=?";
 
 fn day_v5_total_sql() -> String {
-    format!("SELECT COALESCE(SUM(c.v5),0) AS c {V5_POOL_FROM} WHERE c.day=? AND {V5_IN_POOL}")
+    "SELECT COALESCE(SUM(v5),0) AS c FROM counters WHERE day=?".into()
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -233,7 +226,7 @@ impl Db {
         .await
     }
 
-    /// 全站当日 V5 消耗，不包含明确配置为独立额度的 Key。
+    /// 所有成员当日 V5 消耗，均计入共享预算。
     pub async fn day_v5_total(&self, day: &str) -> Result<i64> {
         let day = day.to_string();
         self.read(move |c| c.query_row(&day_v5_total_sql(), [day], |r| value::i64_or(r, "c", 0)))
@@ -343,8 +336,8 @@ impl Db {
                 "SELECT c.day, \
                         SUM(c.images) AS images, SUM(c.anlas) AS anlas, \
                         SUM(c.text_tokens) AS text_tokens, SUM(c.requests) AS requests, \
-                        SUM(CASE WHEN {V5_IN_POOL} THEN c.v5 ELSE 0 END) AS v5 \
-                 {V5_POOL_FROM} \
+                        SUM(c.v5) AS v5 \
+                 FROM counters AS c \
                  WHERE c.day IN ({}) GROUP BY c.day",
                 marks(week_days.len())
             );

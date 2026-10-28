@@ -112,10 +112,14 @@ test.describe("已登录", () => {
   test("长表单弹窗：900px 视口下 footer 的提交按钮可见，内容区在框内滚动", async ({ page }) => {
     await page.setViewportSize({ width: 1280, height: 900 });
     await open(page, "/admin/members", PAGES[0]?.ready as never);
-    await page.getByRole("button", { name: "新建 Key" }).click();
-    const dlg = page.getByRole("dialog", { name: "新建 Key" });
+    await page
+      .getByRole("button", { name: /展开.*的详情/ })
+      .first()
+      .click();
+    await page.getByRole("button", { name: "成员例外", exact: true }).click();
+    const dlg = page.getByRole("dialog", { name: /成员例外/ });
     await expect(dlg).toBeVisible();
-    await expect(dlg.getByRole("button", { name: "创建" })).toBeInViewport();
+    await expect(dlg.getByRole("button", { name: "保存", exact: true })).toBeInViewport();
     const layout = await dlg.evaluate((el) => ({
       display: getComputedStyle(el).display,
       bodyOverflow: getComputedStyle(el.querySelector(".dialog__body") as HTMLElement).overflowY,
@@ -132,45 +136,32 @@ test.describe("已登录", () => {
       .getByRole("button", { name: /展开.*的详情/ })
       .first()
       .click();
-    await page.getByRole("button", { name: "全部设置…" }).click();
-    const dlg = page.getByRole("dialog", { name: /编辑：/ });
-    await expect(dlg).toBeVisible();
-    await dlg.getByRole("radio", { name: /^单独设/ }).check();
-    await dlg.getByLabel("每日 V4.5 额度模式").selectOption("limit");
-    const images = dlg.getByLabel("每日 V4.5 及以下免费图张数");
+    await page.getByRole("button", { name: "成员例外", exact: true }).click();
+    const dlg = page.getByRole("dialog", { name: /成员例外/ });
+    const images = dlg.getByLabel("V4.5 免费图/天", { exact: true });
+    const changed = (await images.inputValue()) === "33" ? 34 : 33;
     await images.fill("");
-    await dlg.getByRole("button", { name: "保存" }).click();
-    await expect(dlg.getByText("每日图片张数不能为空")).toBeVisible();
+    await expect(dlg.getByRole("button", { name: "保存", exact: true })).toBeDisabled();
     await images.fill("-3");
-    await dlg.getByRole("button", { name: "保存" }).click();
-    await expect(dlg.getByText(/必须在 0～9999 之间/)).toBeVisible();
-    await images.fill("100");
-    // 10-27：日 / 月上限都是 0 会被「至少一项大于 0」拦下（0 = 停用），日 0 + 月 10 才能存
-    await dlg.getByRole("spinbutton", { name: /^每日 Anlas 上限/ }).fill("0");
-    await dlg.getByRole("spinbutton", { name: /^每月 Anlas 上限/ }).fill("0");
-    await dlg.getByRole("checkbox", { name: /^允许消耗 Anlas/ }).check();
-    await dlg.getByRole("button", { name: "保存" }).click();
-    await expect(dlg.getByText("开通 Anlas 时，每日和每月上限至少一项大于 0（0 = 停用）")).toBeVisible();
-    await dlg.getByRole("spinbutton", { name: /^每月 Anlas 上限/ }).fill("10");
+    await expect(dlg.getByRole("button", { name: "保存", exact: true })).toBeDisabled();
+    await images.fill(String(changed));
     const saveResponse = page.waitForResponse(
       (response) =>
-        /\/admin\/api\/keys\/\d+$/.test(new URL(response.url()).pathname) &&
-        response.request().method() === "PATCH",
+        /\/admin\/api\/members\/\d+\/rules$/.test(new URL(response.url()).pathname) &&
+        response.request().method() === "PUT",
     );
-    await dlg.getByRole("button", { name: "保存" }).click();
+    await dlg.getByRole("button", { name: "保存", exact: true }).click();
     const saved = await saveResponse;
     expect(saved.status()).toBe(200);
-    const quotas = (await saved.json()).key.quota_limits;
-    expect(quotas.daily_anlas).toEqual({ mode: "limit", value: 0 });
-    expect(quotas.monthly_anlas).toEqual({ mode: "limit", value: 10 });
+    expect((await saved.json()).effective.daily_images).toBe(changed);
     await expect(dlg).toBeHidden();
-    expect(await seriousViolations(page), "key-dialog").toEqual([]);
+    expect(await seriousViolations(page), "member-rules-dialog").toEqual([]);
     // 已保存后再编辑一项：取消时先确认放弃。
-    await page.getByRole("button", { name: "全部设置…" }).click();
+    await page.getByRole("button", { name: "成员例外" }).click();
     await expect(dlg).toBeVisible();
-    await dlg.getByLabel("每日 V4.5 及以下免费图张数").fill("120");
+    await dlg.getByLabel("V4.5 免费图/天", { exact: true }).fill("120");
     await dlg.getByRole("button", { name: "取消" }).click();
-    await expect(page.getByText("有未保存的修改，确定放弃吗？")).toBeVisible();
+    await expect(page.getByText("放弃未保存的修改？")).toBeVisible();
     await page.getByRole("button", { name: "放弃修改" }).click();
     await expect(dlg).toBeHidden();
     expect(errs).toEqual([]);
@@ -251,7 +242,7 @@ test.describe("已登录", () => {
         m.rejected_24h = 0;
         m.auto_tags = [];
       }
-      const rows = people.filter((m) => m.enabled && m.role !== "invite").slice(0, 3);
+      const rows = people.filter((m) => m.enabled && !m.invited).slice(0, 3);
       rows.forEach((m, i) => {
         m.rejected_24h = 2;
         m.auto_tags = i === 0 ? [{ tag: "角色超 6 个", count: 2 }] : [{ tag: "请求过快", count: 2 }];
@@ -366,8 +357,7 @@ test.describe("已登录", () => {
 
   test("成员：新建邀请 Key 的消息说明用 Discord 登录", async ({ page }) => {
     await open(page, "/admin/members", PAGES[0]?.ready as never);
-    await page.getByRole("button", { name: "更多", exact: true }).first().click();
-    await page.getByRole("menuitem", { name: "新建邀请 Key" }).click();
+    await page.getByRole("button", { name: "创建邀请 Key", exact: true }).click();
     const dlg = page.getByRole("dialog", { name: /已创建/ });
     await expect(dlg).toBeVisible();
     const msg = dlg.getByRole("textbox");
@@ -418,9 +408,7 @@ test.describe("已登录", () => {
     await expect(remove).toBeHidden();
   });
 
-  test("成员：写操作流程（身份组 / 编辑 / 发券 / 重置额度 / 停用启用 / 重新生成 / 新建 Key / 高危确认）", async ({
-    page,
-  }) => {
+  test("成员：凭据、例外、发券、额度重置和高危确认", async ({ page }) => {
     const errs = watchConsole(page, "/admin/api/events");
     await open(page, "/admin/members", PAGES[0]?.ready as never);
     // 「全部成员」筛选：停用后这位成员不会从列表里消失
@@ -435,26 +423,19 @@ test.describe("已登录", () => {
     const row = page.locator(`#${detailId}`);
     await expect(row).toBeVisible();
 
-    // 身份组：切到另一个再切回（切换是直接生效的，带 toast）
-    const invite = row.getByRole("button", { name: "邀请", exact: true });
-    const regular = row.getByRole("button", { name: "普通", exact: true });
-    const [from, to] =
-      (await regular.getAttribute("aria-pressed")) === "true" ? [regular, invite] : [invite, regular];
-    await (to === invite ? invite : regular).click();
-    await expect(page.getByText(/身份组切换为/)).toBeVisible();
-    await from.click();
-
+    await expect(row.getByRole("button", { name: "普通", exact: true })).toHaveCount(0);
+    await expect(row.getByRole("button", { name: "邀请", exact: true })).toHaveCount(0);
     // 显示 Key（默认遮住中间）
     await expect(row.locator(".mb-key__v")).toContainText("····");
     await row.getByRole("button", { name: "显示" }).click();
     await expect(row.locator(".mb-key__v")).not.toContainText("····");
 
-    // 编辑后保存（不改内容）
-    await row.getByRole("button", { name: "全部设置…" }).click();
-    const edit = page.getByRole("dialog", { name: /编辑：/ });
-    await edit.getByRole("button", { name: "保存" }).click();
+    // 成员例外与凭据到期时间分开。
+    await row.getByRole("button", { name: "成员例外", exact: true }).click();
+    const edit = page.getByRole("dialog", { name: /成员例外/ });
+    await expect(edit.getByRole("button", { name: "保存", exact: true })).toBeDisabled();
+    await edit.getByRole("button", { name: "取消", exact: true }).click();
     await expect(edit).toBeHidden();
-
     // 「请求」= 这位成员（全部 Key）的请求日志；详情里降成了文字链接（站内链接样式）
     await expect(row.getByText("最近来源")).toHaveCount(0);
     await expect(row.getByRole("link", { name: "请求", exact: true })).toBeVisible();
@@ -497,24 +478,9 @@ test.describe("已登录", () => {
     await expect(reveal.getByText(/^nai-/)).toBeVisible();
     await reveal.getByRole("button", { name: "完成" }).click();
 
-    // 绑定 Discord：ID 格式校验
-    await row.getByRole("button", { name: /^(换绑|手动绑定)$/ }).click();
-    const bind = page.getByRole("dialog", { name: /(换绑|绑定) Discord/ });
-    await bind.getByLabel("Discord 用户 ID").fill("12");
-    await bind.getByRole("button", { name: /^(换绑|绑定)$/ }).click();
-    await expect(bind.getByText(/17～20 位纯数字/).first()).toBeVisible();
-    await bind.getByRole("button", { name: "取消" }).click();
-
-    // 新建 Key（手动）：创建后展示 Key
-    await page.getByRole("button", { name: "新建 Key" }).click();
-    const create = page.getByRole("dialog", { name: "新建 Key" });
-    await create.getByLabel("名称 / 备注").fill("e2e-临时");
-    await create.getByRole("radio", { name: /^单独设/ }).check();
-    await create.getByRole("button", { name: "创建" }).click();
-    const made = page.getByRole("dialog", { name: "新 Key 已创建" });
-    await expect(made.getByText(/^nai-/)).toBeVisible();
-    await made.getByRole("button", { name: "完成" }).click();
-
+    // 凭据只提供到期编辑，不提供手动绑定。
+    await expect(row.getByRole("button", { name: /^(换绑|手动绑定)$/ })).toHaveCount(0);
+    await expect(page.getByRole("button", { name: "新建 Key", exact: true })).toHaveCount(0);
     // 全站重置：确认词
     await page.getByRole("button", { name: "更多", exact: true }).first().click();
     await page.getByRole("menuitem", { name: /全站重置 Key/ }).click();
@@ -522,18 +488,11 @@ test.describe("已登录", () => {
     await expect(all.getByRole("button", { name: "确认重置" })).toBeDisabled();
     await all.getByRole("button", { name: "取消" }).click();
 
-    // 停用：停用的 Key 不再出现在成员列表里（谁用过仍记在日志里）
-    await page.getByRole("searchbox", { name: "搜索成员" }).fill("e2e-临时");
-    const tmp = page.getByRole("button", { name: /展开.*e2e-临时.*的详情/ });
-    const tmpId = await tmp.getAttribute("aria-controls");
-    await tmp.click();
-    const tmpRow = page.locator(`#${tmpId}`);
-    await tmpRow.getByRole("button", { name: "更多" }).click();
-    await page.getByRole("menuitem", { name: "停用" }).click();
-    const off = page.getByRole("dialog", { name: /停用/ });
-    await off.getByRole("button", { name: "停用", exact: true }).click();
-    await expect(off).toBeHidden();
-    await expect(tmp).toHaveCount(0);
+    // 邀请凭据通过单独入口创建，停用不需要任何权限身份组。
+    await page.getByRole("button", { name: "创建邀请 Key", exact: true }).click();
+    const made = page.getByRole("dialog", { name: /已创建/ });
+    await expect(made).toBeVisible();
+    await made.getByRole("button", { name: "完成", exact: true }).click();
     expect(errs).toEqual([]);
   });
 
@@ -614,8 +573,8 @@ test.describe("已登录", () => {
           .first()
           .click();
         expect(await noHorizontalScroll(page, { loose: true })).toBe(true);
-        await page.getByRole("button", { name: "全部设置…" }).click();
-        await expect(page.getByRole("dialog", { name: /编辑：/ })).toBeVisible();
+        await page.getByRole("button", { name: "成员例外" }).click();
+        await expect(page.getByRole("dialog", { name: /成员例外/ })).toBeVisible();
         expect(await noHorizontalScroll(page, { loose: true })).toBe(true);
       } else {
         await open(page, "/admin/members", PAGES[0]?.ready as never);
@@ -672,8 +631,8 @@ test.describe("已登录", () => {
           .click();
         await page.waitForTimeout(300);
         await page.screenshot({ path: `${SHOTS}/members-expanded-${tag}.png`, fullPage: true });
-        await page.getByRole("button", { name: "全部设置…" }).click();
-        await expect(page.getByRole("dialog", { name: /编辑：/ })).toBeVisible();
+        await page.getByRole("button", { name: "成员例外" }).click();
+        await expect(page.getByRole("dialog", { name: /成员例外/ })).toBeVisible();
         await page.waitForTimeout(300);
         await page.screenshot({ path: `${SHOTS}/members-keydialog-${tag}.png` });
         await page.keyboard.press("Escape");

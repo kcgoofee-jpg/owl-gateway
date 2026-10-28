@@ -1,7 +1,7 @@
 //! 虚拟 Key：增删改查、闲置判定、身份组。
 
-use super::{INVITE_TAG, ROLE_INVITE, ROLE_REGULAR, SqlValue, json_to_sql};
-use crate::{Db, DbError, Result, value};
+use super::{SqlValue, json_to_sql};
+use crate::{Db, Result, value};
 use gate_core::{primitives, values};
 use rusqlite::{OptionalExtension, params};
 use serde::Deserialize;
@@ -11,101 +11,33 @@ fn yes() -> bool {
     true
 }
 
-fn legacy() -> String {
-    "legacy".into()
-}
-
-/// `create_key` 的入参。缺省值见各字段；
-/// 必填项（name / token / daily_images / monthly_anlas / daily_text_tokens / rpm）缺了返回 Err。
-#[derive(Debug, Clone, Deserialize)]
+/// 凭据不存额度或功能权限；权限归属于 Discord 成员。
+#[derive(Clone, Deserialize)]
 pub struct NewKey {
     pub name: String,
     pub token: String,
     #[serde(default = "yes")]
     pub enabled: bool,
-    pub daily_images: i64,
-    #[serde(default)]
-    pub daily_anlas: f64,
-    #[serde(default)]
-    pub daily_v5: i64,
-    pub monthly_anlas: f64,
-    pub daily_text_tokens: i64,
-    pub rpm: i64,
-    #[serde(default)]
-    pub allow_anlas: bool,
-    #[serde(default)]
-    pub allow_img2img: bool,
-    #[serde(default)]
-    pub exclude_global_v5: bool,
-    #[serde(default = "legacy")]
-    pub image_model_scope: String,
     #[serde(default)]
     pub expires_at: Option<f64>,
     #[serde(default)]
-    pub features: Option<String>,
-    #[serde(default)]
     pub discord_id: Option<String>,
-    #[serde(default)]
-    pub quota_limits: Option<String>,
 }
-
-/// `update_key` 允许改的列（顺序无关，只是白名单）。
-const UPDATE_ALLOWED: [&str; 15] = [
-    "name",
-    "enabled",
-    "daily_images",
-    "daily_anlas",
-    "daily_v5",
-    "monthly_anlas",
-    "daily_text_tokens",
-    "rpm",
-    "allow_anlas",
-    "allow_img2img",
-    "exclude_global_v5",
-    "image_model_scope",
-    "expires_at",
-    "features",
-    "quota_limits",
-];
-const UPDATE_FLAGS: [&str; 4] = [
-    "enabled",
-    "allow_anlas",
-    "allow_img2img",
-    "exclude_global_v5",
-];
+impl std::fmt::Debug for NewKey {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter.debug_struct("NewKey").finish_non_exhaustive()
+    }
+}
+const UPDATE_ALLOWED: [&str; 3] = ["name", "enabled", "expires_at"];
+const UPDATE_FLAGS: [&str; 1] = ["enabled"];
 
 impl Db {
     /// 新建 Key 并返回刚建好的整行（`created_at` = `now`）。
     pub async fn create_key(&self, f: &NewKey, now: f64) -> Result<Value> {
         let f = f.clone();
         self.write(move |tx| {
-            tx.execute(
-                "INSERT INTO api_keys \
-                 (name, token, enabled, daily_images, daily_anlas, daily_v5, monthly_anlas, \
-                 daily_text_tokens, rpm, allow_anlas, allow_img2img, exclude_global_v5, image_model_scope, expires_at, created_at, features, \
-                 discord_id, quota_limits) \
-                 VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
-                params![
-                    f.name,
-                    f.token,
-                    i64::from(f.enabled),
-                    f.daily_images,
-                    f.daily_anlas,
-                    f.daily_v5,
-                    f.monthly_anlas,
-                    f.daily_text_tokens,
-                    f.rpm,
-                    i64::from(f.allow_anlas),
-                    i64::from(f.allow_img2img),
-                    i64::from(f.exclude_global_v5),
-                    f.image_model_scope,
-                    f.expires_at,
-                    now,
-                    f.features,
-                    f.discord_id,
-                    f.quota_limits,
-                ],
-            )?;
+            tx.execute("INSERT INTO api_keys(name,token,enabled,expires_at,created_at,discord_id) VALUES(?,?,?,?,?,?)",
+                params![f.name,f.token,i64::from(f.enabled),f.expires_at,now,f.discord_id])?;
             let id = tx.last_insert_rowid();
             tx.query_row(
                 "SELECT * FROM api_keys WHERE id=?",
@@ -170,13 +102,7 @@ impl Db {
             if UPDATE_FLAGS.contains(&k.as_str()) {
                 vals.push(SqlValue::Integer(i64::from(values::enabled(v))));
             } else {
-                if k == "quota_limits" && (v.is_object() || v.is_array()) {
-                    vals.push(SqlValue::Text(
-                        serde_json::to_string(v).map_err(|e| DbError::Invalid(e.to_string()))?,
-                    ));
-                } else {
-                    vals.push(json_to_sql(v)?);
-                }
+                vals.push(json_to_sql(v)?);
             }
         }
         if sets.is_empty() {
@@ -253,17 +179,16 @@ impl Db {
                 return Ok(Vec::new());
             }
             let mut stmt = c.prepare(
-                "SELECT id FROM api_keys \
-                 WHERE enabled=1 \
-                   AND (expires_at IS NULL OR expires_at > ?) \
-                   AND MAX(COALESCE(last_image_at, created_at), ?) < ? \
-                   AND id NOT IN (SELECT key_id FROM key_tags WHERE tag=?) \
-                 ORDER BY id ASC",
+                "SELECT k.id FROM api_keys k \
+                 LEFT JOIN discord_registrations r ON r.key_id=k.id \
+                 LEFT JOIN member_rules m ON m.discord_id=k.discord_id \
+                 WHERE k.enabled=1 \
+                   AND (k.expires_at IS NULL OR k.expires_at > ?1) \
+                   AND MAX(COALESCE(k.last_image_at,r.created_at,k.created_at), ?2) < ?3 \
+                   AND COALESCE(m.recycle_not_before,0)<=?1 ORDER BY k.id ASC",
             )?;
-            stmt.query_map(params![now, grace, cutoff, INVITE_TAG], |r| {
-                value::i64_or(r, 0, 0)
-            })?
-            .collect()
+            stmt.query_map(params![now, grace, cutoff], |r| value::i64_or(r, 0, 0))?
+                .collect()
         })
         .await
     }
@@ -282,37 +207,6 @@ impl Db {
                 "UPDATE api_keys SET last_used_at=? WHERE id=?",
                 params![now, key_id],
             )?;
-            Ok(())
-        })
-        .await
-    }
-
-    /// 原子切换账号身份组：regular / invite（邀请标签，豁免闲置回收）。未知身份组在动库之前就报错。
-    pub async fn set_key_role(&self, key_id: i64, role: &str, now: f64) -> Result<()> {
-        let invite = match role {
-            ROLE_INVITE => true,
-            ROLE_REGULAR => false,
-            other => return Err(DbError::Invalid(format!("未知身份组: {other}"))),
-        };
-        self.write(move |tx| {
-            if invite {
-                tx.execute(
-                    "INSERT INTO key_tags(key_id, tag, note, by, ts) VALUES (?,?,?,?,?) \
-                     ON CONFLICT(key_id, tag) DO UPDATE SET note=excluded.note, by=excluded.by, ts=excluded.ts",
-                    params![
-                        key_id,
-                        INVITE_TAG,
-                        "站长手动设为邀请账号，豁免闲置回收",
-                        "站长",
-                        now
-                    ],
-                )?;
-            } else {
-                tx.execute(
-                    "DELETE FROM key_tags WHERE key_id=? AND tag=?",
-                    params![key_id, INVITE_TAG],
-                )?;
-            }
             Ok(())
         })
         .await

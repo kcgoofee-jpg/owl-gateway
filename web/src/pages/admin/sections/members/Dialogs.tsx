@@ -5,7 +5,7 @@ import { getJSON } from "../../../../lib/api";
 import { fullTime, rel, scopeText } from "../../../../lib/format";
 import { Badge, Button, CopyField, copyText, Dialog, Field, Notice, Skeleton } from "../../../../ui";
 import { Avatar, ConfirmDialog, TableWrap, useBusy } from "../_kit";
-import { addBan, addTag, bindDiscord, giveCoupon, removeBan, resetDailyQuota } from "./actions";
+import { addBan, addTag, call, giveCoupon, removeBan, resetDailyQuota } from "./actions";
 import { scopeTextOf } from "./logic";
 import { Empty, ResetScopeChecks, useDebounced, usePageData } from "./shared";
 import type { Ban, Coupon } from "./types";
@@ -128,67 +128,40 @@ export function KeyRevealDialog(props: {
   );
 }
 
-/* ---------------- 绑定 / 换绑 Discord ---------------- */
-export function BindDiscordDialog(props: {
+export function CredentialDialog(props: {
   keyId: number;
   name: string;
-  currentId: string;
-  currentUser: string;
+  expiresAt: number | null;
   onClose: () => void;
   onDone: (text: string) => void;
 }) {
-  const [id, setId] = useState(props.currentId);
-  const [user, setUser] = useState(props.currentUser);
-  const [e1, setE1] = useState("");
+  const [date, setDate] = useState(
+    props.expiresAt ? new Date(props.expiresAt * 1000 + 8 * 3600000).toISOString().slice(0, 10) : "",
+  );
   return (
     <FormDialog
-      title={props.currentId ? `换绑 Discord：${props.name}` : `绑定 Discord：${props.name}`}
-      submitText={props.currentId ? "换绑" : "绑定"}
+      title={`${props.name} · 到期日期`}
+      submitText="保存"
       onClose={props.onClose}
       onSubmit={async () => {
-        if (!isDiscordId(id)) {
-          setE1("Discord ID 必须是 17～20 位纯数字");
-          return "请先修正标红的内容";
-        }
-        setE1("");
-        // 换了账号又没改用户名：预填的是旧账号的名字，不能带给新账号（读不到资料时会被当成备注写进去）
-        const sameAccount = id.trim() === props.currentId;
-        const typed = sameAccount || user !== props.currentUser ? user.trim() : "";
-        const r = await bindDiscord(props.keyId, id.trim(), typed);
-        if (!r.ok) return r.error;
-        props.onDone(
-          r.data.from_discord
-            ? `已绑定 Discord 账号，已从 Discord 读取资料，Key 名为「${r.data.name}」`
-            : `已为「${props.name}」绑定 Discord 账号（没读到 Discord 资料，用填写的用户名）`,
-        );
-        return undefined;
+        const expires = date ? Date.parse(`${date}T23:59:59+08:00`) / 1000 : null;
+        if (expires !== null && !Number.isFinite(expires)) return "到期日期无效";
+        const result = await call("PATCH", `/admin/api/keys/${props.keyId}`, { expires_at: expires });
+        if (!result.ok) return result.error;
+        props.onDone("到期日期已保存");
       }}
     >
-      <Field
-        label="Discord 用户 ID"
-        hint={fieldErr(e1) ?? "17～20 位纯数字；在 Discord 开启开发者模式后，右键头像复制用户 ID"}
-      >
-        <input
-          class="input mono"
-          inputMode="numeric"
-          autoComplete="off"
-          value={id}
-          aria-invalid={e1 ? true : undefined}
-          onInput={(e) => setId(e.currentTarget.value)}
-        />
-      </Field>
-      <Field
-        label="Discord 用户名（选填）"
-        hint="一般不用填：会自动从 Discord 读取用户名、显示名和头像，并把 Key 名改成「显示名 (@用户名)」；读不到时才用这里填的，例如 yuexiaying"
-      >
+      <Field label="到期日期">
         <input
           class="input"
-          maxLength={80}
-          autoComplete="off"
-          value={user}
-          onInput={(e) => setUser(e.currentTarget.value)}
+          type="date"
+          value={date}
+          onInput={(event) => setDate(event.currentTarget.value)}
         />
       </Field>
+      <Button size="sm" onClick={() => setDate("")}>
+        设为永久
+      </Button>
     </FormDialog>
   );
 }

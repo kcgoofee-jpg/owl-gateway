@@ -4,9 +4,7 @@
 //! （[`JobsState::record`]）：内存里一份，整体写进设置 `job_last`（serde_json）。任务出错或 panic 都只记成
 //! 这一轮失败（`ok=false`，摘要写错误，另记 Bug，来源 `job:<名字>`），循环照常继续。
 
-use super::{
-    autopilot, capacity, idle_recycle_job, jittered, maintenance_job, quota, sleep_or_shutdown,
-};
+use super::{autopilot, capacity, idle_recycle_job, jittered, maintenance_job, sleep_or_shutdown};
 use crate::error::{ApiError, InternalError};
 use crate::state::AppState;
 use futures::FutureExt;
@@ -41,9 +39,6 @@ pub struct Job {
     pub run: RunFn,
 }
 
-fn run_quota(s: &AppState) -> BoxFuture<'_, Result<String, JobError>> {
-    Box::pin(quota::tick(s))
-}
 fn run_upstream_snapshot(s: &AppState) -> BoxFuture<'_, Result<String, JobError>> {
     Box::pin(capacity::upstream_snapshot(s))
 }
@@ -67,15 +62,7 @@ fn run_idle_recycle(s: &AppState) -> BoxFuture<'_, Result<String, JobError>> {
 }
 
 /// 全部定时任务，按后台显示顺序。周期和抖动沿用内核时代的值。
-pub const JOBS: [Job; 8] = [
-    Job {
-        name: "quota",
-        title: "额度同步",
-        every: "每 10 分钟",
-        every_secs: 600.0,
-        jitter: 0.2,
-        run: run_quota,
-    },
+pub const JOBS: [Job; 7] = [
     Job {
         name: "upstream_snapshot",
         title: "上游 V5 快照",
@@ -222,7 +209,7 @@ impl From<JobError> for ApiError {
 pub enum Origin {
     /// 定时循环（以及 [`run_once`]）：失败记 Bug（来源 `job:<名字>`），整份记录立即写库。
     Loop,
-    /// 后台触发的立即重算（[`super::quota::run_now`]）：只更新内存里的记录（接口马上能看到）；
+    /// 操作触发的即时记录：只更新内存，随下一次定时任务一起落库；
     /// 出错由调用方的接口自己记 Bug；落库跟着下一次任何定时任务记结果一起写（最多约一个维护周期）。
     /// 这样后台改 Key、改参数的接口不会顺带多写一行设置。
     Manual,
@@ -232,8 +219,6 @@ pub enum Origin {
 pub struct JobsState {
     /// 每个任务最近一轮的结果（也就是设置 `job_last` 的内容）。写库时一直持锁，保证库里的是最新的一份。
     last: tokio::sync::Mutex<Map<String, Value>>,
-    /// 动态额度重算串行化：定时任务、后台改参数、Key 交回算法都会调它，不能两份同时写。
-    quota_lock: tokio::sync::Mutex<()>,
     /// 官方状态接口地址的覆盖（测试 / 本地开发用，保证不出本机）；None 用状态页的 `OFFICIAL_API`。
     official_api: RwLock<Option<String>>,
 }
@@ -248,7 +233,6 @@ impl JobsState {
     pub fn new() -> Self {
         Self {
             last: tokio::sync::Mutex::new(Map::new()),
-            quota_lock: tokio::sync::Mutex::new(()),
             official_api: RwLock::new(None),
         }
     }
@@ -331,10 +315,6 @@ impl JobsState {
 
     pub fn official_api(&self) -> Option<String> {
         self.official_api.read().expect("official_api").clone()
-    }
-
-    pub(crate) async fn quota_guard(&self) -> tokio::sync::MutexGuard<'_, ()> {
-        self.quota_lock.lock().await
     }
 }
 

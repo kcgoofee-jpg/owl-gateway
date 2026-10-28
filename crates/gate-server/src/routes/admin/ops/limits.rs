@@ -1,8 +1,7 @@
-//! 额度与保护类设置（全部手动）：每人每日 V4.5 / V5、全站 V5、V5 暂停、Anlas、图片排队与冷却、账号保护与排队。
+//! 运行保护：共享预算、V5 暂停与降档、图片排队与冷却、上游账号保护。
 
 use super::super::BODY_LIMIT;
-use super::super::num::{Kind, strict_num};
-use crate::auth::{site_flag, site_flag_f64};
+use crate::auth::site_flag;
 use crate::body::read_json_body;
 use crate::error::{ApiError, ApiResult, HttpError, InternalError, ok_json};
 use crate::guard::GuardIoError;
@@ -11,10 +10,7 @@ use crate::state::{AppState, RUNTIME_LIMIT_BOUNDS};
 use axum::Router;
 use axum::extract::{Request, State};
 use axum::routing::get;
-use gate_core::site_flags::{
-    self, GLOBAL_DAILY_ANLAS, GLOBAL_DAILY_V5, GLOBAL_MONTHLY_ANLAS, MEMBER_DAILY_ANLAS,
-    REGISTER_DAILY_IMAGES, REGISTER_DAILY_V5, V5_MEDIUM_MODE, V5_PAUSED,
-};
+use gate_core::site_flags::{V5_MEDIUM_MODE, V5_PAUSED};
 use gate_core::validation::ValidationError;
 use gate_core::{primitives, values};
 use serde_json::{Value, json};
@@ -22,7 +18,6 @@ use serde_json::{Value, json};
 pub(super) fn router() -> Router<AppState> {
     Router::new()
         .route("/admin/api/settings", get(get_settings).put(put_settings))
-        .route("/admin/api/quota-modes", get(get_quota_modes))
         .route(
             "/admin/api/runtime-limits",
             get(get_runtime_limits).put(put_runtime_limits),
@@ -32,362 +27,62 @@ pub(super) fn router() -> Router<AppState> {
 
 // ------------------------------------------------------------------ 预算
 
-/// V5 Medium 降档此刻是否生效（手动开关）。
-async fn medium_view(state: &AppState) -> Value {
-    json!({"active": crate::v5_medium::active(state).await})
+#[derive(serde::Serialize, serde::Deserialize)]
+#[serde(deny_unknown_fields)]
+struct RuntimeSettings {
+    budgets: gate_core::member_policy::SharedBudgets,
+    v5_paused: bool,
+    v5_medium_mode: String,
 }
 
-async fn get_settings(State(state): State<AppState>, _s: AdminSession) -> ApiResult {
-    let policy = crate::v5_access::configuration(&state).await?;
-    let policy_mode = policy.mode.as_str();
-    Ok(ok_json(&json!({
-        "global_monthly_anlas": values::float(site_flag_f64(&state, &GLOBAL_MONTHLY_ANLAS).await?),
-        "global_daily_v5": crate::ops::global_daily_v5(&state.db).await?,
-        "global_daily_anlas": site_flag(&state, &GLOBAL_DAILY_ANLAS).await?,
-        "member_daily_anlas": site_flag(&state, &MEMBER_DAILY_ANLAS).await?,
-        "register_daily_images": site_flag(&state, &REGISTER_DAILY_IMAGES).await?,
-        "register_daily_v5": site_flag(&state, &REGISTER_DAILY_V5).await?,
-        "v5_paused": policy.paused,
-        "v5_access_mode": policy_mode,
-        "v5_authorized_discord_ids": policy.authorized,
-        "gateway_owner_discord_ids": policy.owners,
-        "gateway_admin_discord_ids": policy.admins,
-        "v5_medium_mode": site_flag(&state, &V5_MEDIUM_MODE).await?,
-        "v5_medium_state": medium_view(&state).await,
-    })))
+async fn runtime_settings(state: &AppState) -> Result<RuntimeSettings, ApiError> {
+    Ok(RuntimeSettings {
+        budgets: state.db.shared_budgets().await?,
+        v5_paused: crate::ops::v5_paused(&state.db).await?,
+        v5_medium_mode: site_flag(state, &V5_MEDIUM_MODE)
+            .await?
+            .as_str()
+            .ok_or_else(|| InternalError("V5 降档设置无效".into()))?
+            .to_owned(),
+    })
 }
 
-async fn get_quota_modes(State(state): State<AppState>, _s: AdminSession) -> ApiResult {
-    Ok(ok_json(&json!(
-        crate::ops::global_quota_modes(&state.db).await?
-    )))
+async fn get_settings(State(state): State<AppState>, _session: AdminSession) -> ApiResult {
+    Ok(ok_json(&json!(runtime_settings(&state).await?)))
 }
 
-async fn put_settings(State(state): State<AppState>, _s: AdminSession, req: Request) -> ApiResult {
+async fn put_settings(
+    State(state): State<AppState>,
+    _session: AdminSession,
+    req: Request,
+) -> ApiResult {
     let (parts, body) = req.into_parts();
     let body = read_json_body(&parts.headers, body, BODY_LIMIT).await?;
-    if body.contains_key("quota_modes")
-        && [
-            GLOBAL_MONTHLY_ANLAS.key,
-            GLOBAL_DAILY_V5.key,
-            GLOBAL_DAILY_ANLAS.key,
-            MEMBER_DAILY_ANLAS.key,
-            REGISTER_DAILY_IMAGES.key,
-            REGISTER_DAILY_V5.key,
-        ]
-        .iter()
-        .any(|key| body.contains_key(*key))
-    {
-        return Err(HttpError::new(422, "quota_modes 不能与旧数字额度字段同时提交").into());
+    let settings: RuntimeSettings = serde_json::from_value(Value::Object(body))
+        .map_err(|_| HttpError::new(422, "运行保护设置格式无效"))?;
+    settings
+        .budgets
+        .validate()
+        .map_err(|message| HttpError::new(422, message))?;
+    if !["off", "on"].contains(&settings.v5_medium_mode.as_str()) {
+        return Err(HttpError::new(422, "V5 降档设置只能是 off 或 on").into());
     }
-    let quota_modes = match body.get("quota_modes") {
-        None => None,
-        Some(v) => {
-            let value = gate_core::quota_limits::GlobalLimits::from_value(v)
-                .ok_or_else(|| HttpError::new(422, "quota_modes 格式无效"))?;
-            // 10-27 规范化：0 = 停用，上限 9999（每月池 99999），不再有「不限」
-            let fields = [
-                (value.register_daily_images, 9999.0),
-                (value.register_daily_v5, 9999.0),
-                (value.global_daily_v5, 9999.0),
-                (value.global_daily_anlas, 9999.0),
-                (value.member_daily_anlas, 9999.0),
-                (value.global_monthly_anlas, 99_999.0),
-            ];
-            if fields.iter().any(|(mode, max)| match mode {
-                gate_core::quota_limits::Limit::Inherit => true,
-                gate_core::quota_limits::Limit::Unlimited => false,
-                gate_core::quota_limits::Limit::Limit(n) => !n.is_finite() || *n < 0.0 || *n > *max,
-            }) {
-                return Err(HttpError::new(
-                    422,
-                    "quota_modes 中的限额无效；全局额度不支持 inherit，限额须非负",
-                )
-                .into());
-            }
-            Some(value)
-        }
-    };
-    let policy_keys = [
-        crate::v5_access::MODE_KEY,
-        crate::v5_access::SUBJECTS_KEY,
-        crate::v5_access::OWNERS_KEY,
-        crate::v5_access::ADMINS_KEY,
-    ];
-    let has_policy = policy_keys.iter().any(|key| body.contains_key(*key));
-    if has_policy && policy_keys.iter().any(|key| !body.contains_key(*key)) {
-        return Err(HttpError::new(422, "V5 策略需同时提交模式、授权主体与身份角色列表").into());
-    }
-    let policy_mode = match body.get(crate::v5_access::MODE_KEY) {
-        None => None,
-        Some(Value::String(s))
-            if ["legacy", "closed", "restricted", "everyone"].contains(&s.as_str()) =>
-        {
-            Some(s.clone())
-        }
-        Some(_) => {
-            return Err(HttpError::new(
-                422,
-                "v5_access_mode 必须是 legacy / closed / restricted / everyone",
-            )
-            .into());
-        }
-    };
-    fn subjects(v: Option<&Value>, name: &str) -> Result<Option<String>, ApiError> {
-        let Some(Value::Array(values)) = v else {
-            if v.is_none() {
-                return Ok(None);
-            }
-            return Err(HttpError::new(422, format!("{name} 必须是 Discord ID 数组")).into());
-        };
-        let mut ids = Vec::new();
-        for value in values {
-            let Some(id) = value.as_str() else {
-                return Err(HttpError::new(422, format!("{name} 中的 ID 必须是字符串")).into());
-            };
-            if id.is_empty() || !id.bytes().all(|b| b.is_ascii_digit()) {
-                return Err(HttpError::new(422, format!("{name} 中包含无效 Discord ID")).into());
-            }
-            if !ids.iter().any(|seen| seen == id) {
-                ids.push(id.to_string());
-            }
-        }
-        Ok(Some(
-            serde_json::to_string(&ids).map_err(|e| InternalError(e.to_string()))?,
-        ))
-    }
-    let subject_settings = [
-        (
-            crate::v5_access::SUBJECTS_KEY,
-            subjects(
-                body.get(crate::v5_access::SUBJECTS_KEY),
-                crate::v5_access::SUBJECTS_KEY,
-            )?,
-        ),
-        (
-            crate::v5_access::OWNERS_KEY,
-            subjects(
-                body.get(crate::v5_access::OWNERS_KEY),
-                crate::v5_access::OWNERS_KEY,
-            )?,
-        ),
-        (
-            crate::v5_access::ADMINS_KEY,
-            subjects(
-                body.get(crate::v5_access::ADMINS_KEY),
-                crate::v5_access::ADMINS_KEY,
-            )?,
-        ),
-    ];
-    let policy_values = policy_mode.as_ref().map(|mode| {
-        vec![
-            (crate::v5_access::MODE_KEY.to_string(), mode.clone()),
+    state
+        .db
+        .set_settings_bulk(&[
             (
-                crate::v5_access::SUBJECTS_KEY.to_string(),
-                subject_settings[0].1.clone().unwrap(),
+                gate_db::repo::member_policy::BUDGETS_KEY.into(),
+                serde_json::to_string(&settings.budgets)
+                    .map_err(|e| InternalError(e.to_string()))?,
             ),
             (
-                crate::v5_access::OWNERS_KEY.to_string(),
-                subject_settings[1].1.clone().unwrap(),
+                V5_PAUSED.key.into(),
+                if settings.v5_paused { "1" } else { "0" }.into(),
             ),
-            (
-                crate::v5_access::ADMINS_KEY.to_string(),
-                subject_settings[2].1.clone().unwrap(),
-            ),
-        ]
-    });
-    // 降档模式：只认 off / on 两个小写字符串，其他（含已删除的 auto）一律 422；缺省保持原值
-    let medium_mode = match body.get(V5_MEDIUM_MODE.key) {
-        Some(v) => v.clone(),
-        None => site_flag(&state, &V5_MEDIUM_MODE).await?,
-    };
-    let medium_text =
-        site_flags::encode(&V5_MEDIUM_MODE, &medium_mode).map_err(|e| HttpError::new(422, e.0))?;
-    // 缺省字段保持原值（以前缺省会被写成 0 = 不限）
-    async fn field(
-        state: &AppState,
-        body: &serde_json::Map<String, Value>,
-        spec: &site_flags::Spec,
-        kind: Kind,
-        hi: f64,
-    ) -> Result<Value, ApiError> {
-        let value = match body.get(spec.key) {
-            Some(v) => v.clone(),
-            None => site_flag(state, spec).await?,
-        };
-        Ok(strict_num(&value, kind, 0.0, hi, spec.key)?)
-    }
-    let monthly = field(&state, &body, &GLOBAL_MONTHLY_ANLAS, Kind::Float, 99_999.0).await?;
-    let daily_v5 = field(&state, &body, &GLOBAL_DAILY_V5, Kind::Int, 9999.0).await?;
-    let daily_anlas = field(&state, &body, &GLOBAL_DAILY_ANLAS, Kind::Int, 9999.0).await?;
-    let member = field(&state, &body, &MEMBER_DAILY_ANLAS, Kind::Int, 9999.0).await?;
-    // 每人每日 V4.5 / V5（0 = 不限）、V5 暂停（开关）
-    let v45 = field(&state, &body, &REGISTER_DAILY_IMAGES, Kind::Int, 100_000.0).await?;
-    let v5_each = field(&state, &body, &REGISTER_DAILY_V5, Kind::Int, 100_000.0).await?;
-    let paused = match body.get(V5_PAUSED.key) {
-        None => site_flag(&state, &V5_PAUSED).await? == Value::Bool(true),
-        Some(Value::Bool(b)) => *b,
-        Some(_) => return Err(HttpError::new(422, "v5_paused 必须是 true / false").into()),
-    };
-    // 这几项改了要立刻同步给成员 Key 和首页文案（不等下一轮定时任务）
-    let sync = [
-        GLOBAL_DAILY_V5.key,
-        MEMBER_DAILY_ANLAS.key,
-        REGISTER_DAILY_IMAGES.key,
-        REGISTER_DAILY_V5.key,
-        V5_PAUSED.key,
-        "quota_modes",
-    ]
-    .iter()
-    .any(|k| body.contains_key(*k));
-    let mut v5_settings = Vec::new();
-    if body.contains_key(V5_PAUSED.key) {
-        v5_settings.push((
-            V5_PAUSED.key.to_string(),
-            if paused { "1" } else { "0" }.to_string(),
-        ));
-    }
-    if let Some(policy) = policy_values {
-        v5_settings.extend(policy);
-    }
-    if !v5_settings.is_empty() {
-        state.db.set_settings_bulk(&v5_settings).await?;
-    }
-    for (spec, v) in [
-        (&GLOBAL_MONTHLY_ANLAS, &monthly),
-        (&GLOBAL_DAILY_V5, &daily_v5),
-        (&GLOBAL_DAILY_ANLAS, &daily_anlas),
-        (&MEMBER_DAILY_ANLAS, &member),
-        (&REGISTER_DAILY_IMAGES, &v45),
-        (&REGISTER_DAILY_V5, &v5_each),
-    ] {
-        if body.contains_key(spec.key) {
-            let text = site_flags::encode(spec, v).map_err(|e| InternalError(e.0))?;
-            state.db.set_setting(spec.key, &text).await?;
-        }
-    }
-    if quota_modes.is_some()
-        || [
-            GLOBAL_MONTHLY_ANLAS.key,
-            GLOBAL_DAILY_V5.key,
-            GLOBAL_DAILY_ANLAS.key,
-            MEMBER_DAILY_ANLAS.key,
-            REGISTER_DAILY_IMAGES.key,
-            REGISTER_DAILY_V5.key,
-        ]
-        .iter()
-        .any(|key| body.contains_key(*key))
-    {
-        let mut modes = quota_modes.unwrap_or(crate::ops::global_quota_modes(&state.db).await?);
-        let legacy = |v: &Value| {
-            let n = values::number(v).unwrap_or(0.0);
-            if n <= 0.0 {
-                gate_core::quota_limits::Limit::Unlimited
-            } else {
-                gate_core::quota_limits::Limit::Limit(n)
-            }
-        };
-        if quota_modes.is_none() {
-            if body.contains_key(REGISTER_DAILY_IMAGES.key) {
-                modes.register_daily_images = legacy(&v45);
-            }
-            if body.contains_key(REGISTER_DAILY_V5.key) {
-                modes.register_daily_v5 = legacy(&v5_each);
-            }
-            if body.contains_key(GLOBAL_DAILY_V5.key) {
-                modes.global_daily_v5 = legacy(&daily_v5);
-            }
-            if body.contains_key(GLOBAL_DAILY_ANLAS.key) {
-                modes.global_daily_anlas = legacy(&daily_anlas);
-                modes.public_vibe_enabled = values::number(&daily_anlas).unwrap_or(0.0) > 0.0;
-            }
-            if body.contains_key(MEMBER_DAILY_ANLAS.key) {
-                modes.member_daily_anlas = legacy(&member);
-            }
-            if body.contains_key(GLOBAL_MONTHLY_ANLAS.key) {
-                modes.global_monthly_anlas = legacy(&monthly);
-            }
-        }
-        let raw = serde_json::to_string(&modes).map_err(|e| InternalError(e.to_string()))?;
-        state
-            .db
-            .set_settings_bulk(&[
-                ("quota_modes_v1".into(), raw),
-                (
-                    "public_vibe_enabled".into(),
-                    if modes.public_vibe_enabled { "1" } else { "0" }.into(),
-                ),
-            ])
-            .await?;
-    }
-    if let Some(modes) = quota_modes {
-        use gate_core::quota_limits::Limit;
-        let numeric = |mode: Limit| match mode {
-            Limit::Limit(n) => values::float(n),
-            Limit::Unlimited => json!(0),
-            Limit::Inherit => Value::Null,
-        };
-        let projected = [
-            (&REGISTER_DAILY_IMAGES, numeric(modes.register_daily_images)),
-            (&REGISTER_DAILY_V5, numeric(modes.register_daily_v5)),
-            (&GLOBAL_DAILY_V5, numeric(modes.global_daily_v5)),
-            (&GLOBAL_DAILY_ANLAS, numeric(modes.global_daily_anlas)),
-            (&MEMBER_DAILY_ANLAS, numeric(modes.member_daily_anlas)),
-            (&GLOBAL_MONTHLY_ANLAS, numeric(modes.global_monthly_anlas)),
-        ];
-        let mut writes = Vec::new();
-        for (spec, value) in projected {
-            let encoded = site_flags::encode(spec, &value).map_err(|e| HttpError::new(422, e.0))?;
-            writes.push((spec.key.to_string(), encoded));
-        }
-        let raw = serde_json::to_string(&modes).map_err(|e| InternalError(e.to_string()))?;
-        writes.push(("quota_modes_v1".to_string(), raw));
-        writes.push((
-            "public_vibe_enabled".to_string(),
-            if modes.public_vibe_enabled { "1" } else { "0" }.to_string(),
-        ));
-        state.db.set_settings_bulk(&writes).await?;
-    }
-    if body.contains_key(V5_MEDIUM_MODE.key) {
-        state
-            .db
-            .set_setting(V5_MEDIUM_MODE.key, &medium_text)
-            .await?;
-    }
-    let policy_mode_out = policy_mode.unwrap_or(
-        crate::v5_access::configuration(&state)
-            .await?
-            .mode
-            .as_str()
-            .to_string(),
-    );
-    let stored_modes = crate::ops::global_quota_modes(&state.db).await?;
-    let project_int = |mode: gate_core::quota_limits::Limit| match mode {
-        gate_core::quota_limits::Limit::Limit(n) => json!(n.trunc() as i64),
-        gate_core::quota_limits::Limit::Unlimited => json!(0),
-        gate_core::quota_limits::Limit::Inherit => Value::Null,
-    };
-    let project_float = |mode: gate_core::quota_limits::Limit| match mode {
-        gate_core::quota_limits::Limit::Limit(n) => values::float(n),
-        gate_core::quota_limits::Limit::Unlimited => json!(0.0),
-        gate_core::quota_limits::Limit::Inherit => Value::Null,
-    };
-    let out = json!({
-        "ok": true,
-        "global_monthly_anlas": project_float(stored_modes.global_monthly_anlas),
-        "global_daily_v5": project_int(stored_modes.global_daily_v5),
-        "global_daily_anlas": project_int(stored_modes.global_daily_anlas),
-        "member_daily_anlas": project_int(stored_modes.member_daily_anlas),
-        "register_daily_images": project_int(stored_modes.register_daily_images),
-        "register_daily_v5": project_int(stored_modes.register_daily_v5),
-        "v5_paused": paused,
-        "v5_access_mode": policy_mode_out,
-        "v5_medium_mode": medium_text,
-    });
-    if sync {
-        crate::jobs::quota::run_now(&state).await?;
-    }
-    Ok(ok_json(&out))
+            (V5_MEDIUM_MODE.key.into(), settings.v5_medium_mode),
+        ])
+        .await?;
+    get_settings(State(state), _session).await
 }
 
 // ------------------------------------------------------------------ 排队与冷却

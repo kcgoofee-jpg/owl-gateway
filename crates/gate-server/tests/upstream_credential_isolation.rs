@@ -168,13 +168,7 @@ async fn successfully_verified_replacement_clears_only_the_replaced_fingerprint(
 #[tokio::test]
 async fn subscription_401_isolates_before_generation_but_zero_percent_and_402_do_not() {
     let e = setup(&[]).await;
-    e.state
-        .db
-        .run_script(vec![
-            "UPDATE api_keys SET image_model_scope='all', daily_v5=10 WHERE id=1".into(),
-        ])
-        .await
-        .unwrap();
+    common::policy_for(&e.state, 1, json!({"v5":true,"daily_v5":10})).await;
     let id = e.state.nai.tokens().await[0].token_id.clone();
     e.mock.push(
         "/user/subscription",
@@ -208,27 +202,14 @@ async fn subscription_401_isolates_before_generation_but_zero_percent_and_402_do
         ("NAI_IMAGE_HOST", "http://127.0.0.1:9"),
     ])
     .await;
-    local_failure
-        .state
-        .db
-        .run_script(vec![
-            "UPDATE api_keys SET image_model_scope='all', daily_v5=10 WHERE id=1".into(),
-        ])
-        .await
-        .unwrap();
+    common::policy_for(&local_failure.state, 1, json!({"v5":true,"daily_v5":10})).await;
     let other_id = local_failure.state.nai.tokens().await[0].token_id.clone();
     let _ = generate(&local_failure.state, "nai-diffusion-5-full").await;
     assert!(!disabled(&local_failure.state, &other_id).await);
 
     let zero = setup(&[]).await;
     zero.mock.set_v5_percent(0);
-    zero.state
-        .db
-        .run_script(vec![
-            "UPDATE api_keys SET image_model_scope='all', daily_v5=10 WHERE id=1".into(),
-        ])
-        .await
-        .unwrap();
+    common::policy_for(&zero.state, 1, json!({"v5":true,"daily_v5":10})).await;
     let zero_id = zero.state.nai.tokens().await[0].token_id.clone();
     let _ = generate(&zero.state, "nai-diffusion-5-full").await;
     assert!(!disabled(&zero.state, &zero_id).await);

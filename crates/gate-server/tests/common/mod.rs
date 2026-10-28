@@ -15,6 +15,8 @@ use std::collections::HashMap;
 use std::net::SocketAddr;
 use tower::ServiceExt;
 
+pub const SUBJECT: &str = "900000000000000001";
+
 pub const TOKEN: &str = "nai-test-member-key-000000000000000000";
 pub const ADMIN_PASSWORD: &str = "dev-admin-password-123";
 
@@ -75,11 +77,28 @@ pub async fn setup_with_static(extra: &[(&str, &str)], landing_html: Option<&str
         .await
         .unwrap();
     let key: NewKey = serde_json::from_value(json!({
-        "name": "测试成员", "token": TOKEN, "daily_images": 100, "daily_v5": 10,
-        "monthly_anlas": 0.0, "daily_text_tokens": 1000, "rpm": 60,
+        "name": "测试成员", "token": TOKEN,
+        "discord_id":SUBJECT,
     }))
     .unwrap();
     state.db.create_key(&key, state.now()).await.unwrap();
+    state
+        .db
+        .set_member_overrides(
+            SUBJECT,
+            &gate_core::member_policy::MemberOverrides {
+                daily_images: Some(100),
+                daily_v5: Some(10),
+                rpm: Some(60),
+                v5: Some(true),
+                image: Some(true),
+                vibe: Some(true),
+                tags: Some(true),
+                ..Default::default()
+            },
+        )
+        .await
+        .unwrap();
     Env {
         state,
         mock,
@@ -251,11 +270,27 @@ pub async fn setting_json(state: &AppState, key: &str) -> Value {
 /// 建一把合成的成员 Key（`nai-synthetic-<编号>`），可以再用 SQL 改列；返回库里的 id。
 pub async fn member_key(state: &AppState, n: i64, extra: &[(&str, Value)]) -> i64 {
     let key: NewKey = serde_json::from_value(json!({
-        "name": format!("成员{n:02}"), "token": format!("nai-synthetic-{n:04}"), "daily_images": 100,
-        "daily_v5": 10, "monthly_anlas": 0.0, "daily_text_tokens": 1000, "rpm": 60,
+        "name": format!("成员{n:02}"), "token": format!("nai-synthetic-{n:04}"), "discord_id":SUBJECT,
     }))
     .unwrap();
     state.db.create_key(&key, state.now()).await.unwrap();
+    state
+        .db
+        .set_member_overrides(
+            SUBJECT,
+            &gate_core::member_policy::MemberOverrides {
+                daily_images: Some(100),
+                daily_v5: Some(10),
+                rpm: Some(60),
+                v5: Some(true),
+                image: Some(true),
+                vibe: Some(true),
+                tags: Some(true),
+                ..Default::default()
+            },
+        )
+        .await
+        .unwrap();
     let id = state
         .db
         .get_key_by_token(&format!("nai-synthetic-{n:04}"))
@@ -622,4 +657,56 @@ pub async fn setup_registration(base: &str, extra: &[(&str, &str)]) -> Env {
     let mut refs: Vec<(&str, &str)> = vars.iter().map(|(k, v)| (k.as_str(), v.as_str())).collect();
     refs.extend_from_slice(extra);
     setup(&refs).await
+}
+
+/// Change canonical member overrides while preserving unrelated fields in the fixture.
+pub async fn policy_for(state: &AppState, key_id: i64, changes: Value) {
+    let row = state.db.get_key(key_id).await.unwrap().unwrap();
+    let subject = row["discord_id"]
+        .as_str()
+        .expect("fixture credential must be bound");
+    let snapshot = state.db.member_policy(subject).await.unwrap();
+    let mut overrides = serde_json::to_value(snapshot.overrides).unwrap();
+    for (name, value) in changes.as_object().unwrap() {
+        overrides[name] = value.clone();
+    }
+    state
+        .db
+        .set_member_overrides(subject, &serde_json::from_value(overrides).unwrap())
+        .await
+        .unwrap();
+}
+
+pub async fn claim_for(state: &AppState, changes: Value) {
+    let mut value = serde_json::to_value(state.db.claim_rules().await.unwrap()).unwrap();
+    for (field, data) in changes.as_object().unwrap() {
+        value[field] = data.clone();
+    }
+    state
+        .db
+        .set_claim_rules(&serde_json::from_value(value).unwrap())
+        .await
+        .unwrap();
+}
+pub async fn defaults_for(state: &AppState, changes: Value) {
+    let mut value = serde_json::to_value(state.db.member_defaults().await.unwrap()).unwrap();
+    for (field, data) in changes.as_object().unwrap() {
+        value[field] = data.clone();
+    }
+    state
+        .db
+        .set_member_defaults(&serde_json::from_value(value).unwrap())
+        .await
+        .unwrap();
+}
+pub async fn budgets_for(state: &AppState, changes: Value) {
+    let mut value = serde_json::to_value(state.db.shared_budgets().await.unwrap()).unwrap();
+    for (field, data) in changes.as_object().unwrap() {
+        value[field] = data.clone();
+    }
+    state
+        .db
+        .set_shared_budgets(&serde_json::from_value(value).unwrap())
+        .await
+        .unwrap();
 }

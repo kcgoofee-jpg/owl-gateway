@@ -70,7 +70,7 @@ export const SECTIONS: Section[] = [
   },
   {
     id: "onboarding",
-    label: "领 Key 与功能",
+    label: "成员规则",
     group: "设置",
     path: "/admin/onboarding",
     icon: Server,
@@ -78,7 +78,7 @@ export const SECTIONS: Section[] = [
   },
   {
     id: "limits",
-    label: "额度与保护",
+    label: "运行保护",
     group: "设置",
     path: "/admin/limits",
     icon: SlidersHorizontal,

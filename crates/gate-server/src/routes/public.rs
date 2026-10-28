@@ -432,18 +432,20 @@ fn canonical_parts(data: &serde_json::Map<String, Value>) -> Option<(String, Str
 /// 虚拟订阅视图：数字由 gate_core 算（纯函数），这里只负责把库里的数查好。
 async fn subscription(state: &AppState, key: &Key) -> Result<Value, InternalError> {
     let (day, month) = (state.day(), state.month());
-    let access = crate::v5_access::evaluate(state, Some(key.str("discord_id"))).await?;
+    let shared = state.db.shared_budgets().await?;
     let data = gate_core::client_views::SubscriptionData {
         month_anlas_used: state.db.month_anlas(key.id(), &month).await?,
         daily_v5_used: state.db.get_counter(key.id(), &day).await?.v5,
-        global_v5_limit: crate::ops::global_daily_v5(&state.db).await?,
+        global_v5_limit: shared.daily_v5,
         global_v5_total: state.db.day_v5_total(&day).await?,
-        v5_paused: access.paused,
-        v5_access_allowed: access.decision.allowed,
-        global_quota_modes: crate::ops::global_quota_modes(&state.db).await?,
+        v5_paused: crate::ops::v5_paused(&state.db).await?,
     };
-    gate_core::client_views::subscription_payload(&key.0, state.now(), &data)
-        .map_err(|e| InternalError(e.to_string()))
+    Ok(gate_core::client_views::subscription_payload(
+        &key.policy,
+        key.expires_at(),
+        state.now(),
+        &data,
+    ))
 }
 
 /// 官方 /user/priority 的形状（2026-10-13 实测 image.novelai.net 返回 200）：
@@ -465,7 +467,7 @@ async fn user_data(State(state): State<AppState>, req: Request) -> ApiResult {
     let (parts, _) = req.into_parts();
     let key = authenticate(&state, &parts, false).await?;
     let sub = subscription(&state, &key).await?;
-    let access = crate::v5_access::evaluate(&state, Some(key.str("discord_id"))).await?;
+    let paused = crate::ops::v5_paused(&state.db).await?;
     let public_sub: Map<String, Value> = sub
         .as_object()
         .map(|m| {
@@ -481,7 +483,7 @@ async fn user_data(State(state): State<AppState>, req: Request) -> ApiResult {
         "priority": virtual_priority(state.now()),
         "trainingStepsLeft": steps,
         "anlas": steps["fixedTrainingStepsLeft"],
-        "v5Access": {"mode": access.mode.as_str(), "allowed": access.decision.allowed, "paused": access.paused},
+        "v5Access": {"allowed": key.policy.allows("v5"), "paused": paused},
     })))
 }
 
@@ -509,11 +511,11 @@ async fn user_information(State(state): State<AppState>, req: Request) -> ApiRes
     let now = state.now();
     // int(key["expires_at"] or time.time() + 3650 * 86400)
     let expires = key
-        .opt_float("expires_at")
+        .expires_at()
         .filter(|e| *e != 0.0)
         .map_or((now + 3650.0 * 86400.0) as i64, |e| e as i64);
     Ok(ok_json(&json!({
-        "tier": 3, "active": true, "username": key.get("name"), "expiresAt": expires,
+        "tier": 3, "active": true, "username": key.name(), "expiresAt": expires,
     })))
 }
 
@@ -655,42 +657,31 @@ pub(super) async fn me_payload(
     }
     // 全站今天还剩多少张 V5（首页 V5 圆环取「个人剩余」和它的较小值）。
     // null = 不受全站限制（只剩一种情况：这把 Key 不计入全站 V5）。10-27 起全站池 0 = 停用（0 剩余）。
-    let g = crate::ops::global_daily_v5(&state.db).await?;
-    let v5_access = crate::v5_access::evaluate(state, Some(key.str("discord_id"))).await?;
-    let (site_v5_left, site_v5_cap) = if v5_access.paused || !v5_access.decision.allowed {
-        // 暂停：全站今天没有 V5（不能按「不限」显示）
-        (json!(0), Value::Null)
-    } else if g == 0 {
-        // 全站 V5 池停用
-        (json!(0), json!(0))
-    } else if !key.exclude_global_v5() {
-        let used = state.db.day_v5_total(&state.day()).await?;
-        (json!((g - used).max(0)), json!(g))
+    let g = i64::from(state.db.shared_budgets().await?.daily_v5);
+    let paused = crate::ops::v5_paused(&state.db).await?;
+    let allowed = key.policy.allows("v5");
+    let used = state.db.day_v5_total(&state.day()).await?;
+    let site_v5_left = if paused || !allowed {
+        0
     } else {
-        (Value::Null, Value::Null)
+        (g - used).max(0)
     };
     let now = state.now();
     out.insert("has_key".into(), json!(true));
-    out.insert("key".into(), key.get("token").clone());
-    out.insert("name".into(), key.get("name").clone());
-    out.insert("expires_at".into(), key.get("expires_at").clone());
-    out.insert("image_scope".into(), key.get("image_model_scope").clone());
-    out.insert(
-        "subject_roles".into(),
-        json!({"owner": v5_access.owner, "admin": v5_access.admin}),
-    );
+    out.insert("key".into(), json!(key.token()));
+    out.insert("name".into(), json!(key.name()));
+    out.insert("expires_at".into(), json!(key.expires_at()));
+    out.insert("policy".into(), json!(&key.policy));
     out.insert(
         "today".into(),
         json!({
             "images": c.images, "v5": c.v5, "legacy": c.legacy_free_images,
-            "daily_images": key.get("daily_images"), "daily_v5": key.get("daily_v5"),
-            "quota_limits": key.quota_limits(),
-            "quota_limits_valid": key.try_quota_limits().is_ok(),
-            "site_v5_left": site_v5_left, "site_v5_cap": site_v5_cap,
-            "upstream_v5_free": live::upstream_v5_free(state).await && !v5_access.paused,
-            "v5_paused": v5_access.paused,
-            "v5_access_allowed": v5_access.decision.allowed,
-            "v5_access_reason": v5_access.decision.reason,
+            "daily_images": key.daily_images(), "daily_v5": key.daily_v5(),
+            "site_v5_left": site_v5_left, "site_v5_cap": g,
+            "upstream_v5_free": live::upstream_v5_free(state).await && !paused,
+            "v5_paused": paused,
+            "v5_access_allowed": allowed,
+            "v5_access_reason": if allowed { "" } else { "此成员未开放 V5" },
             "anlas": gate_core::primitives::round0(c.anlas),
             "daily_anlas": live::member_anlas_cap(state, key).await?,
             "reset_hour": state.guard.with(|g| g.reset_hour),

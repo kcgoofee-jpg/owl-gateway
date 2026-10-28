@@ -97,7 +97,7 @@ pub(super) async fn prepare(
         )
         .into());
     };
-    if tier == "v5" && key.image_model_scope() != "all" {
+    if tier == "v5" && !key.policy.v5 {
         reject(&model, "模型权限：仅允许 V4.5 及更低");
         return Err(GateError::with_code(
             403,
@@ -118,27 +118,19 @@ pub(super) async fn prepare(
     if let Some(problem) = policy::validate_image_references(&body) {
         return Err(GateError::with_code(400, problem, reasons::PARAM).into());
     }
-    if params_has(&body, &["image", "mask"]) {
-        if !key.allow_img2img() {
-            reject(&model, "img2img 未开放");
-            return Err(GateError::with_code(
-                400,
-                "本站不支持图生图和局部重绘，未扣费。请在客户端中去掉原图。",
-                reasons::PARAM,
-            )
-            .into());
-        }
-        if !key.allow_anlas() {
-            reject(&model, "img2img 未开通 Anlas 权限");
-            return Err(
-                GateError::with_code(403, "图生图和局部重绘需要消耗 Anlas，你的 Key 未开通 Anlas，未扣费。请在客户端中去掉原图。", reasons::FEATURE_OFF).into(),
-            );
-        }
+    if params_has(&body, &["image", "mask"]) && !key.policy.img2img {
+        reject(&model, "img2img 未开放");
+        return Err(GateError::with_code(
+            400,
+            "本站不支持图生图和局部重绘，未扣费。请在客户端中去掉原图。",
+            reasons::PARAM,
+        )
+        .into());
     }
-    // 免费档钳制：只对没有 Anlas 权限的 Key 生效；有 Anlas 的 Key 可以用超规格参数，按 Anlas 扣。
+    // 未开放高规格生图时钳制到免费规格；费用仍由个人与全站预算共同限制。
     // 上限写死（与 policy 的免费条件、SYSTEM-FACTS 的文案同一口径），不再读环境变量
     let mut notes: Vec<String> = Vec::new();
-    if !key.allow_anlas() {
+    if !key.allows_paid_parameters() {
         let (b, n, problem) = policy::clamp_image_params(
             &body,
             policy::FREE_MAX_PIXELS,

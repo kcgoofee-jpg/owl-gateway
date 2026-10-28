@@ -154,14 +154,7 @@ async fn generate_image_ok_records_usage() {
 async fn image_tool_sends_and_persists_support_correlation_id() {
     use base64::Engine;
     let e = setup(&[]).await;
-    e.state
-        .db
-        .run_script(vec![
-            "UPDATE api_keys SET allow_img2img=1, allow_anlas=1, daily_anlas=10, features='image,upscale,augment,vibe' WHERE id=1"
-                .into(),
-        ])
-        .await
-        .unwrap();
+    common::policy_for(&e.state,1,json!({"daily_anlas":10,"paid_parameters":true,"img2img":true,"image":true,"vibe":true,"tags":false,"upscale":true,"augment":true})).await;
     let image = image::GrayImage::from_fn(64, 64, |x, y| image::Luma([((x * 4) ^ y) as u8]));
     let mut png = std::io::Cursor::new(Vec::new());
     image.write_to(&mut png, image::ImageFormat::Png).unwrap();
@@ -365,7 +358,7 @@ async fn stream_disconnect_after_final_keeps_single_image_charge_and_marks_inter
 #[tokio::test]
 async fn no_per_member_pacing_below_the_daily_cap() {
     let e = setup(&[]).await;
-    e.state.db.set_setting("quota_modes_v1", r#"{"register_daily_images":{"mode":"limit","value":200},"register_daily_v5":{"mode":"unlimited"},"global_daily_v5":{"mode":"unlimited"},"global_daily_anlas":{"mode":"unlimited"},"member_daily_anlas":{"mode":"unlimited"},"global_monthly_anlas":{"mode":"unlimited"},"public_vibe_enabled":false}"#).await.unwrap();
+    common::policy_for(&e.state, 1, json!({"daily_images":200})).await;
     let used = |n: i64| Success {
         key_id: 1,
         kind: "image".into(),
@@ -412,9 +405,12 @@ async fn no_per_member_pacing_below_the_daily_cap() {
 #[tokio::test]
 async fn explicit_member_limit_zero_rejects_generation_before_upstream() {
     let e = setup(&[]).await;
-    e.state.db.run_script(vec![
-        r#"UPDATE api_keys SET quota_limits='{"images":{"mode":"limit","value":0},"v5":{"mode":"unlimited"},"daily_anlas":{"mode":"inherit"},"monthly_anlas":{"mode":"unlimited"}}' WHERE id=1"#.into(),
-    ]).await.unwrap();
+    common::policy_for(
+        &e.state,
+        1,
+        json!({"daily_images":0,"daily_v5":9999,"daily_anlas":null,"monthly_anlas":99999}),
+    )
+    .await;
     let (status, _, body) = call(
         &e.state,
         "POST",
@@ -431,14 +427,7 @@ async fn explicit_member_limit_zero_rejects_generation_before_upstream() {
 #[tokio::test]
 async fn explicit_global_v5_limit_zero_rejects_generation_before_upstream() {
     let e = setup(&[]).await;
-    e.state.db.set_setting("quota_modes_v1", r#"{"register_daily_images":{"mode":"unlimited"},"register_daily_v5":{"mode":"unlimited"},"global_daily_v5":{"mode":"limit","value":0},"global_daily_anlas":{"mode":"unlimited"},"member_daily_anlas":{"mode":"unlimited"},"global_monthly_anlas":{"mode":"unlimited"},"public_vibe_enabled":false}"#).await.unwrap();
-    e.state
-        .db
-        .run_script(vec![
-            "UPDATE api_keys SET image_model_scope='all' WHERE id=1".into(),
-        ])
-        .await
-        .unwrap();
+    common::budgets_for(&e.state, json!({"daily_v5":0})).await;
     let (status, _, body) = call(
         &e.state,
         "POST",
@@ -468,40 +457,14 @@ fn vibe_payload() -> Value {
     })
 }
 
-async fn configure_public_vibe(e: &common::Env, enabled: bool, pool: Value, allow_anlas: bool) {
-    e.state
-        .db
-        .set_setting(
-            "features_global",
-            r#"{"image":true,"upscale":true,"augment":true,"vibe":true,"tags":true}"#,
-        )
-        .await
-        .unwrap();
-    e.state
-        .db
-        .set_setting(
-            "quota_modes_v1",
-            &json!({
-                "register_daily_images":{"mode":"unlimited"},
-                "register_daily_v5":{"mode":"unlimited"},
-                "global_daily_v5":{"mode":"unlimited"},
-                "global_daily_anlas":pool,
-                "member_daily_anlas":{"mode":"unlimited"},
-                "global_monthly_anlas":{"mode":"unlimited"},
-                "public_vibe_enabled":enabled
-            })
-            .to_string(),
-        )
-        .await
-        .unwrap();
-    e.state
-        .db
-        .run_script(vec![format!(
-            "UPDATE api_keys SET allow_anlas={} WHERE id=1",
-            i32::from(allow_anlas)
-        )])
-        .await
-        .unwrap();
+async fn configure_public_vibe(e: &common::Env, enabled: bool, pool: i64, paid_parameters: bool) {
+    common::policy_for(
+        &e.state,
+        1,
+        json!({"vibe":enabled,"daily_anlas":10,"paid_parameters":paid_parameters}),
+    )
+    .await;
+    common::budgets_for(&e.state, json!({"daily_anlas":pool})).await;
 }
 
 fn encoded_vibe_reply() -> Reply {
@@ -513,77 +476,53 @@ fn encoded_vibe_reply() -> Reply {
 }
 
 #[tokio::test]
-async fn public_vibe_uses_canonical_flag_and_anlas_pool_at_the_real_route() {
-    let e = setup(&[]).await;
-    configure_public_vibe(&e, true, json!({"mode":"unlimited"}), false).await;
-    e.mock.push("/ai/encode-vibe", encoded_vibe_reply());
-    let (status, _, body) = call(
-        &e.state,
-        "POST",
-        "/ai/encode-vibe",
-        Some(TOKEN),
-        Some(vibe_payload()),
-    )
-    .await;
-    assert_eq!(status, 200, "{}", String::from_utf8_lossy(&body));
-    assert_eq!(e.mock.requests_to("/ai/encode-vibe").len(), 1);
-
-    let e = setup(&[]).await;
-    configure_public_vibe(&e, true, json!({"mode":"limit","value":0}), false).await;
-    e.mock.push("/ai/encode-vibe", encoded_vibe_reply());
-    let (status, _, body) = call(
-        &e.state,
-        "POST",
-        "/ai/encode-vibe",
-        Some(TOKEN),
-        Some(vibe_payload()),
-    )
-    .await;
-    assert_eq!(status, 403, "{}", String::from_utf8_lossy(&body));
-    assert!(err_message(&body).contains("全站今日 Vibe 额度已用完"));
-    assert!(e.mock.requests_to("/ai/encode-vibe").is_empty());
-
-    let e = setup(&[]).await;
-    configure_public_vibe(&e, false, json!({"mode":"unlimited"}), false).await;
-    e.mock.push("/ai/encode-vibe", encoded_vibe_reply());
-    let (status, _, body) = call(
-        &e.state,
-        "POST",
-        "/ai/encode-vibe",
-        Some(TOKEN),
-        Some(vibe_payload()),
-    )
-    .await;
-    assert_eq!(status, 403, "{}", String::from_utf8_lossy(&body));
-    assert!(
-        err_message(&body).contains("本站未开放"),
-        "{}",
-        String::from_utf8_lossy(&body)
-    );
-    assert!(e.mock.requests_to("/ai/encode-vibe").is_empty());
-
-    // Explicit Anlas access remains independent of the free public-Vibe switch.
-    let e = setup(&[]).await;
-    configure_public_vibe(&e, false, json!({"mode":"unlimited"}), true).await;
-    e.mock.push("/ai/encode-vibe", encoded_vibe_reply());
-    let (status, _, body) = call(
-        &e.state,
-        "POST",
-        "/ai/encode-vibe",
-        Some(TOKEN),
-        Some(vibe_payload()),
-    )
-    .await;
-    assert_eq!(status, 200, "{}", String::from_utf8_lossy(&body));
-    assert_eq!(e.mock.requests_to("/ai/encode-vibe").len(), 1);
+async fn vibe_requires_member_permission_and_shared_budget_without_paid_bypass() {
+    for (enabled, pool, paid, expected) in [
+        (false, 10, true, 403),
+        (true, 0, false, 403),
+        (true, 2, false, 200),
+    ] {
+        let e = setup(&[]).await;
+        configure_public_vibe(&e, enabled, pool, paid).await;
+        e.mock.push("/ai/encode-vibe", encoded_vibe_reply());
+        let (status, _, body) = call(
+            &e.state,
+            "POST",
+            "/ai/encode-vibe",
+            Some(TOKEN),
+            Some(vibe_payload()),
+        )
+        .await;
+        assert_eq!(status, expected, "{}", String::from_utf8_lossy(&body));
+        assert_eq!(
+            e.mock.requests_to("/ai/encode-vibe").len(),
+            usize::from(expected == 200)
+        );
+        if expected == 200 {
+            let (status, _, _) = call(
+                &e.state,
+                "POST",
+                "/ai/encode-vibe",
+                Some(TOKEN),
+                Some(vibe_payload()),
+            )
+            .await;
+            assert_eq!(status, 403);
+            assert_eq!(e.mock.requests_to("/ai/encode-vibe").len(), 1);
+        }
+    }
 }
 
 #[tokio::test]
 async fn malformed_canonical_quota_fails_closed_instead_of_legacy_zero_unlimited() {
     let e = setup(&[]).await;
-    e.state.db.run_script(vec![
-        r#"UPDATE api_keys SET daily_images=0, quota_auto=-1, quota_limits='{"images":{"mode":"limit","value":-1},"v5":{"mode":"unlimited"},"daily_anlas":{"mode":"inherit"},"monthly_anlas":{"mode":"unlimited"}}' WHERE id=1"#.into(),
-    ]).await.unwrap();
+    e.state
+        .db
+        .run_script(vec![
+            r#"UPDATE member_rules SET overrides='{"daily_images":-1}'"#.into(),
+        ])
+        .await
+        .unwrap();
     let (status, _, body) = call(
         &e.state,
         "POST",
@@ -703,7 +642,7 @@ async fn one_image_per_key_at_a_time_without_per_key_interval() {
 #[tokio::test]
 async fn no_v5_refill_with_anlas() {
     let e = setup(&[]).await;
-    e.state.db.run_script(vec![r#"UPDATE api_keys SET allow_anlas=1, quota_auto=-1, quota_limits='{"images":{"mode":"unlimited"},"v5":{"mode":"limit","value":1},"daily_anlas":{"mode":"limit","value":500},"monthly_anlas":{"mode":"unlimited"}}', image_model_scope='all' WHERE id=1"#.into()]).await.unwrap();
+    common::policy_for(&e.state,1,json!({"paid_parameters":true,"v5":true,"daily_images":9999,"daily_v5":1,"daily_anlas":500,"monthly_anlas":99999})).await;
     e.state
         .db
         .set_setting("quota_algo_last", r#"{"v5": {"percent": 0}}"#)
@@ -742,22 +681,7 @@ async fn no_v5_refill_with_anlas() {
 #[tokio::test]
 async fn restricted_v5_denial_does_not_dispatch_or_consume_quota() {
     let e = setup(&[]).await;
-    e.state.db.run_script(vec![
-        "UPDATE api_keys SET image_model_scope='all', discord_id='900000000000000041' WHERE id=1".into(),
-    ]).await.unwrap();
-    e.state
-        .db
-        .set_setting(gate_server::v5_access::MODE_KEY, "restricted")
-        .await
-        .unwrap();
-    e.state
-        .db
-        .set_setting(
-            gate_server::v5_access::SUBJECTS_KEY,
-            r#"["900000000000000042"]"#,
-        )
-        .await
-        .unwrap();
+    common::policy_for(&e.state, 1, json!({"v5":false})).await;
     let (status, _, body) = call(
         &e.state,
         "POST",
@@ -784,22 +708,7 @@ async fn restricted_v5_denial_does_not_dispatch_or_consume_quota() {
 #[tokio::test]
 async fn queued_v5_is_rechecked_after_subject_revocation() {
     let e = setup(&[]).await;
-    e.state.db.run_script(vec![
-        "UPDATE api_keys SET image_model_scope='all', discord_id='900000000000000061' WHERE id=1".into(),
-    ]).await.unwrap();
-    e.state
-        .db
-        .set_setting(gate_server::v5_access::MODE_KEY, "restricted")
-        .await
-        .unwrap();
-    e.state
-        .db
-        .set_setting(
-            gate_server::v5_access::SUBJECTS_KEY,
-            r#"["900000000000000061"]"#,
-        )
-        .await
-        .unwrap();
+    common::policy_for(&e.state, 1, json!({"v5":true})).await;
     e.mock.push(
         "/ai/generate-image",
         Reply::Chunks {
@@ -857,11 +766,7 @@ async fn queued_v5_is_rechecked_after_subject_revocation() {
         tokio::time::sleep(std::time::Duration::from_millis(5)).await;
     }
     assert!(queued, "second image must be waiting before revocation");
-    e.state
-        .db
-        .set_setting(gate_server::v5_access::SUBJECTS_KEY, "[]")
-        .await
-        .unwrap();
+    common::policy_for(&e.state, 1, json!({"v5":false})).await;
     assert_eq!(first.await.unwrap().0, StatusCode::OK);
     let (status, _, body) = second.await.unwrap();
     assert_eq!(
@@ -885,49 +790,24 @@ async fn queued_v5_is_rechecked_after_subject_revocation() {
 }
 
 #[tokio::test]
-async fn owner_identity_survives_member_key_rotation() {
-    let e = setup(&[]).await;
-    e.state
-        .db
-        .run_script(vec![
-            "UPDATE api_keys SET discord_id='900000000000000071' WHERE id=1".into(),
-        ])
-        .await
-        .unwrap();
-    e.state
-        .db
-        .set_setting(gate_server::v5_access::MODE_KEY, "restricted")
-        .await
-        .unwrap();
-    e.state
-        .db
-        .set_setting(
-            gate_server::v5_access::SUBJECTS_KEY,
-            r#"["900000000000000071"]"#,
-        )
-        .await
-        .unwrap();
-    e.state
-        .db
-        .set_setting(
-            gate_server::v5_access::OWNERS_KEY,
-            r#"["900000000000000071"]"#,
-        )
-        .await
-        .unwrap();
+async fn member_rule_survives_credential_rotation() {
+    let env = setup(&[]).await;
+    common::policy_for(&env.state, 1, json!({"v5":true})).await;
     assert!(
-        e.state
+        env.state
             .db
             .rotate_key_token(1, "synthetic-rotated-member-key")
             .await
             .unwrap()
     );
-    let key = gate_server::key::Key(e.state.db.get_key(1).await.unwrap().unwrap());
-    let access = gate_server::v5_access::evaluate(&e.state, Some(key.str("discord_id")))
-        .await
-        .unwrap();
-    assert!(access.decision.allowed);
-    assert!(access.owner);
+    let key = gate_server::key::Key::load(
+        &env.state.db,
+        env.state.db.get_key(1).await.unwrap().unwrap(),
+    )
+    .await
+    .unwrap();
+    assert_eq!(key.subject(), common::SUBJECT);
+    assert!(key.policy.v5);
 }
 
 /// V5 也在入口预检：同一把 Key 的前一张 V5 已经拿到预留、正在出图，而今天只剩这 1 张时，
@@ -935,13 +815,7 @@ async fn owner_identity_survives_member_key_rotation() {
 #[tokio::test]
 async fn second_v5_is_refused_at_once_when_the_first_holds_the_last_slot() {
     let e = setup(&[]).await;
-    e.state
-        .db
-        .run_script(vec![
-            r#"UPDATE api_keys SET image_model_scope='all', daily_v5=2, quota_auto=-1, quota_limits='{"images":{"mode":"unlimited"},"v5":{"mode":"limit","value":2},"daily_anlas":{"mode":"inherit"},"monthly_anlas":{"mode":"unlimited"}}' WHERE id=1"#.into(),
-        ])
-        .await
-        .unwrap();
+    common::policy_for(&e.state,1,json!({"daily_v5":2,"v5":true,"daily_images":9999,"daily_anlas":null,"monthly_anlas":99999})).await;
     e.state
         .db
         .record_success(
@@ -1157,7 +1031,7 @@ async fn paused_key_message_without_reason_is_neutral() {
 }
 
 /// 「每位成员到网页登录一次」：开关打开后，这之后没在网页登录过的成员 Key 先拦下；网页登录一次（哪怕没算出设备指纹）
-/// 立即放行；没绑 Discord 的 Key（这里的默认 Key）不拦；开关关掉就都不拦。
+/// 立即放行；开关关掉后，其他已绑定成员也不拦。
 /// 放行按永久保留的 web_logins：30 天清理 device_logins 后不会又拦回去。
 #[tokio::test]
 async fn web_login_required_blocks_until_the_member_logs_in_once() {
@@ -1202,9 +1076,10 @@ async fn web_login_required_blocks_until_the_member_logs_in_once() {
         "{}",
         err_message(&body)
     );
-    // 没绑 Discord 的 Key 不拦
-    let (_, _, body) = ask(TOKEN).await;
-    assert!(!err_message(&body).contains("用 Discord 登录一次"));
+    // 默认成员同样必须完成网页登录，没有身份豁免。
+    let (status, _, body) = ask(TOKEN).await;
+    assert_eq!(status, 403);
+    assert!(err_message(&body).contains("用 Discord 登录一次"));
 
     // 开关之前的登录不算；之后登录一次（没有指纹也算）就放行（没登录过的结果不缓存）
     e.state
@@ -1650,13 +1525,7 @@ async fn accounting_identity_across_counters_and_logs() {
 
 /// 让测试成员能出 V5。
 async fn allow_v5(state: &AppState) {
-    state
-        .db
-        .run_script(vec![
-            "UPDATE api_keys SET image_model_scope='all', daily_v5=10 WHERE id=1".into(),
-        ])
-        .await
-        .unwrap();
+    common::policy_for(state, 1, json!({"daily_v5":10,"v5":true})).await;
 }
 
 async fn set_mode(state: &AppState, mode: &str) {
@@ -1753,11 +1622,7 @@ async fn v5_beyond_free_spec_is_refused_even_with_anlas() {
     // 站长 10-22：V5 只用免费额度；多张等要花 Anlas 的 V5 直接拒，即使这把 Key 开了 Anlas
     let e = setup(&[]).await;
     allow_v5(&e.state).await;
-    e.state
-        .db
-        .run_script(vec!["UPDATE api_keys SET allow_anlas=1 WHERE id=1".into()])
-        .await
-        .unwrap();
+    common::policy_for(&e.state, 1, json!({"paid_parameters":true})).await;
     let before = e.mock.requests_to("/ai/generate-image").len();
     let (status, body) = v5_post(&e, image_body("nai-diffusion-5-full", 2)).await;
     assert_eq!(status, 403, "{}", String::from_utf8_lossy(&body));
@@ -1775,13 +1640,12 @@ async fn v5_beyond_free_spec_is_refused_even_with_anlas() {
 async fn single_oversized_v5_is_refused_before_queueing() {
     let e = setup(&[]).await;
     allow_v5(&e.state).await;
-    e.state
-        .db
-        .run_script(vec![
-            "UPDATE api_keys SET allow_anlas=1, daily_anlas=5000 WHERE id=1".into(),
-        ])
-        .await
-        .unwrap();
+    common::policy_for(
+        &e.state,
+        1,
+        json!({"daily_anlas":5000,"paid_parameters":true}),
+    )
+    .await;
     let mut body = image_body("nai-diffusion-5-full", 1);
     body["parameters"]["width"] = json!(1216);
     body["parameters"]["height"] = json!(1600);
@@ -2026,13 +1890,7 @@ async fn usage_log_records_user_agent_and_real_client_ip() {
 #[tokio::test]
 async fn exhausted_v5_is_paid_by_a_listed_account_within_budget() {
     let e = setup(&[]).await;
-    e.state
-        .db
-        .run_script(vec![
-            "UPDATE api_keys SET daily_v5=10, image_model_scope='all' WHERE id=1".into(),
-        ])
-        .await
-        .unwrap();
+    common::policy_for(&e.state, 1, json!({"daily_v5":10,"v5":true})).await;
     e.mock.set_v5_percent(0);
     let token_id = e.state.nai.tokens().await[0].token_id.clone();
     let v5 = || Some(image_body("nai-diffusion-5-full", 1));
@@ -2121,13 +1979,12 @@ async fn site_paid_budget_beats_member_anlas_and_switching() {
         .guard
         .with(|g| g.values.insert("interval_jitter".into(), 0));
     allow_v5(&e.state).await;
-    e.state
-        .db
-        .run_script(vec![
-            "UPDATE api_keys SET allow_anlas=1, daily_anlas=500 WHERE id=1".into(),
-        ])
-        .await
-        .unwrap();
+    common::policy_for(
+        &e.state,
+        1,
+        json!({"daily_anlas":500,"paid_parameters":true}),
+    )
+    .await;
     let until = e.state.now() + 3600.0;
     let mut grant = serde_json::Map::new();
     for t in e.state.nai.tokens().await {
@@ -2257,13 +2114,12 @@ async fn upstream_402_on_free_v5_switches_to_other_account_and_marks_out() {
 async fn paid_v5_refuses_when_account_anlas_is_short() {
     let e = setup(&[]).await;
     allow_v5(&e.state).await;
-    e.state
-        .db
-        .run_script(vec![
-            "UPDATE api_keys SET allow_anlas=1, daily_anlas=500 WHERE id=1".into(),
-        ])
-        .await
-        .unwrap();
+    common::policy_for(
+        &e.state,
+        1,
+        json!({"daily_anlas":500,"paid_parameters":true}),
+    )
+    .await;
     let token_id = e.state.nai.tokens().await[0].token_id.clone();
     let grant = json!({ &token_id: {"until": e.state.now() + 3600.0, "max_anlas": 1000} });
     e.state
@@ -2301,13 +2157,12 @@ async fn free_v5_is_refused_once_upstream_allowance_reads_empty() {
 #[tokio::test]
 async fn raw_precise_references_are_sent_in_the_cached_shape() {
     let e = setup(&[]).await;
-    e.state
-        .db
-        .run_script(vec![
-            "UPDATE api_keys SET features='image,vibe,tags' WHERE id=1".into(),
-        ])
-        .await
-        .unwrap();
+    common::policy_for(
+        &e.state,
+        1,
+        json!({"image":true,"vibe":true,"tags":true,"upscale":false,"augment":false}),
+    )
+    .await;
     let png = "iVBORw0KGgoAAAANSUhEUgAAAAEAAAAB";
     let body = |img: &str| {
         let mut b = image_body("nai-diffusion-4-5-full", 1);

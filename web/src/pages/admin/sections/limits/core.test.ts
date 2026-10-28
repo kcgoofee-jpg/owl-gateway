@@ -1,14 +1,9 @@
 import { describe, expect, it } from "vitest";
-import { agoText, dash, guardSpecs, QUOTA_SPECS, RUNTIME_SPECS } from "./core";
+import { agoText, dash, guardSpecs, RUNTIME_SPECS } from "./core";
 
 describe("额度与保护：全是手动设置", () => {
-  it("每人 / 全站额度的范围与后端一致", () => {
-    expect(QUOTA_SPECS.register_daily_images).toMatchObject({ kind: "int", min: 0, max: 9999 });
-    expect(QUOTA_SPECS.global_monthly_anlas?.kind).toBe("float");
-    // 自动档已删除：只有关 / 开
-    const medium = QUOTA_SPECS.v5_medium_mode;
-    expect(medium?.kind === "select" && medium.options.map((o) => o.value)).toEqual(["off", "on"]);
-    // 出图间隔 10-23 删除：节奏只剩账号保护的「每张出完后歇 N～M 秒」
+  it("运行排队字段保留服务端边界", () => {
+    expect(RUNTIME_SPECS.queue_timeout).toMatchObject({ kind: "int", min: 15, max: 300 });
     expect(Object.keys(RUNTIME_SPECS)).toEqual(["queue_timeout", "image_429_cooldown_seconds"]);
   });
   it("账号保护字段的范围取自接口，标题取短名", () => {

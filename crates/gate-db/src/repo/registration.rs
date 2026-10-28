@@ -1,6 +1,6 @@
 //! Discord 领取记录（`discord_registrations`）与待摘身份组（`pending_role_removals`）。
 //!
-//! 领取记录 / 问卷的查询与写入。「几条语句 + 一次 commit」= 这里一个事务；
+//! 领取记录的查询与写入。「几条语句 + 一次 commit」= 这里一个事务；
 //! 中间夹着 Discord 请求的地方分成几个方法（不能在持有未提交写事务时等网络）。
 
 use super::INVITE_TAG;
@@ -28,15 +28,13 @@ pub struct NewRegistration<'a> {
     pub key_name: &'a str,
     /// 配了「已领 Key」身份组：清掉旧的待摘除并标记 `role_granted=1`。
     pub member_role: bool,
+    pub expires_at: Option<f64>,
 }
 
 /// 退群核对的一个对象。
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct DepartedCandidate {
     pub discord_id: String,
-    /// 领到的是站长发的邀请 Key（带「邀请」标签）时：`(key_id, Key 名字)`。
-    /// 邀请 Key 只由站长手动删，退群时不回收。
-    pub invite_key: Option<(i64, String)>,
 }
 
 impl Db {
@@ -128,12 +126,13 @@ impl Db {
         .await
     }
 
-    /// 这个账号是否核验过指定服务器的指定身份组。
-    pub async fn role_verified(
+    /// 这个账号是否在有效时间窗口内核验过指定身份组。
+    pub async fn role_verified_since(
         &self,
         discord_id: &str,
         guild_id: &str,
         role_id: &str,
+        since: f64,
     ) -> Result<bool> {
         let (d, g, r) = (
             discord_id.to_string(),
@@ -142,11 +141,24 @@ impl Db {
         );
         self.read(move |c| {
             c.query_row(
-                "SELECT EXISTS(SELECT 1 FROM role_verifications WHERE discord_id=? AND guild_id=? AND role_id=?)",
-                params![d, g, r],
+                "SELECT EXISTS(SELECT 1 FROM role_verifications WHERE discord_id=? AND guild_id=? AND role_id=? AND verified_at>=?)",
+                params![d, g, r,since],
                 |row| row.get::<_, i64>(0),
             )
             .map(|n| n != 0)
+        })
+        .await
+    }
+
+    /// 开始一次新核验时作废旧凭据；查询失败不能继续沿用旧成功记录。
+    pub async fn clear_role_verifications(&self, subject: &str) -> Result<()> {
+        let subject = subject.to_owned();
+        self.write(move |transaction| {
+            transaction.execute(
+                "DELETE FROM role_verifications WHERE discord_id=?",
+                [&subject],
+            )?;
+            Ok(())
         })
         .await
     }
@@ -218,8 +230,7 @@ impl Db {
 
     // ------------------------------------------------------------------ 退群回收 / 资料补全
 
-    /// 该核对「是否还在服务器」的领取记录（最久没核对的在前），并带上是不是邀请 Key。
-    /// 邀请 Key 的持有人照样核对（退群时给站长留一条提醒），但不回收。
+    /// 待核对服务器成员资格的领取记录，按上次核对时间排序；领取方式不影响退群回收。
     pub async fn departed_candidates(
         &self,
         now: f64,
@@ -227,20 +238,10 @@ impl Db {
     ) -> Result<Vec<DepartedCandidate>> {
         self.read(move |c| {
             let mut stmt = c.prepare(
-                "SELECT r.discord_id, k.id, k.name FROM discord_registrations r \
-                 LEFT JOIN api_keys k ON k.id=r.key_id \
-                   AND EXISTS (SELECT 1 FROM key_tags t WHERE t.key_id=r.key_id AND t.tag=?) \
-                 WHERE COALESCE(r.member_checked_at, 0) < ? \
-                 ORDER BY COALESCE(r.member_checked_at, 0) LIMIT ?",
+                "SELECT discord_id FROM discord_registrations \
+                 WHERE COALESCE(member_checked_at,0)<? ORDER BY COALESCE(member_checked_at,0) LIMIT ?",
             )?;
-            stmt.query_map(params![INVITE_TAG, now - 86400.0, batch], |r| {
-                let invite_id = value::i64_opt(r, 1)?;
-                let name = value::text_or(r, 2, "")?;
-                Ok(DepartedCandidate {
-                    discord_id: value::text_or(r, 0, "None")?,
-                    invite_key: invite_id.map(|id| (id, name)),
-                })
-            })?
+            stmt.query_map(params![now-86400.0,batch],|r|Ok(DepartedCandidate {discord_id:r.get(0)?}))?
             .collect()
         })
         .await
@@ -391,7 +392,7 @@ impl Db {
             r.avatar.map(str::to_string),
             r.key_name.to_string(),
         );
-        let (key_id, now, member_role) = (r.key_id, r.now, r.member_role);
+        let (key_id, now, member_role, expires_at) = (r.key_id, r.now, r.member_role, r.expires_at);
         self.write(move |tx| {
             tx.execute(
                 "INSERT INTO discord_registrations(discord_id,key_id,created_at,username,display_name,avatar) \
@@ -400,8 +401,8 @@ impl Db {
             )?;
             tx.execute("UPDATE api_keys SET name=? WHERE id=?", params![name, key_id])?;
             tx.execute(
-                "UPDATE api_keys SET discord_id=? WHERE id=?",
-                params![id, key_id],
+                "UPDATE api_keys SET discord_id=?,expires_at=? WHERE id=?",
+                params![id,expires_at,key_id],
             )?;
             mark_role_granted(tx, &id, member_role)
         })

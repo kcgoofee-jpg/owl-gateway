@@ -17,6 +17,7 @@ path = "src/main.rs"
 
 [dependencies]
 gate-core.workspace = true
+gate-db.workspace = true
 anyhow.workspace = true
 clap.workspace = true
 serde.workspace = true
@@ -32,7 +33,6 @@ base64.workspace = true
 flate2 = "1"
 
 [dev-dependencies]
-gate-db.workspace = true
 axum.workspace = true
 tempfile = "3"
 

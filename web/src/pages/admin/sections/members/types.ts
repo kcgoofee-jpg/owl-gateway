@@ -1,19 +1,5 @@
 /** 成员相关接口的数据形状（/admin/api/members、/admin/api/keys、/admin/api/bans 等）。 */
-import type { Ops } from "../onboarding/core";
-
-export type Role = "regular" | "invite";
-export type QuotaLimit = { mode: "inherit" } | { mode: "unlimited" } | { mode: "limit"; value: number };
-export type MemberQuotaLimits = {
-  images: QuotaLimit;
-  v5: QuotaLimit;
-  daily_anlas: QuotaLimit;
-  monthly_anlas: QuotaLimit;
-};
-export const ROLE_LABEL: Record<Role, string> = {
-  regular: "普通",
-  invite: "邀请",
-};
-
+import type { PolicySnapshot } from "../member-policy";
 export type Tag = { tag: string; note: string; by: string; ts: number };
 export type AutoTag = { tag: string; count: number; note?: string };
 export type Discord = {
@@ -28,22 +14,14 @@ export type Member = {
   id: number;
   name: string;
   enabled: boolean;
-  role: Role;
-  role_label: string;
+  invited: boolean;
   discord_id: string | null;
   discord: Discord | null;
   created_at: number;
   last_used_at: number | null;
   expires_at: number | null;
-  daily_images: number;
-  daily_v5: number;
-  allow_anlas: boolean;
-  daily_anlas: number;
-  image_model_scope: string;
-  quota_auto: boolean;
-  quota_limits?: MemberQuotaLimits;
-  quota_limits_valid?: boolean;
-  today: { images: number; v5: number; anlas: number; requests: number };
+  policy: PolicySnapshot;
+  today: { images: number; legacy_free_images: number; v5: number; anlas: number; requests: number };
   week: { images: number; v5: number; anlas: number; requests: number };
   total_images: number;
   registered_at: number | null;
@@ -64,21 +42,8 @@ export type KeyRow = {
   name: string;
   token: string;
   enabled: boolean;
-  daily_images: number;
-  daily_anlas: number;
-  daily_v5: number;
-  monthly_anlas: number;
-  rpm: number;
-  allow_anlas: boolean;
-  allow_img2img: boolean;
-  exclude_global_v5: boolean;
-  image_model_scope: string;
-  quota_auto: boolean;
-  quota_limits?: MemberQuotaLimits;
-  quota_limits_valid?: boolean;
-  role: Role;
-  /** null = 全部已开放功能；数组 = 仅这些功能 */
-  features: string[] | null;
+  policy: PolicySnapshot;
+  invited: boolean;
   expires_at: number | null;
   created_at: number;
   last_used_at: number | null;
@@ -123,5 +88,3 @@ export type Coupon = {
   /** 重置哪几项：v45 / v45,v5 / v45,anlas / v45,v5,anlas */
   scope?: string;
 };
-
-export type OpsSnapshot = Pick<Ops, "registration" | "features" | "new_key">;

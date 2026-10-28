@@ -85,3 +85,43 @@ export async function adminSession(
   await ctx.close();
   return cookies;
 }
+
+export async function misalignedControls(page: Page): Promise<string[]> {
+  return page.evaluate(() => {
+    const sel =
+      "button:not(.switch):not(.tabs__tab):not(.lp-gallery__copy), select, input:not([type=checkbox]):not([type=radio]):not([type=hidden]), .xa-seg, .copy, .field-inline";
+    // Native modal dialogs make the background inert; compare controls in the active layer.
+    const root = document.querySelector("dialog[open]") ?? document;
+    const els = [...root.querySelectorAll<HTMLElement>(sel)].filter((el) => {
+      const r = el.getBoundingClientRect();
+      if (!r.width || !r.height || getComputedStyle(el).visibility === "hidden") return false;
+      // 复合控件只看外框
+      if (el.parentElement?.closest(".xa-seg, .copy, .field-inline")) return false;
+      // 收起的 <details> 里的控件看不见（Chrome 仍算出位置），标题行除外
+      const d = el.closest("details:not([open])");
+      if (d && !el.closest("summary")) return false;
+      return !el.closest("table, nav, aside, [role=menu], dialog:not([open])");
+    });
+    const name = (el: HTMLElement) =>
+      (el.getAttribute("aria-label") || el.textContent || el.className)
+        .trim()
+        .replace(/\s+/g, " ")
+        .slice(0, 16);
+    const out: string[] = [];
+    const rs = els.map((el) => ({ el, r: el.getBoundingClientRect() }));
+    for (let i = 0; i < rs.length; i++)
+      for (let j = i + 1; j < rs.length; j++) {
+        const a = rs[i] as (typeof rs)[number];
+        const b = rs[j] as (typeof rs)[number];
+        const overlap = Math.min(a.r.bottom, b.r.bottom) - Math.max(a.r.top, b.r.top);
+        if (overlap < Math.min(a.r.height, b.r.height) * 0.4) continue;
+        const gap = Math.max(a.r.left, b.r.left) - Math.min(a.r.right, b.r.right);
+        if (gap > 48 || gap < -2) continue;
+        if (Math.abs(a.r.height - b.r.height) > 1.5 || Math.abs(a.r.top - b.r.top) > 1.5)
+          out.push(
+            `「${name(a.el)}」${Math.round(a.r.height)}px vs 「${name(b.el)}」${Math.round(b.r.height)}px`,
+          );
+      }
+    return out;
+  });
+}

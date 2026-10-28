@@ -9,8 +9,7 @@ use serde_json::{Value, json};
 /// 2026-10-14 12:00:00 +08:00
 const NOW: f64 = 1_791_950_400.0;
 
-const NAMES: [&str; 8] = [
-    "quota",
+const NAMES: [&str; 7] = [
     "upstream_snapshot",
     "breaker",
     "key_guard",
@@ -102,12 +101,12 @@ async fn one_failing_job_does_not_affect_the_others() {
     let e = setup(&[]).await;
     // 快照表坏了：「上游 V5 快照」这一轮失败，别的任务照常
     run_sql(&e, vec!["DROP TABLE upstream_snapshots".into()]).await;
-    for name in ["quota", "upstream_snapshot", "breaker", "key_guard"] {
+    for name in ["upstream_snapshot", "breaker", "key_guard"] {
         let _ = run_job(&e.state, name).await;
     }
     let last = Value::Object(e.state.jobs.last().await);
     assert_eq!(last["upstream_snapshot"]["ok"], false, "{last}");
-    for name in ["quota", "breaker", "key_guard"] {
+    for name in ["breaker", "key_guard"] {
         assert_eq!(last[name]["ok"], true, "{name} {last}");
     }
 }
@@ -153,23 +152,4 @@ async fn quota_records_shape() {
     assert_eq!(a["quiet_rate"], Value::Null);
     assert!(v.get("quiet_rate").is_none());
     assert_eq!(v["manual"], json!({"account_caps": [], "paid_v5": []}));
-}
-
-#[tokio::test]
-async fn a_failed_recompute_is_recorded_without_a_second_bug() {
-    let _clock = clock(Some(NOW)).await;
-    let e = setup(&[]).await;
-    let api = Admin::login_bare(&e.state).await;
-    // 成员 Key 表坏了：改额度后的立即同步失败
-    run_sql(&e, vec!["DROP TABLE api_keys".into()]).await;
-    let (status, _) = api
-        .json(
-            "PUT",
-            "/settings",
-            Some(json!({"register_daily_images": 120})),
-        )
-        .await;
-    assert_eq!(status, 500);
-    let last = Value::Object(e.state.jobs.last().await);
-    assert_eq!(last["quota"]["ok"], false);
 }

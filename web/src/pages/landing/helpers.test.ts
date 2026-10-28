@@ -6,7 +6,6 @@ import type { MeMember } from "./types";
 const member = (over: Partial<MeMember> = {}): MeMember => ({
   logged_in: true,
   has_key: true,
-  image_scope: "all",
   today: {
     images: 30,
     v5: 4,
@@ -58,7 +57,6 @@ describe("quotaRows", () => {
   it("没配 V5 上限且模型范围不是 all：不显示 V5；没配 Anlas 上限：不显示 Anlas", () => {
     const rows = quotaRows(
       member({
-        image_scope: "free",
         today: { images: 1, v5: 0, legacy: 1, daily_images: 150, daily_v5: 0, daily_anlas: 0 },
       }),
     );
@@ -83,7 +81,6 @@ describe("quotaRows", () => {
     const rows = (today: Record<string, unknown>) =>
       quotaRows(
         member({
-          image_scope: "all",
           today: { images: 0, v5: 2, legacy: 0, daily_images: 150, daily_v5: 20, ...today },
         }),
       ).find((r) => r.id === "v5");
@@ -97,7 +94,6 @@ describe("quotaRows: upstream V5 exhausted", () => {
   const v5 = (today: Record<string, unknown>) =>
     quotaRows(
       member({
-        image_scope: "all",
         today: { images: 0, v5: 0, legacy: 0, daily_images: 150, daily_v5: 20, ...today },
       }),
     ).find((r) => r.id === "v5");

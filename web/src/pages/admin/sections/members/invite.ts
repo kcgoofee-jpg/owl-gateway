@@ -9,5 +9,5 @@ ${token}
 2. 在弹出的 key 一栏粘贴上面这串 Key，回车发送
 3. 看到「✅ 邀请 Key 已绑定到你的 Discord 账号」就完成了
 
-绑定后打开 ${site} ，点「用 Discord 登录」就能查看额度和接入方法（网页只支持 Discord 登录，不用粘贴 Key）；也可以在 Discord 用 /quota 查看。`;
+绑定后打开 ${site} ，点「用 Discord 登录」就能查看额度和接入方法（网页只支持 Discord 登录，不用粘贴 Key）。领取资格、额度和回收条件与普通领取相同。`;
 }

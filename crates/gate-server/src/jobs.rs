@@ -4,7 +4,6 @@
 //!
 //! | 任务 | 周期 | 做什么 |
 //! |---|---|---|
-//! | `quota` 动态额度 | 10 分钟 ±20% | `quota::decide`：服务日第一次跑时复盘昨天、定当天的 V5 方案，之后每轮把额度下发给算法管理的 Key |
 //! | `upstream_snapshot` 上游 V5 快照 | 10 分钟 ±20%，满 1 小时才记 | 主动读一次订阅，写 `upstream_snapshots`（后台「额度记录」页估算 V5 实测恢复速度用） |
 //! | `breaker` 全站熔断 | 10 分钟 ±20% | 15 分钟内上游失败 ≥ 5 次、≥ 30%、来自 ≥ 2 把 Key → 停 5 分钟 |
 //! | `key_guard` 单 Key 限流 | 10 分钟 ±20% | 1 小时被拒 ≥ 120 次 → 暂停这把 Key 1 小时 |
@@ -21,9 +20,9 @@ mod abuse_scan;
 mod autopilot;
 mod capacity;
 pub mod leader;
-pub mod quota;
 mod reconcile;
 pub mod registry;
+mod support;
 
 pub use registry::{JOBS, Job, JobError, JobsState, Origin, find, guarded, run_once, spawn_job};
 

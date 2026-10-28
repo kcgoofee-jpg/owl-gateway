@@ -39,14 +39,6 @@ pub(super) async fn tool(
         },
     )
     .await?;
-    if !key.allow_img2img() {
-        return Err(GateError::with_code(
-            403,
-            "本站或你的 Key 未开放图片工具，未扣费。如需开通，请联系站长。",
-            reasons::FEATURE_OFF,
-        )
-        .into());
-    }
     let body = read_image_payload(&parts.headers, body, IMAGE_BODY_LIMIT).await?;
     let admission = image_admission(&state, &ctx, &key).await?;
     let slots = acquire_slots(&state);
@@ -67,7 +59,21 @@ pub(super) async fn tool(
         v5: 0,
         is_vibe: false,
     };
-    let reserved = Arc::new(reserve_image_budget(&state, &ctx, &key, &est, 0).await?);
+    let reserved = Arc::new(
+        reserve_image_budget(
+            &state,
+            &ctx,
+            &key,
+            &est,
+            0,
+            crate::admission::DispatchRequirements::feature(if operation == "upscale" {
+                "upscale"
+            } else {
+                "augment"
+            }),
+        )
+        .await?,
+    );
     let (s, c) = (state.clone(), ctx.clone());
     shielded(&state, &ctx, async move {
         let _held = (admission, slots, reserved.clone());
@@ -86,7 +92,7 @@ pub(super) async fn tool(
             let cb = Callbacks {
                 correlation_id: Some(ctx.correlation_id()),
                 on_rate_limited: Some(on_429(&state)),
-                before_dispatch: Some(before_dispatch(&state, None)),
+                before_dispatch: Some(before_dispatch(&state)),
                 on_dispatch: Some(on_dispatch(&state, &ctx, reserved.clone())),
                 ..Default::default()
             };
@@ -212,7 +218,17 @@ pub(super) async fn vibe(state: AppState, req: Request) -> Result<Response, ApiE
     let admission = image_admission(&state, &ctx, &key).await?;
     let slots = acquire_slots(&state);
     check_image_cooldown(&state)?;
-    let reserved = Arc::new(reserve_image_budget(&state, &ctx, &key, &est, 0).await?);
+    let reserved = Arc::new(
+        reserve_image_budget(
+            &state,
+            &ctx,
+            &key,
+            &est,
+            0,
+            crate::admission::DispatchRequirements::feature("vibe"),
+        )
+        .await?,
+    );
     let (s, c) = (state.clone(), ctx.clone());
     shielded(&state, &ctx, async move {
         let _held = (admission, slots, reserved.clone());
@@ -229,7 +245,7 @@ pub(super) async fn vibe(state: AppState, req: Request) -> Result<Response, ApiE
         let cb = Callbacks {
             correlation_id: Some(ctx.correlation_id()),
             on_rate_limited: Some(on_429(&state)),
-            before_dispatch: Some(before_dispatch(&state, None)),
+            before_dispatch: Some(before_dispatch(&state)),
             on_dispatch: Some(on_dispatch(&state, &ctx, reserved.clone())),
             ..Default::default()
         };

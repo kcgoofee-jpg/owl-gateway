@@ -18,6 +18,13 @@ struct Cli {
 
 #[derive(Subcommand)]
 enum Cmd {
+    /// 只读预检成员规则迁移，只输出默认值和聚合差异
+    PolicyPreflight {
+        #[arg(long)]
+        db: PathBuf,
+        #[arg(long, default_value_t = 3)]
+        idle_days: i64,
+    },
     /// 改一项后台设置（走后台接口，校验与操作日志同后台页面）；先看 `set --list`，没有 --yes 不写
     Set {
         /// 设置名（见 --list）
@@ -121,6 +128,24 @@ fn main() {
 
 async fn dispatch(cli: Cli) -> Result<i32> {
     match cli.cmd {
+        Cmd::PolicyPreflight { db, idle_days } => {
+            anyhow::ensure!(idle_days >= 0, "闲置期限不能是负数");
+            let mut conn = rusqlite::Connection::open_with_flags(
+                db,
+                rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY,
+            )?;
+            let transaction = conn.transaction()?;
+            let preview =
+                gate_db::policy_migration::preview(&transaction, util::now_secs(), idle_days)?;
+            transaction.commit()?;
+            println!(
+                "{}",
+                serde_json::to_string_pretty(&serde_json::json!({
+                "defaults":preview.defaults,"budgets":preview.budgets,"summary":preview.summary
+                }))?
+            );
+            Ok(0)
+        }
         Cmd::Set {
             name,
             value,

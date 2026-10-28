@@ -52,13 +52,6 @@ async fn tags_invites_and_quota_owner() {
     assert!(!db.delete_key_tag(a, "不存在").await.unwrap());
     assert!(db.delete_key_tag(b, "观察").await.unwrap());
     assert_eq!(db.key_names().await.unwrap(), ["邀请-3", "普通"]);
-    db.set_quota_auto(b, -1).await.unwrap();
-    assert_eq!(db.get_key(b).await.unwrap().unwrap()["quota_auto"], -1);
-    assert_eq!(
-        db.get_key(a).await.unwrap().unwrap()["quota_auto"],
-        1,
-        "新建默认交给算法"
-    );
     assert_eq!(
         db.key_names_for(&[b, a, 999])
             .await
@@ -241,43 +234,19 @@ async fn member_page_aggregates() {
 }
 
 #[tokio::test]
-async fn reset_all_keys_spares_invites() {
-    let (db, _d) = open().await;
-    let (user, invite) = (key(&db, "普通").await, key(&db, "邀请").await);
-    sql(
-        &db,
-        &format!(
-            "INSERT INTO key_tags(key_id, tag, ts) VALUES ({invite}, '邀请', 1.0), ({invite}, '观察', 1.0), ({user}, '观察', 1.0), (999, '孤儿', 1.0);\
-             INSERT INTO discord_registrations(discord_id, key_id, created_at) VALUES ('1', {user}, 1.0), ('2', {invite}, 1.0);\
-             INSERT INTO share_state(key_id, paused_until) VALUES ({user}, 9.0);"
-        ),
-    )
-    .await;
-    assert_eq!(db.reset_all_keys().await.unwrap(), (1, 1));
-    assert_eq!(db.get_key(user).await.unwrap().unwrap()["enabled"], 0);
-    assert_eq!(db.get_key(invite).await.unwrap().unwrap()["enabled"], 1);
-    let regs = db.registration_rows().await.unwrap();
-    assert_eq!(
-        regs.iter()
-            .map(|r| r.discord_id.as_str())
-            .collect::<Vec<_>>(),
-        ["2"]
-    );
-    let tags: Vec<(i64, String)> = db
-        .key_tag_rows()
+async fn reset_all_keys_includes_every_delivery_method() {
+    let (db, _dir) = open().await;
+    let user = key(&db, "普通").await;
+    let invite = key(&db, "邀请").await;
+    db.upsert_key_tag(invite, "邀请", "", "synthetic", 1.0)
         .await
-        .unwrap()
-        .into_iter()
-        .map(|t| (t.key_id, t.tag))
-        .collect();
-    assert!(tags.contains(&(invite, "观察".into())) && !tags.contains(&(user, "观察".into())));
-    assert!(
-        !tags.contains(&(999, "孤儿".into())),
-        "没有对应 Key 的孤儿标签也清掉（旧版如此）"
-    );
-    assert!(db.pause_rows().await.unwrap().is_empty());
-    // 再来一次：没有可失效的了（已经失效的算在内——UPDATE 命中的行数）
-    assert_eq!(db.reset_all_keys().await.unwrap(), (1, 1));
+        .unwrap();
+    assert_eq!(db.reset_all_keys().await.unwrap(), 2);
+    for id in [user, invite] {
+        assert_eq!(db.get_key(id).await.unwrap().unwrap()["enabled"], 0);
+    }
+    assert!(db.registration_rows().await.unwrap().is_empty());
+    assert!(db.key_tag_rows().await.unwrap().is_empty());
 }
 
 #[tokio::test]

@@ -3,7 +3,7 @@
 //! 待审接口列出每个涉及账号（含没有 Key 的）。合成数据：Discord ID 一律 9000000000000004xx。
 
 mod common;
-use common::{Admin, query, run_job, set_setting, setup_registration};
+use common::{Admin, query, run_job, setup_registration};
 use gate_server::ban_link::{self, BLOCK_NOTICE};
 use gate_server::registration::{DiscordUser, Issued, RegErr};
 use serde_json::{Value, json};
@@ -18,7 +18,7 @@ const APPLE: &str = r#"{"gpuRenderer":"Apple GPU","platform":"iPhone"}"#;
 async fn env() -> common::Env {
     // 发 Key 不需要找 Discord（没配成员身份组）；地址指向一个不会连上的端口
     let e = setup_registration("http://127.0.0.1:9", &[]).await;
-    set_setting(&e, "register_open", "1").await;
+    common::claim_for(&e.state, json!({"open":true})).await;
     let now = e.state.now();
     e.state
         .db

@@ -24,3 +24,21 @@ Before removing historical creative-content records, startup writes `<database-n
 Recovery backups, including older `before-prompts-only` archives, are offline operator archives and are never served or read by the gateway. They can still contain historical prompts and images. Delete them explicitly according to the operator's backup policy after verifying the release.
 
 Rollback across this schema change requires both the previous image and a database backup: stop the gateway, preserve the failed live database separately, restore `database.sqlite` as the gateway database without carrying over the failed version's WAL/SHM files, and start the previous image. A normal image-only rollback is insufficient after the record tables have been removed.
+
+
+## 成员规则与运行保护
+
+成员规则只有一份默认值和按 Discord 成员 ID 保存的逐项例外。未设置或清空的例外随默认值变化；例外等于默认值时自动合并。额度使用数字，0 表示停用。Key 只保存凭据和生命周期元数据，邀请来源不会改变权限或回收条件。
+
+| 接口 | 客户端调整 |
+| --- | --- |
+| `GET/PUT /admin/api/member-rules` | 读取或完整提交 13 项默认规则；响应为 `{defaults}`。 |
+| `GET/PUT /admin/api/members/{discord_id}/rules` | 读取 `{defaults, overrides, effective}`；提交逐项例外，`null` 清空。 |
+| `GET/PUT /admin/api/settings` | 完整提交 `{budgets:{daily_v5,daily_anlas,monthly_anlas},v5_paused,v5_medium_mode}`；缺少字段或旧字段返回 422。 |
+| `PUT /admin/api/ops/registration` | 完整提交 `{open,max_users,expires_days,roles:[{guild,role,note}]}`。身份组仅决定领取资格，多条之间为“或”。 |
+| `PATCH /admin/api/keys/{id}` | 仅接受 `name`、`enabled`、`expires_at`；权限改用成员规则接口。 |
+| `POST /admin/api/keys`、`.../{id}/role`、`.../{id}/bind-discord` | 已移除；使用邀请凭据或 Discord 自助领取。 |
+
+成员和 Key 后台视图使用 `policy` 返回默认规则、例外和有效规则；`invited` 仅表示邀请来源，替代 `role` 与 `role_label`。成员公开视图的 `policy` 为有效规则。删除 `quota_auto`、`quota_limits`、`image_model_scope`、身份管理员名单和全站预算豁免；客户端不应再提供“手动／自动／继承／不限”选项。订阅视图保留实际数字额度和暂停状态，删除 `*Unlimited`、`quotaLimits` 和 `imageModelScope`。所有成员都受全站预算与暂停约束，排队请求在发送上游前再次核验当前规则。
+
+升级先检查旧规则并建立私有数据库备份，再在同一事务中写入新规则、删除旧字段和设置。历史请求与结算记录保持不变，执行结果不明的预算占用继续保留。失败时回滚，重复启动不会重复转换。新安装直接使用原生结构；存在旧结构的数据库必须经过显式网关迁移入口。

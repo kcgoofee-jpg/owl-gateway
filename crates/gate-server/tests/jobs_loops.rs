@@ -147,7 +147,7 @@ async fn idle_recycle_deletes_and_logs_without_banning_when_switched_on() {
         (3, 10.0, vec![("last_image_at", json!(now - 3600.0))]), // 活跃
         (4, 10.0, vec![("last_image_at", json!(now - 2.0 * DAY))]), // 2 天没生图 → 未到 3 天
         (5, 10.0, vec![("last_image_at", json!(now - DAY))]), // 1 天没生图 → 未到 3 天
-        (6, 10.0, vec![]), // 邀请标签豁免
+        (6, 10.0, vec![]), // 邀请标签也遵守闲置回收
         (7, 1.0, vec![]),  // 刚创建
         // 已过期：过期后请求一律 403、last_image_at 不再更新；不算闲置，照旧等 /register 时释放
         (8, 10.0, vec![("expires_at", json!(now - 4.0 * DAY))]),
@@ -173,21 +173,21 @@ async fn idle_recycle_deletes_and_logs_without_banning_when_switched_on() {
         .unwrap();
     // 通过定时任务跑一轮：摘要写明回收了几把
     let summary = run_job(&e.state, "idle_recycle").await.unwrap();
-    assert_eq!(summary, "回收 3 把");
+    assert_eq!(summary, "回收 4 把");
     let mut gone = Vec::new();
     for (n, id) in (1..=9).zip(&ids) {
         if !key_exists(&e, *id).await {
             gone.push(n);
         }
     }
-    assert_eq!(gone, vec![1, 2, 9]);
+    assert_eq!(gone, vec![1, 2, 6, 9]);
     for (n, alive) in [
         (1, false),
         (2, false),
         (3, true),
         (4, true),
         (5, true),
-        (6, true),
+        (6, false),
         (7, true),
         (8, true),
         (9, false),
@@ -232,7 +232,7 @@ async fn idle_recycle_deletes_and_logs_without_banning_when_switched_on() {
         .iter()
         .filter(|r| r["action"] == "闲置回收 Key")
         .collect();
-    assert_eq!(del.len(), 3);
+    assert_eq!(del.len(), 4);
     assert!(
         del.iter()
             .any(|r| r["target"] == format!("Key #{id1} 成员01")

@@ -49,7 +49,6 @@ pub struct RequestSettlement {
     pub status: String,
     pub day: String,
     pub month: String,
-    pub exclude_global_v5: bool,
     pub is_vibe: bool,
     pub anlas: f64,
     pub v5: i64,
@@ -286,7 +285,6 @@ impl Db {
         key_id: i64,
         day: &str,
         month: &str,
-        exclude_global_v5: bool,
         is_vibe: bool,
         anlas: f64,
         v5: i64,
@@ -300,8 +298,8 @@ impl Db {
             month.to_owned(),
         );
         self.write(move |tx| {
-            tx.execute("INSERT INTO request_settlements(request_id,rid,key_id,status,day,month,exclude_global_v5,anlas,v5,legacy,is_vibe,updated_at) VALUES(?,?,?,'reserved',?,?,?,?,?,?,?,?)",
-                params![request_id, rid, key_id, day, month, exclude_global_v5, anlas, v5, legacy, is_vibe, now])?;
+            tx.execute("INSERT INTO request_settlements(request_id,rid,key_id,status,day,month,anlas,v5,legacy,is_vibe,updated_at) VALUES(?,?,?,'reserved',?,?,?,?,?,?,?)",
+                params![request_id, rid, key_id, day, month, anlas, v5, legacy, is_vibe, now])?;
             Ok(())
         }).await
     }
@@ -314,7 +312,6 @@ impl Db {
         correlation_id: &str,
         day: &str,
         month: &str,
-        exclude_global_v5: bool,
         is_vibe: bool,
         anlas: f64,
         v5: i64,
@@ -327,8 +324,8 @@ impl Db {
             day.to_owned(),
             month.to_owned(),
         );
-        self.write(move |tx| Ok(tx.execute("UPDATE request_settlements SET status='dispatched',correlation_id=?,day=?,month=?,exclude_global_v5=?,anlas=?,v5=?,legacy=?,is_vibe=?,dispatched_at=CASE WHEN dispatched_at IS NULL THEN ? ELSE dispatched_at END,updated_at=? WHERE request_id=? AND status IN ('reserved','dispatched')",
-            params![correlation_id, day, month, exclude_global_v5, anlas, v5, legacy, is_vibe, now, now, request_id])? == 1)).await
+        self.write(move |tx| Ok(tx.execute("UPDATE request_settlements SET status='dispatched',correlation_id=?,day=?,month=?,anlas=?,v5=?,legacy=?,is_vibe=?,dispatched_at=CASE WHEN dispatched_at IS NULL THEN ? ELSE dispatched_at END,updated_at=? WHERE request_id=? AND status IN ('reserved','dispatched')",
+            params![correlation_id, day, month, anlas, v5, legacy, is_vibe, now, now, request_id])? == 1)).await
     }
 
     #[allow(clippy::too_many_arguments)]
@@ -337,7 +334,6 @@ impl Db {
         request_id: &str,
         day: &str,
         month: &str,
-        exclude_global_v5: bool,
         is_vibe: bool,
         anlas: f64,
         v5: i64,
@@ -345,8 +341,8 @@ impl Db {
     ) -> Result<bool> {
         let request_id = request_id.to_owned();
         let (day, month) = (day.to_owned(), month.to_owned());
-        self.write(move |tx| Ok(tx.execute("UPDATE request_settlements SET day=?,month=?,exclude_global_v5=?,anlas=?,v5=?,legacy=?,is_vibe=? WHERE request_id=? AND status IN ('reserved','dispatched')",
-            params![day, month, exclude_global_v5, anlas, v5, legacy, is_vibe, request_id])? == 1)).await
+        self.write(move |tx| Ok(tx.execute("UPDATE request_settlements SET day=?,month=?,anlas=?,v5=?,legacy=?,is_vibe=? WHERE request_id=? AND status IN ('reserved','dispatched')",
+            params![day, month, anlas, v5, legacy, is_vibe, request_id])? == 1)).await
     }
 
     /// Persist the complete success payload before applying counters. Repeated identical calls are safe.
@@ -549,18 +545,18 @@ impl Db {
         self.write(move |tx| {
             tx.execute("UPDATE request_settlements SET status='released',updated_at=? WHERE status='reserved'", [now])?;
             tx.execute("UPDATE request_settlements SET status='uncertain',updated_at=? WHERE status='dispatched'", [now])?;
-            let mut stmt = tx.prepare("SELECT request_id,rid,key_id,status,day,month,exclude_global_v5,anlas,v5,legacy,is_vibe,result_json,correlation_id FROM request_settlements WHERE status IN ('uncertain','result_saved') ORDER BY request_id")?;
+            let mut stmt = tx.prepare("SELECT request_id,rid,key_id,status,day,month,anlas,v5,legacy,is_vibe,result_json,correlation_id FROM request_settlements WHERE status IN ('uncertain','result_saved') ORDER BY request_id")?;
             stmt.query_map([], |r| Ok(RequestSettlement {
                 request_id:r.get(0)?, rid:r.get(1)?, key_id:r.get(2)?, status:r.get(3)?, day:r.get(4)?, month:r.get(5)?,
-                exclude_global_v5:r.get::<_,i64>(6)? != 0, anlas:r.get(7)?, v5:r.get(8)?, legacy:r.get(9)?, is_vibe:r.get::<_,i64>(10)? != 0, result_json:r.get(11)?, correlation_id:r.get(12)?
+                anlas:r.get(6)?, v5:r.get(7)?, legacy:r.get(8)?, is_vibe:r.get::<_,i64>(9)? != 0, result_json:r.get(10)?, correlation_id:r.get(11)?
             }))?.collect()
         }).await
     }
 
     pub async fn list_unknown_request_settlements(&self) -> Result<Vec<RequestSettlement>> {
         self.read(|c| {
-            let mut stmt=c.prepare("SELECT request_id,rid,key_id,status,day,month,exclude_global_v5,anlas,v5,legacy,is_vibe,result_json,correlation_id FROM request_settlements WHERE status='uncertain' ORDER BY updated_at")?;
-            stmt.query_map([], |r| Ok(RequestSettlement { request_id:r.get(0)?, rid:r.get(1)?, key_id:r.get(2)?, status:r.get(3)?, day:r.get(4)?, month:r.get(5)?, exclude_global_v5:r.get::<_,i64>(6)? != 0, anlas:r.get(7)?, v5:r.get(8)?, legacy:r.get(9)?, is_vibe:r.get::<_,i64>(10)? != 0, result_json:r.get(11)?, correlation_id:r.get(12)? }))?.collect()
+            let mut stmt=c.prepare("SELECT request_id,rid,key_id,status,day,month,anlas,v5,legacy,is_vibe,result_json,correlation_id FROM request_settlements WHERE status='uncertain' ORDER BY updated_at")?;
+            stmt.query_map([], |r| Ok(RequestSettlement { request_id:r.get(0)?, rid:r.get(1)?, key_id:r.get(2)?, status:r.get(3)?, day:r.get(4)?, month:r.get(5)?, anlas:r.get(6)?, v5:r.get(7)?, legacy:r.get(8)?, is_vibe:r.get::<_,i64>(9)? != 0, result_json:r.get(10)?, correlation_id:r.get(11)? }))?.collect()
         }).await
     }
 

@@ -6,7 +6,7 @@
 import { ApiError, sendJSON } from "../../../../lib/api";
 import { tick } from "../../Admin";
 import { edits } from "../live";
-import type { Coupon, KeyRow, Role } from "./types";
+import type { Coupon, KeyRow } from "./types";
 
 export type Res<T = unknown> = { ok: true; data: T } | { ok: false; error: string };
 
@@ -43,10 +43,6 @@ const scopeList = (s: ResetScope) => [...(s.v5 ? ["v5"] : []), ...(s.anlas ? ["a
 export const resetDailyQuota = (id: number, scope: ResetScope) =>
   call("POST", `${A}/keys/${id}/reset-daily-image-quota`, { scope: scopeList(scope) });
 
-export const switchRole = (id: number, role: Role) => call("POST", `${A}/keys/${id}/role`, { role });
-
-export const setQuotaAuto = (id: number) => call("PATCH", `${A}/keys/${id}`, { quota: "auto" });
-
 export const addTag = (id: number, tag: string, note: string) =>
   call("PUT", `${A}/keys/${id}/tags`, { tag, note });
 export const removeTag = (id: number, tag: string) =>
@@ -59,14 +55,6 @@ export const giveCoupon = (id: number, days: number, note: string, scope: ResetS
     days,
     note,
     scope: scopeList(scope),
-  });
-
-/** 绑定 / 换绑 Discord。服务端会用机器人读资料：读到了 `from_discord` 为 true，Key 名改成「显示名 (@用户名)」；
- *  读不到才用这里的 `username`（可以为空）。`name` 是绑定后这把 Key 的名字。 */
-export const bindDiscord = (id: number, discordId: string, username: string) =>
-  call<{ name: string; from_discord: boolean }>("POST", `${A}/keys/${id}/bind-discord`, {
-    discord_id: discordId,
-    username,
   });
 
 export const createInvite = () => call<{ key: KeyRow }>("POST", `${A}/keys/invite`, {});

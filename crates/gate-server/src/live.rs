@@ -9,22 +9,24 @@
 //! 快照里没有任何人的 Key、提示词、IP 或 Discord ID；「我的排队」（`me`）按连接单独拼，不进共享快照
 //! 红线：共享缓存对象绝不能被某个请求的 `me` 污染。
 
-use crate::auth::site_flag;
 use crate::error::InternalError;
 use crate::state::AppState;
 use gate_core::features::{self, FEATURES};
 use gate_core::primitives;
 use gate_core::reasons::Reason;
-use gate_core::site_flags::ALGO_NOTICE;
-use gate_core::values;
 use serde_json::{Map, Value, json};
 
-fn public_algo_notice(custom: &str, mode: gate_core::v5_access::Mode) -> String {
-    match mode {
-        gate_core::v5_access::Mode::Restricted => "V5 当前仅授权成员可用。".to_string(),
-        gate_core::v5_access::Mode::Closed => "V5 当前已关闭。".to_string(),
-        _ => primitives::take_chars(custom, 300).to_string(),
-    }
+async fn public_algo_notice(state: &AppState) -> Result<String, gate_db::DbError> {
+    let defaults = state.db.member_defaults().await?;
+    let v5 = if defaults.v5 {
+        format!("V5 {} 张/天", defaults.daily_v5)
+    } else {
+        "V5 未开放".into()
+    };
+    Ok(format!(
+        "默认额度：V4.5 {} 张/天 · {v5}",
+        defaults.daily_images
+    ))
 }
 use std::collections::HashMap;
 use std::hash::{Hash, Hasher};
@@ -76,7 +78,6 @@ pub struct RegSettings {
     pub open: bool,
     pub max_users: i64,
     /// None = 全部功能（`register_features` 存的是 `*`，或环境变量里没配）。
-    pub features: Option<Vec<String>>,
     /// 限定身份组的名称（后台 register_role_note）；只有身份组门槛配齐（服务器 + 身份组都有）时才是 `Some`。
     /// 首页登录被挡时要告诉成员「缺哪个身份组」，只暴露这一句名称，不暴露服务器 / 身份组 ID。
     pub role_note: Option<String>,
@@ -93,7 +94,6 @@ pub async fn registration_settings(state: &AppState) -> Result<Option<RegSetting
     Ok(Some(RegSettings {
         open: r.open,
         max_users: r.max_users,
-        features: r.features,
         role_note,
     }))
 }
@@ -288,9 +288,7 @@ async fn build_meta(state: &AppState) -> Result<Map<String, Value>, InternalErro
             reg["slots_left"] = json!(left);
         }
     }
-    let algo = values::text(&site_flag(state, &ALGO_NOTICE).await?);
-    let policy = crate::v5_access::evaluate(state, None).await?;
-    let algo = public_algo_notice(&algo, policy.mode);
+    let algo = public_algo_notice(state).await?;
     let mut m = Map::new();
     m.insert("site".into(), json!(env.site_url.trim_end_matches('/')));
     m.insert("discord_invite".into(), json!(env.discord_invite_url));
@@ -334,10 +332,12 @@ pub async fn build_status(state: &AppState) -> Result<Value, InternalError> {
         if let Some(note) = &cfg.role_note {
             reg["role_note"] = json!(note);
         }
-        let names: Vec<String> = match &cfg.features {
-            None => FEATURES.iter().map(|(n, _)| n.to_string()).collect(),
-            Some(l) => l.clone(),
-        };
+        let policy = state.db.member_defaults().await?;
+        let names: Vec<String> = FEATURES
+            .iter()
+            .filter(|(name, _)| policy.allows(name))
+            .map(|(name, _)| (*name).to_owned())
+            .collect();
         defaults = names
             .into_iter()
             .filter(|n| enabled(n) && n != "voice")
@@ -358,9 +358,7 @@ pub async fn build_status(state: &AppState) -> Result<Value, InternalError> {
         .filter(|r| r.active)
         .count();
     let env = &state.env;
-    let algo = values::text(&site_flag(state, &ALGO_NOTICE).await?);
-    let policy = crate::v5_access::evaluate(state, None).await?;
-    let algo = public_algo_notice(&algo, policy.mode);
+    let algo = public_algo_notice(state).await?;
     Ok(json!({
         "site": env.site_url.trim_end_matches('/'),
         "upstream": {"status": status, "image_cooldown_seconds": state.cooldown.remaining(now)},

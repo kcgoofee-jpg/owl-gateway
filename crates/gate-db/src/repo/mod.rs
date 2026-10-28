@@ -22,6 +22,7 @@ pub mod footprint;
 pub mod guard;
 pub mod kernel;
 pub mod keys;
+pub mod member_policy;
 pub mod public;
 pub mod reconciliation;
 pub mod registration;
@@ -33,13 +34,8 @@ pub mod usage;
 
 use rusqlite::types::Value as SqlValue;
 
-/// 站长手动发的邀请 Key：只由站长手动删除，闲置回收跳过（10-11 站长）。
+/// 由邀请凭据领取的来源标签，不提供权限或生命周期豁免。
 pub const INVITE_TAG: &str = "邀请";
-
-pub const ROLE_INVITE: &str = "invite";
-pub const ROLE_REGULAR: &str = "regular";
-/// 身份组 → 中文标签。
-pub const ROLE_LABELS: [(&str, &str); 2] = [(ROLE_INVITE, "邀请"), (ROLE_REGULAR, "普通")];
 
 /// 后台请求日志列表读出的列：usage_log 的全部列，顺序同 schema.sql（`client` 放在最后）。
 /// `client` = 原始 User-Agent、`src` = 来源 IP，保留期（`usage_origin_keep_days`）过后被清成空串。

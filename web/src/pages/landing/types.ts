@@ -1,3 +1,4 @@
+import type { MemberPolicy } from "../../lib/member-policy";
 /**
  * 首页用到的接口数据形状（Rust 网关返回）。
  * 字段一律可缺省：网关只会多给、不会改名；缺哪个字段就不显示哪块，不编数字。只列页面真正读的字段。
@@ -58,16 +59,16 @@ export type MeMember = {
   requires_web_login?: boolean;
   key?: string;
   expires_at?: number | null;
-  image_scope?: string;
+  policy?: MemberPolicy;
   today?: {
     images?: number;
     v5?: number;
     legacy?: number;
     daily_images?: number;
     daily_v5?: number;
-    /** 全站今天还剩多少张 V5；null = 不受全站限制（全站不设限，或这把 Key 不计入全站） */
+    /** 全站今天还剩多少张 V5 */
     site_v5_left?: number | null;
-    /** 全站每天的 V5 张数（与 site_v5_left 同时为 null） */
+    /** 全站每天的 V5 张数 */
     site_v5_cap?: number | null;
     /** false = 全站没有上游账号还有免费 V5；缺省按 true */
     upstream_v5_free?: boolean;

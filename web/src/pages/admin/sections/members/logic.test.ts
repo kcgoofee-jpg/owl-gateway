@@ -16,7 +16,6 @@ import {
   needsAttention,
   normalizeFilter,
   rejectReasons,
-  roleOf,
   sortMembers,
 } from "./logic";
 import type { Member } from "./types";
@@ -29,20 +28,46 @@ function mk(p: Partial<Member> = {}): Member {
     id,
     name: `m${id}`,
     enabled: true,
-    role: "regular",
-    role_label: "普通",
+    invited: false,
     discord_id: `9000000000000000${id}`,
     discord: null,
     created_at: NOW - 10 * DAY,
     last_used_at: NOW - 3600,
     expires_at: NOW + 20 * DAY,
-    daily_images: 100,
-    daily_v5: 5,
-    allow_anlas: false,
-    daily_anlas: 0,
-    image_model_scope: "all",
-    quota_auto: true,
-    today: { images: 0, v5: 0, anlas: 0, requests: 0 },
+    policy: {
+      defaults: {
+        daily_images: 100,
+        daily_v5: 5,
+        daily_anlas: 15,
+        monthly_anlas: 99999,
+        rpm: 10,
+        image: true,
+        v5: true,
+        vibe: true,
+        tags: true,
+        img2img: false,
+        upscale: false,
+        augment: false,
+        paid_parameters: false,
+      },
+      overrides: {},
+      effective: {
+        daily_images: 100,
+        daily_v5: 5,
+        daily_anlas: 15,
+        monthly_anlas: 99999,
+        rpm: 10,
+        image: true,
+        v5: true,
+        vibe: true,
+        tags: true,
+        img2img: false,
+        upscale: false,
+        augment: false,
+        paid_parameters: false,
+      },
+    },
+    today: { images: 0, legacy_free_images: 0, v5: 0, anlas: 0, requests: 0 },
     week: { images: 0, v5: 0, anlas: 0, requests: 0 },
     total_images: 10,
     registered_at: NOW - 10 * DAY,
@@ -124,12 +149,21 @@ describe("memberIssues / needsAttention", () => {
 describe("memberVerdict / memberStatus", () => {
   it("按优先级给一句话结论", () => {
     expect(memberVerdict(mk({ first_image_at: null }), NOW).title).toContain("还没出过图");
-    expect(memberVerdict(mk({ today: { images: 100, v5: 0, anlas: 0, requests: 3 } }), NOW).title).toContain(
-      "额度用完",
-    );
-    expect(memberVerdict(mk({ today: { images: 7, v5: 0, anlas: 0, requests: 3 } }), NOW).title).toContain(
-      "今天出了 7 张",
-    );
+    expect(
+      memberVerdict(
+        mk({ today: { images: 100, legacy_free_images: 100, v5: 0, anlas: 0, requests: 3 } }),
+        NOW,
+      ).title,
+    ).toContain("额度用完");
+    expect(
+      memberVerdict(mk({ today: { images: 7, v5: 0, anlas: 0, requests: 3, legacy_free_images: 7 } }), NOW)
+        .title,
+    ).toContain("今天出了 7 张");
+  });
+  it("V5 图片不消耗 V4.5 免费图额度", () => {
+    const member = mk({ today: { images: 125, legacy_free_images: 25, v5: 100, anlas: 0, requests: 125 } });
+    expect(memberVerdict(member, NOW).title).toContain("正常使用");
+    expect(memberStatus(member, NOW)?.text).not.toBe("额度用完");
   });
   it("正常成员没有状态徽标", () => {
     expect(memberStatus(mk(), NOW)).toBeNull();
@@ -158,14 +192,14 @@ describe("筛选横栏", () => {
     for (const gone of ["role:regular", "role:admin", "role:test", "manual", "staff", "tag:"])
       expect(all).not.toContain(gone);
   });
-  it("「快被回收」按最近一次生图算，豁免邀请，标签用 API 给的天数", () => {
+  it("「快被回收」所有领取方式使用相同闲置窗口，标签显示有效天数", () => {
     const idle = mk({ last_image_at: NOW - 2.5 * DAY });
     const fresh = mk({ last_image_at: NOW - 3600 });
-    const invite = mk({ last_image_at: NOW - 2.5 * DAY, role: "invite" });
+    const invite = mk({ last_image_at: NOW - 2.5 * DAY, invited: true });
     const never = mk({ last_image_at: null, first_image_at: null, created_at: NOW - 2.5 * DAY });
     const reclaim = buildFilters(NOW, 3).chips.find((x) => x.id === "reclaim");
     expect(reclaim?.label).toBe("快被回收（满 3 天）");
-    expect([idle, fresh, invite, never].filter((m) => reclaim?.test(m))).toEqual([idle, never]);
+    expect([idle, fresh, invite, never].filter((m) => reclaim?.test(m))).toEqual([idle, invite, never]);
     expect(buildFilters(NOW, 7).chips.find((x) => x.id === "reclaim")?.label).toBe("快被回收（满 7 天）");
   });
   it("回收天数为 0（关闭）时没有「快被回收」", () => {
@@ -173,9 +207,9 @@ describe("筛选横栏", () => {
   });
   it("各标签的人数", () => {
     const rows = [
-      mk({ today: { images: 1, v5: 0, anlas: 0, requests: 2 } }),
+      mk({ today: { images: 1, v5: 0, anlas: 0, requests: 2, legacy_free_images: 1 } }),
       mk({ first_image_at: null, registered_at: NOW - 3600 }),
-      mk({ role: "invite", tags: [{ tag: "邀请", note: "", by: "", ts: NOW }], rejected_24h: 2 }),
+      mk({ invited: true, tags: [{ tag: "邀请", note: "", by: "", ts: NOW }], rejected_24h: 2 }),
     ];
     const f = buildFilters(NOW, 3);
     const n = (id: string) => countFilter(rows, f.chips.find((c) => c.id === id) as never);
@@ -227,21 +261,11 @@ describe("筛选横栏", () => {
 
 describe("排序 / 身份 / 查找", () => {
   it("数字列倒序，同值按名称正序兜底", () => {
-    const a = mk({ name: "b", today: { images: 5, v5: 0, anlas: 0, requests: 1 } });
-    const b = mk({ name: "a", today: { images: 5, v5: 0, anlas: 0, requests: 1 } });
-    const c = mk({ name: "c", today: { images: 9, v5: 0, anlas: 0, requests: 1 } });
+    const a = mk({ name: "b", today: { images: 5, v5: 0, anlas: 0, requests: 1, legacy_free_images: 5 } });
+    const b = mk({ name: "a", today: { images: 5, v5: 0, anlas: 0, requests: 1, legacy_free_images: 5 } });
+    const c = mk({ name: "c", today: { images: 9, v5: 0, anlas: 0, requests: 1, legacy_free_images: 9 } });
     expect(sortMembers([a, b, c], "today", "desc").map((m) => m.name)).toEqual(["c", "a", "b"]);
     expect(sortMembers([a, b, c], "today", "asc").map((m) => m.name)).toEqual(["a", "b", "c"]);
-  });
-  it("身份组：优先用接口给的 role，缺失时按标签推断", () => {
-    expect(roleOf(mk({ role: "invite" }))).toBe("invite");
-    expect(
-      roleOf({
-        ...mk(),
-        role: undefined as unknown as Member["role"],
-        tags: [{ tag: "邀请", note: "", by: "", ts: 0 }],
-      }),
-    ).toBe("invite");
   });
   it("显示名优先 Discord 昵称", () => {
     expect(memberLabel(mk({ name: "后台名" }))).toBe("后台名");

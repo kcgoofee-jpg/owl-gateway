@@ -282,7 +282,7 @@ async fn donations_are_gone() {
 }
 
 #[tokio::test]
-async fn reset_all_keys_disables_everyone_but_invites() {
+async fn reset_all_keys_disables_everyone_including_invites() {
     let (e, a) = ready().await;
     a.sql(
         "INSERT INTO api_keys(id, name, token, created_at) VALUES (2, '普通号2', 'nai-t-2', 1.0);\
@@ -310,8 +310,7 @@ async fn reset_all_keys_disables_everyone_but_invites() {
     assert_eq!(r.status, 200, "{}", r.text());
     assert_eq!(
         r.json(),
-        json!({"ok": true, "disabled_count": 3, "kept_invites": 1,
-               "message": "全站已成功重置！已失效 3 把 Key 并解除 Discord 绑定；1 把「邀请」Key 原样保留。"})
+        json!({"ok": true, "disabled_count": 4, "message": "已失效 4 把 Key 并解除 Discord 绑定。"})
     );
     let enabled = query(&e.state.db, "SELECT id, enabled FROM api_keys ORDER BY id").await;
     assert_eq!(
@@ -319,27 +318,20 @@ async fn reset_all_keys_disables_everyone_but_invites() {
         [
             json!({"id": 1, "enabled": 0}),
             json!({"id": 2, "enabled": 0}),
-            json!({"id": 3, "enabled": 1}),
+            json!({"id": 3, "enabled": 0}),
             json!({"id": 4, "enabled": 0})
         ]
     );
     assert_eq!(
         query(&e.state.db, "SELECT discord_id FROM discord_registrations").await,
-        [json!({"discord_id": "900000000000000003"})]
+        [] as [Value; 0]
     );
     let tags = query(
         &e.state.db,
         "SELECT key_id, tag FROM key_tags ORDER BY key_id, tag",
     )
     .await;
-    assert_eq!(
-        tags,
-        [
-            json!({"key_id": 3, "tag": "观察"}),
-            json!({"key_id": 3, "tag": "邀请"})
-        ],
-        "邀请 Key 的标签原样保留，其它 Key 的标签清掉"
-    );
+    assert!(tags.is_empty(), "所有凭据标签一起清除");
     assert!(
         query(&e.state.db, "SELECT 1 FROM share_state")
             .await
@@ -362,8 +354,8 @@ async fn reset_all_keys_disables_everyone_but_invites() {
         "{acts:?}"
     );
     assert!(acts.iter().any(|(act, t, d, ok)| act == "全站重置 Key"
-        && t == "全部非邀请 Key"
-        && d == "已失效 3 把 Key 并清空 Discord 绑定；「邀请」Key 保留 1 把不受影响"
+        && t == "全部 Key"
+        && d == "已失效 4 把 Key 并清空 Discord 绑定"
         && *ok));
 }
 

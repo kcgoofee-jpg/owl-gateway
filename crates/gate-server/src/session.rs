@@ -305,7 +305,7 @@ pub fn verify_login_state(secret_key: &str, raw: &str, now: i64) -> Option<(Logi
 /// 会话绑定的 Key 指纹：Key 一换（/resetkey、回收后重领），旧会话立刻失效。没有 Key 时为 "-"。
 pub fn key_tag(key: Option<&Key>) -> String {
     match key {
-        Some(k) => sha256_hex(&gate_core::values::text(k.get("token")))[..16].to_string(),
+        Some(k) => sha256_hex(k.token())[..16].to_string(),
         None => "-".into(),
     }
 }

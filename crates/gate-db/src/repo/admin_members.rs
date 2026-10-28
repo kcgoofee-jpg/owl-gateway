@@ -117,18 +117,6 @@ impl Db {
         .await
     }
 
-    /// 额度归属：1 = 动态额度算法管，-1 = 站长手动。
-    pub async fn set_quota_auto(&self, key_id: i64, value: i64) -> Result<()> {
-        self.write(move |tx| {
-            tx.execute(
-                "UPDATE api_keys SET quota_auto=? WHERE id=?",
-                params![value, key_id],
-            )?;
-            Ok(())
-        })
-        .await
-    }
-
     /// 管理员手动给 Key 绑定 / 换绑 Discord：一个 Discord 账号只能绑一把 Key；
     /// 这把 Key 已有绑定就改成新账号（保留领取时间），没有就新建一条。头像 / Key 名见 [`BindProfile`]。
     pub async fn bind_discord(
@@ -349,32 +337,17 @@ impl Db {
         .await
     }
 
-    /// 全站重置：失效所有非「邀请」的 Key，清掉它们的 Discord 绑定和（非邀请）标签，清空防分享状态。
-    /// 带「邀请」标签的 Key 原样保留。返回 (失效的 Key 数, 保留的邀请标签数)。
-    pub async fn reset_all_keys(&self) -> Result<(i64, i64)> {
-        self.write(|tx| {
-            let kept: i64 = tx.query_row(
-                "SELECT COUNT(*) FROM key_tags WHERE tag=?",
-                [INVITE_TAG],
-                |r| value::i64_or(r, 0, 0),
-            )?;
-            let disabled = tx.execute(
-                "UPDATE api_keys SET enabled=0, disabled_reason=? WHERE NOT EXISTS \
-                 (SELECT 1 FROM key_tags t WHERE t.key_id=api_keys.id AND t.tag=?)",
-                params![gate_core::key_status::SITE_RESET, INVITE_TAG],
+    /// 全站重置所有凭据；邀请来源不豁免，成员权限例外仍归属于原成员。
+    pub async fn reset_all_keys(&self) -> Result<i64> {
+        self.write(|transaction| {
+            let disabled = transaction.execute(
+                "UPDATE api_keys SET enabled=0,disabled_reason=?",
+                [gate_core::key_status::SITE_RESET],
             )? as i64;
-            tx.execute(
-                "DELETE FROM discord_registrations WHERE NOT EXISTS \
-                 (SELECT 1 FROM key_tags t WHERE t.key_id=discord_registrations.key_id AND t.tag=?)",
-                [INVITE_TAG],
-            )?;
-            tx.execute(
-                "DELETE FROM key_tags WHERE tag!=? \
-                 AND NOT EXISTS (SELECT 1 FROM key_tags t2 WHERE t2.key_id=key_tags.key_id AND t2.tag=?)",
-                params![INVITE_TAG, INVITE_TAG],
-            )?;
-            tx.execute("DELETE FROM share_state", [])?;
-            Ok((disabled, kept))
+            transaction.execute("DELETE FROM discord_registrations", [])?;
+            transaction.execute("DELETE FROM key_tags", [])?;
+            transaction.execute("DELETE FROM share_state", [])?;
+            Ok(disabled)
         })
         .await
     }

@@ -3,25 +3,15 @@ import { ExternalLink, Plus } from "lucide-preact";
 import { useState } from "preact/hooks";
 import { dayOf, fullTime, rel, usedOf } from "../../../../lib/format";
 import { Badge, Button, copyText, Menu, toast } from "../../../../ui";
-import { FEATURES } from "../features";
-import {
-  type Issue,
-  type IssueAction,
-  memberIssues,
-  memberLabel,
-  memberVerdict,
-  roleOf,
-  userTags,
-} from "./logic";
-import { Seg } from "./shared";
-import { type KeyRow, type MemberRow, ROLE_LABEL, type Role } from "./types";
+import { exceptionCount, FEATURE_FIELDS, POLICY_SPECS } from "../member-policy";
+import { type Issue, type IssueAction, memberIssues, memberLabel, memberVerdict, userTags } from "./logic";
+import type { MemberRow } from "./types";
 
 export type DetailActions = {
-  edit: (m: MemberRow, manual?: boolean) => void;
-  quotaAuto: (m: MemberRow) => void;
-  role: (m: MemberRow, r: Role) => void;
+  edit: (m: MemberRow) => void;
+  resetRules: (m: MemberRow) => void;
+  metadata: (m: MemberRow) => void;
   issue: (m: MemberRow, a: IssueAction) => void;
-  bind: (m: MemberRow) => void;
   addTag: (m: MemberRow) => void;
   removeTag: (m: MemberRow, tag: string) => void;
   coupon: (m: MemberRow) => void;
@@ -75,7 +65,6 @@ export function MemberDetail(props: { m: MemberRow; now: number; act: DetailActi
   const k = m.k;
   const verdict = memberVerdict(m, now);
   const [reveal, setReveal] = useState(false);
-  const role = roleOf(m);
   const dc = m.discord;
   const dcId = dc ? String(dc.id) : m.discord_id ? String(m.discord_id) : "";
   const tags = userTags(m);
@@ -90,24 +79,8 @@ export function MemberDetail(props: { m: MemberRow; now: number; act: DetailActi
       </div>
     );
   }
-  const u = k.used;
-  const quotaSource = k.quota_auto ? "auto" : "manual";
-  // 今天的 V4.5 / V5 用量在列表行里已经有了，这里只补行里没有的 Anlas
-  const anlasUsed = Math.round(u.anlas || 0);
-  // 10-27 规范化：上限是数字，0 = 停用；旧数据的 unlimited 显示为 9999（迁移已折算，这里只是兜底）
-  const limitText = (mode: NonNullable<KeyRow["quota_limits"]>["images"]): string => {
-    if (mode.mode === "inherit") return "继承统一额度";
-    if (mode.mode === "unlimited") return "限 9999";
-    return mode.value === 0 ? "停用" : `限 ${mode.value}`;
-  };
-  const limitsValid = k.quota_limits_valid !== false;
-  const anlas = !k.allow_anlas
-    ? "关闭"
-    : !limitsValid
-      ? "额度配置损坏"
-      : `今天 ${usedOf(anlasUsed, k.quota_limits?.daily_anlas.mode === "limit" ? Math.round(k.quota_limits.daily_anlas.value) : 0)} · ${limitText(k.quota_limits?.daily_anlas ?? { mode: "inherit" })}`;
-  const feats = k.features ?? null;
-
+  const policy = k.policy.effective;
+  const exceptions = exceptionCount(k.policy.overrides);
   return (
     <div class="mb-detail">
       <div>
@@ -118,82 +91,42 @@ export function MemberDetail(props: { m: MemberRow; now: number; act: DetailActi
       {issues.length > 0 && <IssueList m={m} issues={issues} act={act} />}
 
       <div class="mb-cols">
-        <section class="mb-sec" aria-label="额度与权限">
-          <h4 class="mb-h4">额度与权限</h4>
+        <section class="mb-sec" aria-label="有效规则">
+          <h4 class="mb-h4">有效规则</h4>
           <dl class="mb-kv">
-            <dt>身份组</dt>
+            <dt>V4.5 免费图</dt>
+            <dd>{policy.image && policy.daily_images > 0 ? `${policy.daily_images} 张` : "停用"}</dd>
+            <dt>V5 每天</dt>
+            <dd>{policy.image && policy.v5 && policy.daily_v5 > 0 ? `${policy.daily_v5} 张` : "停用"}</dd>
+            <dt>Anlas 每天</dt>
+            <dd>{usedOf(Math.round(k.used.anlas), policy.daily_anlas)}</dd>
+            <dt>Anlas 每月</dt>
+            <dd>{policy.monthly_anlas}</dd>
+            <dt>每分钟请求</dt>
+            <dd>{policy.rpm} 次</dd>
+            <dt>功能</dt>
             <dd>
-              <Seg
-                label={`${memberLabel(m)} 的身份组`}
-                value={role}
-                options={(["regular", "invite"] as Role[]).map((r) => ({
-                  id: r,
-                  label: ROLE_LABEL[r],
-                }))}
-                onChange={(r) => r !== role && act.role(m, r)}
-              />
+              <span class="mb-chips">
+                {FEATURE_FIELDS.filter((name) => policy[name]).map((name) => (
+                  <span class="xa-chip" key={name}>
+                    {POLICY_SPECS[name].label}
+                  </span>
+                ))}
+              </span>
             </dd>
-            <dt>额度来源</dt>
-            <dd>
-              <Seg
-                label={`${memberLabel(m)} 的额度来源`}
-                value={quotaSource}
-                options={[
-                  { id: "auto", label: "统一", title: "跟随全站手动的每人每日额度" },
-                  { id: "manual", label: "手动", title: "手动填具体数字" },
-                ]}
-                onChange={(v) => {
-                  if (v === quotaSource) return;
-                  if (v === "auto") act.quotaAuto(m);
-                  else act.edit(m, true);
-                }}
-              />
-            </dd>
-            <dt>每天</dt>
-            <dd>
-              {!limitsValid
-                ? "额度配置损坏"
-                : `V4.5 ${limitText(k.quota_limits?.images ?? { mode: "limit", value: 9999 })}`}
-              {k.image_model_scope === "all"
-                ? ` · V5 ${limitText(k.quota_limits?.v5 ?? { mode: "limit", value: 9999 })}`
-                : " · 不能用 V5"}
+            <dt>成员例外</dt>
+            <dd class="mb-key">
+              {exceptions ? `${exceptions} 项` : "无"}
+              {exceptions > 0 && (
+                <Button size="sm" variant="ghost" onClick={() => act.resetRules(m)}>
+                  恢复默认
+                </Button>
+              )}
             </dd>
             {m.reset_today && m.reset_today.count > 0 && (
               <>
                 <dt>今日重置</dt>
-                <dd title={`最近重置：${fullTime(m.reset_today.last_ts)}`}>
-                  已重置 {m.reset_today.count} 次（最近 {rel(m.reset_today.last_ts, now)}）
-                </dd>
-              </>
-            )}
-            <dt>Anlas</dt>
-            <dd>{anlas}</dd>
-            <dt>功能</dt>
-            <dd>
-              <span class="mb-chips">
-                {feats == null ? (
-                  <span class="xa-chip">全部已开放功能</span>
-                ) : feats.length ? (
-                  feats.map((f) => (
-                    <span class="xa-chip" key={f}>
-                      {FEATURES.find((x) => x.id === f)?.short ?? f}
-                    </span>
-                  ))
-                ) : (
-                  <span class="muted">未开通任何功能</span>
-                )}
-              </span>
-            </dd>
-            <dt>到期</dt>
-            <dd>{k.expires_at ? dayOf(k.expires_at) : "永久"}</dd>
-            {(k.allow_img2img || k.exclude_global_v5) && (
-              <>
-                <dt>其他</dt>
-                <dd>
-                  {[k.allow_img2img ? "可以图生图" : "", k.exclude_global_v5 ? "V5 不占全站额度" : ""]
-                    .filter(Boolean)
-                    .join(" · ")}
-                </dd>
+                <dd>{m.reset_today.count} 次</dd>
               </>
             )}
           </dl>
@@ -228,17 +161,9 @@ export function MemberDetail(props: { m: MemberRow; now: number; act: DetailActi
                   >
                     复制 ID
                   </Button>
-                  <Button size="sm" variant="ghost" onClick={() => act.bind(m)}>
-                    换绑
-                  </Button>
                 </span>
               ) : (
-                <span class="mb-key">
-                  <span class="muted">未绑定</span>
-                  <Button size="sm" variant="ghost" onClick={() => act.bind(m)}>
-                    手动绑定
-                  </Button>
-                </span>
+                <span class="muted">待领取</span>
               )}
             </dd>
             <dt>Key</dt>
@@ -263,6 +188,13 @@ export function MemberDetail(props: { m: MemberRow; now: number; act: DetailActi
             </dd>
             <dt>{m.discord_id ? "领取" : "创建"}</dt>
             <dd title={fullTime(m.registered_at)}>{m.registered_at ? rel(m.registered_at, now) : "—"}</dd>
+            <dt>到期</dt>
+            <dd class="mb-key">
+              {k.expires_at ? dayOf(k.expires_at) : "永久"}
+              <Button size="sm" variant="ghost" onClick={() => act.metadata(m)}>
+                修改
+              </Button>
+            </dd>
             <dt>最近使用</dt>
             <dd title={fullTime(k.last_used_at)}>{k.last_used_at ? rel(k.last_used_at, now) : "从未使用"}</dd>
             <dt>标签</dt>
@@ -304,8 +236,8 @@ export function MemberDetail(props: { m: MemberRow; now: number; act: DetailActi
           发重置券
         </Button>
         <span class="spacer" />
-        <Button size="sm" onClick={() => act.edit(m)}>
-          全部设置…
+        <Button size="sm" disabled={!dcId} onClick={() => act.edit(m)}>
+          成员例外
         </Button>
         <Menu
           button={(p) => (

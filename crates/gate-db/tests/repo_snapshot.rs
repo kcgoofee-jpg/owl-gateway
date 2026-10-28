@@ -432,11 +432,6 @@ async fn call(db: &Db, c: &Case) -> Out {
             db.touch_key(int(a(0, "key_id"), 0), now).await?;
             Value::Null
         }
-        "set_key_role" => {
-            db.set_key_role(int(a(0, "key_id"), 0), &s(a(1, "role"), ""), now)
-                .await?;
-            Value::Null
-        }
         // ---------------- counters
         "get_counter" => {
             let c = db
@@ -730,7 +725,6 @@ const METHODS: &[&str] = &[
     "inactive_key_ids",
     "list_keys",
     "touch_key",
-    "set_key_role",
     "get_counter",
     "reset_daily_image_quota",
     "month_anlas",

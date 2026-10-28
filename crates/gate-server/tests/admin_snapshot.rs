@@ -6,7 +6,7 @@
 //! 响应原文逐字节一致（含 JSON 键顺序、浮点写法）：本身就是紧凑 JSON 的响应存成 JSON 值，其余存原文。
 //!
 //! 时间是进程级冻结的，所以这个文件里只放这一个测试（独占一个测试进程）。
-//! 归一化：新建 Key 的随机串统一成 `nai-<rand>`；缩略图字节（编码器不同）只记是不是 JPEG。
+//! 归一化：新建 Key 的随机串统一成 `nai-<rand>`。
 //!
 //! 更新：`UPDATE_SNAPSHOT=1 cargo test -p gate-server --test admin_snapshot`，然后审阅 `git diff`。
 
@@ -299,7 +299,7 @@ async fn admin_routes_match_snapshot() {
     gate_server::time::freeze(None);
     // 快照没被意外截短
     assert!(
-        main >= 170 && merge == 1 && early == 2,
+        main == 96 && merge == 1 && early == 2,
         "{main} {merge} {early}"
     );
 }

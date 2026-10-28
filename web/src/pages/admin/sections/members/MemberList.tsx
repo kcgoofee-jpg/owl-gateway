@@ -4,10 +4,10 @@ import { type ComponentChildren, Fragment } from "preact";
 import { rel, withUnit } from "../../../../lib/format";
 import { Badge, Button, cx } from "../../../../ui";
 import { Avatar, TableWrap } from "../_kit";
-import { memberLabel, memberStatus, roleOf, type SortKey, userTags } from "./logic";
+import { memberLabel, memberStatus, type SortKey, userTags } from "./logic";
 import { type DetailActions, MemberDetail } from "./MemberDetail";
 import { MiniBar } from "./shared";
-import { type MemberRow, ROLE_LABEL } from "./types";
+import type { MemberRow } from "./types";
 
 type Props = {
   rows: MemberRow[];
@@ -28,7 +28,6 @@ function Identity(props: { m: MemberRow }) {
   const dc = m.discord;
   const handle =
     dc?.username && dc.username !== title ? `@${dc.username}` : m.discord_id ? "" : "后台建的 Key";
-  const role = roleOf(m);
   const tag = userTags(m).find((t) => t.tag !== "邀请");
   return (
     <div class="mb-ident">
@@ -36,7 +35,7 @@ function Identity(props: { m: MemberRow }) {
       <div class="mb-ident__t">
         <div class="mb-name">
           <span class="mb-name__t">{title}</span>
-          {role !== "regular" && <Badge tone="info">{ROLE_LABEL[role]}</Badge>}
+          {m.invited && <Badge tone="info">邀请</Badge>}
         </div>
         <div class="small muted mb-sub">
           {handle}
@@ -54,11 +53,18 @@ function Identity(props: { m: MemberRow }) {
 function TodayBars(props: { m: MemberRow }) {
   const { m } = props;
   const v5 = m.today.v5 || 0;
-  const v45 = Math.max(0, m.today.images - v5);
+  const v45 = m.today.legacy_free_images;
   return (
     <div class="mb-bars">
-      <MiniBar label="V4.5" used={v45} max={m.daily_images > 0 ? m.daily_images : 0} />
-      {(m.daily_v5 > 0 || v5 > 0) && <MiniBar label="V5" used={v5} max={m.daily_v5} tone="v5" />}
+      <MiniBar label="V4.5" used={v45} max={m.policy.effective.image ? m.policy.effective.daily_images : 0} />
+      {(m.policy.effective.v5 || v5 > 0) && (
+        <MiniBar
+          label="V5"
+          used={v5}
+          max={m.policy.effective.v5 ? m.policy.effective.daily_v5 : 0}
+          tone="v5"
+        />
+      )}
     </div>
   );
 }

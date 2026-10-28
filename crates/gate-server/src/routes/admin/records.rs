@@ -210,29 +210,20 @@ async fn ops_reset_all_keys(State(state): State<AppState>, _s: AdminSession, req
         return Err(http(400, "安全确认未通过：必须传入 confirm='确认重置'"));
     }
     let st = state.clone();
-    let (disabled, kept) = st.db.reset_all_keys().await?;
+    let disabled = st.db.reset_all_keys().await?;
     log_action(
         &st.db,
         "站长",
         "全站重置 Key",
-        "全部非邀请 Key",
-        &format!(
-            "已失效 {disabled} 把 Key 并清空 Discord 绑定；「邀请」Key 保留 {kept} 把不受影响"
-        ),
+        "全部 Key",
+        &format!("已失效 {disabled} 把 Key 并清空 Discord 绑定"),
         true,
         st.now(),
     )
     .await;
-    let message = format!(
-        "全站已成功重置！已失效 {disabled} 把 Key 并解除 Discord 绑定{}",
-        if kept > 0 {
-            format!("；{kept} 把「邀请」Key 原样保留。")
-        } else {
-            "。".to_string()
-        }
-    );
+    let message = format!("已失效 {disabled} 把 Key 并解除 Discord 绑定。");
     let resp: Response = ok_json(&json!({
-        "ok": true, "disabled_count": disabled, "kept_invites": kept, "message": message,
+        "ok": true, "disabled_count": disabled,  "message": message,
     }));
     Ok(mark_logged(resp))
 }

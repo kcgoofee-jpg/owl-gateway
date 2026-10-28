@@ -1,7 +1,7 @@
 //! 自动驾驶的两个定时任务：全站熔断、单 Key 限流（规则在 `gate_core::autopilot`，这里取数、落库）。
 
 use super::JobError;
-use super::quota::apply_effects;
+use super::support::apply_effects;
 use crate::state::AppState;
 use gate_core::autopilot::{
     self, BREAKER_UNTIL_KEY, BreakerInputs, BreakerRows, KEY_GUARD_HALF_WEIGHT,

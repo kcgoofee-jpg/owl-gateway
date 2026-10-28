@@ -47,7 +47,6 @@ pub struct Reservation {
     /// True while queued or executing; false for durable unknown results held only for quota.
     pub active: bool,
     pub key_id: i64,
-    pub exclude_global_v5: bool,
     pub day: String,
     pub month: String,
     pub anlas: f64,
@@ -139,7 +138,7 @@ impl AppState {
     pub async fn build(env: EnvConfig, assets: Assets) -> anyhow::Result<Self> {
         std::fs::create_dir_all(&env.data_dir)?;
         let now = crate::time::now();
-        let db = Db::open(env.db_path())?;
+        let db = Db::open_for_gateway(env.db_path(), now, env.key_inactivity_delete_days)?;
         let clock = Clock::service();
         let alerter = Arc::new(Alerter::owner(&env));
         let tasks = TaskTracker::new();
@@ -252,7 +251,6 @@ impl AppState {
                         request_id: row.request_id,
                         active: false,
                         key_id: row.key_id,
-                        exclude_global_v5: row.exclude_global_v5,
                         day: row.day,
                         month: row.month,
                         anlas: row.anlas,

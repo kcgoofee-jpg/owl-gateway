@@ -177,8 +177,8 @@ async fn reset_scope_resets_v45_always_and_v5_anlas_only_when_selected() {
     // 先放一行计数：V4.5 免费图 7 张、V5 3 张、Anlas 9.0
     db.write(|tx| {
         tx.execute(
-            "INSERT INTO api_keys(id, name, token, enabled, daily_images, daily_anlas, daily_v5, created_at) \
-             VALUES(1,'a','nai-a-0123456789abcdef',1,100,50,10,1.0)",
+            "INSERT INTO api_keys(id, name, token, enabled, created_at) \
+             VALUES(1,'a','nai-a-0123456789abcdef',1,1.0)",
             [],
         )?;
         tx.execute(

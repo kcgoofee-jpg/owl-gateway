@@ -38,7 +38,7 @@ export function quotaRows(me: MeMember): QuotaRow[] {
   const t = me.today ?? {};
   const v5 = t.v5 ?? 0;
   const legacy = t.legacy != null ? t.legacy : Math.max(0, (t.images ?? 0) - v5);
-  const capImages = (t.daily_images ?? 0) > 0 ? (t.daily_images ?? 0) : 0;
+  const capImages = me.policy?.image === false ? 0 : Math.max(0, t.daily_images ?? 0);
   const rows: QuotaRow[] = [
     capImages === 0
       ? {
@@ -52,16 +52,16 @@ export function quotaRows(me: MeMember): QuotaRow[] {
       : { id: "legacy", label: "V4.5", used: legacy, cap: capImages },
   ];
   const capV5 = (t.daily_v5 ?? 0) > 0 ? (t.daily_v5 ?? 0) : 0;
-  if (capV5 > 0 || me.image_scope === "all") {
+  if (capV5 > 0 || v5 > 0 || t.v5_access_allowed !== undefined) {
     const row: QuotaRow = { id: "v5", label: "V5", used: v5, cap: capV5 };
     if (capV5 === 0) {
       Object.assign(row, { paused: true, left: 0, hint: "V5 已停用（个人额度为 0）" });
     }
-    // 全站也有 V5 日上限时，能用的是「个人剩余」和「全站剩余」的较小值；null = 这把 Key 不计入全站
+    // 全站也有 V5 日上限时，能用的是「个人剩余」和「全站剩余」的较小值
     else {
       const site = t.site_v5_left;
       if (t.v5_access_allowed === false) {
-        Object.assign(row, { paused: true, left: 0, hint: "当前访问策略未授权 V5" });
+        Object.assign(row, { paused: true, left: 0, hint: "此成员未开放 V5" });
       } else if (t.v5_paused) {
         Object.assign(row, { paused: true, left: 0, hint: V5_PAUSED_HINT });
       } else if (t.upstream_v5_free === false) {

@@ -116,7 +116,18 @@ impl AppState {
     }
 
     /// 写一条用量日志（后台任务）；成功请求额外计入每日配额。返回任务句柄。
-    pub fn record(&self, ctx: &ReqCtx, key: &Key, mut e: Entry) -> tokio::task::JoinHandle<()> {
+    pub fn record(&self, ctx: &ReqCtx, key: &Key, e: Entry) -> tokio::task::JoinHandle<()> {
+        self.record_identity(ctx, key.id(), key.name(), e)
+    }
+
+    fn record_identity(
+        &self,
+        ctx: &ReqCtx,
+        key_id: i64,
+        key_name: &str,
+        mut e: Entry,
+    ) -> tokio::task::JoinHandle<()> {
+        let key_name = key_name.to_owned();
         ctx.mark_logged();
         // 万一有拒绝路径没带原因码：按说明文字当场归类（只管 status='rejected'）。
         if e.status == "rejected" && e.reason.is_empty() {
@@ -126,7 +137,6 @@ impl AppState {
         let t = ctx.snapshot();
         let (client, ip) = self.origin_of(ctx);
         let hints = ctx.hints();
-        let (key_id, key_name) = (key.id(), key.name().to_string());
         let state = self.clone();
         let ctx = ctx.clone();
         self.tasks.spawn(async move {
@@ -244,13 +254,13 @@ pub async fn error_ledger(State(state): State<AppState>, req: Request, next: Nex
             && (400..500).contains(&e.status)
             && !ctx.logged()
         {
-            let key = Key(serde_json::json!({"id": key_id, "name": key_name}));
             let detail =
                 gate_core::primitives::take_chars(&format!("{} {}", e.status, e.message), 160)
                     .to_string();
-            state.record(
+            state.record_identity(
                 &ctx,
-                &key,
+                key_id,
+                &key_name,
                 Entry::new(kind_for_path(&path), &ctx.model(), "rejected")
                     .detail(detail)
                     .reason(e.code.clone()),

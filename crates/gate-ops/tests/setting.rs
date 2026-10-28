@@ -19,8 +19,7 @@ const COOKIE: &str = "owl_admin=synthetic-session-value";
 struct St {
     daily_anlas: Mutex<i64>,
     open: Mutex<bool>,
-    guild: Mutex<String>,
-    role: Mutex<String>,
+    roles: Mutex<Vec<Value>>,
     per_account: Mutex<i64>,
     puts: Mutex<Vec<(String, Value)>>,
 }
@@ -55,7 +54,7 @@ async fn app() -> Mock {
                 if !authed(&h) {
                     return StatusCode::UNAUTHORIZED.into_response();
                 }
-                Json(json!({"global_daily_anlas": *st.daily_anlas.lock().unwrap(), "v5_alert_threshold": 20}))
+                Json(json!({"budgets":{"daily_anlas":*st.daily_anlas.lock().unwrap(),"daily_v5":150,"monthly_anlas":10000},"v5_paused":false,"v5_medium_mode":"off"}))
                     .into_response()
             })
             .put(
@@ -64,8 +63,8 @@ async fn app() -> Mock {
                         return StatusCode::UNAUTHORIZED.into_response();
                     }
                     st.puts.lock().unwrap().push(("/settings".into(), b.clone()));
-                    if let Some(v) = b["global_daily_anlas"].as_i64() {
-                        if v > 100_000 {
+                    if let Some(v) = b["budgets"]["daily_anlas"].as_i64() {
+                        if v > 9999 {
                             return (
                                 StatusCode::UNPROCESSABLE_ENTITY,
                                 Json(json!({"detail": "global_daily_anlas 超出范围"})),
@@ -109,9 +108,8 @@ async fn app() -> Mock {
                 Json(json!({"registration": {
                     "open": *st.open.lock().unwrap(),
                     "max_users": 10,
-                    "role_note": "",
-                    "role_guild": *st.guild.lock().unwrap(),
-                    "role_id": *st.role.lock().unwrap(),
+                    "expires_days":0,
+                    "roles":st.roles.lock().unwrap().clone(),
                 }}))
                 .into_response()
             }),
@@ -126,10 +124,7 @@ async fn app() -> Mock {
                 if let Some(o) = b["open"].as_bool() {
                     *st.open.lock().unwrap() = o;
                 }
-                if let (Some(g), Some(r)) = (b["role_guild"].as_str(), b["role_id"].as_str()) {
-                    *st.guild.lock().unwrap() = g.into();
-                    *st.role.lock().unwrap() = r.into();
-                }
+                if let Some(roles)=b["roles"].as_array() {*st.roles.lock().unwrap()=roles.clone();}
                 Json(json!({"ok": true})).into_response()
             }),
         )
@@ -222,20 +217,15 @@ async fn endpoints_and_payloads() {
             &base,
             &[
                 "set",
-                "role_gate",
-                "900000000000000001:900000000000000002",
+                "claim_roles",
+                r#"[{"guild":"900000000000000001","role":"900000000000000002","note":""}]"#,
                 "--yes",
             ],
         );
         assert_eq!(gate.code, 0, "{}{}", gate.out, gate.err);
-        assert!(
-            gate.out
-                .contains("(空) → 900000000000000001:900000000000000002"),
-            "{}",
-            gate.out
-        );
-        let clear = nai(&base, &["set", "role_gate", "", "--yes"]);
-        assert!(clear.out.contains("→ (空)"), "{}", clear.out);
+        assert!(gate.out.contains("[] → ["), "{}", gate.out);
+        let clear = nai(&base, &["set", "claim_roles", "[]", "--yes"]);
+        assert!(clear.out.contains("→ []"), "{}", clear.out);
     })
     .await
     .unwrap();
@@ -268,7 +258,7 @@ async fn refusals() {
             "global_daily_anlas",
             "queue_timeout",
             "issue_hourly_cap",
-            "role_gate",
+            "claim_roles",
         ] {
             assert!(list.out.contains(name), "--list 里没有 {name}");
         }

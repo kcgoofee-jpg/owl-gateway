@@ -84,7 +84,7 @@ fn seed_source(path: &Path) {
         [DONOR_TOKEN],
     )
     .unwrap();
-    // 删一把 Key，让触发器在源库里留下 deleted_key_usage_flags（快照必须只有这一份，不能因为灌数据时触发触发器而翻倍）
+    // 删除过的凭据不能在快照中复活。
     add_key(&c, 99, "nai-synthetic-key-deleted", true);
     c.execute("DELETE FROM api_keys WHERE id=99", []).unwrap();
 }
@@ -159,11 +159,6 @@ fn snapshot_drops_only_the_original_images() {
     assert!(
         sequences(&d).contains(&("generation_audit".to_string(), 3)),
         "序号 3 > 最大 id 2 必须保留"
-    );
-    // 灌数据时不触发触发器：被删 Key 的标记行只有源库里那一份
-    assert_eq!(
-        count(&d, "deleted_key_usage_flags"),
-        count(&s, "deleted_key_usage_flags")
     );
     // 普通表整表一致（api_keys 含明文 Key——备份要靠它恢复）
     let dump = |c: &Connection| -> Vec<(i64, String)> {
@@ -382,11 +377,12 @@ fn sanitize_replaces_keys_and_drops_secrets_and_content() {
     assert_eq!(
         keys,
         [
+            "claim_rules",
             "guard_account_daily_cap",
-            "quota_9999_migrated",
-            "quota_modes_v1",
-            "quota_modes_v2_migrated",
-            "register_open"
+            "member_policy_defaults",
+            "member_policy_v1_migrated",
+            "register_open",
+            "runtime_budgets"
         ]
     );
 

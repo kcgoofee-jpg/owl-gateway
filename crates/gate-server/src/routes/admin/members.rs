@@ -5,25 +5,21 @@
 //! 防分享证据；对应的数据库列原样留着，这里不读不写，也不再出现在返回的 JSON 里。
 
 use super::mark_logged;
-use super::num::{strict_float, strict_int};
 use super::req::{AdminPath, AdminQuery, R, http, json_of, pstr, pstr_or};
 use crate::action_log::log_action;
 use crate::body::JsonObject;
-use crate::defaults;
 use crate::error::ApiError;
 use crate::error::ok_json;
-use crate::ops;
-use crate::registration::{DiscordUser, clip, member_label};
 use crate::session::AdminSession;
 use crate::state::AppState;
 use axum::Router;
 use axum::extract::{Request, State};
 use axum::routing::{delete, get, patch, post, put};
-use gate_core::{features, primitives, validation, values};
+use gate_core::{primitives, validation, values};
 use gate_db::repo::counters::Counter;
 use gate_db::repo::{
-    INVITE_TAG, ROLE_INVITE, ROLE_LABELS, ROLE_REGULAR,
-    admin_members::{BindOutcome, BindProfile, RegistrationRow, TagRow},
+    INVITE_TAG,
+    admin_members::{RegistrationRow, TagRow},
     keys::NewKey,
 };
 use serde_json::{Map, Value, json};
@@ -31,19 +27,17 @@ use std::collections::HashMap;
 
 pub fn router() -> Router<AppState> {
     Router::new()
-        .route("/admin/api/keys", get(list_keys).post(create_key))
+        .route("/admin/api/keys", get(list_keys))
         .route("/admin/api/keys/invite", post(create_invite_key))
         .route(
             "/admin/api/keys/{key_id}",
             patch(patch_key).delete(delete_key),
         )
         .route("/admin/api/keys/{key_id}/regenerate", post(regenerate_key))
-        .route("/admin/api/keys/{key_id}/role", post(switch_key_role))
         .route(
             "/admin/api/keys/{key_id}/reset-daily-image-quota",
             post(reset_daily_image_quota),
         )
-        .route("/admin/api/keys/{key_id}/bind-discord", post(bind_discord))
         .route(
             "/admin/api/keys/{key_id}/coupons",
             get(list_key_coupons).post(give_coupon),
@@ -63,11 +57,6 @@ pub fn router() -> Router<AppState> {
 }
 
 const NO_KEY: &str = "key 不存在";
-const ANLAS_CAP: &str =
-    "开通 Anlas 时每日 / 每月上限至少一项大于 0（0 = 停用该档），不能两项都是 0";
-const FEATURES_HINT: &str = "image,upscale,augment,vibe,tags";
-const ROLE_HINT: &str = "身份组只能是 regular（普通）或 invite（邀请）；站长 / 测试身份组已删除";
-
 // ----------------------------------------------------------------------------- 小工具
 
 fn jget(row: &Value, name: &str) -> Value {
@@ -78,62 +67,11 @@ fn jflag(row: &Value, name: &str) -> bool {
     row.get(name).is_some_and(values::enabled)
 }
 
-fn role_label(role: &str) -> &'static str {
-    ROLE_LABELS
-        .iter()
-        .find(|(r, _)| *r == role)
-        .map_or("普通", |(_, l)| l)
-}
-
-fn valid_role(role: &str) -> bool {
-    matches!(role, ROLE_INVITE | ROLE_REGULAR)
-}
-
-/// `str(x).strip().lower()`
-fn norm_role(v: &str) -> String {
-    primitives::strip(v).to_lowercase()
-}
-
-/// `gen_key("nai")`
-pub(super) fn gen_key() -> String {
+fn gen_key() -> String {
     gate_core::policy::gen_key("nai", &rand::random::<[u8; 24]>())
 }
 
 /// `features` 字段：缺省 / null = 沿用全局开关；列表 = 仅允许所列功能。
-fn features_field(body: &JsonObject) -> Result<Option<String>, ApiError> {
-    let Some(value) = body.get("features").filter(|v| !v.is_null()) else {
-        return Ok(None);
-    };
-    let ok = value.as_array().is_some_and(|a| {
-        a.iter().all(|v| {
-            v.as_str()
-                .is_some_and(|s| features::FEATURES.iter().any(|(n, _)| *n == s))
-        })
-    });
-    if !ok {
-        return Err(http(
-            422,
-            format!("features 必须是功能名列表：{FEATURES_HINT}"),
-        ));
-    }
-    let names: Vec<&str> = value
-        .as_array()
-        .into_iter()
-        .flatten()
-        .filter_map(Value::as_str)
-        .collect();
-    Ok(features::dump(Some(names)))
-}
-
-/// 新建 Key 未指定功能时，沿用「新成员默认开通的功能」（默认只有文生图），而不是全部功能。
-async fn new_key_features(state: &AppState, body: &JsonObject) -> Result<Option<String>, ApiError> {
-    if body.contains_key("features") {
-        return features_field(body);
-    }
-    Ok(ops::default_new_key_features(state).await?)
-}
-
-/// Discord 头像地址：有头像哈希用自己的，没有用 Discord 按 ID 分配的默认头像。
 pub(crate) fn discord_avatar_url(id: &str, avatar: Option<&str>) -> String {
     match avatar.filter(|a| !a.is_empty()) {
         Some(a) => format!("https://cdn.discordapp.com/avatars/{id}/{a}.png?size=64"),
@@ -160,36 +98,22 @@ fn discord_profile(row: &RegistrationRow) -> Value {
     })
 }
 
-/// 身份组：邀请 / 普通。`invite` 由调用方按各自的来源（邀请标签）判断。
-fn role_of(invite: bool) -> &'static str {
-    if invite { ROLE_INVITE } else { ROLE_REGULAR }
-}
-
-/// 组装返回给后台的 Key JSON。`role` 给了就覆盖（Key 列表按「邀请」标签识别身份组）；
-/// 不给时按普通，所以修改 / 新建接口返回的 role 不会是「邀请」。
-fn key_json(row: &Value, c: &Counter, generated: i64, role: Option<&str>) -> Value {
-    let role = role.unwrap_or(ROLE_REGULAR);
+/// 后台凭据视图；邀请来源仅作标签，不参与权限计算。
+fn key_json(
+    row: &Value,
+    c: &Counter,
+    generated: i64,
+    invited: bool,
+    policy: &gate_db::repo::member_policy::PolicySnapshot,
+) -> Value {
     let anlas = c.anlas;
     json!({
         "id": jget(row, "id"),
         "name": jget(row, "name"),
         "token": jget(row, "token"),
         "enabled": jflag(row, "enabled"),
-        "daily_images": jget(row, "daily_images"),
-        "daily_anlas": jget(row, "daily_anlas"),
-        "daily_v5": jget(row, "daily_v5"),
-        "monthly_anlas": jget(row, "monthly_anlas"),
-        "quota_limits": crate::key::Key(row.clone()).quota_limits(),
-        "quota_limits_valid": crate::key::Key(row.clone()).try_quota_limits().is_ok(),
-        "rpm": jget(row, "rpm"),
-        "allow_anlas": jflag(row, "allow_anlas"),
-        "allow_img2img": jflag(row, "allow_img2img"),
-        "exclude_global_v5": jflag(row, "exclude_global_v5"),
-        "image_model_scope": jget(row, "image_model_scope"),
-        "quota_auto": validation::num_eq_int(row.get("quota_auto"), 1),
-        "role": role,
-        "role_label": role_label(role),
-        "features": features::key_features(row),
+        "policy": policy,
+        "invited": invited,
         "expires_at": jget(row, "expires_at"),
         "created_at": jget(row, "created_at"),
         "last_used_at": jget(row, "last_used_at"),
@@ -216,7 +140,15 @@ async fn full_key_json(state: &AppState, row: &Value, key_id: i64) -> Result<Val
         .iter()
         .find(|(k, _)| *k == key_id)
         .map_or(0, |(_, n)| *n);
-    Ok(key_json(row, &c, generated, None))
+    let policies = state.db.member_policy_directory().await?;
+    let policy = policies.for_subject(row.get("discord_id").and_then(Value::as_str))?;
+    Ok(key_json(
+        row,
+        &c,
+        generated,
+        state.db.invite_key_ids().await?.contains(&key_id),
+        &policy,
+    ))
 }
 
 // ----------------------------------------------------------------------------- Key 列表 / 新建
@@ -224,6 +156,7 @@ async fn full_key_json(state: &AppState, row: &Value, key_id: i64) -> Result<Val
 async fn list_keys(State(state): State<AppState>, _s: AdminSession) -> R {
     let st = &state;
     let rows = st.db.list_keys().await?;
+    let policies = st.db.member_policy_directory().await?;
     let today = st.day();
     // 一次批量取回今日计数（以前逐把 get_counter：370 把 = 370 次串行读库）
     let counters = st.db.counter_map(&today).await?;
@@ -240,12 +173,12 @@ async fn list_keys(State(state): State<AppState>, _s: AdminSession) -> R {
     for r in &rows {
         let id = r.get("id").and_then(Value::as_i64).unwrap_or(0);
         let c = counters.get(&id).unwrap_or(&zero);
-        let role = role_of(invite.contains(&id));
         out.push(key_json(
             r,
             c,
             totals.get(&id).copied().unwrap_or(0),
-            Some(role),
+            invite.contains(&id),
+            &policies.for_subject(r.get("discord_id").and_then(Value::as_str))?,
         ));
     }
     Ok(ok_json(&json!({"keys": out})))
@@ -256,14 +189,6 @@ async fn list_keys(State(state): State<AppState>, _s: AdminSession) -> R {
 async fn create_invite_key(State(state): State<AppState>, _s: AdminSession) -> R {
     let st = &state;
     // 和 /register 一样读「新成员默认」（后台「领 Key」的设置，没设过用 defaults 里的常量）
-    let cfg = ops::registration_settings(st).await?;
-    let (daily_images, daily_v5, features_list, image_scope, expires_days) = (
-        cfg.daily_images,
-        cfg.daily_v5,
-        cfg.features,
-        cfg.image_scope,
-        cfg.expires_days,
-    );
     // 「邀请-N」编号：只看名字开头，数字可以是任何 Unicode 十进制数字
     let max_no = st
         .db
@@ -283,182 +208,19 @@ async fn create_invite_key(State(state): State<AppState>, _s: AdminSession) -> R
         name: name.clone(),
         token: gen_key(),
         enabled: true,
-        daily_images,
-        daily_anlas: 0.0,
-        daily_v5,
-        monthly_anlas: 0.0,
-        daily_text_tokens: 0,
-        rpm: defaults::MANUAL_KEY_RPM,
-        allow_anlas: false,
-        allow_img2img: false,
-        exclude_global_v5: false,
-        image_model_scope: image_scope,
-        expires_at: (expires_days > 0).then_some(now + expires_days as f64 * 86400.0),
-        features: features::dump(features_list),
+        expires_at: None,
         discord_id: None,
-        quota_limits: Some(
-            serde_json::to_string(&gate_core::quota_limits::MemberLimits::legacy(
-                daily_images,
-                daily_v5,
-                0.0,
-                0.0,
-                1,
-            ))
-            .expect("valid invite quota modes"),
-        ),
     };
     let row = st.db.create_key(&new, now).await?;
     let id = row.get("id").and_then(Value::as_i64).unwrap_or(0);
     st.db
-        .upsert_key_tag(
-            id,
-            INVITE_TAG,
-            "站长发的邀请 Key：成员用 /register 填它完成绑定；只由站长手动删除",
-            "站长",
-            now,
-        )
+        .upsert_key_tag(id, INVITE_TAG, "邀请领取", "站长", now)
         .await?;
     log_action(&st.db, "站长", "新建邀请 Key", &name, "", true, st.now()).await;
     let row = st.db.get_key(id).await?.unwrap_or(Value::Null);
-    let c = st.db.get_counter(id, &st.day()).await?;
-    let resp = ok_json(&json!({"key": key_json(&row, &c, 0, None)}));
+    let resp = ok_json(&json!({"key": full_key_json(st,&row,id).await?}));
     Ok(mark_logged(resp))
 }
-
-async fn create_key(State(state): State<AppState>, _s: AdminSession, req: Request) -> R {
-    let (_, body) = json_of(req).await?;
-    let st = &state;
-    // 没填的字段用「新成员默认」（后台「领 Key」的设置）和 defaults 里的常量；弹窗从 /admin/api/ops 取同一份
-    let reg = ops::registration_settings(st).await?;
-    let field = |name: &str, default: Value| body.get(name).cloned().unwrap_or(default);
-
-    // 10-27 额度规范化：0 = 停用，上限最大 9999（每月池 99999），不再有「不限」
-    let daily_images = strict_int(
-        &field("daily_images", json!(reg.daily_images)),
-        0,
-        9999,
-        "daily_images",
-    )?;
-    let monthly_anlas = strict_float(
-        &field("monthly_anlas", json!(defaults::MANUAL_KEY_MONTHLY_ANLAS)),
-        0.0,
-        99_999.0,
-        "monthly_anlas",
-    )?;
-    let daily_anlas = strict_float(
-        &field("daily_anlas", json!(defaults::MANUAL_KEY_DAILY_ANLAS)),
-        0.0,
-        9999.0,
-        "daily_anlas",
-    )?;
-    let daily_v5 = strict_int(&field("daily_v5", json!(reg.daily_v5)), 0, 9999, "daily_v5")?;
-    let rpm = strict_int(
-        &field("rpm", json!(defaults::MANUAL_KEY_RPM)),
-        1,
-        600,
-        "rpm",
-    )?;
-    let expires_days = strict_int(
-        &field("expires_days", json!(reg.expires_days)),
-        0,
-        3650,
-        "expires_days",
-    )?;
-    let now = st.now();
-    let expires_at = (expires_days > 0).then_some(now + expires_days as f64 * 86400.0);
-    let scope = if body.get("image_model_scope") == Some(&json!("all")) {
-        "all"
-    } else {
-        "legacy"
-    };
-    let enabled = |name: &str| body.get(name).is_some_and(values::enabled);
-    // 配额检查只认 > 0 的上限：allow_anlas 开着而日 / 月上限都是 0 = 个人 Anlas 完全无上限，
-    // 可无限烧共享账号的付费点数（422 文案写「0 = 不限」，但实际 0 + 0 会被拒——历史如此，文案不动）
-    if enabled("allow_anlas")
-        && !body.contains_key("quota_limits")
-        && daily_anlas <= 0.0
-        && monthly_anlas <= 0.0
-    {
-        return Err(http(422, ANLAS_CAP));
-    }
-    let role = match body.get("role") {
-        Some(v) if values::enabled(v) => Some(norm_role(&validation::text(v))),
-        _ => None,
-    };
-    if role.as_deref().is_some_and(|r| !valid_role(r)) {
-        return Err(http(422, ROLE_HINT));
-    }
-    let name = {
-        let n = primitives::take_chars(primitives::strip(&pstr(&body, "name")), 60).to_string();
-        if n.is_empty() {
-            "未命名".to_string()
-        } else {
-            n
-        }
-    };
-    let quota_limits = body.get("quota_limits").map(|v| {
-        let limits = gate_core::quota_limits::MemberLimits::from_value(v)
-            .ok_or_else(|| http(422, "quota_limits 必须包含 images/v5/daily_anlas/monthly_anlas 四项额度模式"))?;
-        if [limits.images, limits.v5, limits.daily_anlas, limits.monthly_anlas]
-            .iter()
-            .any(|mode| matches!(mode, gate_core::quota_limits::Limit::Limit(n) if !n.is_finite() || *n < 0.0 || *n > 1_000_000.0))
-        {
-            return Err(http(422, "quota_limits 限额必须在有效范围内"));
-        }
-        serde_json::to_string(v).map_err(|e| http(422, format!("quota_limits 无效：{e}")))
-    }).transpose()?.unwrap_or_else(|| serde_json::to_string(
-        &gate_core::quota_limits::MemberLimits::legacy(daily_images, daily_v5, daily_anlas, monthly_anlas, -1)
-    ).expect("valid manual quota modes"));
-    if enabled("allow_anlas")
-        && let Some(v) = body.get("quota_limits")
-    {
-        let limits = gate_core::quota_limits::MemberLimits::from_value(v).expect("validated above");
-        if matches!(
-            limits.daily_anlas,
-            gate_core::quota_limits::Limit::Unlimited
-        ) && matches!(
-            limits.monthly_anlas,
-            gate_core::quota_limits::Limit::Unlimited
-        ) {
-            return Err(http(422, ANLAS_CAP));
-        }
-    }
-    let new = NewKey {
-        name,
-        token: gen_key(),
-        enabled: true,
-        daily_images,
-        daily_anlas,
-        daily_v5,
-        monthly_anlas,
-        // 文本接口已删除：列保留（只增不减），新 Key 写 0，不再读
-        daily_text_tokens: 0,
-        rpm,
-        allow_anlas: enabled("allow_anlas"),
-        allow_img2img: enabled("allow_img2img"),
-        exclude_global_v5: enabled("exclude_global_v5"),
-        image_model_scope: scope.to_string(),
-        expires_at,
-        features: new_key_features(st, &body).await?,
-        discord_id: None,
-        quota_limits: Some(quota_limits),
-    };
-    let row = st.db.create_key(&new, now).await?;
-    let id = row.get("id").and_then(Value::as_i64).unwrap_or(0);
-    // 后台手动建的 Key 用站长填的额度和模型范围：标为手动，动态额度算法不覆盖（否则 10 分钟内会被改成算法默认值、
-    // 连 V4.5-only 也会被开成 V5）。要交给算法，可在成员页切回「自动」。
-    st.db.set_quota_auto(id, -1).await?;
-    if let Some(role) = &role {
-        st.db.set_key_role(id, role, st.now()).await?;
-    }
-    let row = st.db.get_key(id).await?.unwrap_or(Value::Null);
-    let c = st.db.get_counter(id, &st.day()).await?;
-    Ok(ok_json(
-        &json!({"key": key_json(&row, &c, 0, role.as_deref())}),
-    ))
-}
-
-// ----------------------------------------------------------------------------- 单把 Key 的操作
 
 async fn regenerate_key(
     State(state): State<AppState>,
@@ -477,315 +239,51 @@ async fn regenerate_key(
     Ok(resp)
 }
 
-/// 从「仅 V4.5」开到 V5 时给一个默认日额度，和早期成员一致。
-const QUICK_V5_DAILY: i64 = 15;
-
 async fn patch_key(
     State(state): State<AppState>,
-    _s: AdminSession,
+    _session: AdminSession,
     AdminPath(key_id): AdminPath<i64>,
-    req: Request,
+    request: Request,
 ) -> R {
-    let st = state.clone();
-    if load_key(&st, key_id).await?.is_none() {
-        return Err(http(404, NO_KEY));
-    }
-    let (_, mut body) = json_of(req).await?;
-    let quota = body.get("quota").cloned().unwrap_or(Value::Null);
-    let quota_s = quota.as_str();
-    if !(quota.is_null() || matches!(quota_s, Some("auto" | "manual"))) {
-        return Err(http(422, "quota 只能是 auto（算法）或 manual（手动）"));
-    }
-    if !quota.is_null() {
-        // 2026-10-11 站长：额度只有两种——「算法」全部交给算法；「手动」填多少就是多少，不和算法混用
-        if quota_s == Some("auto") {
-            for k in [
-                "daily_images",
-                "daily_v5",
-                "daily_anlas",
-                "monthly_anlas",
-                "allow_anlas",
-                "exclude_global_v5",
-                "image_model_scope",
-                "features",
-            ] {
-                values::pop(&mut body, k);
-            }
-        }
-    }
-    if body.contains_key("quota_limits")
-        && (quota_s == Some("auto")
-            || ["daily_images", "daily_v5", "daily_anlas", "monthly_anlas"]
-                .iter()
-                .any(|k| body.contains_key(*k)))
+    let (_, body) = json_of(request).await?;
+    if body
+        .keys()
+        .any(|name| !["name", "enabled", "expires_at"].contains(&name.as_str()))
     {
         return Err(http(
             422,
-            "quota_limits 不能与旧数值额度或 quota 字段同时提交",
+            "Key 只允许修改名称、启用状态和到期时间；权限请修改成员规则",
         ));
     }
-    let mut fields: Map<String, Value> = Map::new();
-    if let Some(v) = body.get("name") {
-        let n = primitives::take_chars(
-            primitives::strip(&if values::enabled(v) {
-                validation::text(v)
-            } else {
-                String::new()
-            }),
-            60,
-        )
-        .to_string();
-        fields.insert(
-            "name".into(),
-            Value::String(if n.is_empty() { "未命名".into() } else { n }),
-        );
+    if load_key(&state, key_id).await?.is_none() {
+        return Err(http(404, NO_KEY));
     }
-    if let Some(v) = body.get("enabled") {
-        fields.insert("enabled".into(), Value::Bool(values::enabled(v)));
-    }
-    if let Some(v) = body.get("daily_images") {
-        fields.insert(
-            "daily_images".into(),
-            json!(strict_int(v, 0, 1_000_000, "daily_images")?),
-        );
-    }
-    if let Some(v) = body.get("daily_anlas") {
-        fields.insert(
-            "daily_anlas".into(),
-            values::float(strict_float(v, 0.0, 9999.0, "daily_anlas")?),
-        );
-    }
-    if let Some(v) = body.get("daily_v5") {
-        fields.insert(
-            "daily_v5".into(),
-            json!(strict_int(v, 0, 9999, "daily_v5")?),
-        );
-    }
-    if let Some(v) = body.get("monthly_anlas") {
-        fields.insert(
-            "monthly_anlas".into(),
-            values::float(strict_float(v, 0.0, 99_999.0, "monthly_anlas")?),
-        );
-    }
-    if let Some(v) = body.get("quota_limits") {
-        let modes = gate_core::quota_limits::MemberLimits::from_value(v).ok_or_else(|| {
-            http(
-                422,
-                "quota_limits 必须包含 images/v5/daily_anlas/monthly_anlas 四项额度模式",
-            )
-        })?;
-        fields.insert("quota_limits".into(), v.clone());
-        // Keep legacy numeric columns as a compatibility projection. Canonical modes remain
-        // authoritative; inherited values project the current site default for old readers.
-        let global = crate::ops::global_quota_modes(&st.db).await?;
-        let projected = |mode: gate_core::quota_limits::Limit, inherited: Option<f64>| {
-            mode.resolve(inherited).unwrap_or(0.0)
-        };
-        fields.insert(
-            "daily_images".into(),
-            json!(projected(
-                modes.images,
-                global.register_daily_images.resolve(None)
-            )),
-        );
-        fields.insert(
-            "daily_v5".into(),
-            json!(projected(modes.v5, global.register_daily_v5.resolve(None))),
-        );
-        fields.insert(
-            "daily_anlas".into(),
-            json!(projected(
-                modes.daily_anlas,
-                global.member_daily_anlas.resolve(None)
-            )),
-        );
-        fields.insert(
-            "monthly_anlas".into(),
-            json!(projected(modes.monthly_anlas, None)),
-        );
-    }
-    if let Some(v) = body.get("rpm") {
-        fields.insert("rpm".into(), json!(strict_int(v, 1, 600, "rpm")?));
-    }
-    for k in ["allow_anlas", "allow_img2img", "exclude_global_v5"] {
-        if let Some(v) = body.get(k) {
-            fields.insert(k.into(), Value::Bool(values::enabled(v)));
-        }
-    }
-    if let Some(v) = body.get("role") {
-        let role = norm_role(&if values::enabled(v) {
-            validation::text(v)
-        } else {
-            String::new()
-        });
-        if !valid_role(&role) {
-            return Err(http(422, ROLE_HINT));
-        }
-        st.db.set_key_role(key_id, &role, st.now()).await?;
-    }
-    if let Some(v) = body.get("image_model_scope") {
-        let scope = if v.as_str() == Some("all") {
-            "all"
-        } else {
-            "legacy"
-        };
-        fields.insert("image_model_scope".into(), json!(scope));
-    }
-    if body.contains_key("features") {
-        fields.insert("features".into(), json!(features_field(&body)?));
-    }
-    if body.get("image_model_scope") == Some(&json!("all")) && !body.contains_key("daily_v5") {
-        let before_v5 = load_key(&st, key_id).await?;
-        if before_v5.is_some_and(|b| !jflag(&b, "daily_v5")) {
-            fields.insert("daily_v5".into(), json!(QUICK_V5_DAILY)); // 从「仅 V4.5」开到 V5 时给一个默认日额度
-        }
-    }
-    if let Some(v) = body.get("expires_days") {
-        let d = strict_int(v, 0, 3650, "expires_days")?;
-        fields.insert(
-            "expires_at".into(),
-            if d > 0 {
-                values::float(st.now() + d as f64 * 86400.0)
-            } else {
-                Value::Null
-            },
-        );
-    }
-    let before = load_key(&st, key_id).await?.unwrap_or(Value::Null);
-    if quota_s == Some("auto") {
-        // Anlas 也交给算法：先收回手动授权（Sonnet 审查 P1：否则手动的 150/天永久保留）
-        fields.insert("exclude_global_v5".into(), json!(false));
-        fields.insert("features".into(), Value::Null);
-        fields.insert("allow_anlas".into(), json!(false));
-        fields.insert("daily_anlas".into(), values::float(0.0));
-    }
-    // 同 create_key：开 Anlas 必须留一道上限，日 / 月全为 0 等于个人无上限（2026-10-13 审查）
-    let pick = |name: &str| {
-        fields
-            .get(name)
-            .or_else(|| before.get(name))
-            .cloned()
-            .unwrap_or(Value::Null)
-    };
-    let le0 = |v: Value| values::number(&v).is_some_and(|x| x <= 0.0);
-    if values::enabled(&pick("allow_anlas"))
-        && !body.contains_key("quota_limits")
-        && le0(pick("daily_anlas"))
-        && le0(pick("monthly_anlas"))
-    {
-        return Err(http(422, ANLAS_CAP));
-    }
-    if !body.contains_key("quota_limits") {
-        let quota_fields_changed = [
-            "daily_images",
-            "daily_v5",
-            "daily_anlas",
-            "monthly_anlas",
-            "image_model_scope",
-        ]
-        .iter()
-        .any(|k| fields.contains_key(*k));
-        let auto = if quota_s == Some("auto") {
-            1
-        } else if quota_s == Some("manual") || quota_fields_changed {
-            -1
-        } else {
-            values::int_like(before.get("quota_auto").unwrap_or(&Value::Null)).unwrap_or(1)
-        };
-        let number = |name: &str| {
-            fields
-                .get(name)
-                .or_else(|| before.get(name))
-                .cloned()
-                .unwrap_or(Value::Null)
-        };
-        let images = values::int_like(&number("daily_images")).unwrap_or(0);
-        let v5 = values::int_like(&number("daily_v5")).unwrap_or(0);
-        let daily_anlas = values::number(&number("daily_anlas")).unwrap_or(0.0);
-        let monthly = values::number(&number("monthly_anlas")).unwrap_or(0.0);
-        let modes =
-            gate_core::quota_limits::MemberLimits::legacy(images, v5, daily_anlas, monthly, auto);
-        fields.insert("quota_limits".into(), json!(modes));
-    }
-    st.db.update_key(key_id, &fields).await?;
-    if body.contains_key("quota_limits") && quota_s.is_none() {
-        st.db.set_quota_auto(key_id, -1).await?;
-    }
-    let quota_mode_auto = quota_s == Some("auto");
-    if quota_s == Some("manual") {
-        st.db.set_quota_auto(key_id, -1).await?;
-    } else {
-        // 只有额度 / 模型的值真的变了才转为手动（2026-10-10：提交了一个没变的「模型 = 全部」就被冻结在 18 张）
-        let quota_changed = ["daily_images", "daily_v5", "image_model_scope"]
-            .iter()
-            .any(|k| {
-                fields
-                    .get(*k)
-                    .is_some_and(|v| !values::equal(v, before.get(*k).unwrap_or(&Value::Null)))
-            });
-        if quota_mode_auto || quota_changed {
-            // 手动改了额度或模型 → 这把 Key 由站长管理（-1），动态额度算法不再覆盖；选「交给算法」恢复为 1 并立即重算
-            st.db
-                .set_quota_auto(key_id, if quota_mode_auto { 1 } else { -1 })
-                .await?;
-            if quota_mode_auto && let Err(e) = crate::jobs::quota::run_now(&st).await {
-                let (ty, msg) = match &e {
-                    crate::error::ApiError::Internal(i) => ("InternalError", i.0.clone()),
-                    crate::error::ApiError::Http(h) => ("HTTPException", values::text(&h.detail)),
-                    crate::error::ApiError::Gate(g) => ("GateError", g.message.clone()),
-                };
-                st.bugs.capture(crate::bugs::Report {
-                    source: "quota_algo",
-                    error: Some((ty, &msg)),
-                    ..Default::default()
-                });
+    let mut fields = Map::new();
+    for (name, value) in body {
+        let valid = match name.as_str() {
+            "name" => value
+                .as_str()
+                .is_some_and(|text| !text.trim().is_empty() && text.chars().count() <= 60),
+            "enabled" => value.is_boolean(),
+            "expires_at" => {
+                value.is_null() || value.as_f64().is_some_and(|n| n.is_finite() && n >= 0.0)
             }
+            _ => false,
+        };
+        if !valid {
+            return Err(http(422, format!("{name} 格式无效")));
         }
+        fields.insert(name, value);
     }
-    let row = load_key(&st, key_id).await?.unwrap_or(Value::Null);
+    state.db.update_key(key_id, &fields).await?;
+    let row = load_key(&state, key_id)
+        .await?
+        .ok_or_else(|| http(404, NO_KEY))?;
     Ok(ok_json(
-        &json!({"key": full_key_json(&st, &row, key_id).await?}),
+        &json!({"key":full_key_json(&state,&row,key_id).await?}),
     ))
 }
 
-/// 手动切换账号身份组（站长 / 测试、邀请、普通）。
-async fn switch_key_role(
-    State(state): State<AppState>,
-    _s: AdminSession,
-    AdminPath(key_id): AdminPath<i64>,
-    req: Request,
-) -> R {
-    let st = state.clone();
-    let Some(key) = load_key(&st, key_id).await? else {
-        return Err(http(404, NO_KEY));
-    };
-    let (_, body) = json_of(req).await?;
-    let role = norm_role(&pstr(&body, "role"));
-    if !valid_role(&role) {
-        return Err(http(422, ROLE_HINT));
-    }
-    st.db.set_key_role(key_id, &role, st.now()).await?;
-    let label = role_label(&role);
-    let exemption = if role == ROLE_REGULAR {
-        "（纳入闲置回收）"
-    } else {
-        "（豁免闲置回收）"
-    };
-    log_action(
-        &st.db,
-        "站长",
-        "修改账号身份组",
-        &format!("Key #{key_id} {}", values::text(&jget(&key, "name"))),
-        &format!("切换为「{label}」{exemption}"),
-        true,
-        st.now(),
-    )
-    .await;
-    let resp = ok_json(&json!({"ok": true, "key_id": key_id, "role": role, "role_label": label}));
-    Ok(mark_logged(resp))
-}
-
-/// 请求里的 `scope`（如 `["v5", "anlas"]`）→ 重置范围。V4.5 一定重置；没传 / 不是数组 = 只重置 V4.5（站长 10-18）。
 fn reset_scope_of(body: &JsonObject) -> gate_db::repo::counters::ResetScope {
     let has = |k: &str| {
         body.get("scope")
@@ -821,103 +319,11 @@ async fn reset_daily_image_quota(
     Ok(ok_json(&json!({"ok": true, "key": key})))
 }
 
-/// 换绑时向 Discord 读资料的超时（秒）：读不到就用站长填的用户名，不让后台等太久。
-const BIND_FETCH_SECS: u64 = 5;
-
 /// 管理员手动给指定 Key 绑定或换绑 Discord 账号。
 ///
 /// 只需要 Discord ID：配了机器人就用它读这个账号的公开资料（和后台补全资料同一条 `GET /users/{id}`），
 /// 用户名 / 显示名（global_name，没有就用用户名）/ 头像都以 Discord 为准，Key 名改成「显示名 (@用户名)」。
 /// 读不到（没配机器人、网络错误、超时、查无此人）就退回请求里填的 `username` / `display_name`，Key 名不动。
-async fn bind_discord(
-    State(state): State<AppState>,
-    _s: AdminSession,
-    AdminPath(key_id): AdminPath<i64>,
-    req: Request,
-) -> R {
-    let (_, body) = json_of(req).await?;
-    let discord_id = primitives::strip(&pstr(&body, "discord_id")).to_string();
-    if !gate_core::validation::is_decimal(&discord_id) {
-        return Err(http(422, "Discord ID 必须是纯数字"));
-    }
-    let username =
-        primitives::take_chars(primitives::strip(&pstr(&body, "username")), 80).to_string();
-    let display_name =
-        primitives::take_chars(&pstr_or(&body, "display_name", &username), 80).to_string();
-    let st = state.clone();
-    let Some(row) = load_key(&st, key_id).await? else {
-        return Err(http(404, NO_KEY));
-    };
-    // 没有用户名的响应（假服务 / 异常返回）不算读到
-    let fetched = match st.registration.as_ref() {
-        Some(reg) => reg
-            .fetch_user(&discord_id, BIND_FETCH_SECS)
-            .await
-            .filter(|u| !u.username.is_empty()),
-        None => None,
-    };
-    let profile = match &fetched {
-        Some(u) => {
-            let user = DiscordUser {
-                id: discord_id.clone(),
-                ..u.clone()
-            };
-            let username = clip(&user.username).unwrap_or_default();
-            BindProfile {
-                display_name: clip(&user.global_name).unwrap_or_else(|| username.clone()),
-                username,
-                avatar: Some(clip(&user.avatar).unwrap_or_default()),
-                key_name: Some(member_label(&user)),
-            }
-        }
-        None => BindProfile {
-            username,
-            display_name,
-            avatar: None,
-            key_name: None,
-        },
-    };
-    let reg = match st
-        .db
-        .bind_discord(key_id, &discord_id, &profile, st.now())
-        .await?
-    {
-        BindOutcome::Taken(other) => {
-            return Err(http(400, format!("该 Discord 账号已绑定到 Key #{other}")));
-        }
-        BindOutcome::Bound(reg) => reg,
-    };
-    let old_name = values::text(&jget(&row, "name"));
-    // 读不到资料时日志和以前一样；读到了再注明来源和改名
-    let note = match &profile.key_name {
-        Some(n) if *n != old_name => format!("；已从 Discord 读取资料，Key 名改为「{n}」"),
-        Some(_) => "；已从 Discord 读取资料".to_string(),
-        None => String::new(),
-    };
-    log_action(
-        &st.db,
-        "站长",
-        "手动绑定 Discord",
-        &format!("Key #{key_id} {old_name}"),
-        &format!("@{} ({discord_id}){note}", profile.username),
-        true,
-        st.now(),
-    )
-    .await;
-    let name = profile.key_name.clone().unwrap_or(old_name);
-    let resp = ok_json(&json!({
-        "ok": true,
-        "discord_id": discord_id,
-        "discord": reg.as_ref().map(discord_profile),
-        "name": name,
-        "from_discord": fetched.is_some(),
-    }));
-    Ok(mark_logged(resp))
-}
-
-// ----------------------------------------------------------------------------- 券
-
-/// 给成员发一张券（现在只有重置券）：`{"kind": "reset", "days": 7, "note": "唱得真好听"}`。成员在首页自己使用。
 async fn give_coupon(
     State(state): State<AppState>,
     _s: AdminSession,
@@ -1255,6 +661,7 @@ fn attention_needed(m: &Obj, now: f64) -> bool {
 /// 前端 `web/src/pages/admin/sections/members/logic.ts` 的 `needsAttention` 与本文件的
 /// [`attention_needed`] 是同一条口径，改一边要同时改另一边。
 async fn members(State(state): State<AppState>, _s: AdminSession, q: AdminQuery) -> R {
+    let policies = state.db.member_policy_directory().await?;
     let filter = match q.text("filter") {
         "" | "all" => "all",
         "attention" => "attention",
@@ -1332,24 +739,18 @@ async fn members(State(state): State<AppState>, _s: AdminSession, q: AdminQuery)
             e.1 = a_ts;
         }
     }
-    let today_counters: HashMap<i64, (i64, i64, f64, i64)> = st
-        .db
-        .counter_rows(&today)
-        .await?
-        .into_iter()
-        .map(|(k, images, v5, anlas, _tokens, requests)| (k, (images, v5, anlas, requests)))
-        .collect();
-
+    let today_counters = st.db.counter_map(&today).await?;
     let mut out: Vec<Obj> = Vec::new();
     for row in st.db.list_keys().await? {
         let id = row.get("id").and_then(Value::as_i64).unwrap_or(0);
+        let counter = today_counters.get(&id).cloned().unwrap_or_default();
         let (images, v5, anlas, requests) =
-            today_counters.get(&id).copied().unwrap_or((0, 0, 0.0, 0));
+            (counter.images, counter.v5, counter.anlas, counter.requests);
         let w = week.get(&id).cloned().unwrap_or(Value::Null);
         let wi = |k: &str| values::number(&jget(&w, k)).map_or(0, |x| x as i64);
         let wf = |k: &str| values::number(&jget(&w, k)).unwrap_or(0.0);
         let my_tags = manual_tags.get(&id);
-        let role = role_of(my_tags.is_some_and(|t| t.iter().any(|x| x.tag == INVITE_TAG)));
+        let invited = my_tags.is_some_and(|t| t.iter().any(|x| x.tag == INVITE_TAG));
         let reg_row = reg.get(&id);
         let ms = milestones.get(&id);
         let mut m = Obj::new();
@@ -1359,33 +760,22 @@ async fn members(State(state): State<AppState>, _s: AdminSession, q: AdminQuery)
         put("id", jget(&row, "id"));
         put("name", jget(&row, "name"));
         put("enabled", json!(jflag(&row, "enabled")));
-        put("role", json!(role));
-        put("role_label", json!(role_label(role)));
+        put("invited", json!(invited));
         put("discord_id", json!(reg_row.map(|r| r.discord_id.clone())));
         put("discord", json!(reg_row.map(discord_profile)));
         put("created_at", jget(&row, "created_at"));
         put("last_used_at", jget(&row, "last_used_at"));
         put("expires_at", jget(&row, "expires_at"));
-        put("daily_images", jget(&row, "daily_images"));
-        put("daily_v5", jget(&row, "daily_v5"));
         put(
-            "quota_limits",
-            json!(crate::key::Key(row.clone()).quota_limits()),
-        );
-        put(
-            "quota_limits_valid",
-            json!(crate::key::Key(row.clone()).try_quota_limits().is_ok()),
-        );
-        put("allow_anlas", json!(jflag(&row, "allow_anlas")));
-        put("daily_anlas", jget(&row, "daily_anlas"));
-        put("image_model_scope", jget(&row, "image_model_scope"));
-        put(
-            "quota_auto",
-            json!(validation::num_eq_int(row.get("quota_auto"), 1)),
+            "policy",
+            serde_json::to_value(
+                policies.for_subject(row.get("discord_id").and_then(Value::as_str))?,
+            )
+            .map_err(|_| crate::error::InternalError("成员规则编码失败".into()))?,
         );
         put(
             "today",
-            json!({"images": images, "v5": v5, "anlas": values::float(primitives::round(anlas, 2)),
+            json!({"images": images, "legacy_free_images":counter.legacy_free_images,"v5": v5, "anlas": values::float(primitives::round(anlas, 2)),
                    "requests": requests}),
         );
         put(

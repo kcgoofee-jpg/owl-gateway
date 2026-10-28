@@ -1,9 +1,4 @@
 //! `GET /v1/me` 的端到端测试：真实的 AppState + 路由 + 记账，上游换成本地假服务。
-//!
-//! 这个文件原先是文本生成 / 流式 / 语音 / OpenAI 兼容聊天路由的测试（`text_routes.rs`）。文本接口在 2026-10-15
-//! 整套删除，只留下 `/v1/me` 的用例；`/v1/models`、`/v1` 随之删除，也不再测。
-//! 期望值里的字节串来自旧 Python 网关，功能列表按 3.0 现状少了「文本」「语音」两项；`today` 里去掉了
-//! `daily_images_base`（保底）与 `anlas_auto`（V5 续杯）。
 
 mod common;
 use axum::http::StatusCode;
@@ -23,14 +18,20 @@ async fn call_get_anon(e: &Env, path: &str) -> Reply3 {
 
 async fn add_key(e: &Env, name: &str, token: &str, extra: Value) {
     let mut v = json!({
-        "name": name, "token": token, "daily_images": 100, "daily_v5": 10, "monthly_anlas": 0.0,
+        "name": name, "token": token, "discord_id":"900000000000000009", "daily_images": 100, "daily_v5": 10, "monthly_anlas": 0.0,
         "daily_text_tokens": 1000, "rpm": 1000,
     });
     for (k, x) in extra.as_object().unwrap() {
         v[k] = x.clone();
     }
     let key: NewKey = serde_json::from_value(v).unwrap();
-    e.state.db.create_key(&key, e.state.now()).await.unwrap();
+    let id = e.state.db.create_key(&key, e.state.now()).await.unwrap();
+    common::policy_for(
+        &e.state,
+        id["id"].as_i64().unwrap(),
+        json!({"image":true,"upscale":false,"augment":false,"vibe":false,"tags":false}),
+    )
+    .await;
 }
 
 fn text(body: &[u8]) -> String {
@@ -59,31 +60,25 @@ fn assert_gate_error(status: StatusCode, body: &[u8], code: u16, message: &str) 
 
 // ------------------------------------------------------------------ /v1/me
 
-const FEATURES_ALL_ON: &str = r#"[{"id":"image","label":"文生图","on":true},{"id":"upscale","label":"放大","on":true},{"id":"augment","label":"导演工具（线稿、上色等）","on":true},{"id":"vibe","label":"Vibe 编码","on":true},{"id":"tags","label":"标签补全","on":true}]"#;
-
-fn me_json(
-    name: &str,
-    tokens: i64,
-    requests: i64,
-    daily_text: i64,
-    delete_days: i64,
-    features: &str,
-) -> String {
-    format!(
-        "{{\"name\":\"{name}\",\"generated_images_total\":0,\"today\":{{\"images\":0,\"daily_images\":100,\"legacy_free_images_today\":0,\"anlas_today\":0.0,\"daily_anlas\":0.0,\"v5_today\":0,\"daily_v5\":10,\"image_model_scope\":\"legacy\",\"anlas_month\":0.0,\"monthly_anlas\":0.0,\"quota_limits\":{{\"images\":{{\"mode\":\"inherit\"}},\"v5\":{{\"mode\":\"inherit\"}},\"daily_anlas\":{{\"mode\":\"inherit\"}},\"monthly_anlas\":{{\"mode\":\"unlimited\"}}}},\"quota_limits_valid\":true,\"text_tokens\":{tokens},\"daily_text_tokens\":{daily_text},\"requests\":{requests}}},\"expires_at\":null,\"inactivity_delete_days\":{delete_days},\"features\":{features}}}"
-    )
-}
-
 #[tokio::test]
-async fn me_matches_legacy_bytes() {
+async fn me_reports_effective_policy_without_retired_fields() {
     let e = setup(&[]).await;
     let (status, headers, body) = call_get(&e, "/v1/me", TOKEN).await;
     assert_eq!(status, 200, "{}", text(&body));
     assert_eq!(ct(&headers), "application/json");
-    assert_eq!(
-        text(&body),
-        me_json("测试成员", 0, 0, 1000, 3, FEATURES_ALL_ON)
-    );
+    let value = json_of(&body);
+    assert_eq!(value["name"], "测试成员");
+    assert_eq!(value["today"]["daily_images"], 100);
+    assert_eq!(value["today"]["daily_v5"], 10);
+    assert_eq!(value["today"]["images"], 0);
+    for removed in [
+        "quota_limits",
+        "image_model_scope",
+        "daily_text_tokens",
+        "text_tokens",
+    ] {
+        assert!(value["today"].get(removed).is_none(), "{value}");
+    }
 }
 
 #[tokio::test]
@@ -108,7 +103,7 @@ async fn me_counts_usage_and_respects_feature_switches() {
     let v = json_of(&body);
     assert_eq!(v["today"]["images"], 1, "{}", text(&body));
     assert_eq!(v["today"]["requests"], 1, "{}", text(&body));
-    // Key 自己的功能列表：只开了出图（Vibe 因为全站 Anlas 池开放，仍是可用）
+    // 成员只开出图，Vibe 不因共享预算而隐式开放。
     let (_, _, body) = call_get(&e, "/v1/me", "nai-test-feat-key-00000000000000000000").await;
     let v = json_of(&body);
     let on: Vec<(&str, bool)> = v["features"]
@@ -123,7 +118,7 @@ async fn me_counts_usage_and_respects_feature_switches() {
             ("image", true),
             ("upscale", false),
             ("augment", false),
-            ("vibe", true),
+            ("vibe", false),
             ("tags", false),
         ]
     );

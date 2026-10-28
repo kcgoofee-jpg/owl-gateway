@@ -3,7 +3,7 @@
  * 时间单位都是 Unix 秒。
  */
 import { fullTime, rel, scopeText, withUnit } from "../../../../lib/format";
-import type { AutoTag, Member, Role, Tag } from "./types";
+import type { AutoTag, Member, Tag } from "./types";
 
 export const HOUR = 3600;
 export const DAY = 86400;
@@ -16,11 +16,6 @@ export const acked = (m: Pick<Member, "tags">, now: number): boolean =>
 
 export const memberLabel = (m: Pick<Member, "discord" | "name">): string =>
   m.discord?.display_name || m.discord?.username || m.name;
-
-export function roleOf(m: Pick<Member, "role" | "tags">): Role {
-  if (m.role) return m.role;
-  return m.tags.some((t) => t.tag === "邀请") ? "invite" : "regular";
-}
 
 /** 成员在「按成员筛选」里的取值：名下所有 Key 的 id 用逗号连起来。 */
 export const memberKeyValue = (m: Pick<Member, "id" | "all_key_ids">): string =>
@@ -133,7 +128,7 @@ export const needsAttention = (m: Member, now: number): boolean =>
 /* ---------------- 一句话结论与列表状态 ---------------- */
 export function memberVerdict(m: Member, now: number): { title: string; sub: string } {
   const issues = memberIssues(m, now);
-  const cap = m.daily_images;
+  const cap = m.policy.effective.daily_images;
   const used = m.today.images;
   let title: string;
   const bad = issues.find((x) => x.level === "bad");
@@ -142,7 +137,8 @@ export function memberVerdict(m: Member, now: number): { title: string; sub: str
     title = `有 ${issues.filter((x) => x.need).length} 件事要看一眼`;
   } else if (!m.first_image_at) {
     title = `领了 Key ${m.registered_at ? `${ago(now - m.registered_at)}了` : ""}，还没出过图`;
-  } else if (cap > 0 && used >= cap) title = `今天的额度用完了（${withUnit(used, "张")}）`;
+  } else if (cap > 0 && m.today.legacy_free_images >= cap)
+    title = `今天的额度用完了（${withUnit(used, "张")}）`;
   else if (used > 0) title = `正常使用，今天出了 ${withUnit(used, "张")}`;
   else title = `今天还没用${m.last_used_at ? `，上次是 ${rel(m.last_used_at, now)}` : ""}`;
   const why = (m.rejected_why || []).map(([r, n]) => `${r} ${n}`).join("、");
@@ -175,7 +171,8 @@ export function memberStatus(m: Member, now: number): StatusBadge | null {
         .join("、"),
     };
   }
-  if (m.daily_images > 0 && m.today.images >= m.daily_images) return { tone: undefined, text: "额度用完" };
+  if (m.policy.effective.daily_images > 0 && m.today.legacy_free_images >= m.policy.effective.daily_images)
+    return { tone: undefined, text: "额度用完" };
   if (m.registered_at && now - m.registered_at < DAY) return { tone: "info", text: "新加入" };
   if (!m.first_image_at) return { tone: undefined, text: "还没出过图" };
   return null;
@@ -221,7 +218,7 @@ export function buildFilters(now: number, idleDays: number): FilterSet {
       label: `快被回收（满 ${idleDays} 天）`,
       hint: `满 ${idleDays} 天没生过图就会被自动删除（不拉黑，之后可以再领）`,
       // 与后端回收口径一致：只看最近一次成功生图（没生过图的从创建时间算），邀请 Key 豁免
-      test: (m) => roleOf(m) === "regular" && now - (m.last_image_at ?? m.created_at) > (idleDays - 1) * DAY,
+      test: (m) => now - (m.last_image_at ?? m.created_at) > (idleDays - 1) * DAY,
     });
   }
   chips.push(
@@ -229,7 +226,7 @@ export function buildFilters(now: number, idleDays: number): FilterSet {
       id: "invite",
       label: "邀请 Key",
       hint: "带「邀请」标签的 Key（站长发出的邀请，不参与自动回收）",
-      test: (m) => roleOf(m) === "invite",
+      test: (m) => m.invited,
     },
     { id: "attention", label: "需要处理", test: (m) => needsAttention(m, now) },
   );

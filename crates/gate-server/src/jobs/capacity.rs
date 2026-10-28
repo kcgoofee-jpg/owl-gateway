@@ -6,7 +6,7 @@
 //! 账号节奏改由上游客户端按 429 自动调整出图间隔（`gate_upstream::pace`），不需要定时任务。
 
 use super::JobError;
-use super::quota::{allowance_accounts, refresh_allowance};
+use super::support::{allowance_accounts, refresh_allowance};
 use crate::state::AppState;
 
 /// 距离上次快照 ≥ 1 小时（或从未记录）才记一次。`last` = `SELECT MAX(ts) FROM upstream_snapshots`。

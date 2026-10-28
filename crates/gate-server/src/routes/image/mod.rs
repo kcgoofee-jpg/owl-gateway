@@ -135,43 +135,11 @@ pub(super) fn on_429(state: &AppState) -> Box<dyn Fn(f64) -> BoxFuture<'static, 
 
 pub(super) fn before_dispatch(
     state: &AppState,
-    key: Option<(String, bool)>,
 ) -> Box<dyn Fn() -> BoxFuture<'static, Result<(), UpstreamError>> + Send + Sync> {
-    let s = state.clone();
+    let state = state.clone();
     Box::new(move || {
-        let s = s.clone();
-        let key = key.clone();
-        Box::pin(async move {
-            check_image_cooldown(&s).map_err(|g| local(g.into()))?;
-            if let Some((discord_id, is_v5)) = key
-                && is_v5
-            {
-                let snapshot = crate::v5_access::evaluate(&s, Some(&discord_id))
-                    .await
-                    .map_err(|_| {
-                        UpstreamError::local(
-                            500,
-                            "读取 V5 权限与紧急暂停状态失败，请求未发出。",
-                            "",
-                        )
-                    })?;
-                if snapshot.paused {
-                    return Err(UpstreamError::local(
-                        403,
-                        gate_core::quota::V5_PAUSED_TEXT,
-                        gate_core::reasons::V5_EXHAUSTED,
-                    ));
-                }
-                if !snapshot.decision.allowed {
-                    return Err(UpstreamError::local(
-                        403,
-                        snapshot.decision.reason,
-                        gate_core::reasons::FEATURE_OFF,
-                    ));
-                }
-            }
-            Ok(())
-        })
+        let state = state.clone();
+        Box::pin(async move { check_image_cooldown(&state).map_err(|error| local(error.into())) })
     })
 }
 
@@ -338,8 +306,15 @@ async fn generate(state: AppState, req: Request, streaming: bool) -> ApiResult {
         let slots = acquire_slots(&state);
         // 排队 / 预算等待之后再查一次冷却和额度
         check_image_cooldown(&state)?;
-        let reserved =
-            reserve_image_budget(&state, &ctx, &key, &prep.est, prep.legacy_free_images).await?;
+        let reserved = reserve_image_budget(
+            &state,
+            &ctx,
+            &key,
+            &prep.est,
+            prep.legacy_free_images,
+            crate::admission::DispatchRequirements::image(&prep.body)?,
+        )
+        .await?;
         let (s, c) = (state.clone(), ctx.clone());
         shielded(&state, &ctx, async move {
             let _held = (admission, slots);

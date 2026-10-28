@@ -5,8 +5,8 @@
 mod abuse;
 mod auth;
 mod jobs;
+mod member_rules;
 mod members;
-mod num;
 mod ops;
 mod records;
 mod req;
@@ -35,6 +35,7 @@ pub fn router(state: AppState) -> Router<AppState> {
         .merge(ops::router())
         .merge(jobs::router())
         .merge(members::router())
+        .merge(member_rules::router())
         .merge(records::router())
         .route_layer(from_fn_with_state(state, audited))
 }

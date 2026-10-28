@@ -30,8 +30,6 @@ use std::time::Duration;
 
 /// 身份组同步每轮最多摘几个（不制造突发请求）。
 pub const SYNC_ROLES_PER_RUN: usize = 5;
-/// 邀请 Key 持有人退群后，多久再核对一次。
-const INVITE_RECHECK_SECS: f64 = 30.0 * 86400.0;
 
 // ------------------------------------------------------------------ 错误
 
@@ -173,20 +171,6 @@ pub struct Welcome<'a> {
     pub idle_days: i64,
     /// 已开通功能的名字，空串 = 不写这一行。
     pub opened: &'a str,
-}
-
-fn welcome_v5_available(
-    image_scope: &str,
-    policy_allowed: bool,
-    paused: bool,
-    member_limit: Option<f64>,
-    global_limit: Option<f64>,
-) -> bool {
-    image_scope == "all"
-        && policy_allowed
-        && !paused
-        && member_limit != Some(0.0)
-        && global_limit != Some(0.0)
 }
 
 /// 领取成功的欢迎语：Key + 一步步配置教程 + 规则。控制在 Discord 2000 字以内。
@@ -410,7 +394,10 @@ impl RegistrationService {
     }
 
     pub async fn key_row_for(&self, discord_id: &str) -> Result<Option<Key>, DbError> {
-        Ok(self.db.key_row_for_discord(discord_id).await?.map(Key))
+        match self.db.key_row_for_discord(discord_id).await? {
+            Some(row) => Ok(Some(Key::load(&self.db, row).await?)),
+            None => Ok(None),
+        }
     }
 
     /// 领取记录里的资料：没有记录只有 `{"id"}`。
@@ -609,25 +596,6 @@ impl RegistrationService {
                     .find_map(|k| label.get(k).filter(|v| values::enabled(v)))
                     .map(validation::text)
                     .unwrap_or_else(|| discord_id.clone());
-                if let Some((key_id, key_name)) = &cand.invite_key {
-                    log_action(
-                        &self.db,
-                        "系统",
-                        "退群（邀请 Key 保留）",
-                        &format!("Key #{key_id} {key_name}"),
-                        &format!(
-                            "Discord:{discord_id} {who} 已不在服务器；邀请 Key 只由站长手动删除，未回收"
-                        ),
-                        true,
-                        now,
-                    )
-                    .await;
-                    // 30 天后再核对一次：持有人一直不回来时，操作日志每月提醒一条而不是每天一条
-                    self.db
-                        .set_member_checked(&discord_id, now + INVITE_RECHECK_SECS)
-                        .await?;
-                    continue;
-                }
                 if self.revoke(&discord_id, false).await? {
                     log_action(
                         &self.db,
@@ -933,6 +901,7 @@ impl RegistrationService {
         if rules.is_empty() {
             return Ok(RoleCheck::NotRequired);
         }
+        self.db.clear_role_verifications(user_id).await?;
         let mut guilds: Vec<&str> = Vec::new();
         for r in &rules {
             if !guilds.contains(&r.guild.as_str()) {
@@ -1014,13 +983,13 @@ impl RegistrationService {
         self.db.is_unbound_invite(key_id).await
     }
 
-    /// /register 时填了邀请 Key：把这把 Key 绑定到发命令的 Discord 账号（10-11 站长：不用后台手动认人）。
-    /// 邀请是站长预先放行的，所以不受「领 Key 开关 / 名额 / 每小时上限」限制；Key 本身不变。调用方须持有 `lock`。
+    /// 绑定已有的邀请凭据。调用方必须先通过与普通领取相同的资格、容量和限流检查。
     async fn bind_invite(
         &self,
         user_id: &str,
         token: &str,
         user: &DiscordUser,
+        cfg: &Registration,
     ) -> Result<Issued, RegErr> {
         let token = strip(token);
         let row = if token.starts_with("nai-") {
@@ -1055,6 +1024,8 @@ impl RegistrationService {
                 display_name: display.as_deref(),
                 avatar: avatar.as_deref(),
                 key_name: &member_label(user),
+                expires_at: (cfg.expires_days > 0)
+                    .then(|| crate::time::now() + cfg.expires_days as f64 * 86400.0),
                 member_role: !self.cfg.member_role_id.is_empty(),
             })
             .await?;
@@ -1110,9 +1081,6 @@ impl RegistrationService {
         if crate::ban_link::blocked(&self.db, user_id).await? {
             return denied(crate::ban_link::BLOCK_NOTICE);
         }
-        if !invite_key.is_empty() {
-            return self.bind_invite(user_id, invite_key, user).await;
-        }
         if self.issue_rate_blocked(crate::time::now()).await? {
             return denied(
                 "本小时领取人数较多，为保护服务稳定已暂时限流，请过几分钟再用 /register 领取。",
@@ -1127,7 +1095,12 @@ impl RegistrationService {
             for rule in &rules {
                 if self
                     .db
-                    .role_verified(user_id, &rule.guild, &rule.role)
+                    .role_verified_since(
+                        user_id,
+                        &rule.guild,
+                        &rule.role,
+                        crate::time::now() - 900.0,
+                    )
                     .await?
                 {
                     passed = true;
@@ -1141,6 +1114,9 @@ impl RegistrationService {
                     self.cfg.site_url
                 ));
             }
+        }
+        if !invite_key.is_empty() {
+            return self.bind_invite(user_id, invite_key, user, &cfg).await;
         }
         let user = DiscordUser {
             id: user_id.to_string(),
@@ -1169,33 +1145,9 @@ impl RegistrationService {
                     name: format!("Discord:{user_id}"),
                     token: key.clone(),
                     enabled: true,
-                    daily_images: cfg.daily_images,
-                    daily_anlas: 0.0,
-                    daily_v5: cfg.daily_v5,
-                    monthly_anlas: 0.0,
-                    daily_text_tokens: 0,
-                    rpm: defaults::REGISTER_KEY_RPM,
-                    allow_anlas: false,
-                    allow_img2img: false,
-                    exclude_global_v5: false,
-                    image_model_scope: cfg.image_scope.clone(),
                     expires_at: (cfg.expires_days > 0)
                         .then(|| created + (cfg.expires_days * 86400) as f64),
-                    features: cfg
-                        .features
-                        .as_ref()
-                        .and_then(|f| features::dump(Some(f.iter()))),
                     discord_id: Some(user_id.to_string()),
-                    quota_limits: Some(
-                        serde_json::to_string(&gate_core::quota_limits::MemberLimits::legacy(
-                            cfg.daily_images,
-                            cfg.daily_v5,
-                            0.0,
-                            0.0,
-                            1,
-                        ))
-                        .expect("valid default quota modes"),
-                    ),
                 },
                 created,
             )
@@ -1216,6 +1168,8 @@ impl RegistrationService {
                 display_name: display.as_deref(),
                 avatar: avatar.as_deref(),
                 key_name: &member_label(user),
+                expires_at: (cfg.expires_days > 0)
+                    .then_some(created + cfg.expires_days as f64 * 86400.0),
                 member_role: !self.cfg.member_role_id.is_empty(),
             })
             .await;
@@ -1227,35 +1181,21 @@ impl RegistrationService {
         if !self.cfg.member_role_id.is_empty() {
             self.set_role(user_id, true).await;
         }
-        let opened = match &cfg.features {
-            Some(list) => list
-                .iter()
-                .filter_map(|f| {
-                    features::FEATURES
-                        .iter()
-                        .find(|(n, _)| n == f)
-                        .map(|(_, l)| *l)
-                })
-                .collect::<Vec<_>>()
-                .join("、"),
-            None => "全部已开放功能".to_string(),
-        };
-        let access = crate::v5_access::configuration_for(&self.db).await?;
-        let access = access.evaluate(Some(user_id));
-        let quota_modes = crate::ops::global_quota_modes(&self.db).await?;
-        let member_v5 = quota_modes.register_daily_v5.resolve(None);
-        let global_v5 = quota_modes.global_daily_v5.resolve(None);
-        let member_images = quota_modes.register_daily_images.resolve(None);
-        let v5 = welcome_v5_available(
-            &cfg.image_scope,
-            access.decision.allowed,
-            access.paused,
-            member_v5,
-            global_v5,
-        );
-        let images_available = member_images != Some(0.0);
-        let daily_images = member_images.unwrap_or(0.0).trunc() as i64;
-        let daily_v5 = member_v5.unwrap_or(0.0).trunc() as i64;
+        let policy = self.db.member_policy(user_id).await?.effective;
+        let shared = self.db.shared_budgets().await?;
+        let opened = features::FEATURES
+            .iter()
+            .filter(|(name, _)| policy.allows(name))
+            .map(|(_, label)| *label)
+            .collect::<Vec<_>>()
+            .join("、");
+        let v5 = policy.allows("v5")
+            && !crate::ops::v5_paused(&self.db).await?
+            && policy.daily_v5 > 0
+            && shared.daily_v5 > 0;
+        let images_available = policy.daily_images > 0 && policy.image;
+        let daily_images = i64::from(policy.daily_images);
+        let daily_v5 = i64::from(policy.daily_v5);
         let message = welcome_message(&Welcome {
             key: &key,
             site: &self.cfg.site_url,
@@ -1338,16 +1278,6 @@ pub fn parse_connections(v: &Value) -> Vec<DiscordConnection> {
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    #[test]
-    fn welcome_v5_requires_scope_policy_pause_and_nonzero_effective_quotas() {
-        assert!(welcome_v5_available("all", true, false, None, None));
-        assert!(!welcome_v5_available("all", false, false, None, None));
-        assert!(!welcome_v5_available("all", true, true, None, None));
-        assert!(!welcome_v5_available("legacy", true, false, None, None));
-        assert!(!welcome_v5_available("all", true, false, Some(0.0), None));
-        assert!(!welcome_v5_available("all", true, false, None, Some(0.0)));
-    }
 
     #[test]
     fn label_and_clip() {

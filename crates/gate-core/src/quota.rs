@@ -1,24 +1,9 @@
-//! 额度：把站长手动定的每人额度下发给成员 Key，写首页那句「今日额度」；另有 V5 电量的记录（只显示）。
-//!
-//! 站长 10-23：所有自动额度算法删除，额度全是手动的一个个数（坚守初心让更多人进来用、调低个人限额，重度用户自己花钱）：
-//! - V4.5 每人每天 `register_daily_images`、V5 每人每天 `register_daily_v5`、全站每日 V5 `global_daily_v5`、
-//!   V5 暂停 `v5_paused`（开关）——登记见 [`crate::site_flags`]；
-//! - 删除的：V4.5 每人上限自动调整（`quota_ceiling` / `quota_step` / `quota_target_avg` / `quota_ceiling_max` /
-//!   `quota_base_min_fair`、water-fill）、新号爬坡（`newbie_ramp_*`）、按电量定的 V5 当天方案（`quota_v5_day_plan`、
-//!   临时加量 `quota_v5_bonus`、自动暂停 `quota_v5_paused`）、动态额度总开关 `quota_auto_enabled`、每日复盘
-//!   （`quota_algo_day` / `quota_algo_history` / `quota_algo_last`）、账号日上限的自动版（`quota_account_caps` /
-//!   `quota_account_cap_auto`）。库里的旧行不删，只是不再读写。
-//!
-//! [`sync`]：额度同步任务每轮（以及后台改了额度时）调一次：成员 Key 的值和手动值不一样才写，文案变了才写。
-//! [`Effect::UpdateKeys`] 的执行：`UPDATE api_keys SET daily_images=?, daily_v5=?`
-//! WHERE quota_auto=1`。后台手动设过额度的 Key（`quota_auto=-1`）不动。
+//! V5 读数统计与运行保护动作。
 
 use crate::{primitives, values};
 use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value};
 
-/// 首页那句「今日额度」（`site_settings` 键）。
-pub const NOTICE_KEY: &str = "algo_notice";
 /// V5 暂停时成员看到的话（拒绝 V5 时的 402，原因码 `v5_exhausted`）。
 pub const V5_PAUSED_TEXT: &str = "V5 暂停，未扣费。请使用 V4.5。";
 /// Meter readings at or above this are treated as full (recovery is clipped, not measurable).
@@ -54,8 +39,6 @@ pub enum Effect {
         target: String,
         detail: String,
     },
-    /// 把手动额度下发给 `quota_auto=1` 的成员 Key（见模块文档）。
-    UpdateKeys { daily_images: i64, daily_v5: i64 },
     /// 自动驾驶：`guard.trip_breaker(seconds, reason, now)`（内存态）。
     TripBreaker {
         seconds: i64,
@@ -69,89 +52,6 @@ pub enum Effect {
         reason: String,
         now: f64,
     },
-}
-
-// ---------------------------------------------------------------------------
-// 手动额度的下发与首页文案
-// ---------------------------------------------------------------------------
-
-/// 站长手动定的额度（都已按登记表解析、夹好）。10-27 规范化：0 = 停用，上限最大 9999。
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct Manual {
-    /// V4.5 每人每天（0 = 停用）
-    pub daily_images: i64,
-    /// V5 每人每天（0 = 停用）
-    pub daily_v5: i64,
-    /// 全站每日 V5（0 = 停用）
-    pub global_v5: i64,
-    pub v5_paused: bool,
-    /// Anlas 每人每天（0 = 停用）
-    pub member_anlas: i64,
-}
-
-/// `quota_auto=1` 的成员 Key 当前的值。
-#[derive(Debug, Clone, PartialEq, Deserialize)]
-#[serde(deny_unknown_fields)]
-pub struct ManagedKey {
-    pub daily_images: i64,
-    pub daily_v5: i64,
-    pub image_model_scope: String,
-}
-
-/// 首页那句「今日额度」。
-pub fn quota_notice(m: &Manual, reset_hour: i64) -> String {
-    let v45 = if m.daily_images > 0 {
-        format!("V4.5 每人 {} 张/天", m.daily_images)
-    } else {
-        "V4.5 已停用".to_string()
-    };
-    let v5 = if m.v5_paused {
-        " · V5 暂停中".to_string()
-    } else if m.daily_v5 == 0 {
-        " · V5 已停用".to_string()
-    } else {
-        let each = format!("每人 {} 张", m.daily_v5);
-        if m.global_v5 > 0 {
-            format!(" · V5 {each}（全站今日共 {} 张，先到先得）", m.global_v5)
-        } else {
-            " · V5 已停用（全站池未开放）".to_string()
-        }
-    };
-    let anlas = if m.member_anlas > 0 {
-        format!(" · Anlas 每人 {}/天", m.member_anlas)
-    } else {
-        String::new()
-    };
-    format!("今日额度：{v45}（每日 {reset_hour} 点重置）{v5}{anlas}")
-}
-
-/// 一轮同步要做的写入：成员 Key 和手动值不一样 → [`Effect::UpdateKeys`]；文案变了 → 写 [`NOTICE_KEY`]。
-/// 返回 (写入, 要改几把 Key)。
-pub fn sync(
-    m: &Manual,
-    keys: &[ManagedKey],
-    notice_now: Option<&str>,
-    reset_hour: i64,
-) -> (Vec<Effect>, usize) {
-    let mut out = Vec::new();
-    let changed = keys
-        .iter()
-        .filter(|k| k.daily_images != m.daily_images || k.daily_v5 != m.daily_v5)
-        .count();
-    if changed > 0 {
-        out.push(Effect::UpdateKeys {
-            daily_images: m.daily_images,
-            daily_v5: m.daily_v5,
-        });
-    }
-    let note = quota_notice(m, reset_hour);
-    if notice_now != Some(note.as_str()) {
-        out.push(Effect::Set {
-            key: NOTICE_KEY.into(),
-            value: note,
-        });
-    }
-    (out, changed)
 }
 
 // ---------------------------------------------------------------------------
@@ -276,88 +176,6 @@ pub fn allowance_summary(accounts: &[AccountAllowance]) -> (Option<f64>, Option<
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    fn manual() -> Manual {
-        Manual {
-            daily_images: 150,
-            daily_v5: 0,
-            global_v5: 0,
-            v5_paused: true,
-            member_anlas: 150,
-        }
-    }
-
-    fn key(images: i64, v5: i64) -> ManagedKey {
-        ManagedKey {
-            daily_images: images,
-            daily_v5: v5,
-            image_model_scope: "all".into(),
-        }
-    }
-
-    #[test]
-    fn notice_says_the_manual_numbers() {
-        let m = manual();
-        assert_eq!(
-            quota_notice(&m, 7),
-            "今日额度：V4.5 每人 150 张/天（每日 7 点重置） · V5 暂停中 · Anlas 每人 150/天"
-        );
-        let open = Manual {
-            v5_paused: false,
-            daily_v5: 10,
-            global_v5: 300,
-            member_anlas: 0,
-            daily_images: 0,
-        };
-        assert_eq!(
-            quota_notice(&open, 7),
-            "今日额度：V4.5 已停用（每日 7 点重置） · V5 每人 10 张（全站今日共 300 张，先到先得）"
-        );
-        // 10-27：全局 V5 池停用（0）时不再显示成「不限」
-        let closed = Manual {
-            v5_paused: false,
-            daily_v5: 10,
-            global_v5: 0,
-            member_anlas: 0,
-            daily_images: 150,
-        };
-        assert_eq!(
-            quota_notice(&closed, 7),
-            "今日额度：V4.5 每人 150 张/天（每日 7 点重置） · V5 已停用（全站池未开放）"
-        );
-    }
-
-    #[test]
-    fn sync_writes_only_what_differs() {
-        let m = manual();
-        let note = quota_notice(&m, 7);
-        // 新号老号都一样：只要和手动值不同就改（新号爬坡已删）
-        let mut restricted = key(150, 0);
-        restricted.image_model_scope = "legacy".into();
-        let (fx, n) = sync(
-            &m,
-            &[key(150, 0), restricted, key(75, 0), key(175, 3)],
-            None,
-            7,
-        );
-        assert_eq!(n, 2);
-        assert_eq!(
-            fx,
-            vec![
-                Effect::UpdateKeys {
-                    daily_images: 150,
-                    daily_v5: 0
-                },
-                Effect::Set {
-                    key: NOTICE_KEY.into(),
-                    value: note.clone()
-                }
-            ]
-        );
-        // 第二轮什么都不写
-        let (fx, n) = sync(&m, &[key(150, 0)], Some(&note), 7);
-        assert_eq!((fx, n), (vec![], 0));
-    }
 
     fn snaps(points: &[(f64, f64)]) -> QuietInputs {
         QuietInputs {

@@ -23,6 +23,17 @@ function Actor(props: { a: ActionRow }) {
   );
 }
 
+/** 结构化操作参数以代码显示，说明与错误仍按普通文字显示。 */
+function ActionDetail({ value }: { value: string }) {
+  try {
+    const parsed: unknown = JSON.parse(value);
+    if (parsed !== null && typeof parsed === "object") return <code>{value}</code>;
+  } catch {
+    /* 普通说明不需要解析。 */
+  }
+  return <>{value}</>;
+}
+
 export function Actions() {
   const { query, set } = useQueryState();
   const narrow = useMedia(NARROW);
@@ -106,7 +117,11 @@ export function Actions() {
                     <Actor a={a} />
                   </div>
                   {a.target && <div class="small">{a.target}</div>}
-                  {a.detail && <div class="small muted">{a.detail}</div>}
+                  {a.detail && (
+                    <div class="small muted">
+                      <ActionDetail value={a.detail} />
+                    </div>
+                  )}
                 </li>
               ))}
             </ul>
@@ -135,7 +150,9 @@ export function Actions() {
                       </td>
                       <td class="nowrap">{actionLabel(a.action)}</td>
                       <td>{a.target}</td>
-                      <td class="muted lg-note">{a.detail}</td>
+                      <td class="muted lg-note">
+                        <ActionDetail value={a.detail} />
+                      </td>
                       <td>
                         <Result a={a} />
                       </td>

@@ -47,7 +47,7 @@ async fn register_member(state: &AppState) -> String {
         .await
         .unwrap();
     let row = state.db.get_key_by_token(TOKEN).await.unwrap().unwrap();
-    let tag = session::key_tag(Some(&Key(row)));
+    let tag = session::key_tag(Some(&Key::load(&state.db, row).await.unwrap()));
     let exp = state.now() as i64 + 86400;
     format!(
         "owl_member={}",
@@ -308,35 +308,20 @@ async fn public_live_without_registration_service() {
 #[tokio::test]
 async fn public_live_reflects_site_settings_after_meta_cache() {
     let e = setup(&reg_env()).await;
-    let long = "额".repeat(400);
-    for (k, v) in [
-        ("algo_notice", long.as_str()),
-        ("register_open", "1"),
-        ("register_max_users", "3"),
-    ] {
-        e.state.db.set_setting(k, v).await.unwrap();
-    }
+    common::claim_for(&e.state, json!({"open":true,"max_users":3})).await;
     e.state.live.invalidate();
     let (_, _, v) = get_json(&e.state, "/public/live", &[]).await;
-    assert_eq!(v["web_login"], true);
-    assert_eq!(v["algo_notice"].as_str().unwrap().chars().count(), 300);
     assert_eq!(
         v["registration"],
-        json!({"configured": true, "open": true, "slots_left": 3})
+        json!({"configured":true,"open":true,"slots_left":3})
     );
-    assert_eq!(v["members"], json!({"max": 3, "active": 0, "open": true}));
-
-    // 30 秒子缓存：改了设置，不 invalidate 就还是旧值
-    e.state
-        .db
-        .set_setting("algo_notice", "新说明")
-        .await
-        .unwrap();
+    assert_eq!(v["members"], json!({"max":3,"active":0,"open":true}));
+    common::defaults_for(&e.state, json!({"daily_images":123})).await;
     let (_, _, again) = get_json(&e.state, "/public/live", &[]).await;
-    assert_eq!(again["algo_notice"].as_str().unwrap().chars().count(), 300);
+    assert_eq!(again["algo_notice"], v["algo_notice"]);
     e.state.live.invalidate();
     let (_, _, fresh) = get_json(&e.state, "/public/live", &[]).await;
-    assert_eq!(fresh["algo_notice"], "新说明");
+    assert!(fresh["algo_notice"].as_str().unwrap().contains("123"));
     // 登录开关已删除：库里残留 web_login_paused=1 也不影响
     e.state
         .db
@@ -351,28 +336,11 @@ async fn public_live_reflects_site_settings_after_meta_cache() {
 #[tokio::test]
 async fn public_rules_announce_restricted_v5_without_exposing_subjects() {
     let e = setup(&reg_env()).await;
-    e.state
-        .db
-        .set_setting(gate_server::v5_access::MODE_KEY, "restricted")
-        .await
-        .unwrap();
-    e.state
-        .db
-        .set_setting(
-            gate_server::v5_access::SUBJECTS_KEY,
-            r#"["900000000000000081"]"#,
-        )
-        .await
-        .unwrap();
+    common::defaults_for(&e.state, json!({"v5":false})).await;
     e.state.live.invalidate();
     let (_, _, live) = get_json(&e.state, "/public/live", &[]).await;
     // 10-27 起看板不带访问策略字段：策略通过 meta 的 algo_notice 一句话说清
-    assert!(
-        live["algo_notice"]
-            .as_str()
-            .unwrap()
-            .contains("V5 当前仅授权成员可用")
-    );
+    assert!(live["algo_notice"].as_str().unwrap().contains("V5 未开放"));
     assert!(!live.to_string().contains("900000000000000081"));
     assert!(
         !live.to_string().contains("v5_access_mode"),
@@ -496,7 +464,7 @@ async fn public_status_exposes_only_safe_fields() {
     assert_eq!(v["registration"], json!({"open": false, "slots_left": 10}));
     assert_eq!(
         v["default_features"],
-        json!([{"id": "image", "label": "文生图"}])
+        json!([{"id":"image","label":"文生图"},{"id":"tags","label":"标签补全"}])
     );
     assert_eq!(
         v["limits"],
@@ -509,13 +477,12 @@ async fn public_status_exposes_only_safe_fields() {
     assert_eq!(v["key_inactivity_delete_days"], 3);
 
     // 8 秒缓存；invalidate 后看到新值
-    for (k, val) in [
-        ("register_features", "*"),
-        ("register_open", "1"),
-        ("register_max_users", "5"),
-    ] {
-        e.state.db.set_setting(k, val).await.unwrap();
-    }
+    common::claim_for(&e.state, json!({"open":true,"max_users":5})).await;
+    common::defaults_for(
+        &e.state,
+        json!({"image":true,"upscale":true,"augment":true,"vibe":true,"tags":true}),
+    )
+    .await;
     let (_, _, cached) = get_json(&e.state, "/public/status", &[]).await;
     assert_eq!(cached, v);
     e.state.live.invalidate();
@@ -640,22 +607,19 @@ async fn user_compat_routes_require_key_and_keep_panel_schema() {
             v["perks"],
             json!({"imageGeneration": true, "unlimitedImageGeneration": false, "voiceGeneration": false, "contextTokens": 0})
         );
-        assert_eq!(
-            v["naiGate"],
-            json!({
-                "imageModelScope": "legacy",
-                "quotaLimits": {"images": {"mode": "inherit"}, "v5": {"mode": "inherit"}, "daily_anlas": {"mode": "inherit"}, "monthly_anlas": {"mode": "unlimited"}},
-                "v45DailyLimit": 150, "v45Unlimited": false, "dailyAnlasLimit": 50.0, "dailyAnlasUnlimited": false,
-                "anlasEnabled": false, "anlasLeft": 0, "anlasMonthlyLimit": 0, "anlasUnlimited": true,
-                "v5LeftToday": 150, "v5DailyLimit": 150, "v5Unlimited": false, "v5Paused": false, "v5Allowed": true, "account": null
-            })
-        );
+        let info = &v["naiGate"];
+        assert_eq!(info["v45DailyLimit"], 100);
+        assert_eq!(info["v5DailyLimit"], 10);
+        assert_eq!(info["v5Allowed"], true);
+        assert_eq!(info["v5LeftToday"], 10);
+        assert!(info.get("quotaLimits").is_none());
+        assert!(info.get("v5Unlimited").is_none());
     }
 
     // 用掉的 V5 体现在 v5LeftToday 里
     common::add_usage(&e.state.db, 1, &e.state.day(), 3, 0.0).await;
     let (_, body) = get("/user/subscription").await;
-    assert_eq!(json_of(&body)["naiGate"]["v5LeftToday"], 147);
+    assert_eq!(json_of(&body)["naiGate"]["v5LeftToday"], 7);
 
     for path in ["/user/data", "/ai/user/data"] {
         let (status, body) = get(path).await;
@@ -676,10 +640,7 @@ async fn user_compat_routes_require_key_and_keep_panel_schema() {
             ["tier", "active", "expiresAt", "trainingStepsLeft", "perks"],
             "naiGate 不暴露在 data 里"
         );
-        assert_eq!(
-            v["v5Access"],
-            json!({"mode": "legacy", "allowed": true, "paused": false})
-        );
+        assert_eq!(v["v5Access"], json!({"allowed": true, "paused": false}));
         assert_eq!(
             keys(&v["priority"]),
             ["maxPriorityActions", "nextRefillAt", "taskPriority"]
@@ -747,35 +708,16 @@ async fn user_compat_routes_require_key_and_keep_panel_schema() {
 #[tokio::test]
 async fn user_data_and_subscription_report_restricted_v5_permission() {
     let e = setup(&reg_env()).await;
-    e.state
-        .db
-        .run_script(vec![
-            "UPDATE api_keys SET discord_id='900000000000000091' WHERE id=1".into(),
-        ])
-        .await
-        .unwrap();
-    e.state
-        .db
-        .set_setting(gate_server::v5_access::MODE_KEY, "restricted")
-        .await
-        .unwrap();
-    e.state
-        .db
-        .set_setting(
-            gate_server::v5_access::SUBJECTS_KEY,
-            r#"["900000000000000092"]"#,
-        )
-        .await
-        .unwrap();
+    common::policy_for(&e.state, 1, json!({"v5":false})).await;
     let (_, subscription) = get_with_auth(&e.state, "/user/subscription", TOKEN).await;
     let subscription = json_of(&subscription);
     assert_eq!(subscription["naiGate"]["v5Allowed"], false);
-    assert_eq!(subscription["naiGate"]["v5Unlimited"], false);
+    assert!(subscription["naiGate"].get("v5Unlimited").is_none());
     assert_eq!(subscription["naiGate"]["v5LeftToday"], 0);
     let (_, data) = get_with_auth(&e.state, "/user/data", TOKEN).await;
     assert_eq!(
         json_of(&data)["v5Access"],
-        json!({"mode":"restricted", "allowed":false, "paused":false})
+        json!({"allowed":false, "paused":false})
     );
 }
 
@@ -1235,8 +1177,7 @@ async fn landing_boot_for_member_with_key() {
             "key",
             "name",
             "expires_at",
-            "image_scope",
-            "subject_roles",
+            "policy",
             "today",
             "queue",
             "coupons",
@@ -1252,19 +1193,13 @@ async fn landing_boot_for_member_with_key() {
     assert_eq!(me["key"], TOKEN);
     assert_eq!(me["name"], "测试成员");
     assert_eq!(me["expires_at"], Value::Null);
-    assert_eq!(me["image_scope"], "legacy");
-    assert_eq!(me["subject_roles"], json!({"owner": false, "admin": false}));
-    assert_eq!(
-        me["today"],
-        json!({
-            "images": 0, "v5": 0, "legacy": 0, "daily_images": 100, "daily_v5": 10,
-            "quota_limits": {"images": {"mode": "inherit"}, "v5": {"mode": "inherit"}, "daily_anlas": {"mode": "inherit"}, "monthly_anlas": {"mode": "unlimited"}},
-            "quota_limits_valid": true,
-            "site_v5_left": 150, "site_v5_cap": 150, "upstream_v5_free": true, "v5_paused": false,
-            "v5_access_allowed": true, "v5_access_reason": "legacy policy",
-            "anlas": 0, "daily_anlas": 50, "reset_hour": 7
-        })
-    );
+    assert_eq!(me["policy"]["daily_images"], 100);
+    assert_eq!(me["policy"]["v5"], true);
+    assert_eq!(me["today"]["daily_images"], 100);
+    assert_eq!(me["today"]["daily_v5"], 10);
+    assert_eq!(me["today"]["v5_access_allowed"], true);
+    assert_eq!(me["today"]["reset_hour"], 7);
+    assert!(me["today"].get("quota_limits").is_none());
     assert_eq!(me["queue"], json!([{"state": "waiting", "position": 1}]));
     assert_eq!(me["coupons"], json!([]));
     assert_eq!(
@@ -1277,11 +1212,7 @@ async fn landing_boot_for_member_with_key() {
         json!({"mine": [{"state": "waiting", "position": 1}], "waiting": 1, "running": 0})
     );
     // 全站 V5 池停用（global_daily_v5=0，10-27 语义）：首页 V5 圆环显示 0 / 0
-    p.state
-        .db
-        .set_setting("global_daily_v5", "0")
-        .await
-        .unwrap();
+    common::budgets_for(&p.state, json!({"daily_v5":0})).await;
     let (_, _, body) = raw(&p.state, "GET", "/", &[("cookie", &cookie)], b"").await;
     let today = &boot_of(&String::from_utf8(body).unwrap())["me"]["today"];
     assert_eq!(
@@ -1324,19 +1255,20 @@ async fn landing_boot_for_member_without_key_and_bad_session() {
 
 #[tokio::test]
 async fn landing_boot_escapes_markup() {
-    let p = setup_with_static(&[], Some(LANDING_HTML)).await;
+    let p = setup_with_static(&reg_env(), Some(LANDING_HTML)).await;
+    let cookie = register_member(&p.state).await;
     p.state
         .db
-        .set_setting("algo_notice", "</script><script>alert(1)</script> & <b>")
+        .run_script(vec![
+            "UPDATE api_keys SET name='</script><script>alert(1)</script> & <b>' WHERE id=1".into(),
+        ])
         .await
         .unwrap();
-    p.state.live.invalidate();
-    let (_, _, body) = raw(&p.state, "GET", "/", &[], b"").await;
+    let (_, _, body) = raw(&p.state, "GET", "/", &[("cookie", &cookie)], b"").await;
     let html = String::from_utf8(body).unwrap();
     assert!(!html.contains("<script>alert"));
-    let boot = boot_of(&html);
     assert_eq!(
-        boot["status"]["algo_notice"],
+        boot_of(&html)["me"]["name"],
         "</script><script>alert(1)</script> & <b>"
     );
 }

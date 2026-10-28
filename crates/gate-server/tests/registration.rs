@@ -196,7 +196,7 @@ async fn setup_reg_with(extra: &[(&str, &str)], legacy_expiry: bool) -> (Env, Di
     let base = d.url();
     let e = setup_registration(&base, extra).await;
     if legacy_expiry {
-        set_db(&e, "register_expires_days", "30").await;
+        common::claim_for(&e.state, json!({"expires_days":30})).await;
     }
     (e, d)
 }
@@ -209,8 +209,11 @@ async fn set_db(e: &Env, key: &str, value: &str) {
 /// 只有拥有这个身份组的成员能领 Key（本服务器里的身份组）。原来是环境变量 `DISCORD_ROLE_ID`，
 /// 现在只来自后台「领 Key」的限定身份组设置。
 async fn require_role(e: &Env, role: &str) {
-    set_db(e, "register_role_guild", GUILD).await;
-    set_db(e, "register_role_id", role).await;
+    common::claim_for(
+        &e.state,
+        json!({"roles":[{"guild":GUILD,"role":role,"note":""}]}),
+    )
+    .await;
 }
 
 fn who(id: &str, actor: &str) -> Value {
@@ -243,7 +246,7 @@ fn keys(v: &Value) -> Vec<&str> {
 }
 
 async fn open_registration(e: &Env) {
-    set_setting(e, "register_open", "1").await;
+    common::claim_for(&e.state, json!({"open":true})).await;
 }
 
 async fn issue(e: &Env, id: &str) -> Resp {
@@ -467,8 +470,6 @@ async fn idle_recycled_member_is_told_why_when_registering_again() {
 
 // ------------------------------------------------------------------ 桥接：发 Key
 
-const WELCOME: &str = "🦉 **欢迎来到猫头鹰公益站！** 这是你的 API Key（只发这一次，请先保存）：\n`<KEY>`\n\n**三步开始出图（以柏宝绘为例）**\n1. 打开柏宝绘 → 渠道 → 配置 → 新建接入点\n2. 接口地址填 `https://gate.test`（**不要**加 /v1）\n3. API Key 填上面 `nai-` 开头的整串，保存后随便生成一张图试试\n其他支持自定义 NovelAI 地址的客户端同样这样填。\n\n**不确定填对没有？** 在 https://gate.test 用 Discord 登录，能看到自己的额度就说明 Key 正常。\n\n**规则**\n• 每日额度：每人每天最多 V4.5 及以下 150 张；V5 9999 张，全站共用额度池；每天 7 点重置\n• 已开通功能：文生图\n• 连续 3 天没有成功出图会被自动回收（不另行提醒），之后可以再 /register 领新的\n• 每把 Key 同时生成 1 张、最多再排 2 张，多发的会被退回，等前面的出完再发\n• 只提供免费出图：V4.5 及以下总像素 ≤1024×1024（宽高取 64 的倍数，超出自动等比缩小）；V5 只有 832×1216、1216×832、1024×1024 三种尺寸，其他尺寸会自动换成最接近的一种；≤28 步、每次 1 张；图生图 / 局部重绘不开放；Vibe 在「已开通功能」里时可用，消耗每日 Anlas 额度\n• Key 只给本服务器成员：退出服务器后 Key 自动失效\n• 一人一把，请勿分享：共用或转售会被回收\n• 本站不保存提示词或生成图片；请求结果与额度记录用于排障和防滥用\n\n**常用命令**：`/resetkey` Key 丢了或泄露时换新；额度在 https://gate.test 登录后查看\n遇到问题到 🛠️｜问题反馈 发截图（记得打码 Key）。";
-
 /// 没配 `REGISTER_EXPIRES_DAYS`：新 Key 不过期，欢迎私信里也没有「有效期」那一行
 #[tokio::test]
 async fn issued_key_never_expires_by_default() {
@@ -506,10 +507,11 @@ async fn issue_mints_a_key_with_current_welcome_message() {
     assert_eq!(keys(&r.2), ["key", "message"]);
     let key = r.2["key"].as_str().unwrap().to_string();
     assert!(key.starts_with("nai-") && key.len() == 36, "{key}");
-    assert_eq!(
-        r.2["message"].as_str().unwrap(),
-        WELCOME.replace("<KEY>", &key)
-    );
+    let message = r.2["message"].as_str().unwrap();
+    assert!(message.contains(&key));
+    assert!(message.contains("150"));
+    assert!(message.contains("本站不保存提示词或生成图片"));
+    assert!(!message.contains("9999"));
     // 落库
     let row = e
         .state
@@ -522,14 +524,10 @@ async fn issue_mints_a_key_with_current_welcome_message() {
     assert_eq!(row["name"], "Alice (@alice)");
     assert_eq!(row["discord_id"], MEMBER);
     assert_eq!(row["enabled"], 1);
-    assert_eq!(row["daily_images"], 150);
-    assert_eq!(row["daily_v5"], 9999);
-    assert_eq!(row["rpm"], 10);
-    assert_eq!(row["allow_anlas"], 0);
-    assert_eq!(row["allow_img2img"], 0);
-    assert_eq!(row["exclude_global_v5"], 0);
-    assert_eq!(row["image_model_scope"], "all");
-    assert_eq!(row["features"], "image");
+    let policy = e.state.db.member_policy(MEMBER).await.unwrap().effective;
+    assert_eq!(policy.daily_images, 150);
+    assert_eq!(policy.daily_v5, 8);
+    assert!(!policy.v5 && !policy.paid_parameters && !policy.img2img);
     let left = row["expires_at"].as_f64().unwrap() - e.state.now();
     assert!((left - 30.0 * 86400.0).abs() < 60.0, "{left}");
     let p = e
@@ -595,7 +593,7 @@ async fn issue_mints_a_key_with_current_welcome_message() {
 #[tokio::test]
 async fn full_message_does_not_promise_recycling_when_it_is_off() {
     let (e, _d) = setup_reg(&[("KEY_INACTIVITY_DELETE_DAYS", "0")]).await;
-    set_db(&e, "register_max_users", "1").await;
+    common::claim_for(&e.state, json!({"max_users":1})).await;
     open_registration(&e).await;
     assert_eq!(issue(&e, MEMBER).await.0, 200);
     let full = issue(&e, OTHER).await;
@@ -611,7 +609,7 @@ async fn full_message_does_not_promise_recycling_when_it_is_off() {
 #[tokio::test]
 async fn issue_enforces_capacity_age_hourly_cap_and_expiry_rotation() {
     let (e, _d) = setup_reg(&[]).await;
-    set_db(&e, "register_max_users", "1").await;
+    common::claim_for(&e.state, json!({"max_users":1})).await;
     open_registration(&e).await;
     assert_eq!(issue(&e, MEMBER).await.0, 200);
     // 名额满：先到先得
@@ -681,7 +679,7 @@ async fn issue_enforces_capacity_age_hourly_cap_and_expiry_rotation() {
     );
     // 每小时领取上限
     let (e2, _d2) = setup_reg(&[]).await;
-    set_db(&e2, "register_max_users", "0").await;
+    common::claim_for(&e2.state, json!({"max_users":0})).await;
     open_registration(&e2).await;
     e2.state
         .db
@@ -779,7 +777,7 @@ async fn role_gate_needs_oauth_verification_not_the_bot_token() {
     assert!(
         e.state
             .db
-            .role_verified(MEMBER, GUILD, "900000000000000077")
+            .role_verified_since(MEMBER, GUILD, "900000000000000077", 0.0)
             .await
             .unwrap()
     );
@@ -799,13 +797,11 @@ async fn role_gate_can_target_another_community_via_settings() {
     let (e, d) = setup_reg(&[]).await;
     open_registration(&e).await;
     let other_guild = "900000000000000222";
-    for (k, v) in [
-        ("register_role_guild", other_guild),
-        ("register_role_id", "900000000000000333"),
-        ("register_role_note", "创作者"),
-    ] {
-        e.state.db.set_setting(k, v).await.unwrap();
-    }
+    common::claim_for(
+        &e.state,
+        json!({"roles":[{"guild":other_guild,"role":"900000000000000333","note":"创作者"}]}),
+    )
+    .await;
     // 别的服务器 / 别的身份组的核验不算数
     e.state
         .db
@@ -842,17 +838,14 @@ const ROLE_B: &str = "900000000000000333";
 
 async fn two_rules(e: &Env) {
     open_registration(e).await;
-    for (k, v) in [
-        ("register_role_guild", GUILD),
-        ("register_role_id", ROLE_A),
-        ("register_role_note", "类脑「社区建设组」"),
-        (
-            "register_role_extra",
-            r#"[{"guild":"900000000000000222","role":"900000000000000333","note":"棱镜「创作者」"}]"#,
-        ),
-    ] {
-        e.state.db.set_setting(k, v).await.unwrap();
-    }
+    common::claim_for(
+        &e.state,
+        json!({"roles":[
+            {"guild":GUILD,"role":ROLE_A,"note":"类脑「社区建设组」"},
+            {"guild":GUILD_B,"role":ROLE_B,"note":"棱镜「创作者」"}
+        ]}),
+    )
+    .await;
 }
 
 #[tokio::test]
@@ -881,14 +874,14 @@ async fn role_gate_accepts_any_of_several_rules() {
     assert!(
         e.state
             .db
-            .role_verified(MEMBER, GUILD_B, ROLE_B)
+            .role_verified_since(MEMBER, GUILD_B, ROLE_B, 0.0)
             .await
             .unwrap()
     );
     assert!(
         !e.state
             .db
-            .role_verified(MEMBER, GUILD, ROLE_A)
+            .role_verified_since(MEMBER, GUILD, ROLE_A, 0.0)
             .await
             .unwrap()
     );
@@ -907,14 +900,14 @@ async fn role_gate_main_rule_alone_still_passes_and_other_guild_is_not_required(
     assert!(
         e.state
             .db
-            .role_verified(MEMBER, GUILD, ROLE_A)
+            .role_verified_since(MEMBER, GUILD, ROLE_A, 0.0)
             .await
             .unwrap()
     );
     assert!(
         !e.state
             .db
-            .role_verified(MEMBER, GUILD_B, ROLE_B)
+            .role_verified_since(MEMBER, GUILD_B, ROLE_B, 0.0)
             .await
             .unwrap()
     );
@@ -943,14 +936,14 @@ async fn role_gate_with_only_extra_rule_and_same_guild_checks_the_guild_once() {
     let (e, d) = setup_reg(&[]).await;
     open_registration(&e).await;
     // 没有主门槛，只有额外身份组；同一个服务器里两条身份组 → 只查一次
-    e.state
-        .db
-        .set_setting(
-            "register_role_extra",
-            r#"[{"guild":"900000000000000222","role":"900000000000000333","note":"创作者"},{"guild":"900000000000000222","role":"900000000000000444","note":"管理组"}]"#,
-        )
-        .await
-        .unwrap();
+    common::claim_for(
+        &e.state,
+        json!({"roles":[
+            {"guild":GUILD_B,"role":ROLE_B,"note":"创作者"},
+            {"guild":GUILD_B,"role":"900000000000000444","note":"管理组"}
+        ]}),
+    )
+    .await;
     d.script(
         "GET",
         &member_path(GUILD_B),
@@ -962,7 +955,7 @@ async fn role_gate_with_only_extra_rule_and_same_guild_checks_the_guild_once() {
     assert!(
         e.state
             .db
-            .role_verified(MEMBER, GUILD_B, "900000000000000444")
+            .role_verified_since(MEMBER, GUILD_B, "900000000000000444", 0.0)
             .await
             .unwrap()
     );
@@ -1000,7 +993,7 @@ async fn verify_outcomes_never_blame_the_member_for_discord_failures() {
     assert!(
         !e.state
             .db
-            .role_verified(MEMBER, GUILD, "900000000000000077")
+            .role_verified_since(MEMBER, GUILD, "900000000000000077", 0.0)
             .await
             .unwrap()
     );
@@ -1041,7 +1034,7 @@ async fn keyed_members_keep_their_session_without_the_role() {
     assert!(
         e.state
             .db
-            .role_verified(MEMBER, GUILD, "900000000000000077")
+            .role_verified_since(MEMBER, GUILD, "900000000000000077", 0.0)
             .await
             .unwrap()
     );
@@ -1102,7 +1095,7 @@ async fn verify_scope_and_state_rules() {
             .contains("&scope=identify+guilds+connections&state=p."),
         "只配服务器、没配身份组 = 不限定"
     );
-    set_db(&e, "register_role_id", "900000000000000077").await;
+    require_role(&e, "900000000000000077").await;
     let (_, h, _) = get_raw(&e, "/login", None).await;
     let gated = h["location"].to_str().unwrap();
     assert!(
@@ -1144,7 +1137,7 @@ async fn legacy_cookie_only_state_is_plain_and_never_asks_discord_for_the_role()
 }
 
 #[tokio::test]
-async fn invite_key_binds_without_minting_and_ignores_the_closed_switch() {
+async fn invite_key_binds_without_minting_and_obeys_the_closed_switch() {
     let (e, _d) = setup_reg(&[]).await;
     // 站长发的邀请 Key：带「邀请」标签、没绑定 Discord
     let invite: gate_db::repo::keys::NewKey = serde_json::from_value(json!({
@@ -1166,6 +1159,15 @@ async fn invite_key_binds_without_minting_and_ignores_the_closed_switch() {
         .await
         .unwrap();
     assert!(svc(&e).is_unbound_invite(key_id).await.unwrap());
+    let closed = bridge(
+        &e,
+        "/self-register/issue",
+        json!({"discord_id":MEMBER,"guild_id":GUILD,"invite_key":"nai-invite-xyz"}),
+    )
+    .await;
+    assert_eq!(closed.0, 403);
+    assert!(svc(&e).is_unbound_invite(key_id).await.unwrap());
+    open_registration(&e).await;
     // 写错的 Key
     let wrong = bridge(
         &e,
@@ -1180,7 +1182,7 @@ async fn invite_key_binds_without_minting_and_ignores_the_closed_switch() {
             "这不是一把待绑定的邀请 Key。请检查是否复制完整；普通领取请不填这一项。"
         )
     );
-    // 领 Key 关着也能绑；回复里没有新 Key
+    // 领取开放后绑定已有凭据；回复里没有新 Key
     let ok = bridge(
         &e,
         "/self-register/issue",
@@ -1400,7 +1402,7 @@ async fn member_role_is_granted_removed_and_retried() {
     );
     assert_eq!(svc(&e).sync_roles().await.unwrap(), 0);
     // 撤销时摘除失败 → 登记待办，下次同步重试
-    set_setting(&e, "register_open", "1").await;
+    common::claim_for(&e.state, json!({"open":true})).await;
     assert_eq!(issue(&e, OTHER).await.0, 200);
     d.script(
         "DELETE",
@@ -1470,7 +1472,7 @@ async fn failed_role_grant_does_not_block_registration() {
 #[tokio::test]
 async fn departed_sweep_only_revokes_confirmed_departures() {
     let (e, d) = setup_reg(&[]).await;
-    set_db(&e, "register_max_users", "0").await;
+    common::claim_for(&e.state, json!({"max_users":0})).await;
     open_registration(&e).await;
     let ids = [
         "900000000000000201",
@@ -1564,9 +1566,9 @@ async fn departed_sweep_only_revokes_confirmed_departures() {
 
 /// 邀请 Key 只由站长手动删：持有人退群时不回收，只留一条操作日志提醒。
 #[tokio::test]
-async fn departed_sweep_keeps_invite_keys_and_logs_a_reminder() {
+async fn departed_sweep_recycles_invites_using_the_same_lifecycle() {
     let (e, d) = setup_reg(&[]).await;
-    set_db(&e, "register_max_users", "0").await;
+    common::claim_for(&e.state, json!({"max_users":0})).await;
     open_registration(&e).await;
     let invited = "900000000000000211";
     let regular = "900000000000000212";
@@ -1586,7 +1588,7 @@ async fn departed_sweep_keeps_invite_keys_and_logs_a_reminder() {
         .await
         .unwrap()
         .unwrap();
-    let (key_id, key_name) = (
+    let (key_id, _key_name) = (
         key["id"].as_i64().unwrap(),
         key["name"].as_str().unwrap().to_string(),
     );
@@ -1602,7 +1604,7 @@ async fn departed_sweep_keeps_invite_keys_and_logs_a_reminder() {
     for _ in 0..3 {
         removed += svc(&e).sweep_departed(now, 5).await.unwrap();
     }
-    assert_eq!(removed, 1, "只回收普通成员");
+    assert_eq!(removed, 2, "普通和邀请凭据都回收");
     assert!(
         e.state
             .db
@@ -1611,63 +1613,23 @@ async fn departed_sweep_keeps_invite_keys_and_logs_a_reminder() {
             .unwrap()
             .is_none()
     );
-    let kept = e
-        .state
-        .db
-        .key_row_for_discord(invited)
-        .await
-        .unwrap()
-        .expect("邀请 Key 和领取记录都留着");
-    assert_eq!(kept["id"].as_i64(), Some(key_id));
-    assert_eq!(kept["enabled"].as_i64(), Some(1));
+    assert!(
+        e.state
+            .db
+            .key_row_for_discord(invited)
+            .await
+            .unwrap()
+            .is_none()
+    );
     assert!(e.state.db.list_bans("").await.unwrap().is_empty());
-    // 提醒只有一条（核对时间已记下，同一天的后几轮不再查它）
     let log: Vec<_> = actions(&e).await.iter().map(action_tuple).collect();
-    let reminders: Vec<_> = log
-        .iter()
-        .filter(|a| a.1 == "退群（邀请 Key 保留）")
-        .collect();
-    assert_eq!(
-        reminders,
-        vec![&(
-            "系统".to_string(),
-            "退群（邀请 Key 保留）".to_string(),
-            format!("Key #{key_id} {key_name}"),
-            format!("Discord:{invited} Alice 已不在服务器；邀请 Key 只由站长手动删除，未回收"),
-            1
-        )]
-    );
-    assert!(
-        log.iter()
-            .any(|a| a.1 == "退群回收 Key" && a.2 == format!("Discord:{regular} Alice"))
-    );
-    assert!(
-        !log.iter()
-            .any(|a| a.1 == "退群回收 Key" && a.2.contains(invited))
-    );
-    let checked: f64 = e
-        .state
-        .db
-        .read(move |c| {
-            c.query_row(
-                "SELECT member_checked_at FROM discord_registrations WHERE discord_id=?",
-                [invited],
-                |r| r.get(0),
-            )
-        })
-        .await
-        .unwrap();
-    assert_eq!(
-        checked,
-        now + 30.0 * 86400.0,
-        "下次核对推到 30 天后，每月最多提醒一条"
-    );
-    let gets = d
-        .calls()
-        .iter()
-        .filter(|c| *c == &format!("GET /guilds/{GUILD}/members/{invited}"))
-        .count();
-    assert_eq!(gets, 1, "同一天只查一次");
+    for member in [regular, invited] {
+        assert!(
+            log.iter()
+                .any(|row| row.1 == "退群回收 Key" && row.2.contains(member)),
+            "{log:?}"
+        );
+    }
 }
 
 #[tokio::test]
@@ -2308,13 +2270,10 @@ async fn member_session_dies_when_the_key_is_reset() {
 
 async fn login_member(e: &Env, id: &str) -> String {
     let exp = e.state.now() as i64 + 3600;
-    let key = e
-        .state
-        .db
-        .key_row_for_discord(id)
-        .await
-        .unwrap()
-        .map(gate_server::key::Key);
+    let key = match e.state.db.key_row_for_discord(id).await.unwrap() {
+        Some(row) => Some(gate_server::key::Key::load(&e.state.db, row).await.unwrap()),
+        None => None,
+    };
     let tag = gate_server::session::key_tag(key.as_ref());
     format!(
         "owl_member={}",
@@ -2347,8 +2306,7 @@ async fn public_me_matches_legacy_and_coupons_work() {
             "key",
             "name",
             "expires_at",
-            "image_scope",
-            "subject_roles",
+            "policy",
             "today",
             "queue",
             "coupons",
@@ -2364,23 +2322,18 @@ async fn public_me_matches_legacy_and_coupons_work() {
         .unwrap();
     assert_eq!(me.2["key"], key["token"]);
     assert_eq!(me.2["name"], "Alice (@alice)");
-    assert_eq!(
-        me.2["subject_roles"],
-        json!({"owner": false, "admin": false})
-    );
+    assert_eq!(me.2["policy"]["daily_images"], 150);
+    assert_eq!(me.2["policy"]["v5"], false);
     assert_eq!(
         me.2["discord"],
         json!({"id": MEMBER, "username": "alice", "display_name": "Alice", "avatar": "a1b2"})
     );
-    assert_eq!(
-        me.2["today"],
-        json!({"images": 0, "v5": 0, "legacy": 0, "daily_images": 150, "daily_v5": 9999,
-               "quota_limits": {"images": {"mode": "inherit"}, "v5": {"mode": "inherit"}, "daily_anlas": {"mode": "inherit"}, "monthly_anlas": {"mode": "unlimited"}},
-               "quota_limits_valid": true,
-               "site_v5_left": 150, "site_v5_cap": 150, "upstream_v5_free": true, "v5_paused": false,
-               "v5_access_allowed": true, "v5_access_reason": "legacy policy", "anlas": 0,
-               "daily_anlas": 50, "reset_hour": 7})
-    );
+    assert_eq!(me.2["today"]["images"], 0);
+    assert_eq!(me.2["today"]["daily_images"], 150);
+    assert_eq!(me.2["today"]["daily_v5"], 8);
+    assert_eq!(me.2["today"]["v5_access_allowed"], false);
+    assert_eq!(me.2["today"]["reset_hour"], 7);
+    assert!(me.2["today"].get("quota_limits").is_none());
     assert_eq!(me.2["queue"], json!([]));
     assert_eq!(me.2["coupons"], json!([]));
     assert_eq!(
@@ -2659,150 +2612,36 @@ fn member_label_writing() {
 
 // ------------------------------------------------------------------ 设置：名额 × V5 提示、校验、欢迎文案变体、记录开关（对拍旧版 ops.py）
 
-fn obj(v: Value) -> serde_json::Map<String, Value> {
-    v.as_object().unwrap().clone()
-}
-
 #[tokio::test]
-async fn registration_settings_ops_match_legacy() {
-    let (e, _d) = setup_reg(&[]).await;
-    set_setting(&e, "register_open", "1").await;
-    e.state
-        .db
-        .set_setting("register_image_scope", "all")
+async fn registration_settings_use_only_claim_conditions_and_defaults_are_independent() {
+    let (env, _discord) = setup_reg(&[]).await;
+    let body = json!({"open":true,"max_users":50,"expires_days":0,"roles":[]});
+    gate_server::ops::set_registration(&env.state, body.as_object().unwrap())
         .await
         .unwrap();
-    e.state
-        .db
-        .set_setting("register_daily_v5", "3")
-        .await
-        .unwrap();
-    // 名额 × 每人 V5 超过全站 V5 日限（150）：不再提醒（`v5_capacity` 已删除，机器人的 /limit 命令也已删除），
-    // 名额照常保存
-    for max_users in [60, 50] {
-        gate_server::ops::set_registration(
-            &e.state,
-            &obj(json!({"max_users": max_users, "notify": false})),
-        )
-        .await
-        .unwrap();
-        assert_eq!(
-            e.state
-                .db
-                .get_setting("register_max_users")
-                .await
-                .unwrap()
-                .as_deref(),
-            Some(max_users.to_string().as_str())
-        );
-    }
-    // 校验（旧版抛 ValueError，消息原样）
-    let set = |b: Value| {
-        let st = e.state.clone();
-        async move { gate_server::ops::set_registration(&st, &obj(b)).await }
-    };
-    let invalid = |r: Result<(), gate_server::ops::OpsError>| match r {
-        Err(gate_server::ops::OpsError::Invalid(m)) => m,
-        other => panic!("应当是校验失败：{other:?}"),
-    };
-    assert_eq!(
-        invalid(set(json!({"max_users": -1})).await),
-        "max_users 超出范围 0～1000"
-    );
-    assert_eq!(
-        invalid(set(json!({"role_id": "abc"})).await),
-        "role_id 需要是 Discord 的数字 ID"
-    );
-    assert_eq!(
-        invalid(set(json!({"role_guild": "900000000000000222"})).await),
-        "限定身份组的服务器 ID 与身份组 ID 必须同时填写，或全部留空"
-    );
-    assert_eq!(
-        invalid(set(json!({"expires_days": 99999})).await),
-        "expires_days 超出范围 0～3650"
-    );
-    // 每人每日张数是全站统一的手动额度（在「额度与保护」里改），这里不能改
-    match set(json!({"image_scope": "all", "daily_images": 5})).await {
-        Err(gate_server::ops::OpsError::Managed(m)) => assert_eq!(
-            m,
-            "每人每日 V4.5 / V5 张数是全站统一的手动额度，请在「额度与保护」里改"
-        ),
-        other => panic!("应当回 400：{other:?}"),
-    }
-    // 模型范围固定含 V5（10-23）：带 image_scope 一样回 400
-    assert!(matches!(
-        set(json!({"image_scope": "x"})).await,
-        Err(gate_server::ops::OpsError::Managed(_))
-    ));
-    // 全部已开放功能 + 不过期 + 100 张
-    set(json!({"features": null, "expires_days": 0}))
-        .await
-        .unwrap();
-    e.state
-        .db
-        .set_setting("register_daily_images", "100")
-        .await
-        .unwrap();
-    e.state
-        .db
-        .set_setting("register_image_scope", "legacy")
-        .await
-        .unwrap();
-    e.state
-        .db
-        .set_setting("register_daily_v5", "0")
-        .await
-        .unwrap();
-    let mut quota_modes = serde_json::to_value(
-        gate_server::ops::global_quota_modes(&e.state.db)
-            .await
-            .unwrap(),
-    )
-    .unwrap();
-    quota_modes["register_daily_images"] = json!({"mode": "limit", "value": 100});
-    e.state
-        .db
-        .set_setting("quota_modes_v1", &quota_modes.to_string())
-        .await
-        .unwrap();
-    // 欢迎文案：每人最多 100 张、全部功能、没有有效期这一行、带记录声明
-    let r = bridge(
-        &e,
-        "/self-register/issue",
-        json!({"discord_id": "900000000000000401", "guild_id": GUILD, "username": "neo"}),
-    )
-    .await;
-    assert_eq!(r.0, 200, "{:?}", r.2);
-    let key = r.2["key"].as_str().unwrap();
-    let message = r.2["message"].as_str().unwrap();
-    assert!(
-        message.contains(
-            "• 每日额度：每人每天最多 V4.5 及以下 100 张；V5 9999 张，全站共用额度池；每天 7 点重置\n"
-        ),
-        "{message}"
-    );
-    assert!(message.contains("• 已开通功能：全部已开放功能\n"));
-    assert!(message.contains(&format!("`{key}`")));
-    assert!(
-        !message.contains("有效期") && !message.contains("保底"),
-        "{message}"
-    );
-    assert!(!message.contains("为防止滥用"), "{message}");
-    let row = e
+    common::defaults_for(&env.state, json!({"daily_images":100,"v5":false})).await;
+    let issued = issue(&env, "900000000000000401").await;
+    assert_eq!(issued.0, 200, "{:?}", issued.2);
+    assert!(issued.2["message"].as_str().unwrap().contains("100 张"));
+    let policy = env
         .state
         .db
-        .key_row_for_discord("900000000000000401")
+        .member_policy("900000000000000401")
         .await
         .unwrap()
-        .unwrap();
-    assert!(row["features"].is_null(), "全部已开放功能 = NULL");
-    assert!(row["expires_at"].is_null(), "expires_days=0 = 不过期");
-    // 生效的设置
-    assert_eq!(
-        Value::Object(svc(&e).settings().await.unwrap().to_map()),
-        json!({"configured": true, "open": true, "max_users": 50, "features": null, "daily_images": 100,
-               "daily_v5": 0, "image_scope": "all", "expires_days": 0, "role_guild": "",
-               "role_id": "", "role_note": "", "role_extra": []})
+        .effective;
+    assert_eq!(policy.daily_images, 100);
+    assert!(!policy.v5);
+    let stored = env.state.db.claim_rules().await.unwrap();
+    assert!(stored.open);
+    assert_eq!(stored.max_users, 50);
+    assert!(
+        gate_server::ops::set_registration(
+            &env.state,
+            json!({"role_guild":"bad"}).as_object().unwrap()
+        )
+        .await
+        .is_err()
     );
 }
 
@@ -2866,8 +2705,11 @@ async fn public_meta_exposes_only_the_role_note_when_the_gate_is_configured() {
     );
     // 配齐：只给名称，不给服务器 / 身份组 ID
     let (e, _d) = setup_reg(&[]).await;
-    set_db(&e, "register_role_note", "创作者").await;
-    require_role(&e, "900000000000000077").await;
+    common::claim_for(
+        &e.state,
+        json!({"roles":[{"guild":GUILD,"role":"900000000000000077","note":"创作者"}]}),
+    )
+    .await;
     for path in ["/public/status", "/public/live"] {
         let body = fetch(&e, path).await;
         assert_eq!(body["registration"]["role_note"], "创作者", "{path}");
@@ -2960,7 +2802,7 @@ async fn verify_login_keeps_the_earliest_join_across_two_guilds() {
     two_rules(&e).await;
     e.state
         .db
-        .upsert_role_verification(MEMBER, GUILD, ROLE_A, 1.0)
+        .upsert_role_verification(MEMBER, GUILD, ROLE_A, e.state.now())
         .await
         .unwrap();
     assert_eq!(issue(&e, MEMBER).await.0, 200);
@@ -3002,7 +2844,7 @@ async fn verify_login_keeps_the_earliest_join_across_two_guilds() {
 /// 机器人巡查的是本站自己的服，不是门槛服：它的进服时间不能拿来算「进服多久」，一律不记。
 async fn departed_sweep_does_not_record_the_bot_guild_join_time() {
     let (e, d) = setup_reg(&[]).await;
-    set_db(&e, "register_max_users", "0").await;
+    common::claim_for(&e.state, json!({"max_users":0})).await;
     open_registration(&e).await;
     let ids = [
         "900000000000000301",

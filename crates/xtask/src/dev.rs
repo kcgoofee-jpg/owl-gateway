@@ -171,7 +171,7 @@ async fn serve(args: Args) -> Result<()> {
 
     // 先把数据写进库、关掉这个连接，再让网关像对着一份现成的库那样启动（启动时的回填、停机检测都按真实路径走）
     let seeded = {
-        let db = Db::open(env.db_path())?;
+        let db = Db::open_for_gateway(env.db_path(), now, env.key_inactivity_delete_days)?;
         seed::seed(&db, &clock, now)
             .await
             .context("写入合成演示数据失败")?
@@ -245,7 +245,7 @@ async fn write_cookies(state: &AppState, seeded: &Seeded, data: &Path) -> Result
         .get_key(member.id)
         .await?
         .context("刚建的 Key 读不到")?;
-    let tag = session::key_tag(Some(&Key(row)));
+    let tag = session::key_tag(Some(&Key::load(&state.db, row).await?));
     let exp = state.now() as i64 + session::MEMBER_SESSION_DAYS * 86400;
     let json = serde_json::json!({
         "admin": session::make_admin_cookie(state),

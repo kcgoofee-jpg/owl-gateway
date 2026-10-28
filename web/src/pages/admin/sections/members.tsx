@@ -12,6 +12,7 @@ import { ConfirmDialog, LoadError, Loading, SectionHead } from "./_kit";
 import { FreshBar, useFrozenList, useScrolledPast } from "./live";
 import {
   addTag,
+  call,
   clearShare,
   createInvite,
   disableKey,
@@ -20,13 +21,11 @@ import {
   removeMember,
   removeTag,
   resetAllKeys,
-  setQuotaAuto,
-  switchRole,
 } from "./members/actions";
 import {
   BansDialog,
-  BindDiscordDialog,
   CouponDialog,
+  CredentialDialog,
   KeyRevealDialog,
   ResetQuotaDialog,
   TagDialog,
@@ -57,10 +56,10 @@ import type { KeysResp, MemberRow, MembersResp } from "./members/types";
 import "./members.css";
 
 type Dlg =
-  | { t: "edit"; id: number | null; manual?: boolean }
+  | { t: "edit"; id: number }
   | { t: "reveal"; title: string; intro: string; token: string; message?: string }
   | {
-      t: "bind" | "coupon" | "tag" | "disable" | "regen" | "reset" | "delete" | "ban";
+      t: "metadata" | "coupon" | "tag" | "disable" | "regen" | "reset" | "delete" | "ban";
       id: number;
     }
   | { t: "bans" | "resetAll" };
@@ -192,16 +191,16 @@ export default function Members() {
     else toast(r.error, { error: true });
   };
   const act: DetailActions = {
-    edit: (m, manual) => setDlg({ t: "edit", id: m.id, ...(manual ? { manual } : {}) }),
-    quotaAuto: (m) => quick(setQuotaAuto(m.id), `「${memberLabel(m)}」已改为统一额度`),
-    role: (m, r) =>
+    edit: (m) => setDlg({ t: "edit", id: m.id }),
+    resetRules: (m) =>
       quick(
-        switchRole(m.id, r),
-        `已将「${memberLabel(m)}」的身份组切换为「${{ regular: "普通", invite: "邀请", test: "测试", admin: "站长" }[r]}」`,
+        call("PUT", `/admin/api/members/${m.discord_id ?? m.discord?.id}/rules`, {}),
+        "成员规则已恢复默认",
       ),
+    metadata: (m) => setDlg({ t: "metadata", id: m.id }),
     issue: (m, a) => {
       if (a.kind === "share-clear") void quick(clearShare(m.id), "已解除限流暂停");
-      else if (a.kind === "edit") setDlg({ t: "edit", id: m.id });
+      else if (a.kind === "edit") setDlg({ t: "metadata", id: m.id });
       else if (a.kind === "tag-del") void quick(removeTag(m.id, a.tag), `已移除：${a.tag}`);
       else {
         const need = memberIssues(m, now)
@@ -211,7 +210,6 @@ export default function Members() {
         void quick(addTag(m.id, ACK_TAG, `看过：${need}`), "好，24 小时内不再提醒");
       }
     },
-    bind: (m) => setDlg({ t: "bind", id: m.id }),
     addTag: (m) => setDlg({ t: "tag", id: m.id }),
     removeTag: (m, tag) => quick(removeTag(m.id, tag), `已移除：${tag}`),
     coupon: (m) => setDlg({ t: "coupon", id: m.id }),
@@ -245,24 +243,14 @@ export default function Members() {
     if (!dlg) return null;
     switch (dlg.t) {
       case "edit": {
-        if (dlg.id !== null && !target) return null;
+        if (!target) return null;
         return (
           <KeyDialog
-            target={dlg.id === null ? null : (target ?? null)}
-            {...(dlg.manual ? { startManual: true } : {})}
-            idleDays={idleDays}
+            target={target}
             onClose={close}
             onSaved={(text) => {
               close();
               toast(text);
-            }}
-            onCreated={(key) => {
-              setDlg({
-                t: "reveal",
-                title: "新 Key 已创建",
-                intro: "请立即复制新 Key，发给对方：",
-                token: key.token,
-              });
             }}
           />
         );
@@ -277,16 +265,15 @@ export default function Members() {
             onClose={close}
           />
         );
-      case "bind":
+      case "metadata":
         if (!target) return null;
         return (
-          <BindDiscordDialog
+          <CredentialDialog
             keyId={target.id}
             name={memberLabel(target)}
-            currentId={target.discord ? String(target.discord.id) : (target.discord_id ?? "")}
-            currentUser={target.discord?.username ?? ""}
+            expiresAt={target.expires_at}
             onClose={close}
-            onDone={(t) => toast(t)}
+            onDone={(text) => toast(text)}
           />
         );
       case "coupon":
@@ -322,8 +309,7 @@ export default function Members() {
             }}
           >
             <p>
-              <b>高危操作：</b>将失效全站所有成员的 Key，并清空 Discord 绑定。带「邀请」标签的 Key
-              不受影响（保留启用、绑定与标签）。
+              <b>高危操作：</b>将失效全站所有 Key，并清空 Discord 绑定。
             </p>
             <p>执行后，成员需要在 Discord 输入 /register 重新领取 Key。</p>
           </ConfirmDialog>
@@ -420,7 +406,7 @@ export default function Members() {
             ) : dc ? (
               <p>
                 其 Key 将被删除，Discord 领取记录会被清除并摘除身份组。删除后该成员可以重新自助领取新的
-                Key，历史用量不再保留。
+                Key；历史请求和用量保留。
               </p>
             ) : (
               <p>其 Key 将被删除且不可恢复。</p>
@@ -438,9 +424,9 @@ export default function Members() {
         title="成员"
         actions={
           <div class="xa-toolbar">
-            <Button variant="primary" onClick={() => setDlg({ t: "edit", id: null })}>
+            <Button variant="primary" disabled={inviting} onClick={() => void newInvite()}>
               <Plus size={15} aria-hidden="true" />
-              新建 Key
+              创建邀请 Key
             </Button>
             <Menu
               button={(p) => (
@@ -450,7 +436,6 @@ export default function Members() {
                 </Button>
               )}
               items={[
-                { label: "新建邀请 Key", onSelect: newInvite },
                 { label: `封禁黑名单（${bans.data?.total ?? 0}）`, onSelect: () => setDlg({ t: "bans" }) },
                 { label: "全站重置 Key…", onSelect: () => setDlg({ t: "resetAll" }), danger: true },
               ]}

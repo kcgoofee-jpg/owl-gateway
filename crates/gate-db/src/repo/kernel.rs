@@ -8,7 +8,7 @@
 
 use crate::{Db, Result, value};
 use gate_core::autopilot::BreakerRows;
-use gate_core::quota::{ManagedKey, QuietInputs, QuietSnap, quiet_count_pairs, quiet_snaps_since};
+use gate_core::quota::{QuietInputs, QuietSnap, quiet_count_pairs, quiet_snaps_since};
 use rusqlite::params;
 
 fn count_i64(
@@ -51,37 +51,6 @@ impl Db {
                 )?;
             }
             Ok(QuietInputs { snaps, counts })
-        })
-        .await
-    }
-
-    /// `quota_auto=1` 的成员 Key 当前的额度（额度同步用它数「要改几把」）。
-    pub async fn quota_managed_keys(&self) -> Result<Vec<ManagedKey>> {
-        self.read(|c| {
-            let mut stmt = c.prepare(
-                "SELECT daily_images, daily_v5, image_model_scope FROM api_keys \
-                 WHERE quota_auto=1",
-            )?;
-            stmt.query_map([], |r| {
-                Ok(ManagedKey {
-                    daily_images: value::i64_or(r, 0, 0)?,
-                    daily_v5: value::i64_or(r, 1, 0)?,
-                    image_model_scope: value::text_or(r, 2, "")?,
-                })
-            })?
-            .collect()
-        })
-        .await
-    }
-
-    /// 把手动额度下发给所有 `quota_auto=1` 的成员 Key。
-    pub async fn quota_apply_to_keys(&self, daily_images: i64, daily_v5: i64) -> Result<()> {
-        self.write(move |tx| {
-            tx.execute(
-                "UPDATE api_keys SET daily_images=?, daily_v5=? WHERE quota_auto=1",
-                params![daily_images, daily_v5],
-            )?;
-            Ok(())
         })
         .await
     }

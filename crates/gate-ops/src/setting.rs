@@ -23,6 +23,7 @@ pub const ACTOR_HEADER: (&str, &str) = ("x-owl-actor", "claude");
 pub enum Ep {
     /// `/settings`：Anlas / V5 预算
     Settings,
+    MemberDefaults,
     /// `/guard`：账号保护与排队
     Guard,
     /// `/runtime-limits`：排队与冷却
@@ -40,8 +41,8 @@ pub enum Kind {
     Bool,
     Text,
     Choice(&'static [&'static str]),
-    /// `服务器ID:身份组ID`，两者同时设置；留空 = 两个都清空
-    GuildRole,
+    /// 完整的 OR 领取条件 JSON 数组。
+    Roles,
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -66,96 +67,159 @@ const fn s(name: &'static str, ep: Ep, kind: Kind, desc: &'static str) -> Spec {
 
 /// 白名单。范围以服务端为准（这里只做类型检查，服务端不接受会原样转述原因）。
 pub const SPECS: &[Spec] = &[
-    s(
-        "global_daily_anlas",
-        Ep::Settings,
-        Kind::Int,
-        "全站每日 Anlas 池（0~100000，0 = 不限）",
-    ),
-    s(
-        "global_monthly_anlas",
-        Ep::Settings,
-        Kind::Float,
-        "全站每月 Anlas 预算（0~1000000，0 = 不限）",
-    ),
-    s(
-        "member_daily_anlas",
-        Ep::Settings,
-        Kind::Int,
-        "每人每日 Anlas 上限（0~100000，0 = 不限）",
-    ),
-    s(
-        "register_daily_images",
-        Ep::Settings,
-        Kind::Int,
-        "V4.5 每人每天张数（0~100000，0 = 不限；手动，改了立即同步给成员）",
-    ),
-    s(
-        "register_daily_v5",
-        Ep::Settings,
-        Kind::Int,
-        "V5 每人每天张数（0~100000，0 = 不限；手动）",
-    ),
-    s(
-        "v5_paused",
-        Ep::Settings,
-        Kind::Bool,
-        "V5 暂停（on / off；手动）",
-    ),
-    s(
-        "global_daily_v5",
-        Ep::Settings,
-        Kind::Int,
-        "全站每日 V5 张数（0~100000，0 = 不限；手动）",
-    ),
-    s(
-        "v5_medium_mode",
-        Ep::Settings,
-        Kind::Choice(&["off", "on"]),
-        "V5 Medium 降档：off / on",
-    ),
     Spec {
-        name: "register_max_users",
-        ep: Ep::Registration,
+        name: "global_daily_anlas",
+        ep: Ep::Settings,
         kind: Kind::Int,
-        field: "max_users",
-        desc: "自助领 Key 名额上限（0~1000）",
+        field: "budgets.daily_anlas",
+        desc: "全站每日 Anlas（0 停用，上限9999）",
+    },
+    Spec {
+        name: "global_monthly_anlas",
+        ep: Ep::Settings,
+        kind: Kind::Float,
+        field: "budgets.monthly_anlas",
+        desc: "全站每月 Anlas（0 停用，上限99999）",
+    },
+    Spec {
+        name: "global_daily_v5",
+        ep: Ep::Settings,
+        kind: Kind::Int,
+        field: "budgets.daily_v5",
+        desc: "全站每日 V5（0 停用，上限9999）",
+    },
+    Spec {
+        name: "member_daily_images",
+        ep: Ep::MemberDefaults,
+        kind: Kind::Int,
+        field: "daily_images",
+        desc: "默认每日 V4.5 免费图（0 停用，上限9999）",
+    },
+    Spec {
+        name: "member_daily_v5",
+        ep: Ep::MemberDefaults,
+        kind: Kind::Int,
+        field: "daily_v5",
+        desc: "默认每日 V5（0 停用，上限9999）",
+    },
+    Spec {
+        name: "member_daily_anlas",
+        ep: Ep::MemberDefaults,
+        kind: Kind::Int,
+        field: "daily_anlas",
+        desc: "默认每日 Anlas（0 停用，上限9999）",
+    },
+    Spec {
+        name: "member_monthly_anlas",
+        ep: Ep::MemberDefaults,
+        kind: Kind::Float,
+        field: "monthly_anlas",
+        desc: "默认每月 Anlas（0 停用，上限99999）",
+    },
+    Spec {
+        name: "member_rpm",
+        ep: Ep::MemberDefaults,
+        kind: Kind::Int,
+        field: "rpm",
+        desc: "默认每分钟请求数（1~600）",
+    },
+    Spec {
+        name: "v5_paused",
+        ep: Ep::Settings,
+        kind: Kind::Bool,
+        field: "v5_paused",
+        desc: "暂停 V5（on/off）",
     },
     Spec {
         name: "register_open",
         ep: Ep::Registration,
         kind: Kind::Bool,
         field: "open",
-        desc: "是否开放自助领 Key（on / off）",
+        desc: "开放领取（on/off）",
     },
     Spec {
-        name: "role_note",
+        name: "register_max_users",
         ep: Ep::Registration,
-        kind: Kind::Text,
-        field: "role_note",
-        desc: "限定身份组的名称说明（最多 60 字，首页被挡时显示）",
+        kind: Kind::Int,
+        field: "max_users",
+        desc: "领取人数上限（0 不限，上限100000）",
     },
     Spec {
-        name: "role_guild",
+        name: "register_expires_days",
         ep: Ep::Registration,
-        kind: Kind::Text,
-        field: "role_guild",
-        desc: "限定身份组所在服务器 ID（数字；必须与 role_id 同时有或同时空，单独改常被拒，推荐用 role_gate）",
+        kind: Kind::Int,
+        field: "expires_days",
+        desc: "Key 有效天数（0 永久，上限3650）",
     },
     Spec {
-        name: "role_id",
+        name: "claim_roles",
         ep: Ep::Registration,
-        kind: Kind::Text,
-        field: "role_id",
-        desc: "限定身份组 ID（数字；同上，推荐用 role_gate）",
+        kind: Kind::Roles,
+        field: "roles",
+        desc: "符合任一身份组的 JSON 数组；[] 不限制身份组",
     },
     Spec {
-        name: "role_gate",
-        ep: Ep::Registration,
-        kind: Kind::GuildRole,
-        field: "role_gate",
-        desc: "同时设服务器和身份组：服务器ID:身份组ID；传 \"\" 清空两者",
+        name: "member_image",
+        ep: Ep::MemberDefaults,
+        kind: Kind::Bool,
+        field: "image",
+        desc: "默认开放图片生成（on/off）",
     },
+    Spec {
+        name: "member_v5",
+        ep: Ep::MemberDefaults,
+        kind: Kind::Bool,
+        field: "v5",
+        desc: "默认开放V5（on/off）",
+    },
+    Spec {
+        name: "member_vibe",
+        ep: Ep::MemberDefaults,
+        kind: Kind::Bool,
+        field: "vibe",
+        desc: "默认开放Vibe 与参考图（on/off）",
+    },
+    Spec {
+        name: "member_tags",
+        ep: Ep::MemberDefaults,
+        kind: Kind::Bool,
+        field: "tags",
+        desc: "默认开放标签补全（on/off）",
+    },
+    Spec {
+        name: "member_upscale",
+        ep: Ep::MemberDefaults,
+        kind: Kind::Bool,
+        field: "upscale",
+        desc: "默认开放放大（on/off）",
+    },
+    Spec {
+        name: "member_augment",
+        ep: Ep::MemberDefaults,
+        kind: Kind::Bool,
+        field: "augment",
+        desc: "默认开放导演工具（on/off）",
+    },
+    Spec {
+        name: "member_img2img",
+        ep: Ep::MemberDefaults,
+        kind: Kind::Bool,
+        field: "img2img",
+        desc: "默认开放图生图与局部重绘（on/off）",
+    },
+    Spec {
+        name: "member_paid_parameters",
+        ep: Ep::MemberDefaults,
+        kind: Kind::Bool,
+        field: "paid_parameters",
+        desc: "默认开放高规格生图（on/off）",
+    },
+    s(
+        "v5_medium_mode",
+        Ep::Settings,
+        Kind::Choice(&["off", "on"]),
+        "V5 Full 转 Medium：off/on",
+    ),
     Spec {
         name: "issue_hourly_cap",
         ep: Ep::Unsupported(
@@ -214,13 +278,14 @@ fn kind_label(k: Kind) -> String {
         Kind::Bool => "on/off".into(),
         Kind::Text => "文本".into(),
         Kind::Choice(c) => c.join("/"),
-        Kind::GuildRole => "服务器ID:身份组ID".into(),
+        Kind::Roles => "JSON 数组".into(),
     }
 }
 
 fn ep_label(ep: Ep) -> &'static str {
     match ep {
         Ep::Settings => "PUT /settings",
+        Ep::MemberDefaults => "PUT /member-rules",
         Ep::Guard => "PUT /guard",
         Ep::RuntimeLimits => "PUT /runtime-limits",
         Ep::Registration => "PUT /ops/registration",
@@ -269,16 +334,16 @@ pub fn parse_value(kind: Kind, raw: &str) -> Result<Value, String> {
                 Err(format!("{raw:?} 不在 {} 之中", c.join(" / ")))
             }
         }
-        Kind::GuildRole => {
-            if t.is_empty() {
-                return Ok(Value::String(String::new()));
+        Kind::Roles => {
+            let roles: Vec<gate_core::member_policy::EligibilityRule> =
+                serde_json::from_str(t).map_err(|_| "需要领取条件 JSON 数组".to_owned())?;
+            gate_core::member_policy::ClaimRules {
+                roles: roles.clone(),
+                ..gate_core::member_policy::ClaimRules::initial()
             }
-            match t.split_once(':') {
-                Some((g, r)) if !g.trim().is_empty() && !r.trim().is_empty() => {
-                    Ok(Value::String(format!("{}:{}", g.trim(), r.trim())))
-                }
-                _ => Err("需要写成 服务器ID:身份组ID，或传 \"\" 清空".into()),
-            }
+            .validate()
+            .map_err(str::to_owned)?;
+            serde_json::to_value(roles).map_err(|error| error.to_string())
         }
     }
 }
@@ -305,18 +370,30 @@ fn same(a: &Value, b: &Value) -> bool {
 }
 
 /// PUT 的请求体。
-fn put_body(sp: &Spec, v: &Value) -> Value {
-    if sp.kind == Kind::GuildRole {
-        let t = v.as_str().unwrap_or("");
-        let (g, r) = t.split_once(':').unwrap_or(("", ""));
-        return json!({"role_guild": g, "role_id": r});
-    }
-    json!({ sp.field: v })
+fn put_body(sp: &Spec, value: &Value, current: &Value) -> Option<Value> {
+    let mut body = match sp.ep {
+        Ep::Settings => current.clone(),
+        Ep::MemberDefaults => current.get("defaults")?.clone(),
+        Ep::Registration => {
+            let saved = current.get("registration")?.as_object()?;
+            Value::Object(
+                ["open", "max_users", "expires_days", "roles"]
+                    .iter()
+                    .map(|key| Some(((*key).to_owned(), saved.get(*key)?.clone())))
+                    .collect::<Option<_>>()?,
+            )
+        }
+        Ep::Guard | Ep::RuntimeLimits => return Some(json!({sp.field:value})),
+        Ep::Unsupported(_) => return None,
+    };
+    *body.pointer_mut(&format!("/{}", sp.field.replace('.', "/")))? = value.clone();
+    Some(body)
 }
 
 fn put_path(ep: Ep) -> &'static str {
     match ep {
         Ep::Settings => "/settings",
+        Ep::MemberDefaults => "/member-rules",
         Ep::Guard => "/guard",
         Ep::RuntimeLimits => "/runtime-limits",
         Ep::Registration => "/ops/registration",
@@ -326,32 +403,21 @@ fn put_path(ep: Ep) -> &'static str {
 
 /// 从 GET 响应里取当前值。
 fn read_current(sp: &Spec, ep_json: &Value) -> Option<Value> {
-    match sp.ep {
-        Ep::Settings => ep_json.get(sp.field).cloned(),
-        Ep::Guard => ep_json.pointer(&format!("/values/{}", sp.field)).cloned(),
-        Ep::RuntimeLimits => ep_json.get(sp.field).cloned(),
-        Ep::Registration => {
-            if sp.kind == Kind::GuildRole {
-                let g = ep_json.pointer("/registration/role_guild")?.as_str()?;
-                let r = ep_json.pointer("/registration/role_id")?.as_str()?;
-                Some(Value::String(if g.is_empty() && r.is_empty() {
-                    String::new()
-                } else {
-                    format!("{g}:{r}")
-                }))
-            } else {
-                ep_json
-                    .pointer(&format!("/registration/{}", sp.field))
-                    .cloned()
-            }
-        }
-        Ep::Unsupported(_) => None,
-    }
+    let base = match sp.ep {
+        Ep::Settings | Ep::RuntimeLimits => ep_json,
+        Ep::MemberDefaults => ep_json.get("defaults")?,
+        Ep::Guard => ep_json.get("values")?,
+        Ep::Registration => ep_json.get("registration")?,
+        Ep::Unsupported(_) => return None,
+    };
+    base.pointer(&format!("/{}", sp.field.replace('.', "/")))
+        .cloned()
 }
 
 fn get_path(ep: Ep) -> &'static str {
     match ep {
         Ep::Settings => "/settings",
+        Ep::MemberDefaults => "/member-rules",
         Ep::Guard => "/guard",
         Ep::RuntimeLimits => "/runtime-limits",
         Ep::Registration => "/ops",
@@ -527,7 +593,8 @@ pub async fn run_set_with(
             format!("{plan}没有写入：要真的修改请加 --yes（先预览用 --dry-run）\n"),
         ));
     }
-    admin.put(put_path(sp.ep), &put_body(sp, &new)).await?;
+    let body = put_body(sp, &new, &before_json).context("后台设置结构无效，未写入")?;
+    admin.put(put_path(sp.ep), &body).await?;
     let after_json = admin.get(get_path(sp.ep)).await?;
     let after =
         read_current(sp, &after_json).with_context(|| format!("后台返回里没有 {}", sp.name))?;
@@ -645,9 +712,8 @@ mod tests {
         assert_eq!(parse_value(Kind::Bool, "0"), Ok(json!(false)));
         assert!(parse_value(Kind::Bool, "maybe").is_err());
         assert!(parse_value(Kind::Choice(&["off", "on"]), "auto").is_err());
-        assert_eq!(parse_value(Kind::GuildRole, ""), Ok(json!("")));
-        assert_eq!(parse_value(Kind::GuildRole, "1:2"), Ok(json!("1:2")));
-        assert!(parse_value(Kind::GuildRole, "12").is_err());
+        assert_eq!(parse_value(Kind::Roles, "[]"), Ok(json!([])));
+        assert!(parse_value(Kind::Roles, "1:2").is_err());
     }
 
     #[test]
@@ -714,17 +780,16 @@ mod tests {
     }
 
     #[test]
-    fn put_body_shapes() {
-        let sp = find("register_open").unwrap();
-        assert_eq!(put_body(sp, &json!(true)), json!({"open": true}));
-        let sp = find("role_gate").unwrap();
+    fn put_body_preserves_other_canonical_fields() {
+        let current = json!({"budgets":{"daily_v5":150,"daily_anlas":200,"monthly_anlas":10000},"v5_paused":false,"v5_medium_mode":"off"});
+        let body = put_body(find("global_daily_v5").unwrap(), &json!(0), &current).unwrap();
+        assert_eq!(body["budgets"]["daily_v5"], 0);
+        assert_eq!(body["budgets"]["daily_anlas"], 200);
+        assert_eq!(body["v5_paused"], false);
+        let current = json!({"registration":{"configured":true,"active":5,"open":false,"max_users":20,"expires_days":0,"roles":[]}});
         assert_eq!(
-            put_body(sp, &json!("11:22")),
-            json!({"role_guild": "11", "role_id": "22"})
-        );
-        assert_eq!(
-            put_body(sp, &json!("")),
-            json!({"role_guild": "", "role_id": ""})
+            put_body(find("register_open").unwrap(), &json!(true), &current).unwrap(),
+            json!({"open":true,"max_users":20,"expires_days":0,"roles":[]})
         );
     }
 }

@@ -1,8 +1,7 @@
 //! 后台「运营 / 监控」接口：预算、排队与冷却、账号保护、领 Key / 功能 / 记录开关、公告与告警、
 //! Discord 机器人、上游 Token 增删改、Anlas 核对、总览与监控。
 //!
-//! 期望值来自旧 Python 网关（`app/admin.py`）在同样输入下的真实输出：状态码、`detail` 文案、JSON 键顺序、
-//! 数字是 int 还是 float、写进 `site_settings` 的字符串、操作日志行都逐条对过。
+//! 验证原生类型校验、设置持久化、操作日志和实际请求行为。
 //! 公开仓库：全部是合成数据；不会连 Discord / NovelAI（上游是本地假服务）。
 
 mod common;
@@ -65,217 +64,63 @@ async fn actions(e: &Env) -> Vec<(String, String, String, String, bool)> {
         .collect()
 }
 
-fn last_action(rows: &[(String, String, String, String, bool)]) -> (&str, &str, &str, bool) {
-    let r = rows.last().expect("至少有一条操作日志");
-    (r.1.as_str(), r.2.as_str(), r.3.as_str(), r.4)
-}
-
 // ------------------------------------------------------------------ 预算
 
-const SETTINGS_DEFAULT: &str = r#"{"global_monthly_anlas":10000.0,"global_daily_v5":150,"global_daily_anlas":200,"member_daily_anlas":50,"register_daily_images":150,"register_daily_v5":9999,"v5_paused":false,"v5_access_mode":"legacy","v5_authorized_discord_ids":[],"gateway_owner_discord_ids":[],"gateway_admin_discord_ids":[],"v5_medium_mode":"off","v5_medium_state":{"active":false}}"#;
+const SETTINGS_DEFAULT: &str = r#"{"budgets":{"daily_v5":150,"daily_anlas":200,"monthly_anlas":10000.0},"v5_paused":false,"v5_medium_mode":"off"}"#;
 
 #[tokio::test]
 async fn settings_get_put_and_stored_strings() {
     let e = setup(&[]).await;
     let api = Admin::login_bare(&e.state).await;
+    let (_, initial) = api.json("GET", "/settings", None).await;
     assert_eq!(
-        api.text("GET", "/settings", None).await,
-        (200, SETTINGS_DEFAULT.to_string())
+        initial,
+        serde_json::from_str::<Value>(SETTINGS_DEFAULT).unwrap()
     );
-
-    // 空请求体：缺省字段保持原值，且不写回任何设置。
     let before = settings(&e).await;
-    let (s, t) = api.text("PUT", "/settings", Some(json!({}))).await;
-    assert_eq!(s, 200);
-    assert_eq!(
-        t,
-        r#"{"ok":true,"global_monthly_anlas":10000.0,"global_daily_v5":150,"global_daily_anlas":200,"member_daily_anlas":50,"register_daily_images":150,"register_daily_v5":9999,"v5_paused":false,"v5_access_mode":"legacy","v5_medium_mode":"off"}"#
-    );
-    assert!(changed(&before, &settings(&e).await).is_empty());
-
-    // (请求体, 响应原文, 库里的 global_monthly_anlas / global_daily_v5 / member_daily_anlas；v5_alert_threshold 已删除、忽略)
-    #[allow(clippy::type_complexity)]
-    let ok_cases: Vec<(Value, &str, [&str; 4])> = vec![
-        (
-            json!({"global_monthly_anlas": 5000, "global_daily_v5": 200, "member_daily_anlas": 40, "v5_alert_threshold": 30}),
-            r#"{"ok":true,"global_monthly_anlas":5000.0,"global_daily_v5":200,"global_daily_anlas":200,"member_daily_anlas":40,"register_daily_images":150,"register_daily_v5":9999,"v5_paused":false,"v5_access_mode":"legacy","v5_medium_mode":"off"}"#,
-            ["5000.0", "200", "40", "30"],
-        ),
-        // 字符串数字也收（与旧版 float("1e3") 一致）
-        (
-            json!({"global_monthly_anlas": "1e3"}),
-            r#"{"ok":true,"global_monthly_anlas":1000.0,"global_daily_v5":200,"global_daily_anlas":200,"member_daily_anlas":40,"register_daily_images":150,"register_daily_v5":9999,"v5_paused":false,"v5_access_mode":"legacy","v5_medium_mode":"off"}"#,
-            ["1000.0", "200", "40", "30"],
-        ),
-        // 0 被夹到下限：库里是整数 "0"，响应仍是请求值的浮点写法（旧版怪癖）
-        (
-            json!({"global_monthly_anlas": 0}),
-            r#"{"ok":true,"global_monthly_anlas":0.0,"global_daily_v5":200,"global_daily_anlas":200,"member_daily_anlas":40,"register_daily_images":150,"register_daily_v5":9999,"v5_paused":false,"v5_access_mode":"legacy","v5_medium_mode":"off"}"#,
-            ["0", "200", "40", "30"],
-        ),
-        (
-            json!({"global_monthly_anlas": 99999}),
-            r#"{"ok":true,"global_monthly_anlas":99999.0,"global_daily_v5":200,"global_daily_anlas":200,"member_daily_anlas":40,"register_daily_images":150,"register_daily_v5":9999,"v5_paused":false,"v5_access_mode":"legacy","v5_medium_mode":"off"}"#,
-            ["99999", "200", "40", "30"],
-        ),
-        (
-            json!({"global_monthly_anlas": 12.5}),
-            r#"{"ok":true,"global_monthly_anlas":12.5,"global_daily_v5":200,"global_daily_anlas":200,"member_daily_anlas":40,"register_daily_images":150,"register_daily_v5":9999,"v5_paused":false,"v5_access_mode":"legacy","v5_medium_mode":"off"}"#,
-            ["12.5", "200", "40", "30"],
-        ),
-        (
-            json!({"global_daily_v5": "150"}),
-            r#"{"ok":true,"global_monthly_anlas":12.5,"global_daily_v5":150,"global_daily_anlas":200,"member_daily_anlas":40,"register_daily_images":150,"register_daily_v5":9999,"v5_paused":false,"v5_access_mode":"legacy","v5_medium_mode":"off"}"#,
-            ["12.5", "150", "40", "30"],
-        ),
-        // 12.0 作为整数字段：存 "12"
-        (
-            json!({"global_monthly_anlas": 7.0, "global_daily_v5": 12.0}),
-            r#"{"ok":true,"global_monthly_anlas":7.0,"global_daily_v5":12,"global_daily_anlas":200,"member_daily_anlas":40,"register_daily_images":150,"register_daily_v5":9999,"v5_paused":false,"v5_access_mode":"legacy","v5_medium_mode":"off"}"#,
-            ["7.0", "12", "40", "30"],
-        ),
-    ];
-    for (body, expect, stored) in ok_cases {
-        let (s, t) = api.text("PUT", "/settings", Some(body.clone())).await;
-        assert_eq!((s, t.as_str()), (200, expect), "{body}");
-        let now = settings(&e).await;
-        for (key, want) in [
-            "global_monthly_anlas",
-            "global_daily_v5",
-            "member_daily_anlas",
-        ]
-        .iter()
-        .zip(stored)
-        {
-            assert_eq!(now[*key], want, "{body} → {key}");
-        }
-    }
-
-    // 非法输入：422，原文逐字一致，且什么都没写
-    let frozen = settings(&e).await;
-    for (body, detail) in [
-        (
-            json!({"global_monthly_anlas": "abc"}),
-            "global_monthly_anlas 必须是有效数字",
-        ),
-        (
-            json!({"global_daily_v5": 1.5}),
-            "global_daily_v5 必须是整数",
-        ),
-        (
-            json!({"global_daily_v5": -1}),
-            "global_daily_v5 必须在 0～9999 之间",
-        ),
-        (json!({"global_daily_v5": true}), "global_daily_v5 不能为空"),
-        (
-            json!({"global_monthly_anlas": 2e6}),
-            "global_monthly_anlas 必须在 0～99999 之间",
-        ),
-        (
-            json!({"global_monthly_anlas": null}),
-            "global_monthly_anlas 不能为空",
-        ),
-        (
-            json!({"global_monthly_anlas": " "}),
-            "global_monthly_anlas 不能为空",
-        ),
-        (
-            json!({"member_daily_anlas": 100001}),
-            "member_daily_anlas 必须在 0～9999 之间",
-        ),
-        (
-            json!({"global_daily_anlas": 100001}),
-            "global_daily_anlas 必须在 0～9999 之间",
-        ),
-        (
-            json!({"global_daily_anlas": -1}),
-            "global_daily_anlas 必须在 0～9999 之间",
-        ),
-        (
-            json!({"global_daily_anlas": 1.5}),
-            "global_daily_anlas 必须是整数",
-        ),
-        (
-            json!({"global_daily_anlas": null}),
-            "global_daily_anlas 不能为空",
-        ),
-        (
-            json!({"global_daily_v5": [1]}),
-            "global_daily_v5 必须是有效数字",
-        ),
+    for bad in [
+        json!({}),
+        json!({"budgets":{"daily_v5":1}}),
+        json!({"global_daily_v5":200}),
     ] {
-        api.fails("PUT", "/settings", Some(body), 422, detail).await;
+        assert_eq!(api.json("PUT", "/settings", Some(bad)).await.0, 422);
+    }
+    assert_eq!(settings(&e).await, before);
+    let mut proposed = initial;
+    proposed["budgets"] = json!({"daily_v5":200,"daily_anlas":350,"monthly_anlas":5000.0});
+    assert_eq!(
+        api.json("PUT", "/settings", Some(proposed.clone())).await,
+        (200, proposed.clone())
+    );
+    assert_eq!(api.get_ok("/settings").await, proposed);
+    assert_eq!(
+        serde_json::from_str::<Value>(&settings(&e).await["runtime_budgets"]).unwrap(),
+        proposed["budgets"]
+    );
+    let frozen = settings(&e).await;
+    for bad in [json!(-1), json!(1.5), json!("20"), json!(true), json!(null)] {
+        let mut invalid = proposed.clone();
+        invalid["budgets"]["daily_v5"] = bad;
+        invalid["v5_paused"] = json!(true);
+        assert_eq!(api.json("PUT", "/settings", Some(invalid)).await.0, 422);
     }
     assert_eq!(settings(&e).await, frozen);
-
-    // 操作日志：成功记「修改预算」（参数摘要），失败记原因
-    let rows = actions(&e).await;
-    let (action, target, detail, ok) = last_action(&rows);
-    assert_eq!(
-        (action, target, ok),
-        ("修改预算", "Anlas 与 V5 预算", false)
-    );
-    assert_eq!(detail, "失败（422）：global_daily_v5 必须是有效数字");
-    assert!(rows.iter().any(|r| r.1 == "修改预算"
-        && r.3 == r#"{"global_monthly_anlas":5000,"global_daily_v5":200,"member_daily_anlas":40,"v5_alert_threshold":30}"#
-        && r.4));
 }
 
 #[tokio::test]
-async fn v5_policy_and_subject_roles_are_explicit_settings() {
-    let e = setup(&[]).await;
-    let api = Admin::login_bare(&e.state).await;
-    let (status, _) = api
-        .json(
-            "PUT",
-            "/settings",
-            Some(json!({
-                "v5_access_mode": "restricted",
-                "v5_authorized_discord_ids": ["900000000000000051"],
-                "gateway_owner_discord_ids": ["900000000000000052"],
-                "gateway_admin_discord_ids": ["900000000000000053"]
-            })),
-        )
-        .await;
-    assert_eq!(status, 200);
-    assert_eq!(
-        e.state
+async fn retired_identity_lists_cannot_be_written_as_runtime_settings() {
+    let env = setup(&[]).await;
+    let api = Admin::login_bare(&env.state).await;
+    let (status,_)=api.json("PUT","/settings",Some(json!({"v5_access_mode":"restricted","gateway_owner_discord_ids":["900000000000000051"]}))).await;
+    assert_eq!(status, 422);
+    assert!(
+        env.state
             .db
-            .get_setting(gate_server::v5_access::MODE_KEY)
+            .get_setting("gateway_owner_discord_ids")
             .await
             .unwrap()
-            .as_deref(),
-        Some("restricted")
+            .is_none()
     );
-    assert_eq!(
-        e.state
-            .db
-            .get_setting(gate_server::v5_access::SUBJECTS_KEY)
-            .await
-            .unwrap()
-            .as_deref(),
-        Some(r#"["900000000000000051"]"#)
-    );
-    assert_eq!(
-        e.state
-            .db
-            .get_setting(gate_server::v5_access::OWNERS_KEY)
-            .await
-            .unwrap()
-            .as_deref(),
-        Some(r#"["900000000000000052"]"#)
-    );
-    assert_eq!(
-        e.state
-            .db
-            .get_setting(gate_server::v5_access::ADMINS_KEY)
-            .await
-            .unwrap()
-            .as_deref(),
-        Some(r#"["900000000000000053"]"#)
-    );
-    let (status, body) = api.json("PUT", "/settings", Some(json!({ "v5_access_mode": "restricted", "v5_authorized_discord_ids": ["not-a-discord-id"] }))).await;
-    assert_eq!(status, 422, "{body}");
 }
 
 #[tokio::test]
@@ -283,98 +128,54 @@ async fn settings_patch_never_rewrites_an_omitted_emergency_pause() {
     let e = setup(&[]).await;
     let api = Admin::login_bare(&e.state).await;
     common::set_setting(&e, "v5_paused", "1").await;
-    e.state
-        .db
-        .write(|tx| {
-            tx.execute_batch(
-                "CREATE TRIGGER reject_pause_rewrite BEFORE UPDATE OF value ON site_settings \
-             WHEN OLD.key = 'v5_paused' BEGIN SELECT RAISE(ABORT, 'pause rewrite'); END;",
-            )?;
-            Ok(())
-        })
+    let mut full = api.get_ok("/settings").await;
+    assert_eq!(
+        api.json(
+            "PUT",
+            "/settings",
+            Some(json!({"budgets":{"daily_anlas":63}}))
+        )
         .await
-        .unwrap();
-
-    let (status, body) = api
-        .json("PUT", "/settings", Some(json!({"member_daily_anlas": 63})))
-        .await;
-    assert_eq!(status, 200, "{body}");
+        .0,
+        422
+    );
     assert_eq!(settings(&e).await["v5_paused"], "1");
-    assert_eq!(settings(&e).await["member_daily_anlas"], "63");
+    full["budgets"]["daily_anlas"] = json!(63);
+    assert_eq!(api.json("PUT", "/settings", Some(full)).await.0, 200);
+    assert_eq!(settings(&e).await["v5_paused"], "1");
 }
 
 #[tokio::test]
 async fn global_daily_anlas_pool_is_editable() {
-    // Vibe 用的全站每日 Anlas 池（以前后台没有写入口，默认值取环境变量）
     let e = setup(&[]).await;
     let api = Admin::login_bare(&e.state).await;
-    assert_eq!(
-        api.json("GET", "/settings", None).await.1["global_daily_anlas"],
-        200
-    );
-    for (body, shown, stored) in [
-        (json!({"global_daily_anlas": 350}), 350, "350"),
-        (json!({"global_daily_anlas": "120"}), 120, "120"),
-        // 0 = 不开放 Vibe；12.0 作为整数字段存 "12"
-        (json!({"global_daily_anlas": 0}), 0, "0"),
-        (json!({"global_daily_anlas": 12.0}), 12, "12"),
-        (json!({"global_daily_anlas": 9999}), 9999, "9999"),
-    ] {
-        let (s, v) = api.json("PUT", "/settings", Some(body.clone())).await;
+    for limit in [350, 120, 0, 12, 9999] {
+        let mut full = api.get_ok("/settings").await;
+        full["budgets"]["daily_anlas"] = json!(limit);
         assert_eq!(
-            (s, &v["global_daily_anlas"]),
-            (200, &json!(shown)),
-            "{body}"
+            api.json("PUT", "/settings", Some(full.clone())).await,
+            (200, full)
         );
-        assert_eq!(settings(&e).await["global_daily_anlas"], stored, "{body}");
         assert_eq!(
-            api.json("GET", "/settings", None).await.1["global_daily_anlas"],
-            shown
+            e.state.db.shared_budgets().await.unwrap().daily_anlas,
+            limit
         );
     }
-    // 不带这个字段的保存不会把它改掉
-    api.json("PUT", "/settings", Some(json!({"member_daily_anlas": 60})))
-        .await;
-    assert_eq!(settings(&e).await["global_daily_anlas"], "9999");
-    // 准入真的读这个设置：池子是 0 时没有 Anlas 权限的成员用不了 Vibe（见 admission）
-    assert_eq!(
-        gate_core::site_flags::get_from_raw(
-            &gate_core::site_flags::GLOBAL_DAILY_ANLAS,
-            settings(&e)
-                .await
-                .get("global_daily_anlas")
-                .map(String::as_str),
-        ),
-        json!(9999)
-    );
 }
 
 #[tokio::test]
 async fn canonical_global_limit_zero_round_trips_without_legacy_widening() {
     let e = setup(&[]).await;
     let api = Admin::login_bare(&e.state).await;
-    let modes = json!({
-        "register_daily_images": {"mode":"unlimited"},
-        "register_daily_v5": {"mode":"unlimited"},
-        "global_daily_v5": {"mode":"limit", "value":0.0},
-        "global_daily_anlas": {"mode":"unlimited"},
-        "member_daily_anlas": {"mode":"unlimited"},
-        "global_monthly_anlas": {"mode":"unlimited"},
-        "public_vibe_enabled": false
-    });
-    let (status, _) = api
-        .json("PUT", "/settings", Some(json!({"quota_modes": modes})))
-        .await;
-    assert_eq!(status, 200);
-    let (status, saved) = api.json("GET", "/quota-modes", None).await;
-    assert_eq!(status, 200);
-    assert_eq!(saved, modes);
-    assert_eq!(settings(&e).await["global_daily_v5"], "0");
-    let shown = api.json("GET", "/settings", None).await.1;
-    assert_eq!(shown["global_daily_v5"], json!(0));
+    let mut full = api.get_ok("/settings").await;
+    full["budgets"]["daily_v5"] = json!(0);
+    assert_eq!(
+        api.json("PUT", "/settings", Some(full.clone())).await,
+        (200, full)
+    );
+    assert_eq!(e.state.db.shared_budgets().await.unwrap().daily_v5, 0);
+    assert_eq!(api.json("GET", "/quota-modes", None).await.0, 404);
 }
-
-// ------------------------------------------------------------------ 排队与冷却
 
 #[tokio::test]
 async fn runtime_limits_validate_apply_and_persist() {
@@ -779,75 +580,25 @@ async fn discord_bot_status_only() {
 
 // ------------------------------------------------------------------ 领 Key / 功能 / 记录
 
-fn ops_fixed(v: &Value) -> Value {
-    json!({
-        "registration": v["registration"], "features": v["features"], "new_key": v["new_key"],
-        "log_retention": v["log_retention"],
-    })
-}
-
 #[tokio::test]
 async fn ops_snapshot_defaults() {
     let e = setup(&[]).await;
     let api = Admin::login_bare(&e.state).await;
     let v = api.get_ok("/ops").await;
     assert_eq!(
-        ops_fixed(&v),
-        json!({
-            "registration": {"configured": false, "open": false, "max_users": 0, "features": null, "daily_images": 150,
-                // 新 Key 默认不过期
-                "daily_v5": 9999, "image_scope": "all", "expires_days": 0, "role_guild": "", "role_id": "", "role_note": "", "role_extra": [],
-                "active": 0},
-            "features": {
-                "global": {"image": true, "upscale": true, "augment": true, "vibe": true, "tags": true},
-                "labels": {"image": "文生图", "upscale": "放大", "augment": "导演工具（线稿、上色等）", "vibe": "Vibe 编码",
-                    "tags": "标签补全"},
-                "new_key": ["image"],
-            },
-            // 后台「新建 Key」弹窗里没有数据库设置的默认值
-            "new_key": {"rpm": 10, "daily_anlas": 0.0, "monthly_anlas": 2500.0},
-            "log_retention": {"origin_keep_days": 0},
-        })
+        v["registration"],
+        json!({"configured":false,"open":false,"max_users":10,"expires_days":0,"roles":[],"active":0})
     );
+    assert!(v.get("new_key").is_none());
+    assert!(v["features"].get("new_key").is_none());
+    assert_eq!(
+        v["features"]["global"],
+        json!({"image":true,"upscale":true,"augment":true,"vibe":true,"tags":true})
+    );
+    assert_eq!(v["log_retention"], json!({"origin_keep_days":0}));
     assert_eq!(
         v["upstream"],
-        json!({"status": "idle", "recent": 0, "failed": 0, "image_cooldown_seconds": 0})
-    );
-    // 键顺序
-    let keys: Vec<&str> = v.as_object().unwrap().keys().map(String::as_str).collect();
-    assert_eq!(
-        keys,
-        [
-            "registration",
-            "features",
-            "new_key",
-            "log_retention",
-            "upstream"
-        ]
-    );
-    let reg_keys: Vec<&str> = v["registration"]
-        .as_object()
-        .unwrap()
-        .keys()
-        .map(String::as_str)
-        .collect();
-    assert_eq!(
-        reg_keys,
-        [
-            "configured",
-            "open",
-            "max_users",
-            "features",
-            "daily_images",
-            "daily_v5",
-            "image_scope",
-            "expires_days",
-            "role_guild",
-            "role_id",
-            "role_note",
-            "role_extra",
-            "active",
-        ]
+        json!({"status":"idle","recent":0,"failed":0,"image_cooldown_seconds":0})
     );
 }
 
@@ -855,310 +606,49 @@ async fn ops_snapshot_defaults() {
 async fn ops_registration_put() {
     let e = setup(&[]).await;
     let api = Admin::login_bare(&e.state).await;
-    let reg = |v: &Value| v["registration"].clone();
-
-    let before = settings(&e).await;
-    let (s, v) = api
-        .json("PUT", "/ops/registration", Some(json!({"open": true})))
+    let before = e.state.db.member_defaults().await.unwrap();
+    let full = json!({"open":true,"max_users":20,"expires_days":10,"roles":[{"guild":"900000000000000001","role":"900000000000000002","note":"成员"}]});
+    let (status, response) = api
+        .json("PUT", "/ops/registration", Some(full.clone()))
         .await;
-    assert_eq!((s, reg(&v)["open"].clone()), (200, json!(true)));
-    assert_eq!(
-        changed(&before, &settings(&e).await),
-        map(&[("register_open", "1")])
-    );
-
-    // 每人每日 V4.5 / V5 是全站统一的手动额度（在「额度与保护」里改）、模型范围固定：这里带上就 400、什么都不写
-    let before = settings(&e).await;
-    let (s, v) = api
-        .json(
-            "PUT",
-            "/ops/registration",
-            Some(json!({"max_users": 20, "daily_v5": 15, "image_scope": "all"})),
-        )
-        .await;
-    assert_eq!(
-        (s, v),
-        (
-            400,
-            json!({"detail": "每人每日 V4.5 / V5 张数是全站统一的手动额度，请在「额度与保护」里改"})
-        )
-    );
-    assert_eq!(settings(&e).await, before);
-
-    let before = settings(&e).await;
-    let (_, v) = api
-        .json(
-            "PUT",
-            "/ops/registration",
-            Some(json!({"max_users": 20, "expires_days": 10})),
-        )
-        .await;
-    assert_eq!(
-        changed(&before, &settings(&e).await),
-        map(&[
-            ("register_max_users", "20"),
-            ("register_expires_days", "10")
-        ])
-    );
-    assert_eq!(reg(&v)["image_scope"], "all", "新成员固定含 V5");
-    // 名额 20 × 每人 V5 15 = 300 > 全站 V5 日限 150：不再有「超卖」提示，
-    // 注册设置和预算接口都不带 v5_capacity
-    assert!(reg(&v).get("v5_capacity").is_none());
-    assert!(api.get_ok("/settings").await.get("v5_capacity").is_none());
-
-    // 功能清单：列表 / null（全部）/ 空列表（一个都不开）
-    let feats = |v: &Value| (reg(v)["features"].clone(), v["features"]["new_key"].clone());
-    let (_, v) = api
-        .json(
-            "PUT",
-            "/ops/registration",
-            Some(json!({"features": ["tags", "image", "vibe"]})),
-        )
-        .await;
-    assert_eq!(
-        feats(&v),
-        (
-            json!(["image", "vibe", "tags"]),
-            json!(["image", "vibe", "tags"])
-        )
-    );
-    assert_eq!(settings(&e).await["register_features"], "image,vibe,tags");
-    // 文本生成 / 语音已不是功能：和别的未知名字一样 422，库里的值不变
-    api.fails(
-        "PUT",
-        "/ops/registration",
-        Some(json!({"features": ["image", "text"]})),
-        422,
-        "features 必须是功能名列表",
-    )
-    .await;
-    assert_eq!(settings(&e).await["register_features"], "image,vibe,tags");
-    let (_, v) = api
-        .json("PUT", "/ops/registration", Some(json!({"features": null})))
-        .await;
-    assert_eq!(feats(&v), (json!(null), json!(null)));
-    assert_eq!(settings(&e).await["register_features"], "*");
-    let (_, v) = api
-        .json("PUT", "/ops/registration", Some(json!({"features": []})))
-        .await;
-    assert_eq!(
-        feats(&v),
-        (json!([]), json!(["image"])),
-        "没开任何功能时，新建 Key 弹窗仍默认文生图"
-    );
-    assert_eq!(settings(&e).await["register_features"], "");
-
-    // 限定身份组：成对填写（合成 ID）
-    let (_, v) = api
-        .json(
-            "PUT",
-            "/ops/registration",
-            Some(json!({"role_guild": "900000000000000001", "role_id": "900000000000000002", "role_note": " 创作者 "})),
-        )
-        .await;
-    assert_eq!(
-        (
-            reg(&v)["role_guild"].clone(),
-            reg(&v)["role_id"].clone(),
-            reg(&v)["role_note"].clone()
-        ),
-        (
-            json!("900000000000000001"),
-            json!("900000000000000002"),
-            json!("创作者")
-        )
-    );
-    assert_eq!(settings(&e).await["register_role_note"], "创作者");
-    // 只改一半：与库里另一半比较
-    api.fails(
-        "PUT",
-        "/ops/registration",
-        Some(json!({"role_guild": ""})),
-        422,
-        "限定身份组的服务器 ID 与身份组 ID 必须同时填写，或全部留空",
-    )
-    .await;
-    let (s, v) = api
-        .json(
-            "PUT",
-            "/ops/registration",
-            Some(json!({"role_guild": "", "role_id": ""})),
-        )
-        .await;
-    assert_eq!((s, reg(&v)["role_id"].clone()), (200, json!("")));
-    // 额外的限定身份组（满足任意一个即可）：列表，每条服务器 ID / 身份组 ID 都是数字 ID，最多 5 条，重复的合并，空行忽略
-    let rule = |g: &str, r: &str, n: &str| json!({"guild": g, "role": r, "note": n});
-    let (s, v) = api
-        .json(
-            "PUT",
-            "/ops/registration",
-            Some(json!({"role_extra": [
-                rule("900000000000000222", "900000000000000333", " 棱镜「创作者」 "),
-                rule("900000000000000222", "900000000000000333", "重复的一条"),
-                rule("", "", ""),
-            ]})),
-        )
-        .await;
-    assert_eq!(s, 200);
-    assert_eq!(
-        reg(&v)["role_extra"],
-        json!([rule(
-            "900000000000000222",
-            "900000000000000333",
-            "棱镜「创作者」"
-        )])
-    );
-    for (bad, want) in [
-        (
-            json!([rule("123", "900000000000000333", "x")]),
-            "额外身份组的服务器 ID",
-        ),
-        (
-            json!([rule("900000000000000222", "", "x")]),
-            "额外身份组的身份组 ID",
-        ),
-        (json!("not-a-list"), "role_extra 需要是列表"),
-        (
-            json!(
-                (0..6)
-                    .map(|i| rule("900000000000000222", &format!("90000000000000040{i}"), "x"))
-                    .collect::<Vec<_>>()
-            ),
-            "额外身份组最多 5 条",
-        ),
-    ] {
-        let (s, v) = api
-            .json("PUT", "/ops/registration", Some(json!({"role_extra": bad})))
-            .await;
-        assert_eq!(s, 422, "{want}");
-        assert!(v.to_string().contains(want), "{want}: {v}");
+    assert_eq!(status, 200, "{response}");
+    for field in ["open", "max_users", "expires_days", "roles"] {
+        assert_eq!(response["registration"][field], full[field]);
     }
-    // 清空
-    let (_, v) = api
-        .json("PUT", "/ops/registration", Some(json!({"role_extra": []})))
-        .await;
-    assert_eq!(reg(&v)["role_extra"], json!([]));
-    // 备注最多 60 字；open 按真假值
-    let (_, v) = api
-        .json(
-            "PUT",
-            "/ops/registration",
-            Some(json!({"role_note": "x".repeat(100), "open": 0})),
-        )
-        .await;
-    assert_eq!(reg(&v)["role_note"].as_str().unwrap().len(), 60);
-    assert_eq!(reg(&v)["open"], json!(false));
-    // 数字向零取整；bool 不是数字
-    let (_, v) = api
-        .json("PUT", "/ops/registration", Some(json!({"max_users": 7.9})))
-        .await;
-    assert_eq!(reg(&v)["max_users"], 7);
-
-    // 校验失败：文案与旧版一致（含 Python 自己的 int() 报错原文），且什么都没写
+    assert_eq!(e.state.db.member_defaults().await.unwrap(), before);
     let frozen = settings(&e).await;
-    for (body, detail) in [
-        (json!({"max_users": 5000}), "max_users 超出范围 0～1000"),
-        (
-            json!({"expires_days": 3651}),
-            "expires_days 超出范围 0～3650",
-        ),
-        (json!({"max_users": "x"}), "max_users 需要是整数"),
-        (json!({"max_users": true}), "max_users 需要是整数"),
-        (json!({"max_users": null}), "max_users 需要是整数"),
-        (json!({"max_users": [1]}), "max_users 需要是整数"),
-        (
-            json!({"role_id": "abc"}),
-            "role_id 需要是 Discord 的数字 ID",
-        ),
-        (
-            json!({"role_guild": "123"}),
-            "role_guild 需要是 Discord 的数字 ID",
-        ),
-        (json!({"features": ["bogus"]}), "features 必须是功能名列表"),
-        (json!({"features": "image"}), "features 必须是功能名列表"),
-        (json!({"features": [1]}), "features 必须是功能名列表"),
+    for bad in [
+        json!({"open":true}),
+        json!({"daily_images":10}),
+        json!({"role_extra":[]}),
+        json!({"open":true,"max_users":-1,"expires_days":0,"roles":[]}),
     ] {
-        api.fails("PUT", "/ops/registration", Some(body), 422, detail)
-            .await;
+        assert_eq!(api.json("PUT", "/ops/registration", Some(bad)).await.0, 422);
     }
     assert_eq!(settings(&e).await, frozen);
-
-    let rows = actions(&e).await;
-    let (action, target, detail, ok) = last_action(&rows);
-    assert_eq!(
-        (action, target, ok),
-        ("修改开放注册设置", "自助领 Key 设置", false)
-    );
-    assert_eq!(detail, "失败（422）：features 必须是功能名列表");
 }
 
 #[tokio::test]
 async fn ops_registration_defaults_are_constants_not_env() {
-    let secret = "x".repeat(32);
     let e = setup(&[
-        ("DISCORD_CLIENT_ID", "1"),
-        ("DISCORD_CLIENT_SECRET", "synthetic"),
-        ("DISCORD_BOT_TOKEN", "synthetic"),
-        ("REGISTRATION_BRIDGE_SECRET", &secret),
-        ("DISCORD_GUILD_ID", "900000000000000001"),
-        ("SITE_URL", "https://owl.example"),
-        // 这些环境变量 3.0 已删除（每日张数 / 模型范围归动态额度管；
-        // 名额 / 有效期 / 功能只在后台「领 Key」里设）：设了也不读
         ("REGISTER_MAX_USERS", "12"),
         ("REGISTER_DAILY_IMAGES", "40"),
         ("REGISTER_DAILY_V5", "5"),
-        ("REGISTER_IMAGE_SCOPE", "all"),
         ("REGISTER_EXPIRES_DAYS", "14"),
-        ("REGISTER_FEATURES", "image,vibe"),
     ])
     .await;
     let api = Admin::login_bare(&e.state).await;
-    // 登记两个已领取的成员（一个 Key 未过期）→ 占用名额 2
-    for i in 1..=2_i64 {
-        let key = e
-            .state
-            .db
-            .create_key(
-                &serde_json::from_value(
-                    json!({"name": format!("m{i}"), "token": format!("nai-synthetic-{i:0>30}"),
-                    "daily_images": 5, "monthly_anlas": 0.0, "daily_text_tokens": 0, "rpm": 5}),
-                )
-                .unwrap(),
-                e.state.now(),
-            )
-            .await
-            .unwrap();
-        let kid = key["id"].as_i64().unwrap();
-        e.state
-            .db
-            .write(move |tx| {
-                tx.execute(
-                    "INSERT INTO discord_registrations(discord_id, key_id, created_at, username, display_name) VALUES (?,?,?,?,?)",
-                    (format!("90000000000000010{i}"), kid, 1.0_f64, "u", "d"),
-                )?;
-                Ok(())
-            })
-            .await
-            .unwrap();
-    }
-    let v = api.get_ok("/ops").await;
+    assert_eq!(api.get_ok("/ops").await["registration"]["max_users"], 10);
     assert_eq!(
-        v["registration"],
-        json!({"configured": true, "open": false, "max_users": 10, "features": ["image"], "daily_images": 150,
-               "daily_v5": 9999, "image_scope": "all", "expires_days": 0, "role_guild": "", "role_id": "", "role_note": "", "role_extra": [],
-               "active": 2})
+        e.state.db.member_defaults().await.unwrap().daily_images,
+        150
     );
-    // 站长在后台改过的值优先于 defaults 里的常量
-    api.json("PUT", "/ops/registration", Some(json!({"max_users": 3})))
-        .await;
-    let v = api.get_ok("/ops").await;
+    let full = json!({"open":false,"max_users":3,"expires_days":0,"roles":[]});
     assert_eq!(
-        (
-            v["registration"]["max_users"].clone(),
-            v["registration"]["daily_images"].clone()
-        ),
-        (json!(3), json!(150))
+        api.json("PUT", "/ops/registration", Some(full)).await.0,
+        200
     );
+    assert_eq!(api.get_ok("/ops").await["registration"]["max_users"], 3);
 }
 
 #[tokio::test]
@@ -2203,7 +1693,6 @@ async fn reconciliation_waits_for_inflight_reservations_and_blocks_admission() {
             key_id: 1,
             day: "2026-10-25".into(),
             month: "2026-10".into(),
-            exclude_global_v5: false,
             is_vibe: false,
             anlas: 0.0,
             v5: 0,
@@ -2343,79 +1832,31 @@ async fn allowance_snapshot_is_read_only() {
 async fn v5_medium_mode_is_validated_stored_and_audited() {
     let e = setup(&[]).await;
     let api = Admin::login_bare(&e.state).await;
-    assert_eq!(
-        api.json("GET", "/settings", None).await.1["v5_medium_mode"],
-        "off"
-    );
-    // 两个合法值；写进库里的就是原文（自动档 auto 10-23 删除）
     for mode in ["on", "off"] {
-        let (s, v) = api
-            .json("PUT", "/settings", Some(json!({"v5_medium_mode": mode})))
-            .await;
-        assert_eq!((s, &v["v5_medium_mode"]), (200, &json!(mode)), "{v}");
+        let mut full = api.get_ok("/settings").await;
+        full["v5_medium_mode"] = json!(mode);
+        assert_eq!(api.json("PUT", "/settings", Some(full)).await.0, 200);
         assert_eq!(settings(&e).await["v5_medium_mode"], mode);
-        assert_eq!(
-            api.json("GET", "/settings", None).await.1["v5_medium_mode"],
-            mode
-        );
     }
-    // 只改别的字段：模式保持原值
-    api.json("PUT", "/settings", Some(json!({"v5_medium_mode": "on"})))
-        .await;
-    let (s, v) = api
-        .json("PUT", "/settings", Some(json!({"member_daily_anlas": 41})))
-        .await;
-    assert_eq!((s, &v["v5_medium_mode"]), (200, &json!("on")));
-    // 非法值：422，什么都不写（包括同一个请求里别的合法字段）
     let frozen = settings(&e).await;
-    for bad in [
-        json!("ON"),
-        json!("auto"),
-        json!("Auto"),
-        json!(" on"),
-        json!(""),
-        json!("medium"),
-        json!(true),
-        json!(1),
-        json!(null),
-        json!(["on"]),
-    ] {
-        api.fails(
-            "PUT",
-            "/settings",
-            Some(json!({"v5_medium_mode": bad, "member_daily_anlas": 7})),
-            422,
-            "v5_medium_mode 只能是 off / on",
-        )
-        .await;
+    for bad in [json!("auto"), json!("ON"), json!(true), json!(null)] {
+        let mut full = api.get_ok("/settings").await;
+        full["v5_medium_mode"] = bad;
+        full["v5_paused"] = json!(true);
+        assert_eq!(api.json("PUT", "/settings", Some(full)).await.0, 422);
     }
     assert_eq!(settings(&e).await, frozen);
-    // 库里被写坏的值按 off 显示（fail-closed）
-    e.state
-        .db
-        .set_setting("v5_medium_mode", "garbage")
-        .await
-        .unwrap();
-    assert_eq!(
-        api.json("GET", "/settings", None).await.1["v5_medium_mode"],
-        "off"
-    );
-    // 操作日志：照常记「修改预算」，摘要里带着模式
-    let rows = actions(&e).await;
-    assert!(
-        rows.iter()
-            .any(|r| r.1 == "修改预算" && r.3 == r#"{"v5_medium_mode":"on"}"# && r.4)
-    );
+    assert!(actions(&e).await.iter().any(|r| r.1 == "修改预算" && r.4));
 }
 
 #[tokio::test]
 async fn v5_medium_state_follows_the_manual_switch() {
     let e = setup(&[]).await;
     let api = Admin::login_bare(&e.state).await;
-    let st = api.json("GET", "/settings", None).await.1["v5_medium_state"].clone();
-    assert_eq!(st, json!({"active": false}));
-    api.json("PUT", "/settings", Some(json!({"v5_medium_mode": "on"})))
-        .await;
-    let st = api.json("GET", "/settings", None).await.1["v5_medium_state"].clone();
-    assert_eq!(st["active"], true);
+    let mut full = api.get_ok("/settings").await;
+    assert_eq!(full["v5_medium_mode"], "off");
+    assert!(full.get("v5_medium_state").is_none());
+    full["v5_medium_mode"] = json!("on");
+    assert_eq!(api.json("PUT", "/settings", Some(full)).await.0, 200);
+    assert_eq!(api.get_ok("/settings").await["v5_medium_mode"], "on");
 }
