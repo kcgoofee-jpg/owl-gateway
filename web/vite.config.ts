@@ -45,7 +45,8 @@ export default defineConfig({
     port: 5173,
     proxy: {
       // 状态页由网关渲染，它的样式 / 脚本（/_owl/status-page.*）也编在网关里
-      "^/(public|admin/api|self-register|login|logout|member|v1|status|livez|readyz|healthz|announcement|_owl/status-page)":
+      // ai / nai：画匣（成员首页的网页出图）在开发与 e2e 里直接打网关的 NAI 兼容出图接口
+      "^/(public|admin/api|self-register|login|logout|member|v1|ai|nai|status|livez|readyz|healthz|announcement|_owl/status-page)":
         {
           target: process.env.VITE_GATE ?? "http://127.0.0.1:18000",
           // Preserve the browser authority so strict same-origin checks also run in development.
