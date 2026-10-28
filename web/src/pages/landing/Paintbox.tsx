@@ -221,9 +221,9 @@ export function Paintbox({ me }: { me: MeMember }) {
   const cycleHint = cycle && cycle > 0 ? Math.round(cycle) : null;
 
   return (
+    // 不加 reveal（同「我的请求」）：显影按「整块滚进来多少」算，画匣整卡太高，滚很久都还是糊的
     <Card
       id="paintbox"
-      class="reveal"
       title={
         <>
           画匣 <Badge tone="accent">Beta</Badge>
