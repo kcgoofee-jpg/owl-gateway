@@ -108,7 +108,9 @@ PYTHON
 if bash "$repo/deploy/v3/cutover.sh" previous >"$tmp/incompatible.log" 2>&1; then
   echo 'incompatible rollback was allowed' >&2; exit 1
 fi
-! grep -Eq '^(tag|compose) ' "$DOCKER_CALLS"
+if grep -Eq '^(tag|compose) ' "$DOCKER_CALLS"; then
+  echo 'incompatible rollback changed tags or containers' >&2; exit 1
+fi
 grep -Fq '禁止只回滚镜像' "$tmp/incompatible.log"
 
 # Later releases with the same native schema can use the normal previous-image path.
