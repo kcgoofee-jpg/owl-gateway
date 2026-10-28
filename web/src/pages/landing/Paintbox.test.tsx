@@ -170,12 +170,10 @@ describe("Paintbox", () => {
   });
 
   it("取消等待：说明已开画仍会计入额度，按钮恢复可点", async () => {
-    let released: (() => void) | null = null;
     fetchMock.mockImplementationOnce(
       (_url: string, init?: RequestInit) =>
         new Promise((_resolve, reject) => {
           init?.signal?.addEventListener("abort", () => reject(new DOMException("已中止。", "AbortError")));
-          released = () => {};
         }),
     );
     const h = await mount();
@@ -188,7 +186,9 @@ describe("Paintbox", () => {
     await click(cancel);
     await settle();
     expect(h.querySelector(".notice--warn")?.textContent).toContain("仍会计入今天的额度");
-    const again = [...h.querySelectorAll("button")].find((b) => b.textContent === "生成") as HTMLButtonElement;
+    const again = [...h.querySelectorAll("button")].find(
+      (b) => b.textContent === "生成",
+    ) as HTMLButtonElement;
     expect(again.disabled).toBe(false);
     expect(h.querySelector(".pb-shot__img")).toBeNull();
     expect(reloadMe).not.toHaveBeenCalled();
