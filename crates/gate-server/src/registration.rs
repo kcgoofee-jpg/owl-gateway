@@ -163,7 +163,7 @@ pub struct Welcome<'a> {
     pub images_available: bool,
     /// 当前成员是否实际可以用 V5（权限、全局暂停和有效额度都通过）。
     pub v5: bool,
-    /// 每人每天最多出几张 V5；仅在 `v5` 可用时用于显示，Unlimited 以 0 表示。
+    /// 每人每天最多出几张 V5；0 表示停用，仅在 `v5` 可用时用于显示。
     pub daily_v5: i64,
     /// 每天几点重置（服务日起点）。
     pub reset_hour: i64,
@@ -216,6 +216,10 @@ pub fn welcome_message(w: &Welcome) -> String {
     ));
     rules.push("• Key 只给本服务器成员：退出服务器后 Key 自动失效".into());
     rules.push("• 一人一把，请勿分享：共用或转售会被回收".into());
+    rules.push(
+        "• 禁止商业化使用、公开 Key、绕过限制或异常高频调用、提交违规内容及影响其他用户正常使用"
+            .into(),
+    );
     rules.push("• 本站不保存提示词或生成图片；请求结果与额度记录用于排障和防滥用".into());
     let text = format!(
         "🦉 **欢迎来到猫头鹰公益站！** 这是你的 API Key（只发这一次，请先保存）：\n`{key}`\n\n\

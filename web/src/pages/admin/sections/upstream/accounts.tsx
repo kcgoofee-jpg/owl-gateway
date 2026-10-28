@@ -90,6 +90,7 @@ function RequestStats({ a }: { a: UpstreamAccount }) {
 export function AccountCard(props: {
   a: UpstreamAccount;
   only: boolean;
+  onDetails: (a: UpstreamAccount) => void;
   onReplace: (a: UpstreamAccount) => void;
   onDelete: (a: UpstreamAccount) => void;
   onToggle: (a: UpstreamAccount) => void;
@@ -124,6 +125,7 @@ export function AccountCard(props: {
           {st.text}
         </Badge>
         <span class="spacer" />
+        <Button onClick={() => props.onDetails(a)}>完整信息</Button>
         <Menu
           button={(button) => (
             <Button variant="ghost" icon aria-label={`账号 ${a.position} 的更多操作`} {...button}>

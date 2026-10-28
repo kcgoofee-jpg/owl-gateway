@@ -32,6 +32,11 @@
 .form-grid > .field > .field__hint {
   margin-top: var(--sp-2);
 }
+.field__error {
+  font-size: var(--fs-xs);
+  color: var(--danger);
+  font-weight: 600;
+}
 .form-grid > .field > .field__error {
   margin-top: var(--sp-1);
 }
@@ -75,11 +80,6 @@
   background-color: var(--surface-2);
   color: var(--muted);
   cursor: not-allowed;
-}
-.field__error {
-  font-size: var(--fs-xs);
-  color: var(--danger);
-  font-weight: 600;
 }
 
 /* 行式字段：左边标题与说明，右边控件；字段少、要对照着读的表单（额度页）用 */

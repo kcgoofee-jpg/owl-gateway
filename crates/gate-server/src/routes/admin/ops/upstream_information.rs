@@ -188,13 +188,17 @@ fn project_upstream(body: &[u8]) -> Option<Map<String, Value>> {
     Some(out)
 }
 
-async fn refresh(State(state): State<AppState>, _session: AdminSession, req: Request) -> ApiResult {
+/// Both explicit information actions use the owner session, same origin and scoped CSRF.
+pub(super) async fn authorize_information_request(
+    state: &AppState,
+    req: Request,
+) -> Result<String, crate::error::ApiError> {
     let (parts, body) = req.into_parts();
     if !origin_ok(&parts.headers) {
         return Err(HttpError::new(403, "请求来源校验失败").into());
     }
     let session_cookie = cookie(&parts.headers, ADMIN_COOKIE).unwrap_or_default();
-    let expected = scoped_csrf(&state, "upstream-information", &session_cookie);
+    let expected = scoped_csrf(state, "upstream-information", &session_cookie);
     let given = crate::auth::header_str(&parts.headers, "x-nai-admin-csrf");
     if !crate::session::ct_eq(given.as_bytes(), expected.as_bytes()) {
         return Err(HttpError::new(403, "会话校验失败，请刷新后台后重试").into());
@@ -207,6 +211,11 @@ async fn refresh(State(state): State<AppState>, _session: AdminSession, req: Req
         return Err(HttpError::new(400, "本操作不接受自定义账号或地址").into());
     }
 
+    Ok(expected)
+}
+
+async fn refresh(State(state): State<AppState>, _session: AdminSession, req: Request) -> ApiResult {
+    let expected = authorize_information_request(&state, req).await?;
     let _guard = state.ops.account_information.lock().await;
     let now = state.now();
     let mut cache = read_cache(&state).await?;

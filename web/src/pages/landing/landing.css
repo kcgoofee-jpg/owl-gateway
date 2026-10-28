@@ -77,11 +77,11 @@
   padding-top: var(--sp-8);
 }
 /* 首屏下面的卡片和首屏隔开 24，不贴着首屏的下沿 */
-.lp-hero:not(.lp-hero--rings) + .lp-body {
-  padding-top: var(--sp-2);
-}
 .lp-hero--rings + .lp-body {
   padding-top: var(--sp-6);
+}
+.lp-hero:not(.lp-hero--rings) + .lp-body {
+  padding-top: var(--sp-2);
 }
 
 /* 客户端标签：窄屏折行，不出现需要横向滑动才看得到的标签 */
@@ -716,4 +716,28 @@
   display: flex;
   gap: 8px;
   flex-shrink: 0;
+}
+.lp-use-rules {
+  display: grid;
+  gap: var(--sp-1);
+  margin: 0;
+  padding-left: 1.25em;
+  text-align: left;
+}
+.lp-use-rules li {
+  text-wrap: pretty;
+}
+.lp-use-terms {
+  width: fit-content;
+  max-width: 100%;
+  margin-inline: auto;
+  text-align: left;
+}
+.lp-use-terms summary {
+  cursor: pointer;
+  text-align: center;
+}
+/* Closed native details must not leave hidden text in layout measurements. */
+.lp-use-terms:not([open]) > :not(summary) {
+  display: none;
 }

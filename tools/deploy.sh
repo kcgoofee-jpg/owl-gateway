@@ -26,7 +26,7 @@ DOMAIN=${OWL_DOMAIN:-gate.davidzhao.top}
 # shellcheck source=/dev/null
 source "$HOME/.config/owl/owl.env"
 : "${OWL_IP:?OWL_IP missing in ~/.config/owl/owl.env}"
-KEY=(-i "$HOME/.ssh/naigate_ed25519" -o IdentitiesOnly=yes -o BatchMode=yes -o LogLevel=QUIET)
+KEY=(-i "$HOME/.ssh/naigate_ed25519" -o IdentitiesOnly=yes -o BatchMode=yes -o LogLevel=QUIET -o ServerAliveInterval=15 -o ServerAliveCountMax=6)
 CI_WAIT_TIMEOUT=${OWL_CI_WAIT_TIMEOUT_SECONDS:-3600}
 
 mask() { sed -E 's/[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}/x.x.x.x/g'; }

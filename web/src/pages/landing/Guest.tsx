@@ -2,6 +2,7 @@ import type { ComponentChildren } from "preact";
 import { Card, Tabs } from "../../ui";
 import { useStore } from "./ctx";
 import { DiscordMark } from "./icons";
+import { UsageRules } from "./UsageRules";
 
 /* ---------------- 加入服务器（登录了、还没有 Key） ---------------- */
 
@@ -181,7 +182,9 @@ function Rules() {
         Key 仅限本人使用，共用或转售会被回收；退出 <span class="lp-nb">Discord 服务器</span>后 Key
         也会被回收。
       </Rule>
-      <Rule k="合规">禁止违法或极端有害的内容，违规者永久封禁。</Rule>
+      <Rule k="禁止行为">
+        <UsageRules />
+      </Rule>
     </dl>
   );
 }

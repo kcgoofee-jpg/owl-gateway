@@ -42,3 +42,12 @@ Rollback across this schema change requires both the previous image and a databa
 成员和 Key 后台视图使用 `policy` 返回默认规则、例外和有效规则；`invited` 仅表示邀请来源，替代 `role` 与 `role_label`。成员公开视图的 `policy` 为有效规则。删除 `quota_auto`、`quota_limits`、`image_model_scope`、身份管理员名单和全站预算豁免；客户端不应再提供“手动／自动／继承／不限”选项。订阅视图保留实际数字额度和暂停状态，删除 `*Unlimited`、`quotaLimits` 和 `imageModelScope`。所有成员都受全站预算与暂停约束，排队请求在发送上游前再次核验当前规则。
 
 升级先检查旧规则并建立私有数据库备份，再在同一事务中写入新规则、删除旧字段和设置。历史请求与结算记录保持不变，执行结果不明的预算占用继续保留。失败时回滚，重复启动不会重复转换。新安装直接使用原生结构；存在旧结构的数据库必须经过显式网关迁移入口。
+
+
+## 上游完整信息
+
+`POST /admin/api/upstream/{token_id}/details` 只允许后台会话、同源请求和账号信息作用域的 CSRF；请求体必须为 `{}`，账号必须在当前令牌池中。它只向 NovelAI 发出 `GET /user/information`、`GET /user/subscription` 和 `GET /user/priority`，不读取 keystore、客户端设置或用户作品，不执行上游写操作。[官方接口文档](https://image.novelai.net/docs/index.html)
+
+每个账号 60 秒内只接受一次查询，重复请求返回 429 和 `Retry-After`。服务端只保留查询时间，不缓存完整响应；正文不写入数据库或日志。各接口分别返回状态、完整元数据与错误，保留未知字段，隐藏凭据和密钥材料，不回显上游错误正文。返回使用 `Cache-Control: no-store`。
+
+“上游”页每个账号的“完整信息”打开独立弹窗，展示账号、订阅和优先级分类。关闭、切换账号或退出后台后清除弹窗状态，不写入 localStorage、sessionStorage 或应用查询缓存。页面现有运营读数仍使用允许字段的投影缓存。

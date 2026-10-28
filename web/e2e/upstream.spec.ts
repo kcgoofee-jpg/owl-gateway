@@ -1,5 +1,7 @@
 import { expect, test } from "@playwright/test";
 import { readCreds } from "./devEnv";
+import { misalignedControls, noHorizontalScroll, seriousViolations, watchConsole } from "./helpers";
+import { orphans } from "./orphans";
 
 const now = 1_793_000_000;
 test.beforeEach(async ({ context, page, baseURL }) => {
@@ -151,3 +153,89 @@ test("上游空读数：缺失不显示成零", async ({ page }) => {
   await expect(card.locator(".up-highlights strong").nth(1)).toHaveText("—");
   await expect(card.getByText("未核对", { exact: true }).first()).toBeVisible();
 });
+
+for (const width of [1440, 390, 320]) {
+  test(`账号完整信息 ${width}px：按需查询、完整字段和关闭清除`, async ({ page }, info) => {
+    const calls: string[] = [];
+    await page.route("**/admin/api/upstream/*/details", async (route) => {
+      const id = new URL(route.request().url()).pathname.split("/").at(-2) ?? "";
+      calls.push(id);
+      expect(route.request().method()).toBe("POST");
+      expect(route.request().headers()["x-nai-admin-csrf"]).toBeTruthy();
+      await route.fulfill({
+        headers: { "cache-control": "no-store" },
+        json: {
+          token_id: id,
+          queried_at: now,
+          retry_after: 60,
+          information: {
+            status: 200,
+            error: null,
+            data: {
+              plainTextEmail: `private-canary-${id}@example.invalid`,
+              accountCreatedAt: 1700000000,
+              emailVerified: false,
+              trialImagesLeft: 0,
+              futureField: { amount: 0, enabled: false },
+            },
+          },
+          subscription: {
+            status: 200,
+            error: null,
+            data: { tier: 3, paymentProcessorData: { receipt: "private-payment-canary" }, unknownCredits: 0 },
+          },
+          priority: {
+            status: 200,
+            error: null,
+            data: { taskPriority: 0, maxPriorityActions: 1000, nextRefillAt: 0 },
+          },
+        },
+      });
+    });
+    const errors = watchConsole(page, "/admin/api/events");
+    await page.setViewportSize({ width, height: 900 });
+    await page.goto("/admin/upstream");
+    const buttons = page.getByRole("button", { name: "完整信息", exact: true });
+    await expect(buttons).toHaveCount(2);
+    expect(calls).toEqual([]);
+    await buttons.first().click();
+    const dialog = page.getByRole("dialog", { name: "账号 1 · 完整信息" });
+    await expect(
+      dialog.getByText("private-canary-synthetic-1@example.invalid", { exact: true }),
+    ).toBeVisible();
+    await expect(dialog.getByText("futureField", { exact: true })).toBeVisible();
+    await expect(dialog.getByText(/2023/)).toBeVisible();
+    await expect(dialog.getByText("amount", { exact: true })).toBeVisible();
+    await expect(dialog.getByRole("button", { name: /秒后刷新/ })).toBeDisabled();
+    await dialog.getByRole("button", { name: "订阅", exact: true }).click();
+    await expect(dialog.getByText("private-payment-canary", { exact: true })).toBeVisible();
+    await dialog.getByRole("button", { name: "优先级", exact: true }).click();
+    await expect(dialog.getByText("任务优先级", { exact: true })).toBeVisible();
+    expect(await noHorizontalScroll(page, { loose: true })).toBe(true);
+    expect(await misalignedControls(page)).toEqual([]);
+    expect(await orphans(page)).toEqual([]);
+    expect(await seriousViolations(page)).toEqual([]);
+    await page.screenshot({ path: info.outputPath(`account-details-${width}.png`), fullPage: true });
+    await dialog.getByRole("button", { name: "关闭", exact: true }).last().click();
+    await expect(page.getByText(/private-canary|private-payment-canary/)).toHaveCount(0);
+    await buttons.nth(1).click();
+    const second = page.getByRole("dialog", { name: "账号 2 · 完整信息" });
+    await expect(
+      second.getByText("private-canary-synthetic-2@example.invalid", { exact: true }),
+    ).toBeVisible();
+    await expect(page.getByText("private-canary-synthetic-1@example.invalid", { exact: true })).toHaveCount(
+      0,
+    );
+    await second.getByRole("button", { name: "关闭", exact: true }).last().click();
+    expect(calls).toEqual(["synthetic-1", "synthetic-2"]);
+    expect(await page.evaluate(() => JSON.stringify({ ...localStorage, ...sessionStorage }))).not.toMatch(
+      /private-canary|private-payment-canary/,
+    );
+    if (width === 1440) {
+      await page.getByRole("button", { name: "退出", exact: true }).click();
+      await expect(page.getByLabel("后台密码")).toBeVisible();
+      await expect(page.getByText(/private-canary|private-payment-canary/)).toHaveCount(0);
+    }
+    expect(errors).toEqual([]);
+  });
+}

@@ -46,7 +46,11 @@ export default defineConfig({
     proxy: {
       // 状态页由网关渲染，它的样式 / 脚本（/_owl/status-page.*）也编在网关里
       "^/(public|admin/api|self-register|login|logout|member|v1|status|livez|readyz|healthz|announcement|_owl/status-page)":
-        process.env.VITE_GATE ?? "http://127.0.0.1:18000",
+        {
+          target: process.env.VITE_GATE ?? "http://127.0.0.1:18000",
+          // Preserve the browser authority so strict same-origin checks also run in development.
+          changeOrigin: false,
+        },
     },
   },
   test: {

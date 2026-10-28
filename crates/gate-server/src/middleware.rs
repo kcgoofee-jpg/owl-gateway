@@ -2,7 +2,7 @@
 //! 1. `/v1/ai/*`、`/v1/user/*` 去掉多余的 `/v1`（成员常把 OpenAI 的 Base URL 填进 NovelAI 客户端）——必须在路由之前；
 //! 2. 请求上下文：生成请求编号、写 `X-Request-Id`、计时、客户端名；
 //! 3. 成员接口状态码计数（没发响应就断开记 499）；
-//! 4. `/admin/api/*` 一律 `Cache-Control: no-store`（后台 JSON 含完整成员 Key 与提示词）。
+//! 4. `/admin/api/*` 一律 `Cache-Control: no-store`（后台 JSON 含敏感凭据和账号信息）。
 
 use crate::reqctx::ReqCtx;
 use axum::body::Body;

@@ -1,6 +1,6 @@
 /**
  * 上游：一次取全（GET /admin/api/upstream），然后组装。
- * 页面只有两类动作会碰上游：手动查官方信息（refresh-info，每 5 分钟一次）和 Anlas 核对。
+ * 按需查询官方信息、账号完整详情与 Anlas 核对；完整详情只存在打开的弹窗中。
  */
 
 import { Plus } from "lucide-preact";
@@ -12,6 +12,7 @@ import { actOrError, ConfirmDialog, LoadError, Loading, SectionHead } from "./_k
 import { Sect } from "./system/forms";
 import { AccountCard } from "./upstream/accounts";
 import type { UpstreamAccount, UpstreamPage } from "./upstream/core";
+import { AccountDetails } from "./upstream/details";
 import ReconcileCard from "./upstream/reconcile";
 import { TokenDialog } from "./upstream/tokens";
 import "./upstream.css";
@@ -57,10 +58,14 @@ function InfoRefresh({ data }: { data: UpstreamPage }) {
 export default function Upstream() {
   const { data, error, loading } = useAdmin<UpstreamPage>("/admin/api/upstream");
   const [dialog, setDialog] = useState<{ mode: "add" | "replace"; target?: UpstreamAccount } | null>(null);
+  const [details, setDetails] = useState<UpstreamAccount | null>(null);
   const [del, setDel] = useState<UpstreamAccount | null>(null);
   const [toggle, setToggle] = useState<UpstreamAccount | null>(null);
 
   const pool = data?.accounts ?? [];
+  useEffect(() => {
+    if (details && !pool.some((account) => account.token_id === details.token_id)) setDetails(null);
+  }, [data, details]);
   const usable = pool.filter((p) => p.admin_enabled && !p.disabled);
   const lastUsable =
     toggle?.admin_enabled === true && usable.filter((p) => p.token_id !== toggle.token_id).length === 0;
@@ -89,6 +94,7 @@ export default function Upstream() {
             key={a.token_id}
             a={a}
             only={pool.length <= 1}
+            onDetails={setDetails}
             onReplace={(t) => setDialog({ mode: "replace", target: t })}
             onDelete={setDel}
             onToggle={setToggle}
@@ -105,6 +111,14 @@ export default function Upstream() {
         />
       )}
 
+      {details && data && (
+        <AccountDetails
+          key={details.token_id}
+          account={details}
+          csrf={data.csrf_info}
+          onClose={() => setDetails(null)}
+        />
+      )}
       {dialog && <TokenDialog mode={dialog.mode} target={dialog.target} onClose={() => setDialog(null)} />}
 
       {del && (

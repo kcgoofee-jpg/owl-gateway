@@ -57,6 +57,8 @@ pub struct Shared {
     pub reconcile: tokio::sync::Mutex<()>,
     /// 手动账号信息查询：全局冷却与串行化。
     pub account_information: tokio::sync::Mutex<()>,
+    /// Per-account query timestamps only. Sensitive upstream responses are never cached here.
+    pub account_details_attempts: tokio::sync::Mutex<std::collections::BTreeMap<String, f64>>,
 }
 
 // ------------------------------------------------------------------ 手动额度

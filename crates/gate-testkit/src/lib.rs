@@ -566,6 +566,21 @@ async fn default_reply(
             })
             .await
         }
+        ("GET", "/user/information") => json_response(
+            200,
+            &json!({
+                "accountCreatedAt":1_700_000_000,"allowMarketingEmails":false,
+                "banMessage":null,"banStatus":"not_banned","emailVerificationLetterSent":false,
+                "emailVerified":true,"plainTextEmail":"dev@example.invalid","trialActivated":false,
+                "trialActionsLeft":0,"trialImagesLeft":0
+            }),
+        ),
+        ("GET", "/user/priority") => json_response(
+            200,
+            &json!({
+                "maxPriorityActions":1000,"nextRefillAt":0,"taskPriority":0
+            }),
+        ),
         ("GET", "/user/subscription") => {
             let pct = *state.v5_percent.lock().expect("v5");
             json_response(
