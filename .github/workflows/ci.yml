@@ -124,7 +124,7 @@ jobs:
       - run: cargo build --locked -p xtask
       - name: Start the full local stack (fake upstream, synthetic data) and the web dev server
         run: |
-          cargo xtask dev > /tmp/gate.log 2>&1 &
+          cargo xtask dev --data "$RUNNER_TEMP/owl-e2e-$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT" > /tmp/gate.log 2>&1 &
           (cd web && pnpm exec vite --port 5174 --strictPort > /tmp/vite.log 2>&1 &)
           for _ in $(seq 1 90); do
             curl -fsS -m 2 http://127.0.0.1:18000/healthz >/dev/null 2>&1 && curl -fsS -m 2 -o /dev/null http://localhost:5174/ && exit 0
@@ -135,6 +135,7 @@ jobs:
         working-directory: web
         env:
           E2E_BASE: http://localhost:5174
+          E2E_COOKIES: ${{ runner.temp }}/owl-e2e-${{ github.run_id }}-${{ github.run_attempt }}/cookies.json
         timeout-minutes: 20
 
   deploy-safety:
