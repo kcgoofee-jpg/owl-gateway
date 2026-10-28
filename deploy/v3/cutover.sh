@@ -148,8 +148,29 @@ cmd_restart() {
   restart_container
 }
 
+# A native member-policy database cannot be opened by the pre-migration gateway.
+# Check before changing tags or stopping the healthy service. Database restore is explicit.
+check_rollback_schema() {
+  local database="$LEGACY_DIR/data/nai_gate.db" schema compatible
+  [[ -f $database ]] || return 0
+  schema=$(python3 - "$database" <<'PYTHON'
+import sqlite3, sys
+from urllib.parse import quote
+conn = sqlite3.connect("file:" + quote(sys.argv[1]) + "?mode=ro", uri=True, timeout=10)
+row = conn.execute("SELECT value FROM site_settings WHERE key='member_policy_v1_migrated'").fetchone()
+print("native" if row is not None else "legacy")
+PYTHON
+  ) || die "数据库版本无法核对，未执行回滚"
+  if [[ $schema == native ]]; then
+    compatible=$(docker image inspect -f '{{ index .Config.Labels "org.owl-gateway.member-policy-schema" }}' "$IMAGE:previous") \
+      || die "回滚镜像版本无法核对，未执行回滚"
+    [[ $compatible == 1 ]] || die "上一版不支持成员规则数据库；必须先停机并恢复迁移前数据库备份，禁止只回滚镜像"
+  fi
+}
+
 cmd_previous() {
   docker image inspect "$IMAGE:previous" >/dev/null 2>&1 || die "没有 owl-gate:previous"
+  check_rollback_schema
   docker tag "$IMAGE:current" "$IMAGE:failed"
   docker tag "$IMAGE:previous" "$IMAGE:current"
   restart_container || die "上一版也起不来：看上面的日志（docker logs $GATE）"

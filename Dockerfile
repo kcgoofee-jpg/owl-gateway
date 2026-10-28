@@ -32,6 +32,7 @@ RUN cargo build --release --locked --bin nai-gate --bin nai-bots --bin nai-ops
 
 # ---------- 运行镜像 ----------
 FROM gcr.io/distroless/cc-debian12:nonroot
+LABEL org.owl-gateway.member-policy-schema="1"
 # UID 10001：与 2.x 的数据目录属主一致（chown -R 10001:10001 data 只需做过一次）
 USER 10001:10001
 WORKDIR /app

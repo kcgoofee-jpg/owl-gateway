@@ -38,6 +38,10 @@ case "$1" in
         ref=${@: -1}
         value=$(get_image "$ref")
         [[ -n $value ]] || exit 1
+        if [[ " $* " == *org.owl-gateway.member-policy-schema* ]]; then
+          printf '%s\n' "${MOCK_POLICY_SCHEMA:-}"
+          exit 0
+        fi
         printf '%s\n' "$value"
         ;;
       rm)
@@ -90,5 +94,27 @@ bash "$repo/deploy/v3/cutover.sh" load "$tmp/image.tar.gz" >/dev/null
 bash "$repo/deploy/v3/cutover.sh" restart >"$tmp/retry.log" 2>&1
 [[ $(awk -F '\t' '$1=="owl-gate:current" {print $2}' "$DOCKER_STATE") == sha256:build-sha ]]
 [[ $(awk -F '\t' '$1=="owl-gate:previous" {print $2}' "$DOCKER_STATE") == sha256:old ]]
+
+# Native schema blocks an older incompatible image before any tags or containers change.
+mkdir -p "$LEGACY_DIR/data"
+python3 - "$LEGACY_DIR/data/nai_gate.db" <<'PYTHON'
+import sqlite3,sys
+conn=sqlite3.connect(sys.argv[1])
+conn.execute('CREATE TABLE site_settings(key TEXT PRIMARY KEY,value TEXT)')
+conn.execute("INSERT INTO site_settings VALUES('member_policy_v1_migrated','1')")
+conn.commit()
+PYTHON
+: >"$DOCKER_CALLS"
+if bash "$repo/deploy/v3/cutover.sh" previous >"$tmp/incompatible.log" 2>&1; then
+  echo 'incompatible rollback was allowed' >&2; exit 1
+fi
+! grep -Eq '^(tag|compose) ' "$DOCKER_CALLS"
+grep -Fq '禁止只回滚镜像' "$tmp/incompatible.log"
+
+# Later releases with the same native schema can use the normal previous-image path.
+export MOCK_POLICY_SCHEMA=1
+bash "$repo/deploy/v3/cutover.sh" previous >"$tmp/compatible.log" 2>&1
+grep -Fq 'tag owl-gate:previous owl-gate:current' "$DOCKER_CALLS"
+grep -Fq 'compose ' "$DOCKER_CALLS"
 
 echo 'cutover safety tests passed'
