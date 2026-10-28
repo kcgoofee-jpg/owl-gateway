@@ -265,6 +265,57 @@ async fn linkage_signals_are_written() {
     );
 }
 
+/// 匿名请求（usage_log.key_id 为 NULL，比如没绑 Key 的调用）不能让整轮扫描失败，
+/// 也不能进任何信号；有归属的行照常评分。（快照曾直接按 i64 读 key_id，NULL 会弄挂整轮 SQL。）
+#[tokio::test]
+async fn anonymous_usage_rows_do_not_break_the_scan() {
+    let e = setup(&[]).await;
+    let st = &e.state;
+    let (da, db_) = ("900000000000000951", "900000000000000952");
+    let a = member_key(st, 1, &[("discord_id", json!(da))]).await;
+    let b = member_key(st, 2, &[("discord_id", json!(db_))]).await;
+    let now = st.now();
+    let mut sql = Vec::new();
+    // 匿名行：第三方 origin 也不该触发 foreign_origin（按 key_id 过滤）
+    for i in 0..3 {
+        sql.push(format!(
+            "INSERT INTO usage_log(ts, key_name, kind, status, images, src, origin) \
+             VALUES ({}, '', 'image', 'ok', 1, '203.0.113.10', 'https://draw.example')",
+            now - f64::from(i) * 60.0
+        ));
+    }
+    // 有归属的行：同 IP 换号，照常出信号
+    sql.push(format!(
+        "INSERT INTO usage_log(ts, key_id, key_name, kind, model, status, images, src, reason) \
+         VALUES ({}, {a}, 'x', 'image', 'm', 'ok', 1, '198.51.100.5', '')",
+        now - 3000.0
+    ));
+    sql.push(format!(
+        "INSERT INTO usage_log(ts, key_id, key_name, kind, model, status, images, src, reason) \
+         VALUES ({}, {b}, 'x', 'image', 'm', 'ok', 1, '198.51.100.5', '')",
+        now - 2880.0
+    ));
+    st.db.run_script(sql).await.unwrap();
+
+    // 整轮扫描成功（不因匿名行报错），有归属的信号照常写出
+    run_job(st, "abuse_scan").await.unwrap();
+    let rows = query(
+        &st.db,
+        "SELECT kind, subject, key_ids FROM abuse_signals ORDER BY kind",
+    )
+    .await;
+    assert!(
+        rows.iter()
+            .any(|r| r["kind"] == "ip_switch" && r["subject"] == format!("{da},{db_}")),
+        "{rows:?}"
+    );
+    // 匿名行不进任何信号：foreign_origin 只会按 Key 记，匿名 origin 不产生行
+    assert!(
+        !rows.iter().any(|r| r["kind"] == "foreign_origin"),
+        "{rows:?}"
+    );
+}
+
 /// 一把 Key 的请求带着第三方网站的 Origin（Key 被填进了别的网站，会流经对方服务器）→
 /// 「foreign_origin」信号（分数 30，只提醒不封）；已知域（本站 / novelai.net / 社区公益站，精确匹配）的不出信号。
 #[tokio::test]

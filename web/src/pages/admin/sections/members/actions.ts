@@ -64,4 +64,8 @@ export const resetAllKeys = () =>
 
 export const addBan = (discordId: string, reason: string) =>
   call("POST", `${A}/bans`, { discord_id: discordId, reason });
+
+/** 人工复核一条风险线索。确认只给涉及的 Key 打「风险线索」标签，不封禁。 */
+export const reviewSignal = (id: number, action: "dismiss" | "confirm" | "reopen") =>
+  call<{ id: number; status: string; tagged: number }>("POST", `${A}/abuse/${id}`, { action });
 export const removeBan = (discordId: string) => call("DELETE", `${A}/bans/${encodeURIComponent(discordId)}`);

@@ -561,7 +561,11 @@ impl<H: Hooks> NaiClient<H> {
                         && t.after_send();
                     return Attempt::Done(Err(UpstreamError::uncertain(
                         502,
-                        "连接 NovelAI 时中断或超时，未扣费。请稍后手动重试。给客户端作者：请勿自动重试",
+                        if uncertain {
+                            "与 NovelAI 的连接中断或超时，上游执行结果不明；本次额度暂时保留，请勿自动重试。"
+                        } else {
+                            "未能连接 NovelAI，请求未执行、未扣费。请稍后手动重试，请勿自动重试。"
+                        },
                         uncertain,
                     )));
                 }

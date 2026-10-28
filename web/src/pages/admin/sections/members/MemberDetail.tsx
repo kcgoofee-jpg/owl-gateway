@@ -5,6 +5,7 @@ import { dayOf, fullTime, rel, usedOf } from "../../../../lib/format";
 import { Badge, Button, copyText, Menu, toast } from "../../../../ui";
 import { exceptionCount, FEATURE_FIELDS, POLICY_SPECS } from "../member-policy";
 import { type Issue, type IssueAction, memberIssues, memberLabel, memberVerdict, userTags } from "./logic";
+import { RiskSignals } from "./RiskSignals";
 import type { MemberRow } from "./types";
 
 export type DetailActions = {
@@ -89,6 +90,15 @@ export function MemberDetail(props: { m: MemberRow; now: number; act: DetailActi
       </div>
 
       {issues.length > 0 && <IssueList m={m} issues={issues} act={act} />}
+
+      {dcId ? (
+        <RiskSignals dcId={dcId} now={now} />
+      ) : (
+        <section class="mb-sec" aria-label="风险线索">
+          <h4 class="mb-h4">风险线索</h4>
+          <p class="small muted">还没绑定 Discord 账号，不能在这里按成员查线索。</p>
+        </section>
+      )}
 
       <div class="mb-cols">
         <section class="mb-sec" aria-label="有效规则">

@@ -696,6 +696,8 @@ async fn restricted_v5_denial_does_not_dispatch_or_consume_quota() {
         e.state.db.get_counter(1, &e.state.day()).await.unwrap().v5,
         0
     );
+    // 拒绝日志是后台任务写的，先等它落库（common::settle）
+    common::settle().await;
     let logs = e
         .state
         .db

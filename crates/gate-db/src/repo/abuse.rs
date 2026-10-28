@@ -18,12 +18,7 @@ pub struct LoginPeer {
     pub device_data: String,
 }
 
-/// 封禁名单里的一个账号：显示名（显示名 → 用户名 → 空）和理由。
-#[derive(Debug, Clone, Default, PartialEq)]
-pub struct BanInfo {
-    pub name: String,
-    pub reason: String,
-}
+pub use gate_core::abuse::banned_link::BanInfo;
 
 /// 待审卡片上每个账号的「登录时间」从哪儿取。
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -42,6 +37,56 @@ pub enum LoginScope {
 pub const ABUSE_STATUSES: [&str; 3] = ["open", "dismissed", "confirmed"];
 /// 已忽略的信号要比原分数高出这么多才重新进待审。
 pub const ABUSE_REOPEN_DELTA: f64 = 10.0;
+
+/// Owner review is metadata, never an automatic ban.
+pub const REVIEW_TAG: &str = "风险线索";
+#[derive(Clone, Debug)]
+pub struct AbuseFilter {
+    pub status: Option<String>,
+    pub member: Option<String>,
+    pub limit: i64,
+    pub offset: i64,
+}
+impl Default for AbuseFilter {
+    fn default() -> Self {
+        Self {
+            status: None,
+            member: None,
+            limit: 200,
+            offset: 0,
+        }
+    }
+}
+#[derive(Default, serde::Serialize)]
+pub struct AbuseCounts {
+    pub open: i64,
+    pub confirmed: i64,
+    pub dismissed: i64,
+    pub expired: i64,
+    pub total: i64,
+}
+#[derive(Clone, Copy, Debug, serde::Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum ReviewAction {
+    Dismiss,
+    Confirm,
+    Reopen,
+}
+impl ReviewAction {
+    pub fn status(self) -> &'static str {
+        match self {
+            Self::Dismiss => "dismissed",
+            Self::Confirm => "confirmed",
+            Self::Reopen => "open",
+        }
+    }
+}
+pub struct ReviewedSignal {
+    pub kind: String,
+    pub key_ids: Vec<i64>,
+    pub tagged: usize,
+}
+const MEMBER_MATCH: &str = "(?2 IS NULL OR instr(','||s.subject||',',','||?2||',')>0 OR EXISTS(SELECT 1 FROM api_keys k WHERE k.discord_id=?2 AND (s.subject='key:'||k.id OR instr(','||replace(s.key_ids,' ','')||',',','||k.id||',')>0)))";
 
 impl Db {
     /// 新增或刷新一条信号；返回行 id。
@@ -78,30 +123,50 @@ impl Db {
         .await
     }
 
-    /// 按状态列信号（`None` = 全部），分高的在前，同分按最近命中。
-    pub async fn list_abuse_signals(&self, status: Option<&str>, limit: i64) -> Result<Vec<Value>> {
-        let status = status.map(str::to_string);
-        self.read(move |c| {
-            let mut stmt = c.prepare(
-                "SELECT id, kind, subject, key_ids, score, detail, status, first_ts, last_ts \
-                 FROM abuse_signals WHERE (?1 IS NULL OR status=?1) \
-                 ORDER BY score DESC, last_ts DESC, id DESC LIMIT ?2",
-            )?;
-            stmt.query_map(params![status, limit], value::row_json)?
-                .collect()
-        })
-        .await
+    /// Filter before pagination, including stable subjects whose credential has rotated.
+    pub async fn list_abuse_signals(&self, filter: &AbuseFilter) -> Result<Vec<Value>> {
+        let f = filter.clone();
+        self.read(move|c|{
+            let sql=format!("SELECT s.id,s.kind,s.subject,s.key_ids,s.score,s.detail,s.status,s.first_ts,s.last_ts FROM abuse_signals s WHERE (?1 IS NULL OR s.status=?1) AND {MEMBER_MATCH} ORDER BY s.score DESC,s.last_ts DESC,s.id DESC LIMIT ?3 OFFSET ?4");
+            c.prepare(&sql)?.query_map(params![f.status,f.member,f.limit,f.offset],value::row_json)?.collect()
+        }).await
     }
-
-    pub async fn count_open_abuse_signals(&self) -> Result<i64> {
-        self.read(|c| {
-            c.query_row(
-                "SELECT COUNT(*) FROM abuse_signals WHERE status='open'",
-                [],
-                |r| r.get(0),
-            )
-        })
-        .await
+    pub async fn abuse_signal_counts(&self, member: Option<&str>) -> Result<AbuseCounts> {
+        let member = member.map(str::to_owned);
+        self.read(move|c|{
+            let mut counts=AbuseCounts::default();
+            let sql=format!("SELECT s.status,count(*) FROM abuse_signals s WHERE {MEMBER_MATCH} GROUP BY s.status");
+            let mut stmt=c.prepare(&sql)?;
+            for row in stmt.query_map(params![Option::<String>::None,member],|r|Ok((r.get::<_,String>(0)?,r.get::<_,i64>(1)?)))? {
+                let (status,n)=row?;counts.total+=n;
+                match status.as_str(){"open"=>counts.open=n,"confirmed"=>counts.confirmed=n,"dismissed"=>counts.dismissed=n,"expired"=>counts.expired=n,_=>{}}
+            }
+            Ok(counts)
+        }).await
+    }
+    /// Status and tags commit together; missing/deleted credentials never receive a tag.
+    pub async fn review_abuse_signal(
+        &self,
+        id: i64,
+        action: ReviewAction,
+        actor: &str,
+        now: f64,
+    ) -> Result<Option<ReviewedSignal>> {
+        let actor = actor.to_owned();
+        self.write(move|tx|{
+            let row=tx.query_row("SELECT kind,key_ids FROM abuse_signals WHERE id=?",[id],|r|Ok((r.get::<_,String>(0)?,r.get::<_,String>(1)?))).optional()?;
+            let Some((kind,raw))=row else{return Ok(None)};
+            let mut key_ids=Vec::new();
+            for id in raw.split(',').filter_map(|part|part.trim().parse::<i64>().ok()).filter(|id|*id>0){if !key_ids.contains(&id){key_ids.push(id)}}
+            tx.execute("UPDATE abuse_signals SET status=? WHERE id=?",params![action.status(),id])?;
+            let mut tagged=0;
+            if action==ReviewAction::Confirm {
+                for key in &key_ids {
+                    tagged+=tx.execute("INSERT INTO key_tags(key_id,tag,note,by,ts) SELECT id,?2,?3,?4,?5 FROM api_keys WHERE id=?1 ON CONFLICT(key_id,tag) DO UPDATE SET note=excluded.note,by=excluded.by,ts=excluded.ts",params![key,REVIEW_TAG,kind,actor,now])?;
+                }
+            }
+            Ok(Some(ReviewedSignal{kind,key_ids,tagged}))
+        }).await
     }
 
     pub async fn get_abuse_signal(&self, id: i64) -> Result<Option<Value>> {

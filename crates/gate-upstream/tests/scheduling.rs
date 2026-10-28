@@ -732,3 +732,61 @@ async fn queue_estimates_follow_the_fair_order() {
     h.abort();
     l.abort();
 }
+
+#[tokio::test]
+async fn connection_failure_and_interrupted_response_describe_different_billing_outcomes() {
+    use tokio::io::{AsyncReadExt, AsyncWriteExt};
+    let closed = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let closed_url = format!("http://{}", closed.local_addr().unwrap());
+    drop(closed);
+    let hooks = TestHooks::default();
+    let c = NaiClient::new(
+        config(&closed_url, &hooks, 0.0),
+        hooks,
+        vec![(T1.into(), 0, false)],
+    )
+    .unwrap();
+    let body = image_body();
+    let rejected = c
+        .request(
+            image_opts(&closed_url, &body),
+            &Callbacks::default(),
+            None,
+            &NoObserver,
+        )
+        .await
+        .unwrap_err();
+    assert!(!rejected.billing_uncertain);
+    assert!(rejected.message.contains("未执行、未扣费"));
+
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let url = format!("http://{}", listener.local_addr().unwrap());
+    let response = tokio::spawn(async move {
+        let (mut socket, _) = listener.accept().await.unwrap();
+        let mut request = vec![0; 8192];
+        let _ = socket.read(&mut request).await.unwrap();
+        socket.write_all(b"HTTP/1.1 200 OK\r\nContent-Length: 100\r\nContent-Type: application/zip\r\nConnection: close\r\n\r\nshort").await.unwrap();
+        socket.shutdown().await.unwrap();
+    });
+    let hooks = TestHooks::default();
+    let c = NaiClient::new(
+        config(&url, &hooks, 0.0),
+        hooks,
+        vec![(T1.into(), 0, false)],
+    )
+    .unwrap();
+    let unknown = c
+        .request(
+            image_opts(&url, &body),
+            &Callbacks::default(),
+            None,
+            &NoObserver,
+        )
+        .await
+        .unwrap_err();
+    response.await.unwrap();
+    assert!(unknown.billing_uncertain);
+    assert!(unknown.message.contains("执行结果不明"));
+    assert!(unknown.message.contains("额度暂时保留"));
+    assert!(!unknown.message.contains("未扣费"));
+}

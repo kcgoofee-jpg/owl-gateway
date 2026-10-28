@@ -98,7 +98,7 @@ export function memberIssues(m: Member, now: number): Issue[] {
       actions: loud ? [{ kind: "ack" }] : [],
     });
   }
-  for (const t of userTags(m).filter((x) => /疑似|待查|观察/.test(x.tag))) {
+  for (const t of userTags(m).filter((x) => /疑似|待查|观察|风险/.test(x.tag))) {
     out.push({
       id: `tag:${t.tag}`,
       level: "warn",

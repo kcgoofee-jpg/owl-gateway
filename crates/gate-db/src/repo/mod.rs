@@ -9,6 +9,7 @@
 //!
 
 pub mod abuse;
+pub mod abuse_scan;
 pub mod account_stats;
 pub mod admin_actions;
 pub mod admin_members;

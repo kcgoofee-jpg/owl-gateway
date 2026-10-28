@@ -11,9 +11,9 @@
 //! | `same_battery` | 两个账号 30 分钟内网页登录时电量和充电状态一模一样（满电 100% 太常见，不算） | 50 起，最高 80 |
 //! | `foreign_origin` | 一把 Key 近 14 天的请求带着第三方网站的 Origin（Key 被填进了别的网站，会流经对方服务器）；已知域（本站 + `https://novelai.net` + 社区公益站，精确匹配）之外都算 | 30（只提醒，不封） |
 
+use super::ScanSnapshot;
 use super::{DAY, Signal, ev, subject};
-use gate_core::clock::Clock;
-use rusqlite::Connection;
+use crate::clock::Clock;
 use serde_json::json;
 use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
 
@@ -25,7 +25,6 @@ const SHARED_IP_KEYS: usize = 5;
 const CONCURRENT_SECS: f64 = 60.0;
 const CONCURRENT_MIN: usize = 3;
 /// 参考图：看最近几天；几把 Key 以上用过的图不算（公开素材）；dHash 汉明距离多少以内算「几乎一样」
-const REF_DAYS: f64 = 14.0;
 const REF_MAX_KEYS: usize = 5;
 const DHASH_MAX_DIST: u32 = 6;
 /// 服务器重合：Jaccard 门槛；冷门服务器 = 本站记录里不到这么多账号在；至少几个共同冷门服务器
@@ -34,8 +33,6 @@ const RARE_GUILD_MEMBERS: usize = 5;
 const RARE_GUILD_MIN: usize = 2;
 /// 电量：多少秒内算「同时」
 const BATTERY_SECS: f64 = 1800.0;
-/// 第三方站点来源：看最近几天
-const FOREIGN_ORIGIN_DAYS: f64 = 14.0;
 /// 已知的非本站 origin（精确匹配，不猜子域）：这些来源的请求不算第三方，不出信号。
 /// 本站的 origin（`SITE_URL`）由调用方传入，不在这个名单里。
 const KNOWN_ORIGINS: [&str; 2] = [
@@ -313,13 +310,13 @@ fn samples(h: &Hits) -> String {
 /// 跑一遍七项，返回信号（由调用方统一写库）。`official` 是本站的 origin（`SITE_URL`，精确匹配）；
 /// 它之外的已知域见 [`KNOWN_ORIGINS`]，都不算第三方。其余来源的请求说明 Key 被填进了第三方网站。
 pub(super) fn scan(
-    c: &Connection,
+    snapshot: &ScanSnapshot,
     now: f64,
     clock: &Clock,
     keys_of: &HashMap<String, Vec<i64>>,
     did_of: &HashMap<i64, String>,
     official: &[String],
-) -> rusqlite::Result<Vec<Signal>> {
+) -> Vec<Signal> {
     let mut out = Vec::new();
     let kids = |ids: &BTreeSet<String>| -> String {
         ids.iter()
@@ -346,19 +343,12 @@ pub(super) fn scan(
     };
 
     // ---------- 近 24 小时的请求（同 IP 换号 / 同时异地） ----------
-    let mut recent: Vec<(f64, String, i64)> = Vec::new();
-    {
-        let mut st = c.prepare(
-            "SELECT ts, COALESCE(src,''), key_id FROM usage_log WHERE ts>=? AND key_id IS NOT NULL ORDER BY ts",
-        )?;
-        let rows = st.query_map([now - DAY], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)))?;
-        for row in rows {
-            let (ts, ip, k): (f64, String, i64) = row?;
-            if did_of.contains_key(&k) {
-                recent.push((ts, ip, k));
-            }
-        }
-    }
+    let recent: Vec<(f64, String, i64)> = snapshot
+        .requests
+        .iter()
+        .filter(|(key, event)| event.ts >= now - DAY && did_of.contains_key(key))
+        .map(|(key, event)| (event.ts, event.ip.clone(), *key))
+        .collect();
     let by_account: Vec<(f64, String, String)> = recent
         .iter()
         .map(|(t, ip, k)| (*t, ip.clone(), did_of[k].clone()))
@@ -406,15 +396,7 @@ pub(super) fn scan(
 
     // ---------- 同一张参考图 ----------
     {
-        let mut rows: Vec<(String, Option<String>, i64, f64)> = Vec::new();
-        let mut st =
-            c.prepare("SELECT sha256, dhash, key_id, ts FROM ref_images WHERE ts>=? ORDER BY ts")?;
-        let it = st.query_map([now - REF_DAYS * DAY], |r| {
-            Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?))
-        })?;
-        for row in it {
-            rows.push(row?);
-        }
+        let rows = snapshot.references.clone();
         // 每张图（sha256）用过它的 Key；≥5 把 Key 用过的是公开素材
         let mut keys_by_sha: HashMap<&str, HashSet<i64>> = HashMap::new();
         for (sha, _, k, _) in &rows {
@@ -509,16 +491,7 @@ pub(super) fn scan(
     // ---------- 同一个外部账号 ----------
     {
         let mut by_ext: BTreeMap<(String, String), BTreeSet<String>> = BTreeMap::new();
-        let mut st = c.prepare("SELECT type, ext_id, discord_id FROM discord_user_connections")?;
-        let rows = st.query_map([], |r| {
-            Ok((
-                r.get::<_, String>(0)?,
-                r.get::<_, String>(1)?,
-                r.get::<_, String>(2)?,
-            ))
-        })?;
-        for row in rows {
-            let (t, x, d) = row?;
+        for (t, x, d) in snapshot.connections.iter().cloned() {
             if keys_of.contains_key(&d) {
                 by_ext.entry((t, x)).or_default().insert(d);
             }
@@ -541,16 +514,7 @@ pub(super) fn scan(
         let mut guilds_of: HashMap<String, BTreeSet<String>> = HashMap::new();
         let mut members: HashMap<String, usize> = HashMap::new();
         let mut names: HashMap<String, String> = HashMap::new();
-        let mut st = c.prepare("SELECT discord_id, guild_id, name FROM discord_user_guilds")?;
-        let rows = st.query_map([], |r| {
-            Ok((
-                r.get::<_, String>(0)?,
-                r.get::<_, String>(1)?,
-                r.get::<_, String>(2)?,
-            ))
-        })?;
-        for row in rows {
-            let (d, g, n) = row?;
+        for (d, g, n) in snapshot.guilds.iter().cloned() {
             *members.entry(g.clone()).or_default() += 1;
             names.insert(g.clone(), n);
             if keys_of.contains_key(&d) {
@@ -590,19 +554,12 @@ pub(super) fn scan(
 
     // ---------- 电量相同 ----------
     {
-        let mut rows: Vec<(f64, String, f64, bool)> = Vec::new();
-        let mut st = c.prepare(
-            "SELECT ts, discord_id, level, charging FROM device_battery WHERE ts>=? ORDER BY ts",
-        )?;
-        let it = st.query_map([now - REF_DAYS * DAY], |r| {
-            Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get::<_, i64>(3)? != 0))
-        })?;
-        for row in it {
-            let r: (f64, String, f64, bool) = row?;
-            if keys_of.contains_key(&r.1) {
-                rows.push(r);
-            }
-        }
+        let rows = snapshot
+            .batteries
+            .iter()
+            .filter(|row| keys_of.contains_key(&row.1))
+            .cloned()
+            .collect::<Vec<_>>();
         for ((a, b), h) in battery_matches(&rows) {
             push(
                 &mut out,
@@ -623,23 +580,11 @@ pub(super) fn scan(
     }
     // ---------- 第三方站点来源（Key 被填进了别的网站） ----------
     {
-        let mut st = c.prepare(
-            "SELECT key_id, origin, COUNT(*), MIN(ts), MAX(ts) FROM usage_log \
-             WHERE ts>=? AND COALESCE(origin,'')!='' GROUP BY key_id, origin",
-        )?;
-        let rows = st.query_map([now - FOREIGN_ORIGIN_DAYS * DAY], |r| {
-            Ok((
-                r.get::<_, i64>(0)?,
-                r.get::<_, String>(1)?,
-                r.get::<_, i64>(2)?,
-                r.get::<_, f64>(3)?,
-                r.get::<_, f64>(4)?,
-            ))
-        })?;
+        let rows = snapshot.origins.iter().cloned();
         // 一把 Key → 非官方来源的命中（次数、首末时刻、域名样例）
         let mut foreign: BTreeMap<i64, Hits> = BTreeMap::new();
         for row in rows {
-            let (k, origin, n, first, last) = row?;
+            let (k, origin, n, first, last) = row;
             if !did_of.contains_key(&k) || is_local_origin(&origin) {
                 continue;
             }
@@ -680,7 +625,7 @@ pub(super) fn scan(
             });
         }
     }
-    Ok(out)
+    out
 }
 
 #[cfg(test)]

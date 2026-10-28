@@ -88,3 +88,50 @@ export type Coupon = {
   /** 重置哪几项：v45 / v45,v5 / v45,anlas / v45,v5,anlas */
   scope?: string;
 };
+
+/* ---------------- 风险线索（/admin/api/abuse） ---------------- */
+/** 信号里涉及的一把 Key：Key 已删时只有删除前留下的归属。 */
+export type AbuseAccount = {
+  key_id: number;
+  name: string | null;
+  discord_id: string | null;
+  discord_name: string | null;
+  deleted: boolean;
+};
+/** 信号涉及的 Discord 账号（没有 Key 的也列出来）。 */
+export type AbuseMember = {
+  discord_id: string;
+  username: string;
+  display_name: string;
+  avatar_url: string;
+  key_id: number | null;
+  key_name: string | null;
+  banned: boolean;
+  ban_reason: string | null;
+  first_login: number | null;
+  last_login: number | null;
+  created_at: number | null;
+};
+export type AbuseSignal = {
+  id: number;
+  kind: string;
+  kind_label: string;
+  subject: string;
+  key_ids: string;
+  score: number;
+  detail: { summary?: string; evidence?: Array<{ k: string; v: unknown }> };
+  status: "open" | "confirmed" | "dismissed" | "expired";
+  first_ts: number;
+  last_ts: number;
+  accounts: AbuseAccount[];
+  members: AbuseMember[];
+};
+/** `?status=all` 之外只有对应状态的信号；expired 只出现在 all 里。 */
+export type AbuseResp = {
+  signals: AbuseSignal[];
+  open: number;
+  counts: { open: number; confirmed: number; dismissed: number; expired: number; total: number };
+  total: number;
+  page: number;
+  per: number;
+};

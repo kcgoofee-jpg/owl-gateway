@@ -123,17 +123,17 @@ async fn same_browser_blocks_register_and_invite_and_alerts() {
 }
 
 #[tokio::test]
-async fn non_apple_device_blocks_but_apple_only_notifies() {
+async fn devices_only_notify_regardless_of_platform() {
     let e = env().await;
     device(&e, &[BANNED, X], "dev-pc", NVIDIA).await;
     device(&e, &[BANNED, Y], "dev-iphone", APPLE).await;
-    assert!(blocked(&issue(&e, X).await));
+    assert!(matches!(issue(&e, X).await, Ok(Issued::Provisioned(_))));
     assert!(matches!(issue(&e, Y).await, Ok(Issued::Provisioned(_))));
 
     // 封禁号自己又登录：反过来给两个关联账号都记上
     ban_link::on_login(&e.state, BANNED).await;
     let x = signal(&e, X).await.unwrap();
-    assert_eq!(x["score"], 95.0);
+    assert_eq!(x["score"], 60.0);
     let y = signal(&e, Y).await.unwrap();
     assert_eq!(
         (y["score"].as_f64(), y["status"].as_str()),
@@ -143,6 +143,31 @@ async fn non_apple_device_blocks_but_apple_only_notifies() {
     // Y 已有的 Key 不受影响
     let k = query(&e.state.db, &format!("SELECT k.enabled FROM api_keys k JOIN discord_registrations r ON r.key_id=k.id WHERE r.discord_id='{Y}'")).await;
     assert_eq!(k, vec![json!({"enabled": 1})]);
+}
+
+#[tokio::test]
+async fn historical_device_block_is_recomputed_without_losing_review() {
+    let e = env().await;
+    device(&e, &[BANNED, X], "dev-pc", NVIDIA).await;
+    e.state
+        .db
+        .upsert_abuse_signal(
+            ban_link::KIND,
+            &ban_link::subject(X, BANNED),
+            "",
+            95.0,
+            "{}",
+            e.state.now(),
+        )
+        .await
+        .unwrap();
+    assert!(!ban_link::blocked(&e.state.db, X).await.unwrap());
+    let id = signal(&e, X).await.unwrap()["id"].as_i64().unwrap();
+    e.state.db.set_abuse_status(id, "confirmed").await.unwrap();
+    run_job(&e.state, "abuse_scan").await.unwrap();
+    let updated = signal(&e, X).await.unwrap();
+    assert_eq!(updated["score"], 60.0);
+    assert_eq!(updated["status"], "confirmed");
 }
 
 #[tokio::test]
@@ -188,7 +213,7 @@ async fn scan_writes_banned_link_but_skips_keyless_signals() {
         )])
         .await
         .unwrap();
-    // 两个封禁号同一个浏览器：没有新信息；X 和封禁号同设备：拦
+    // 两个封禁号同一个浏览器：没有新信息；X 和封禁号同设备：提醒
     browser(
         &e,
         &[BANNED, other_banned],

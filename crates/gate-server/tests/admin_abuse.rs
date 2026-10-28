@@ -42,7 +42,7 @@ async fn upsert_refreshes_and_reopens_only_on_big_jump() {
         ),
         (&json!("1,2,3"), &json!(65.0), &json!(100.0), &json!(200.0))
     );
-    assert_eq!(db.count_open_abuse_signals().await.unwrap(), 1);
+    assert_eq!(db.abuse_signal_counts(None).await.unwrap().open, 1);
 
     // 已忽略：涨不到 10 分不重开，涨够了重开
     assert!(db.set_abuse_status(id, "dismissed").await.unwrap());
@@ -74,7 +74,11 @@ async fn upsert_refreshes_and_reopens_only_on_big_jump() {
         .await
         .unwrap();
     let kinds: Vec<Value> = db
-        .list_abuse_signals(Some("open"), 50)
+        .list_abuse_signals(&gate_db::repo::abuse::AbuseFilter {
+            status: Some("open".into()),
+            limit: 50,
+            ..Default::default()
+        })
         .await
         .unwrap()
         .iter()
@@ -84,8 +88,26 @@ async fn upsert_refreshes_and_reopens_only_on_big_jump() {
         kinds,
         vec![json!("fp_missing"), json!("new_account"), json!("behavior")]
     );
-    assert_eq!(db.list_abuse_signals(None, 50).await.unwrap().len(), 4);
-    assert_eq!(db.list_abuse_signals(None, 2).await.unwrap().len(), 2);
+    assert_eq!(
+        db.list_abuse_signals(&gate_db::repo::abuse::AbuseFilter {
+            limit: 50,
+            ..Default::default()
+        })
+        .await
+        .unwrap()
+        .len(),
+        4
+    );
+    assert_eq!(
+        db.list_abuse_signals(&gate_db::repo::abuse::AbuseFilter {
+            limit: 2,
+            ..Default::default()
+        })
+        .await
+        .unwrap()
+        .len(),
+        2
+    );
 }
 
 #[tokio::test]
@@ -172,17 +194,17 @@ async fn list_shape_and_confirm_tags_keys_once() {
     assert_eq!(
         tags,
         vec![
-            json!({"key_id": k1, "tag": "疑似小号", "note": "device_exact", "by": "站长"}),
-            json!({"key_id": k2, "tag": "疑似小号", "note": "device_exact", "by": "站长"}),
+            json!({"key_id": k1, "tag": "风险线索", "note": "device_exact", "by": "站长"}),
+            json!({"key_id": k2, "tag": "风险线索", "note": "device_exact", "by": "站长"}),
         ]
     );
     let acts = a.actions().await;
     assert_eq!(acts.len(), 2, "{acts:?}"); // 登录 + 确认
-    assert_eq!(acts[0].0, "确认小号");
+    assert_eq!(acts[0].0, "确认线索");
     assert_eq!(acts[0].1, format!("待审 #{id} 同设备"));
     assert_eq!(
         acts[0].2,
-        format!("给 2 把 Key 打「疑似小号」：#{k1} Alice D、#{k2} bobby、#77 gone")
+        format!("给 2 把 Key 打「风险线索」：#{k1} Alice D、#{k2} bobby、#77 gone")
     );
     assert!(acts[0].3);
     assert_eq!(a.get(&format!("{A}/abuse")).await.json()["open"], 1);
