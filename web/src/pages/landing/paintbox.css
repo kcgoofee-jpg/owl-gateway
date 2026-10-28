@@ -11,12 +11,11 @@
   opacity: 0.85;
 }
 
-/* 提示词下面的标签补全：按钮 + 建议词 chips 一行放不下就换行 */
+/* 提示词下面的标签补全：按钮一行，建议词 chips 另起一行（不同高度的控件不并排） */
 .pb-suggest {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
+  display: grid;
   gap: var(--sp-2);
+  justify-items: start;
   margin-top: calc(var(--sp-2) * -1);
 }
 .pb-suggest__tags {
@@ -38,11 +37,17 @@
   color: var(--text-1);
 }
 
-/* 参数区：桌面两列，窄屏一列（字号手机与桌面一致，断点只改布局） */
+/* 参数区：桌面两列，窄屏一列（字号手机与桌面一致，断点只改布局）。
+   同一行字段的控件顶对齐：字段不随行拉伸、提示不把控件顶下去，
+   否则「有提示的字段」和「没有提示的字段」控件不在一条线上（布局规则会抓）。 */
 .pb-grid {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: var(--sp-3);
+  align-items: start;
+}
+.pb-grid .field {
+  align-content: start;
 }
 @media (min-width: 720px) {
   .pb-grid {
