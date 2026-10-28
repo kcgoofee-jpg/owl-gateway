@@ -1,6 +1,6 @@
-/** paintbox-image.ts：文件头识别、ZIP 解包（中央目录 + deflate-raw）、data URL。 */
+/** nai-image.ts：文件头识别、ZIP 解包（中央目录 + deflate-raw）、data URL。 */
 import { describe, expect, it } from "vitest";
-import { extractImages, type ImageMime, isZip, sniffImage, toDataUrl } from "./paintbox-image";
+import { extractImages, type ImageMime, isZip, sniffImage, toDataUrl } from "./nai-image";
 
 /** 一张真的 1×1 PNG（网关测试夹具同款思路：能被识别即可）。 */
 const PNG_1X1 = Uint8Array.from(

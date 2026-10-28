@@ -1,7 +1,7 @@
 /**
  * 成员首页（/）。三种人看到三种首屏：
  * - 游客：首屏显示实时状态，登录入口位于顶栏，下面是客户端设置、使用须知和示例图瀑布；
- * - 有 Key 的成员：今天的额度圆环，下面状态区、画匣（Beta）、重置券和请求记录（瀑布只给游客看）；
+ * - 有 Key 的成员：今天的额度圆环，下面状态区、生图工作台（Beta）入口、重置券和请求记录（瀑布只给游客看）；
  * - 登录了还没有 Key：加入服务器的入口排最前，状态区占满整行。
  * 开屏每天播一次，见 Splash.tsx。
  */
@@ -13,7 +13,6 @@ import { Grain } from "./Grain";
 import { GuestGuides, JoinServerCard } from "./Guest";
 import { displayName } from "./helpers";
 import { Coupons } from "./Member";
-import { Paintbox } from "./Paintbox";
 import { MyRequestsCard } from "./Requests";
 import { QuotaRings } from "./Rings";
 import { Splash, type Landing as SplashLanding, splashActive } from "./Splash";
@@ -21,6 +20,7 @@ import { StatusCard } from "./StatusCard";
 import { createStore, type Store } from "./store";
 import { SiteFooter, Topbar } from "./Topbar";
 import type { MeMember } from "./types";
+import { WorkbenchEntry } from "./WorkbenchEntry";
 import "./landing.css";
 
 /** 「Key 在头像里」的一次性提示（每个浏览器一次）。 */
@@ -120,7 +120,7 @@ function MemberHome({ me }: { me: MeMember }) {
       <div class="wrap lp-body">
         <StatusCard class="reveal" />
         {me.coupons && me.coupons.length > 0 && <Coupons coupons={me.coupons} />}
-        <Paintbox me={me} />
+        <WorkbenchEntry me={me} />
         <MyRequestsCard />
       </div>
     </>

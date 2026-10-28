@@ -13,6 +13,7 @@ function pageRoutes(): Plugin {
         const path = url.split("?")[0] ?? "/";
         const qs = url.slice(path.length);
         if (path === "/") req.url = `/_owl/landing.html${qs}`;
+        else if (path === "/workbench") req.url = `/_owl/workbench.html${qs}`;
         else if ((path === "/admin" || path.startsWith("/admin/")) && !path.startsWith("/admin/api/"))
           req.url = `/_owl/admin.html${qs}`;
         next();
@@ -22,7 +23,7 @@ function pageRoutes(): Plugin {
 }
 
 // 产物放在 /_owl/ 下：Caddy 把 /assets/* /api/* /fonts/* 路由给 workbench 容器，不能撞路径。
-// 多页：首页 / 后台 / 问卷各一个入口，网关按路径返回对应的 HTML（并注入首屏数据）。
+// 多页：首页 / 生图工作台 / 后台各一个入口，网关按路径返回对应的 HTML（并注入首屏数据）。
 export default defineConfig({
   base: "/_owl/",
   plugins: [pageRoutes(), preact()],
@@ -37,6 +38,7 @@ export default defineConfig({
     rollupOptions: {
       input: {
         landing: resolve(import.meta.dirname, "landing.html"),
+        workbench: resolve(import.meta.dirname, "workbench.html"),
         admin: resolve(import.meta.dirname, "admin.html"),
       },
     },
@@ -45,7 +47,7 @@ export default defineConfig({
     port: 5173,
     proxy: {
       // 状态页由网关渲染，它的样式 / 脚本（/_owl/status-page.*）也编在网关里
-      // ai / nai：画匣（成员首页的网页出图）在开发与 e2e 里直接打网关的 NAI 兼容出图接口
+      // ai / nai：网页出图（生图工作台 /workbench 与备用模块画匣）在开发与 e2e 里直接打网关的 NAI 兼容出图接口
       "^/(public|admin/api|self-register|login|logout|member|v1|ai|nai|status|livez|readyz|healthz|announcement|_owl/status-page)":
         {
           target: process.env.VITE_GATE ?? "http://127.0.0.1:18000",

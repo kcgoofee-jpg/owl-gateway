@@ -37,3 +37,5 @@ __pycache__/
 
 # cargo llvm-cov 的覆盖率原始数据
 *.profraw
+
+web/tsconfig.tsbuildinfo

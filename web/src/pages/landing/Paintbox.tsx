@@ -1,4 +1,7 @@
 /**
+ * 画匣（备用模块）：2026-10-29 起下架，被整页的生图工作台（pages/workbench）接替；
+ * 请求与收图逻辑已上移 src/lib/nai-config.ts / nai-image.ts 供工作台复用，本组件按需恢复。
+ *
  * 画匣（Beta）：成员首页的网页出图工坊。仿「魔女画匣」的用法重写：
  * 参数面板（模型 / 尺寸 / 步数 / 引导 / 采样器 / 种子）、串行生成、成图预览与下载、本次会话的历史。
  * 接的是网关自己的出图接口（/ai/generate-image，Bearer = 成员自己的 Key），不引入第三方依赖。
@@ -7,8 +10,6 @@
 
 import type { ComponentChildren } from "preact";
 import { useEffect, useRef, useState } from "preact/hooks";
-import { Badge, Button, Card, cx, Dialog, Field, Notice, toast } from "../../ui";
-import { useStore } from "./ctx";
 import {
   BASE_MODELS,
   buildRequest,
@@ -29,8 +30,10 @@ import {
   SIZE_PRESETS,
   samplersFor,
   V5_MODELS,
-} from "./paintbox-config";
-import { extractImages, type ImageBytes, imageExt, toDataUrl } from "./paintbox-image";
+} from "../../lib/nai-config";
+import { extractImages, type ImageBytes, imageExt, toDataUrl } from "../../lib/nai-image";
+import { Badge, Button, Card, cx, Dialog, Field, Notice, toast } from "../../ui";
+import { useStore } from "./ctx";
 import { modelLabel } from "./Requests";
 import type { MeMember } from "./types";
 import "./paintbox.css";

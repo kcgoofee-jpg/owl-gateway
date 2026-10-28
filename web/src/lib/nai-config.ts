@@ -1,9 +1,10 @@
 /**
- * 画匣（Beta）的数据层：模型 / 尺寸 / 采样器清单、请求体组装、免费档钳制。
- * 只有纯函数，不碰 DOM 和网络；组件在 Paintbox.tsx，收图（PNG / ZIP）在 paintbox-image.ts。
+ * 网页出图共用的数据层：模型 / 尺寸 / 采样器清单、请求体组装、免费档钳制。
+ * 只有纯函数，不碰 DOM 和网络；使用方是生图工作台（pages/workbench）和备用模块画匣（pages/landing/Paintbox.tsx），
+ * 收图（PNG / ZIP）在 nai-image.ts。
  * 口径与网关一致（gate-core policy）：免费档步数 ≤ 28、单张 ≤ 1024×1024；参数原样发送，本站不替成员补质量词。
  */
-import type { MemberPolicy } from "../../lib/member-policy";
+import type { MemberPolicy } from "./member-policy";
 
 export type ModelFamily = "v5" | "v4" | "v3";
 export type ModelOption = { id: string; label: string; family: ModelFamily };

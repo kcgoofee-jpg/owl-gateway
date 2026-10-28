@@ -29,6 +29,8 @@ pub const ADMIN_CSP: &str = "default-src 'self'; script-src 'self'; style-src 's
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Page {
     Landing,
+    /// 生图工作台（/workbench）：整页出图界面，首屏数据与首页同一套注入。
+    Workbench,
     Admin,
 }
 
@@ -36,6 +38,7 @@ impl Page {
     fn file(self) -> &'static str {
         match self {
             Page::Landing => "landing.html",
+            Page::Workbench => "workbench.html",
             Page::Admin => "admin.html",
         }
     }
@@ -149,7 +152,7 @@ pub fn apply_page_headers(h: &mut HeaderMap, page: Page) {
             h.insert("x-frame-options", HeaderValue::from_static("DENY"));
             h.insert(header::CACHE_CONTROL, HeaderValue::from_static("no-store"));
         }
-        Page::Landing => {
+        Page::Landing | Page::Workbench => {
             h.insert(
                 "content-security-policy",
                 HeaderValue::from_static(PUBLIC_CSP),

@@ -1,4 +1,4 @@
-//! 页面与静态资源：`/`、`/admin`（含 `/admin/*` 前端路由，`/admin/api/*` 除外）、`/_owl/*`、图标、健康检查。
+//! 页面与静态资源：`/`、`/workbench`、`/admin`（含 `/admin/*` 前端路由，`/admin/api/*` 除外）、`/_owl/*`、图标、健康检查。
 
 use crate::AppState;
 use crate::error::ok_json;
@@ -16,6 +16,7 @@ pub fn router() -> Router<AppState> {
         .route("/readyz", get(readyz))
         .route("/healthz", get(healthz))
         .route("/", get(landing))
+        .route("/workbench", get(workbench))
         .route("/admin", get(admin))
         .route(
             "/admin/",
@@ -65,6 +66,13 @@ const HEALTH_DB_LIMIT: std::time::Duration = std::time::Duration::from_secs(1);
 async fn landing(State(st): State<AppState>, headers: HeaderMap) -> Response {
     let boot = super::public::landing_boot(&st, &headers).await;
     st.assets.page(Page::Landing, boot.as_ref())
+}
+
+/// 生图工作台：整页出图界面（成员专用，鉴权在 /public/me 与出图接口里做）。
+/// 首屏数据复用首页的 landing_boot（我 / 实时看板 / 站点状态），页面自己按登录态渲染。
+async fn workbench(State(st): State<AppState>, headers: HeaderMap) -> Response {
+    let boot = super::public::landing_boot(&st, &headers).await;
+    st.assets.page(Page::Workbench, boot.as_ref())
 }
 
 async fn admin(State(st): State<AppState>) -> Response {

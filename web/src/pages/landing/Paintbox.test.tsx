@@ -4,9 +4,9 @@ import { render } from "preact";
 import { act } from "preact/test-utils";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { MemberPolicy } from "../../lib/member-policy";
+import { DEFAULT_FORM } from "../../lib/nai-config";
 import { StoreCtx } from "./ctx";
 import { Paintbox } from "./Paintbox";
-import { DEFAULT_FORM } from "./paintbox-config";
 import type { Store } from "./store";
 import type { Live, MeMember } from "./types";
 

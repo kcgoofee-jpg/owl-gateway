@@ -1,4 +1,4 @@
-/** paintbox.ts：请求体组装、免费档钳制、种子、标签补全解析、入口闸门文案。 */
+/** nai-config.ts：请求体组装、免费档钳制、种子、标签补全解析、入口闸门文案。 */
 import { describe, expect, it } from "vitest";
 import {
   BASE_MODELS,
@@ -13,7 +13,7 @@ import {
   resolveSeed,
   samplersFor,
   V5_MODELS,
-} from "./paintbox-config";
+} from "./nai-config";
 
 const form = (patch: Partial<PaintForm> = {}): PaintForm => ({ ...DEFAULT_FORM, ...patch });
 
