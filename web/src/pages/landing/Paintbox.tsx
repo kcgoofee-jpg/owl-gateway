@@ -240,6 +240,7 @@ export function Paintbox({ me }: { me: MeMember }) {
             hint="英文标签、逗号分隔；权重写 (tag:1.2) 也可以，网关会自动换算。本站不自动补质量词，可在开头加 very aesthetic, masterpiece 这类词。"
           >
             <textarea
+              class="textarea"
               rows={3}
               value={form.positive}
               placeholder="very aesthetic, masterpiece, 1girl, sunset, seaside"
@@ -270,6 +271,7 @@ export function Paintbox({ me }: { me: MeMember }) {
           )}
           <Field label="负面提示词（可选）" hint="不想要的内容，比如 lowres, bad anatomy。留空也可以。">
             <textarea
+              class="textarea"
               rows={2}
               value={form.negative}
               placeholder="lowres, bad anatomy"
@@ -283,6 +285,7 @@ export function Paintbox({ me }: { me: MeMember }) {
               hint={isV5(form.model) ? "V5 计入今天的 V5 额度，站方可临时降档为 V5 Medium。" : undefined}
             >
               <select
+                class="select"
                 value={form.model}
                 onChange={(e) => chooseModel((e.target as HTMLSelectElement).value)}
                 disabled={!!running}
@@ -308,6 +311,7 @@ export function Paintbox({ me }: { me: MeMember }) {
               hint={overPixels ? "超出免费规格（1024×1024），送出时会自动缩小。" : undefined}
             >
               <select
+                class="select"
                 value={form.preset}
                 onChange={(e) => choosePreset((e.target as HTMLSelectElement).value)}
                 disabled={!!running}
@@ -323,6 +327,7 @@ export function Paintbox({ me }: { me: MeMember }) {
               <>
                 <Field label="宽">
                   <input
+                    class="input"
                     type="number"
                     min={64}
                     max={4096}
@@ -334,6 +339,7 @@ export function Paintbox({ me }: { me: MeMember }) {
                 </Field>
                 <Field label="高">
                   <input
+                    class="input"
                     type="number"
                     min={64}
                     max={4096}
@@ -354,6 +360,7 @@ export function Paintbox({ me }: { me: MeMember }) {
               }
             >
               <input
+                class="input"
                 type="number"
                 min={1}
                 max={50}
@@ -364,6 +371,7 @@ export function Paintbox({ me }: { me: MeMember }) {
             </Field>
             <Field label="引导" hint="0–10，越高越贴提示词，太高画面会僵。">
               <input
+                class="input"
                 type="number"
                 min={0}
                 max={10}
@@ -375,6 +383,7 @@ export function Paintbox({ me }: { me: MeMember }) {
             </Field>
             <Field label="采样器">
               <select
+                class="select"
                 value={form.sampler}
                 onChange={(e) => set({ sampler: (e.target as HTMLSelectElement).value })}
                 disabled={!!running}
@@ -388,6 +397,7 @@ export function Paintbox({ me }: { me: MeMember }) {
             </Field>
             <Field label="种子" hint="-1 = 每次随机；固定种子 + 相同参数可以复现。">
               <input
+                class="input"
                 type="text"
                 inputMode="numeric"
                 value={form.seed}
@@ -399,6 +409,7 @@ export function Paintbox({ me }: { me: MeMember }) {
             {!isV3(form.model) && (
               <Field label="噪声调度">
                 <select
+                  class="select"
                   value={form.noise}
                   onChange={(e) => set({ noise: (e.target as HTMLSelectElement).value })}
                   disabled={!!running}
