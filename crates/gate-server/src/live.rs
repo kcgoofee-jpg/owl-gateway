@@ -316,7 +316,7 @@ fn public_limits(state: &AppState) -> Value {
     json!({"key_image_queue": get("queue_per_member")})
 }
 
-/// 状态页的公开响应：不含任何密钥、成员信息或计数细节。
+/// 首页元信息的公开响应：不含任何密钥、成员信息或计数细节。
 pub async fn build_status(state: &AppState) -> Result<Value, InternalError> {
     let flags =
         features::parse_global_flags(state.db.get_setting(features::GLOBAL_KEY).await?.as_deref())?;

@@ -18,7 +18,6 @@ pub mod admin_records;
 pub mod counters;
 pub mod coupons;
 pub mod discord;
-pub mod errors;
 pub mod footprint;
 pub mod guard;
 pub mod kernel;
@@ -29,7 +28,6 @@ pub mod reconciliation;
 pub mod registration;
 pub mod settings;
 pub mod share_state;
-pub mod status_page;
 pub mod upstream;
 pub mod usage;
 

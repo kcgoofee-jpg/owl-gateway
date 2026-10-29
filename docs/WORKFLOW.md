@@ -13,15 +13,15 @@ git config core.hooksPath tools/hooks
 
 ## 2. Change
 
-- Work on `main` (or a short-lived local branch merged locally). Keep each commit one logical change.
-- Before committing, run what the change touches:
-  - Rust: `cargo clippy --workspace --all-targets -- -D warnings && cargo test --workspace`
-  - Web: `cd web && pnpm biome check . && pnpm tsc --noEmit && pnpm vitest run`
-  - Fixtures: `tools/ci/check-fixtures.sh` (the repository is public, so fixtures may only hold synthetic data).
-  - End to end: start `cargo xtask dev` and `pnpm vite --port 5174`, then `cd web && E2E_BASE=http://localhost:5174 pnpm exec playwright test`. `web/e2e/layout.spec.ts` holds the hard layout rules: at every width no page may end a paragraph with one or two orphan characters, and controls on one row must be equally tall and aligned.
-  - Snapshot updates: inputs and current outputs live in each crate's `tests/snapshots/**/*.jsonl`, one case per line. When a behaviour change is intended, run `UPDATE_SNAPSHOT=1 cargo test -p <crate> --test <name>` locally only, read the diff, and say in the commit body which snapshots changed and why (CI forbids updates).
-- 更新日志用简单中文，按日期说明改了什么即可，不要求固定分类、版本号或技术细节。
-- The 2.x Python code and the byte-for-byte comparison fixtures used during the cutover are kept under the git tags `py-final` and `v3-deviations-final`.
+- Keep each commit one logical change.
+- Run checks for the affected code locally; CI owns the complete Rust and web unit suites:
+  - Rust: `cargo fmt --all --check`, check the affected crates, then run their relevant tests.
+  - Web: `cd web && pnpm check && pnpm test`.
+  - Release smoke: start `cargo xtask dev` and Vite, then run `cd web && pnpm exec playwright test e2e/release.spec.ts`.
+  - Full browser regression: run `pnpm exec playwright test` locally or dispatch the **UI regression** workflow. Layout, animation, accessibility and extended browser scenarios are optional regression checks, outside the release gate.
+- Release smoke requires synthetic member and admin credentials from `cargo xtask dev`; missing credentials fail the run rather than silently skipping it.
+- Snapshot updates: run `UPDATE_SNAPSHOT=1 cargo test -p <crate> --test <name>` locally only, inspect the diff and explain intended behavior changes. CI forbids snapshot updates.
+- 更新日志用简单中文，按日期说明改了什么即可。
 
 ## 3. Commit messages and other public text
 
@@ -41,19 +41,24 @@ User-facing strings (errors, UI, bot replies) stay in Chinese: members read them
 
 ## 4. CI (push to `main`)
 
-`web`, `rust`, `e2e`, `secrets`, `deploy-safety`, `image` and `nai-ops` run in parallel; `e2e` waits for `web`. The E2E layout checks use a lightweight Chinese font instead of downloading the 61 MB Noto CJK package. Apt setup, browser installation and Playwright each have explicit timeouts so a stalled dependency cannot hold a run indefinitely. Artifacts are built alongside the checks, so a red run still uploads them, but a red run is never deployable.
+The required run contains web lint/types/unit tests, Rust formatting/Clippy/tests, four browser release-smoke scenarios, fixture/secret checks, deployment guards, and release artifacts. The production web bundle is built in the image job; the web check job does not build it again. Image smoke verifies the actual container and embedded landing bundle.
+
+Full UI regression runs only on manual dispatch through `ui-regression.yml`. Its result does not block ordinary releases. Keep quota, accounting, request recovery, migration and scheduling regression tests in the required Rust suite.
+
+Artifact builds run alongside checks. `tools/deploy.sh` accepts only a successful CI run for the selected commit; a failed run is never deployable. Reuse that run for deployment instead of rerunning the full suite.
 
 ## 5. Deploy
 
 ```bash
 tools/deploy.sh --wait     # wait for CI on main HEAD, then deploy it
+tools/deploy.sh --wait --no-notify  # same deployment without a completion webhook
 tools/deploy.sh            # deploy the latest green run
 tools/deploy.sh <run-id>   # deploy a specific green run
 ```
 
 The script refuses runs that did not fully succeed and skips if that build is already live. It downloads and stages the candidate image without changing `current` or `previous`, then promotes the candidate and restarts immediately — no queue wait (owner 10-27); the 1-2 minute downtime window is covered by the Caddy maintenance page, and the old gateway finishes accepted work while shutting down. After restart it checks `healthcheck`, `nai-ops smoke` and the public `/healthz`.
 
-`tools/deploy.sh --wait` reports CI state and its GitHub run URL every minute, and stops waiting after one hour by default (`OWL_CI_WAIT_TIMEOUT_SECONDS` changes that limit). Queue waiting defaults to 1800 seconds with 5-second polling; set `OWL_QUEUE_WAIT_TIMEOUT_SECONDS` and `OWL_QUEUE_POLL_SECONDS` in the local deployment environment file to change these values.
+`tools/deploy.sh --wait` reports CI state and its GitHub run URL every minute, and stops waiting after one hour by default (`OWL_CI_WAIT_TIMEOUT_SECONDS` changes that limit). The cutover stops the old gateway and waits for its accepted requests to finish before starting the new process.
 
 Rollback: `ssh` in and run `/opt/owl/cutover.sh previous`.
 

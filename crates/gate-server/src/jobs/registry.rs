@@ -13,7 +13,6 @@ use gate_core::primitives::take_chars;
 use serde_json::{Map, Value, json};
 use std::future::Future;
 use std::panic::AssertUnwindSafe;
-use std::sync::RwLock;
 use std::time::Instant;
 
 /// 设置键：每个任务最近一轮的结果 `{"<名字>": {"at", "ok", "ms", "summary"}}`。
@@ -219,8 +218,6 @@ pub enum Origin {
 pub struct JobsState {
     /// 每个任务最近一轮的结果（也就是设置 `job_last` 的内容）。写库时一直持锁，保证库里的是最新的一份。
     last: tokio::sync::Mutex<Map<String, Value>>,
-    /// 官方状态接口地址的覆盖（测试 / 本地开发用，保证不出本机）；None 用状态页的 `OFFICIAL_API`。
-    official_api: RwLock<Option<String>>,
 }
 
 impl Default for JobsState {
@@ -233,7 +230,6 @@ impl JobsState {
     pub fn new() -> Self {
         Self {
             last: tokio::sync::Mutex::new(Map::new()),
-            official_api: RwLock::new(None),
         }
     }
 
@@ -306,15 +302,6 @@ impl JobsState {
         if let Err(e) = state.db.set_setting(STATE_KEY, &text).await {
             tracing::warn!(job = name, "定时任务运行记录写库失败：{e}");
         }
-    }
-
-    /// 把「取官方状态」指到别的地址（测试 / 本地开发用，保证不出本机）；`None` 恢复官方接口。
-    pub fn set_official_api(&self, url: Option<String>) {
-        *self.official_api.write().expect("official_api") = url;
-    }
-
-    pub fn official_api(&self) -> Option<String> {
-        self.official_api.read().expect("official_api").clone()
     }
 }
 

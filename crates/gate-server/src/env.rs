@@ -129,11 +129,10 @@ pub struct EnvConfig {
     pub login_window_seconds: i64,
     /// 连续这么多天没成功出过图的 Key 自动回收（0 = 关）。只在这里解析一次，机器人、后台、定时任务共用。
     pub key_inactivity_delete_days: i64,
-    // Discord / 告警（ANNOUNCE_CHANNEL_ID 只用于状态页「订阅更新」链到公告频道，网关不往里发消息）
+    // Discord / 告警
     pub discord_bot_token: String,
     pub site_url: String,
     pub alert_user_id: String,
-    pub announce_channel_id: String,
     pub discord_invite_url: String,
     pub discord_guild_id: String,
     /// Discord REST 基地址（测试指向本地假服务）。
@@ -242,7 +241,6 @@ impl EnvConfig {
             discord_bot_token: r.str("DISCORD_BOT_TOKEN", ""),
             site_url: r.str("SITE_URL", ""),
             alert_user_id: r.str("ALERT_USER_ID", ""),
-            announce_channel_id: r.str("ANNOUNCE_CHANNEL_ID", ""),
             discord_invite_url: r.str("DISCORD_INVITE_URL", ""),
             discord_guild_id: r.str("DISCORD_GUILD_ID", ""),
             discord_api_base: r.str("DISCORD_API_BASE", "https://discord.com/api/v10"),

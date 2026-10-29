@@ -33,10 +33,11 @@ mask() { sed -E 's/[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}/x.x.x.x/g'; }
 remote() { ssh "${KEY[@]}" "root@$OWL_IP" "$@" 2>&1 | mask; return "${PIPESTATUS[0]}"; }
 say() { printf '\033[1m==> %s\033[0m\n' "$*"; }
 die() { printf '\033[31mxx %s\033[0m\n' "$*" >&2; exit 1; }
-run_id="" wait=0
+run_id="" wait=0 notify=1
 for a in "$@"; do
   case $a in
     --wait) wait=1 ;;
+    --no-notify) notify=0 ;;
     [0-9]*) run_id=$a ;;
     *) die "unknown argument: $a" ;;
   esac
@@ -113,7 +114,7 @@ curl -fsS -m 10 "https://$DOMAIN/healthz" | grep -q '"ok":true' || die "public /
 say "live: owl-gate:${sha:0:7} ($((SECONDS - start))s total)"
 
 # 可选：部署完成通知。owl.env 里 export DISCORD_ALERT_WEBHOOK 即开启；发不出去不影响部署结果。
-if [[ -n ${DISCORD_ALERT_WEBHOOK:-} ]]; then
+if [[ $notify == 1 && -n ${DISCORD_ALERT_WEBHOOK:-} ]]; then
   now=$(TZ=Asia/Shanghai date '+%m-%d %H:%M')
   curl -fsS -m 15 -H 'Content-Type: application/json' \
     -d "{\"content\":\"🚀 猫头鹰公益站已上线 ${sha:0:7}（${now} 北京时间，部署用时 $((SECONDS - start))s）。出问题时：ssh 上服务器执行 /opt/owl/cutover.sh previous 回上一版。\"}" \

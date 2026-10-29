@@ -4,7 +4,6 @@
 use rusqlite::{Connection, ErrorCode};
 
 const SCHEMA: &str = include_str!("sql/schema.sql");
-const STATUS_SCHEMA: &str = include_str!("sql/status_schema.sql");
 
 /// 老库补列（新库建表已含这些列，执行会报 duplicate column，忽略即可）。顺序决定列序，不要打乱。
 const ADD_COLUMNS: &[&str] = &[
@@ -231,7 +230,14 @@ fn has_column(conn: &Connection, table: &str, column: &str) -> rusqlite::Result<
 
 /// 已下线功能的表：启动时顺手清掉（建表语句已不在 `schema.sql`，线上库里的旧表留着无用）。
 /// `error_events` 是删掉的 Bug 追踪（10-27）：表里的历史错误随表一起删除。
-pub const REMOVED_TABLES: &[&str] = &["member_survey", "feedback", "error_events"];
+pub const REMOVED_TABLES: &[&str] = &[
+    "member_survey",
+    "feedback",
+    "error_events",
+    "incident_updates",
+    "incidents",
+    "status_hourly",
+];
 
 /// 建表 + 迁移。
 pub fn run(conn: &mut Connection) -> rusqlite::Result<()> {
@@ -240,6 +246,10 @@ pub fn run(conn: &mut Connection) -> rusqlite::Result<()> {
     for t in REMOVED_TABLES {
         conn.execute(&format!("DROP TABLE IF EXISTS {t}"), [])?;
     }
+    conn.execute(
+        "DELETE FROM site_settings WHERE key='novelai_official_status'",
+        [],
+    )?;
     for ddl in ADD_COLUMNS {
         match conn.execute(ddl, []) {
             Ok(_) => {}
@@ -285,7 +295,6 @@ pub fn run(conn: &mut Connection) -> rusqlite::Result<()> {
     for idx in INDEXES {
         conn.execute(idx, [])?;
     }
-    conn.execute_batch(STATUS_SCHEMA)?;
     conn.pragma_update(None, "user_version", SCHEMA_VERSION)?;
     Ok(())
 }

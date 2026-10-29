@@ -43,15 +43,6 @@ test.describe("首页（成员）", () => {
   });
 });
 
-test("状态页：各宽度无孤字、控件对齐", async ({ page }) => {
-  for (const w of WIDTHS) {
-    await page.setViewportSize({ width: w, height: 900 });
-    await page.goto("/status");
-    await expect(page.locator(".sp-banner")).toBeVisible();
-    await check(page, `/status ${w}px`);
-  }
-});
-
 const ADMIN = [
   "/admin",
   "/admin/members",

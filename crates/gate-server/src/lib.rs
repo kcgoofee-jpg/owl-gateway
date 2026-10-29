@@ -48,12 +48,10 @@ use tower::Layer;
 pub fn app(
     state: AppState,
 ) -> tower::util::MapRequest<Router, fn(axum::extract::Request) -> axum::extract::Request> {
-    let stats = state.status_stats.clone();
     let cors = middleware::cors(&state.env.cors_origins);
     let mut router = routes::router(state.clone())
         .layer(from_fn(middleware::admin_no_store))
         .layer(from_fn_with_state(state, accounting::error_ledger))
-        .layer(from_fn_with_state(stats, middleware::status_stats))
         .layer(from_fn(middleware::request_context));
     // 最外层：浏览器里的网页客户端直连网关要靠它
     if let Some(cors) = cors {

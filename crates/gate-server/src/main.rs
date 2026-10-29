@@ -87,7 +87,7 @@ fn serve(bind: SocketAddr) -> anyhow::Result<()> {
         )
         .with_graceful_shutdown(shutdown_signal(state.clone()))
         .await?;
-        // HTTP 已停止接收并等完在途请求：等记账 / 写库任务 → 状态码统计落库 → WAL 并回主库
+        // HTTP 已停止接收并等完在途请求：等记账 / 写库任务 → WAL 并回主库
         gate_server::jobs::shutdown(&state).await;
         tracing::info!("已退出");
         anyhow::Ok(())

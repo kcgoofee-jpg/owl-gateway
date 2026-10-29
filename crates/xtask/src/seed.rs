@@ -1,7 +1,7 @@
 //! 合成演示数据（公开仓库：全部是假的）。
 //!
 //! 它建了 8 把带名字的 Key、各自的 Discord 领取记录和 400 条用量日志；这里在此之上补了计数器、
-//! 生成记录、捐赠、券、黑名单、状态页事件、操作日志和状态码统计，让后台每一页都有东西可看。
+//! 生成记录、捐赠、券、黑名单、操作日志，让后台每一页都有东西可看。
 //!
 //! 约定（Playwright 端到端依赖，别随手改）：
 //! - 第 0 号成员「月见草」（Discord `900000000000000000`）是 `cookies.json` 里的成员会话；它**没有**问卷记录、
@@ -124,7 +124,6 @@ pub async fn seed(db: &Db, clock: &Clock, now: f64) -> Result<Seeded> {
     seed_usage(db, clock, now, &keys, &mut rng).await?;
     seed_member_extras(db, now, &keys).await?;
     seed_records(db, now).await?;
-    seed_site(db, now).await?;
     seed_reconciliation(db, now).await?;
     Ok(Seeded { keys })
 }
@@ -475,74 +474,6 @@ async fn seed_records(db: &Db, now: f64) -> Result<()> {
             .await?;
     }
 
-    Ok(())
-}
-
-// ------------------------------------------------------------------ 站点：状态页事件 / 状态码统计
-
-async fn seed_site(db: &Db, now: f64) -> Result<()> {
-    use gate_server::routes::status::standard_body;
-    // 两个已解决的事件（照 Statuspage 标准句式写）
-    let first = db
-        .create_incident(
-            "图片生成变慢",
-            "minor",
-            &["upstream".to_string()],
-            "investigating",
-            standard_body("investigating").unwrap_or_default(),
-            now - 2.0 * DAY,
-        )
-        .await?;
-    db.add_incident_update(
-        first,
-        "resolved",
-        standard_body("resolved").unwrap_or_default(),
-        now - 2.0 * DAY + 5400.0,
-    )
-    .await?;
-    let second = db
-        .create_incident(
-            "出图接口短暂不可用",
-            "major",
-            &["upstream".to_string(), "api".to_string()],
-            "investigating",
-            standard_body("investigating").unwrap_or_default(),
-            now - 5.0 * DAY,
-        )
-        .await?;
-    db.add_incident_update(
-        second,
-        "monitoring",
-        standard_body("monitoring").unwrap_or_default(),
-        now - 5.0 * DAY + 1800.0,
-    )
-    .await?;
-    db.add_incident_update(
-        second,
-        "resolved",
-        standard_body("resolved").unwrap_or_default(),
-        now - 5.0 * DAY + 4200.0,
-    )
-    .await?;
-
-    // 成员接口各 HTTP 状态码的每小时次数（后台总览与公开状态页的分布图）：最近 72 小时
-    let this_hour = (now / 3600.0).floor() as i64 * 3600;
-    let mut items = Vec::new();
-    for h in 1..=72i64 {
-        let hour = this_hour - h * 3600;
-        let busy = 20 + (h * 7 % 40);
-        items.push(((hour, 200u16), busy));
-        if h % 3 == 0 {
-            items.push(((hour, 429u16), 1 + h % 4));
-        }
-        if h % 11 == 0 {
-            items.push(((hour, 500u16), 1));
-        }
-        if h % 5 == 0 {
-            items.push(((hour, 401u16), 1));
-        }
-    }
-    db.flush_status_hourly(&items).await?;
     Ok(())
 }
 

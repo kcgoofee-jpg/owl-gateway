@@ -1,6 +1,6 @@
 //! 不消耗任何 Anlas / 免费额度，也不会触发出图间隔。
 //!
-//! 检查：`/healthz`、`/public/status`、`/public/live`、`/status.json`、`/queue-status`；
+//! 检查：`/healthz`、`/public/status`、`/public/live`、`/queue-status`；
 //! 以及旧版冒烟里不出图的两条鉴权检查（无 Key / 错 Key 访问 `/v1/me` 必须 401）；
 //! 环境变量 `SMOKE_KEY` 有值时再多一条：用这把 Key 访问 `/v1/me` 必须 200。
 //! Key 只放在请求头里，**任何输出都不会带上它**（连错误信息里也会被抹掉）。
@@ -200,14 +200,6 @@ pub async fn run(base: &str, key: Option<&str>, timeout: Duration) -> Result<Rep
         .await;
     s.check_json("public/live", "/public/live", None, 200, is_object)
         .await;
-    s.check_json("status.json", "/status.json", None, 200, |v| {
-        if v.get("components").is_some_and(Value::is_array) {
-            Ok(())
-        } else {
-            Err("缺少 components 数组")
-        }
-    })
-    .await;
     // 出图队列的公开状态（原来检查的 /v1/models 随文本接口一起删除了）
     s.check_json("queue-status", "/queue-status", None, 200, |v| {
         if v.get("global").is_some_and(Value::is_object) {

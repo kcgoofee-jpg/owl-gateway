@@ -1,6 +1,6 @@
 //! 定时任务的循环：闲置回收（线上开关关着时绝不删 Key）、维护一轮、启动 / 关停序列，以及
 //! 「任务出错或 panic 时循环不退出」。各任务本身的规则见 `jobs_quota.rs` / `jobs_capacity.rs` / `jobs_autopilot.rs`。
-//! 公开仓库：全部是合成数据；Discord / NovelAI / 官方状态页都不出本机。
+//! 公开仓库：全部是合成数据；Discord / NovelAI都不出本机。
 
 mod common;
 use common::*;
@@ -117,9 +117,6 @@ async fn idle_recycle_switched_off_never_deletes_anything() {
     );
 
     // 通过真正的循环也一样：起一遍所有循环，等闲置回收跑完第一轮再关
-    e.state
-        .jobs
-        .set_official_api(Some("http://127.0.0.1:9/never".into()));
     jobs::startup(&e.state).await.unwrap();
     let start = Instant::now();
     while Value::Object(e.state.jobs.last().await)["idle_recycle"]["summary"] != "关闭（天数=0）"
@@ -254,30 +251,23 @@ async fn idle_recycle_negative_days_is_off_too() {
 // ------------------------------------------------------------------ 维护循环一轮
 
 #[tokio::test]
-async fn maintenance_round_purges_and_flushes() {
+async fn maintenance_round_purges_expired_usage() {
     let e = setup(&[("USAGE_LOG_RETENTION_DAYS", "10")]).await;
     let s = &e.state;
-    s.jobs
-        .set_official_api(Some("http://127.0.0.1:9/never".into()));
     let now = s.now();
-    let old_hour = ((now - 40.0 * DAY) / 3600.0).floor() as i64 * 3600;
     s.db.run_script(vec![
         format!("INSERT INTO usage_log (ts, key_id, key_name, kind, status) VALUES ({}, NULL, '', 'text', 'ok')", now - 20.0 * DAY),
         format!("INSERT INTO usage_log (ts, key_id, key_name, kind, status) VALUES ({}, NULL, '', 'text', 'ok')", now - 2.0 * DAY),
         format!("INSERT INTO admin_actions (ts, actor, action, target, detail, ok) VALUES ({}, 'a', '旧', '', '', 1)", now - 200.0 * DAY),
         format!("INSERT INTO admin_actions (ts, actor, action, target, detail, ok) VALUES ({}, 'a', '新', '', '', 1)", now - 2.0 * DAY),
-        format!("INSERT INTO status_hourly (hour, code, n) VALUES ({old_hour}, 200, 5)"),
     ])
     .await
     .unwrap();
-    s.status_stats.record(200, now);
-    s.status_stats.record(200, now);
-    s.status_stats.record(429, now);
 
     assert_eq!(run_job(s, "maintenance").await.unwrap(), "全部完成");
     settle().await;
 
-    // 明细日志按 USAGE_LOG_RETENTION_DAYS 只留 10 天内（设置了才清）；操作日志、状态码统计一律留存（站长 10-22）
+    // 明细日志按 USAGE_LOG_RETENTION_DAYS 只留 10 天内（设置了才清）；操作日志保留
     let (usage_rows, actions) =
         s.db.read(|c| {
             let usage_rows: i64 =
@@ -292,58 +282,18 @@ async fn maintenance_round_purges_and_flushes() {
         .unwrap();
     assert_eq!(usage_rows, 1);
     assert_eq!(actions, ["旧", "新"]);
-    // 内存里的状态码统计落库并清空
-    let hour = (now / 3600.0).floor() as i64 * 3600;
-    let totals = s.db.status_totals_since(hour).await.unwrap();
-    assert!(
-        totals.contains(&(200, 2)) && totals.contains(&(429, 1)),
-        "{totals:?}"
-    );
-    assert!(s.status_stats.pending().is_empty());
-    let kept: i64 =
-        s.db.read(move |c| {
-            c.query_row(
-                "SELECT COUNT(*) FROM status_hourly WHERE hour=?",
-                [old_hour],
-                |r| r.get(0),
-            )
-        })
-        .await
-        .unwrap();
-    assert_eq!(kept, 1);
-}
-
-#[tokio::test]
-async fn flush_status_stats_puts_counts_back_when_the_write_fails() {
-    let e = setup(&[]).await;
-    let s = &e.state;
-    s.status_stats.record(200, s.now());
-    // 让写入失败：把表删掉
-    s.db.run_script(vec!["DROP TABLE status_hourly".into()])
-        .await
-        .unwrap();
-    assert!(jobs::flush_status_stats(s).await.is_err());
-    let pending = s.status_stats.pending();
-    assert_eq!(
-        pending.iter().map(|(_, n)| n).sum::<i64>(),
-        1,
-        "写失败要放回去下次再写：{pending:?}"
-    );
 }
 
 // ------------------------------------------------------------------ 维护里一步出错
 
 #[tokio::test]
 async fn a_failing_maintenance_step_is_shown_but_filed_only_once() {
-    let e = setup(&[]).await;
+    let e = setup(&[("USAGE_LOG_RETENTION_DAYS", "10")]).await;
     let s = &e.state;
-    s.jobs
-        .set_official_api(Some("http://127.0.0.1:9/never".into()));
-    // 让清理这一步失败：把状态码统计表删掉，再留一笔要落库的统计
-    s.db.run_script(vec!["DROP TABLE status_hourly".into()])
+    // 让过期日志清理失败，验证维护任务仍会记录错误。
+    s.db.run_script(vec!["DROP TABLE usage_log".into()])
         .await
         .unwrap();
-    s.status_stats.record(200, s.now());
     let err = run_job(s, "maintenance").await.unwrap_err();
     assert!(err.to_string().starts_with("清理过期记录出错："), "{err}");
     let last = Value::Object(s.jobs.last().await);
@@ -356,8 +306,6 @@ async fn a_failing_maintenance_step_is_shown_but_filed_only_once() {
 async fn startup_runs_every_job_and_shutdown_finishes_promptly() {
     let e = setup(&[]).await;
     let s = &e.state;
-    s.jobs
-        .set_official_api(Some("http://127.0.0.1:9/never".into()));
     // 上次的运行记录在启动时读回来（包括已经不存在的任务）
     s.db.set_setting(
         "job_last",
@@ -383,8 +331,6 @@ async fn startup_runs_every_job_and_shutdown_finishes_promptly() {
     }
     // 7 个循环都还挂着（跑完第一轮在睡觉，没有退出）
     assert!(s.tasks.len() >= JOBS.len(), "{}", s.tasks.len());
-    // 关停前内存里还有没落库的状态码统计
-    s.status_stats.record(503, s.now());
     let t = Instant::now();
     jobs::shutdown(s).await;
     assert!(
@@ -393,14 +339,6 @@ async fn startup_runs_every_job_and_shutdown_finishes_promptly() {
         t.elapsed()
     );
     assert!(s.shutdown.is_cancelled() && s.tasks.is_closed() && s.tasks.is_empty());
-    let hour = (s.now() / 3600.0).floor() as i64 * 3600;
-    assert!(
-        s.db.status_totals_since(hour)
-            .await
-            .unwrap()
-            .contains(&(503, 1)),
-        "关停时要把状态码统计落库"
-    );
 }
 
 // ------------------------------------------------------------------ 出错 / panic 不让循环退出

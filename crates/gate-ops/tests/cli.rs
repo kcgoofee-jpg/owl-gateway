@@ -40,7 +40,7 @@ fn help_lists_every_subcommand() {
     for sub in ["set", "get", "traffic", "snapshot", "ro-sanitize", "smoke"] {
         assert!(text.contains(sub), "--help 里没有 {sub}：{text}");
     }
-    // 群发私信、公告、状态页事件、提示词统计都已删除（后台已无入口，事件直接写库）；
+    // 群发私信、公告、状态页事件、提示词统计都已删除；
     // 周报与巡检 10-27 删除（站长不需要，扩展检查里的统计后台都有）。
     for gone in [
         "dm-broadcast",

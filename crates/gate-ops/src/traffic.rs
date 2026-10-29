@@ -43,11 +43,7 @@ pub fn path_group(uri: &str) -> &'static str {
         "admin-api"
     } else if path == "/admin" || path.starts_with("/admin/") {
         "admin-ui"
-    } else if path.starts_with("/public/")
-        || path.starts_with("/status")
-        || path == "/queue-status"
-        || path == "/healthz"
-    {
+    } else if path.starts_with("/public/") || path == "/queue-status" || path == "/healthz" {
         "public"
     } else if path.starts_with("/self-register") {
         "bridge"

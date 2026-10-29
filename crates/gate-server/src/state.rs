@@ -7,7 +7,6 @@ use crate::bugs::Bugs;
 use crate::env::EnvConfig;
 use crate::guard::Guard;
 use crate::hooks::GateHooks;
-use crate::middleware::StatusStats;
 use crate::registration::RegistrationService;
 use crate::runtime::{
     AuthGuard, ImageCooldown, KeyPauses, SlidingWindow, TagQueue, UpstreamHealth,
@@ -69,7 +68,6 @@ pub struct Inner {
     pub db: Db,
     pub clock: Clock,
     pub assets: Assets,
-    pub status_stats: StatusStats,
     pub alerter: Arc<Alerter>,
     pub bugs: Arc<Bugs>,
     pub guard: Arc<Guard>,
@@ -105,7 +103,7 @@ pub struct Inner {
     pub live: crate::live::Hub,
     /// Discord 自助领 Key（`env.registration` 配齐才有；否则 `/self-register/*` 回 503）。
     pub registration: Option<Arc<RegistrationService>>,
-    /// 定时任务：每个任务最近一轮的结果、动态额度重算的串行锁、官方状态地址的覆盖。
+    /// 定时任务：每个任务最近一轮的结果、动态额度重算的串行锁。
     pub jobs: crate::jobs::JobsState,
 }
 
@@ -191,7 +189,6 @@ impl AppState {
         let state = Self(Arc::new(Inner {
             clock,
             assets,
-            status_stats: StatusStats::default(),
             alerter,
             bugs,
             guard,
@@ -434,7 +431,7 @@ impl AppState {
         remaining
     }
 
-    /// 记一次上游调用结果（状态页的「上游」状态按最近 10 分钟算）。
+    /// 记一次上游调用结果（首页与后台的「上游」状态按最近 10 分钟算）。
     pub fn record_upstream(&self, ok: bool) {
         self.health.record(ok, self.now());
     }

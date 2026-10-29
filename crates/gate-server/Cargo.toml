@@ -1,6 +1,6 @@
 [package]
 name = "gate-server"
-description = "网关主程序：axum 路由、鉴权、准入、记账、后台任务、状态页、内嵌前端。"
+description = "网关主程序：axum 路由、鉴权、准入、记账、后台任务、内嵌前端。"
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true

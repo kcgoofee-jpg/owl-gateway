@@ -2,7 +2,7 @@
 # 只访问公网地址，不碰 NovelAI，不引入任何新的出口 IP。
 # - 只在「状态变化」时发消息：上一次运行是成功、这一次失败 → 故障告警；上一次失败、这一次成功 → 恢复通知。
 # - 失败时让这次运行标红（GitHub 的运行列表里一眼能看到，也方便下一次对比）。
-# - 需要仓库 Secret：DISCORD_ALERT_WEBHOOK（告警频道的 Webhook）、STATUS_MIRROR_URL（独立状态页镜像地址，可选）。
+# - 需要仓库 Secret：DISCORD_ALERT_WEBHOOK（告警频道的 Webhook）。
 # 注意：GitHub 的定时任务最短 5 分钟，高峰时会被推迟几分钟，所以告警大约延迟 5～15 分钟。
 name: 站点探测
 
@@ -31,7 +31,6 @@ jobs:
     env:
       GATE_URL: https://gate.davidzhao.top
       WEBHOOK: ${{ secrets.DISCORD_ALERT_WEBHOOK }}
-      MIRROR: ${{ secrets.STATUS_MIRROR_URL }}
       GH_TOKEN: ${{ github.token }}
     steps:
       - name: 发测试消息
@@ -66,8 +65,6 @@ jobs:
           echo "prev=$prev"
 
           now=$(TZ=Asia/Shanghai date '+%m-%d %H:%M')
-          mirror_line=""
-          [ -n "$MIRROR" ] && mirror_line="\\n独立状态页（只显示状态，不能出图）：${MIRROR}"
 
           post() {
             [ -n "$WEBHOOK" ] || { echo "没有配置 DISCORD_ALERT_WEBHOOK，跳过发送"; return 0; }
@@ -82,6 +79,6 @@ jobs:
           fi
 
           if [ "$prev" != "failure" ]; then
-            post "🔴 猫头鹰公益站 无法访问（${now} 北京时间）：${detail}。\\n已连续 3 次探测失败（外部探测，不在我们自己的服务器上）。可能是服务器 / 网络 / Caddy / 网关故障，请检查并按需在后台发布状态页公告。${mirror_line}"
+            post "🔴 猫头鹰公益站 无法访问（${now} 北京时间）：${detail}。\\n已连续 3 次探测失败（外部探测，不在我们自己的服务器上）。可能是服务器 / 网络 / Caddy / 网关故障，请检查服务器与网关。"
           fi
           exit 1

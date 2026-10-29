@@ -23,8 +23,8 @@ struct Site {
     health_not_json: bool,
     /// /v1/me 对任何请求（含没带 Key）都返回 200（鉴权漏洞）
     me_open: bool,
-    /// /status.json 重定向
-    redirect_status_json: bool,
+    /// /public/live 重定向
+    redirect_live: bool,
     seen: Arc<Mutex<Vec<(String, String)>>>,
 }
 
@@ -71,22 +71,10 @@ fn site(s: Site) -> Router {
         .route(
             "/public/live",
             get(|State(s): State<Site>, h: HeaderMap| async move {
-                serve(State(s), "/public/live", h, json!({"meta": {}})).await
-            }),
-        )
-        .route(
-            "/status.json",
-            get(|State(s): State<Site>, h: HeaderMap| async move {
-                if s.redirect_status_json {
+                if s.redirect_live {
                     return Redirect::permanent("/elsewhere").into_response();
                 }
-                serve(
-                    State(s),
-                    "/status.json",
-                    h,
-                    json!({"components": [], "active": [], "incidents": []}),
-                )
-                .await
+                serve(State(s), "/public/live", h, json!({"meta": {}})).await
             }),
         )
         .route(
@@ -155,7 +143,6 @@ async fn healthy_site_passes_without_a_key() {
             ("healthz", Flag::Pass),
             ("public/status", Flag::Pass),
             ("public/live", Flag::Pass),
-            ("status.json", Flag::Pass),
             ("queue-status", Flag::Pass),
             ("v1/me without key -> 401", Flag::Pass),
             ("v1/me wrong key -> 401", Flag::Pass),
@@ -164,7 +151,7 @@ async fn healthy_site_passes_without_a_key() {
     );
     assert_eq!(r.exit_code(), 0);
     assert!(
-        r.summary().contains("FAIL 0\nPASS 7\nINFO 1\n"),
+        r.summary().contains("FAIL 0\nPASS 6\nINFO 1\n"),
         "{}",
         r.summary()
     );
@@ -240,13 +227,13 @@ async fn failures_make_the_exit_code_nonzero() {
     // 重定向不跟随：状态码对不上就是失败（线上 http→https 配错时能看出来）
     let r = run(
         Site {
-            redirect_status_json: true,
+            redirect_live: true,
             ..Site::default()
         },
         None,
     )
     .await;
-    let o = r.outcomes.iter().find(|o| o.name == "status.json").unwrap();
+    let o = r.outcomes.iter().find(|o| o.name == "public/live").unwrap();
     assert_eq!(o.flag, Flag::Fail);
     assert!(o.line.contains("[308]"), "{}", o.line);
 }
@@ -265,7 +252,7 @@ async fn unreachable_site_fails_every_check_without_leaking_the_key() {
     )
     .await
     .unwrap();
-    assert_eq!(r.failed(), 8);
+    assert_eq!(r.failed(), 7);
     assert_eq!(r.exit_code(), 1);
     for o in &r.outcomes {
         assert_eq!(o.flag, Flag::Fail);

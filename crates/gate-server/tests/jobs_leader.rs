@@ -1,5 +1,5 @@
 //! 部署交接：另一个进程拿着 `jobs.lock` 时，新进程照常起来但不跑定时任务，等锁释放后再接手。
-//! 公开仓库：全部是合成数据；Discord / NovelAI / 官方状态页都不出本机。
+//! 公开仓库：全部是合成数据；Discord / NovelAI都不出本机。
 
 mod common;
 use common::*;
@@ -20,8 +20,6 @@ async fn ran(e: &Env) -> bool {
 async fn jobs_wait_for_the_previous_process_to_release_the_lock() {
     let e = setup(&[]).await;
     let s = &e.state;
-    s.jobs
-        .set_official_api(Some("http://127.0.0.1:9/never".into()));
     // 「旧进程」：同一个锁文件另开一份并拿着锁（flock 按打开的文件算，同进程里也互斥）
     let old = File::create(s.env.data_dir.join(LOCK_FILE)).unwrap();
     old.try_lock().unwrap();

@@ -35,7 +35,6 @@ const ENDPOINTS: &[(&str, &str)] = &[
     ("POST", "/abuse/1"),
     // 运营 / 监控
     ("GET", "/overview"),
-    ("GET", "/status"),
     ("GET", "/settings"),
     ("PUT", "/settings"),
     ("GET", "/runtime-limits"),

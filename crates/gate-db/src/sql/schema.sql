@@ -115,12 +115,6 @@ CREATE TABLE IF NOT EXISTS upstream_snapshots (   -- 每小时记一次上游真
     anlas REAL,                   -- 账号 Anlas 余额
     fresh INTEGER NOT NULL DEFAULT 0   -- 1 = 这次是主动刚读的（不是出图时留下的旧缓存），才能拿来算恢复速度
 );
-CREATE TABLE IF NOT EXISTS status_hourly (  -- 成员接口每小时各 HTTP 状态码的次数（app/status_stats.py）
-    hour INTEGER NOT NULL,
-    code INTEGER NOT NULL,
-    n INTEGER NOT NULL DEFAULT 0,
-    PRIMARY KEY (hour, code)
-);
 CREATE TABLE IF NOT EXISTS coupons (       -- 成员的券（现在只有「重置券」：在首页自己点一下，重置当天的 V5 / Anlas 额度）
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     key_id INTEGER NOT NULL,

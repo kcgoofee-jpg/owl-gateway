@@ -1,0 +1,72 @@
+name: UI regression
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ui-regression-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  regression:
+    name: full UI regression
+    runs-on: ubuntu-24.04
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@v7
+      - name: Use runner BoringSSL build tools
+        run: bash tools/ci/build-deps.sh
+        timeout-minutes: 5
+      # Prevent dpkg from rebuilding the man-db index after each package install.
+      - name: Skip man-db triggers
+        run: sudo rm -f /var/lib/man-db/auto-update
+      - name: Update apt indexes and install lightweight CJK font
+        # WQY MicroHei covers the simplified-Chinese UI text used by the layout checks;
+        # Noto CJK was a 61 MB package and dominated E2E setup downloads.
+        # Acquire::Retries: the 24-minute failed run (39969197783) was a slow apt mirror,
+        # not a regression — retry the download instead of burning the whole step timeout.
+        run: |
+          sudo apt-get update -o Acquire::Retries=3 -o Acquire::http::Timeout=30
+          sudo apt-get install -y -o Acquire::Retries=3 --no-install-recommends fonts-wqy-microhei
+        timeout-minutes: 10
+      - run: rustup show active-toolchain || rustup toolchain install
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: e2e
+      - uses: pnpm/action-setup@v6
+        with:
+          package_json_file: web/package.json
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 24
+          cache: pnpm
+          cache-dependency-path: web/pnpm-lock.yaml
+      - run: pnpm install --frozen-lockfile
+        working-directory: web
+      - uses: actions/cache@v4
+        with:
+          path: ~/.cache/ms-playwright
+          key: playwright-${{ runner.os }}-${{ hashFiles('web/pnpm-lock.yaml') }}
+      - run: pnpm exec playwright install --with-deps chromium
+        working-directory: web
+        timeout-minutes: 10
+      - run: cargo build --locked -p xtask
+      - name: Start the full local stack (fake upstream, synthetic data) and the web dev server
+        run: |
+          cargo xtask dev --data "$RUNNER_TEMP/owl-e2e-$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT" > /tmp/gate.log 2>&1 &
+          (cd web && pnpm exec vite --port 5174 --strictPort > /tmp/vite.log 2>&1 &)
+          for _ in $(seq 1 90); do
+            curl -fsS -m 2 http://127.0.0.1:18000/healthz >/dev/null 2>&1 && curl -fsS -m 2 -o /dev/null http://localhost:5174/ && exit 0
+            sleep 2
+          done
+          cat /tmp/gate.log /tmp/vite.log; exit 1
+      - run: pnpm exec playwright test
+        working-directory: web
+        env:
+          E2E_BASE: http://localhost:5174
+          E2E_COOKIES: ${{ runner.temp }}/owl-e2e-${{ github.run_id }}-${{ github.run_attempt }}/cookies.json
+        timeout-minutes: 20
+

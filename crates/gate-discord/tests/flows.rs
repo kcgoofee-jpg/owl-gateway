@@ -2,7 +2,7 @@
 //! 必须是下面写的这样。网关和 Discord 都换成 `common::MockServer`（本机假服务），测试里不连任何真实的 Discord。
 //!
 //! 管理员命令（`/open /limit /ban /unban /slots /revoke`）和 @奶妹 的自动回复已删除，
-//! `/quota`、`/help` 10-23 删除（额度看状态页和成员页）。
+//! `/quota`、`/help` 10-23 删除（额度看成员首页）。
 
 mod common;
 

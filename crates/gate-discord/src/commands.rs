@@ -10,7 +10,7 @@
 //!
 //! 命令只注册到 `DISCORD_GUILD_ID` 这一个服务器（公会级），不注册全局命令；
 //! `PUT` 是整体覆盖，所以删掉的命令（管理员的 `/open /limit /ban /unban /slots /revoke`，10-23 删的成员命令
-//! `/quota` `/help`：额度看状态页和成员页，10-26 删的 `/反馈`：反馈功能整个下线）在下一次启动同步时就从服务器里消失。
+//! `/quota` `/help`：额度看成员首页，10-26 删的 `/反馈`：反馈功能整个下线）在下一次启动同步时就从服务器里消失。
 
 use serde_json::{Value, json};
 use twilight_model::gateway::Intents;

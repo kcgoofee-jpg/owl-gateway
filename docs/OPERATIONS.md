@@ -16,16 +16,14 @@
 See [WORKFLOW.md](WORKFLOW.md). In short: push to `main`, then `tools/deploy.sh --wait`.
 The server never compiles (2 cores) and holds no GitHub credentials: the script downloads the CI artifacts
 locally, copies them over with `scp`, syncs `cutover.sh` / `compose.yml`, and runs `cutover.sh load`
-(new image becomes `owl-gate:staged`; `current` and rollback tag `previous` stay untouched), waits for
-an idle queue, promotes the candidate while retaining the old `current` as `previous`, restarts, then runs
-healthcheck and smoke. If waiting times out, the current container and rollback tag are unchanged; retry the
-same run after traffic subsides.
+(new image becomes `owl-gate:staged`; `current` and rollback tag `previous` stay untouched), promotes the candidate while retaining the old `current` as `previous`, restarts, then runs
+healthcheck and smoke. The old gateway finishes accepted requests during graceful shutdown before the new process starts.
 
 `restart` 是先停后起：旧网关收到 SIGTERM 立即关掉监听，在途和已排队的图出完（最多 120 秒）才退出，然后起新的，同一时刻只有一个网关在用账号。
 这期间网站断 1–2 分钟，Caddy 显示降级页（「网关自检中」）；脚本每 0.5 秒经本机 Caddy 打一次公网地址的 `/healthz` 和 `/`，最后按**实测**打印停站时长。
 不做不停站发布：交接期间两个网关各自不知道对方在用哪个账号，会让同一账号同时出两张而被上游回 429。
 `restart` 的 `up -d --remove-orphans` 会顺手删掉 compose 里已经没有的容器（比如已删除的 `owl-warden`）；手动 `docker rm -f owl-warden` 也行。
-网关收到停止信号后：停止接新请求 → 进行中的出图最多等 110 秒收尾记账 → 落盘状态码统计 → WAL checkpoint。
+网关收到停止信号后：停止接新请求 → 进行中的出图最多等 110 秒收尾记账 → WAL checkpoint。
 compose 的 `stop_grace_period` 是 120 秒，所以发布时进行中的图不会丢账。
 
 **改 Caddy 配置一律用 `deploy/v3/caddy-reload.sh`**：Caddy 容器是单文件只读挂载，宿主机上的文件被换了 inode（编辑器保存、`sed -i`、写临时文件再 `mv` 都会）后，容器里看到的还是旧文件，`caddy reload` 读进去的也是旧的，而且不报错。
@@ -37,10 +35,9 @@ compose 的 `stop_grace_period` 是 120 秒，所以发布时进行中的图不�
 
 仓库里的配置文件**不会自动同步到服务器**：改了 `deploy/Caddyfile.production`（或 `compose.yml`、`ops/` 里的脚本）之后，要手动拷到服务器对应位置
 （Caddyfile → `/opt/caddy/Caddyfile`，然后 `/opt/owl/caddy-reload.sh`，**不要** `docker exec caddy caddy reload`：见上面「改 Caddy 配置」）。
-`deploy/Caddyfile.production` 是模板，线上文件里还有 Cloudflare 信任段等本地改动，改线上时只做同样的增量；`deploy/Caddyfile.production` 里的 `MIRROR_BUCKET` / `REGION` 要换成线上状态页镜像的桶地址。
+`deploy/Caddyfile.production` 是模板，线上文件里还有 Cloudflare 信任段等本地改动，改线上时只做同样的增量。
 
-**页面降级**（10-18）：首页 / 服务条款 / 隐私政策在网关不可用时（Caddy 连不上网关，或网关回 502/503/504），2 秒内显示静态降级页（503 + `Retry-After`，附独立状态页镜像链接）；`/status` 同样降级但保持 200。
-出图和用户接口**不降级**，仍最长等 150 秒让重启中的网关接上、拿到真实错误码。镜像只显示状态，不能出图，也不会连 NovelAI（不会换出口 IP）。
+**页面降级**：网关不可用时，首页由 Caddy 返回静态维护页（503 + `Retry-After`），自动重试。出图和用户接口保留真实错误码。独立 `/status` 页面、`/status.json`、事件表、官方状态轮询及 S3 静态镜像已经移除；`/public/status` 仍提供首页元信息，`/admin/api/status` 仍提供告警配置。`/livez`、`/readyz`、`/healthz` 保留。
 
 10-27 起不再等队列：`restart` / `previous` 立即停机换版，停机 1–2 分钟由 Caddy 的维护页兜住（在途和已排队的图在旧进程退出前最多收尾 120 秒）。`load` 只将候选镜像打上 `staged` 标签，不改正在运行的版本或回滚标签。
 
@@ -73,9 +70,8 @@ image-gen        2      2     0      0     0      0     2000     4000         2
 | 每晚 03:30 | `naigate-backup`（`/etc/cron.d/naigate-backup`，`deploy/harden.sh` 装的） | 本机 GFS 轮换，快照先过 `naigate-strip-prompts`（清掉整张 `generation_audit`，不含提示词）：每日 14 份、每周日 8 份、每月 1 号 6 份，放在 `/opt/backups/{daily,weekly,monthly}/nai_gate-*.db.gz` |
 | 每晚 04:30 | `nightly_backup.sh` | 一致快照（不含原图，同样先过 `naigate-strip-prompts`）+ `.env` / `secret_key` / 上游 Token 存档 / 3.0 部署文件 / Caddy 配置，客户端 AES-256 加密后推 S3（脚本注释写 60 天过期，桶的生命周期配置未核对）；口令在服务器 `/root/.backup_pass`，务必在服务器之外另存一份 |
 | 每天 05:10 | `ro-snapshot.sh` | 脱敏只读快照 `/opt/backups/ro/owl-ro-YYYYMMDD.db.gz`（保留 7 份；去掉 Key 原文、盐、提示词、捐赠的上游 Token，来源 IP 打成前两段），本机用 `deploy/ops/pull-ro-snapshot.sh` 拉取 |
-| 每 5 分钟 | `status_mirror.sh` | 状态页（HTML + 外置的样式 / 脚本）静态镜像推 S3，主站挂了镜像仍在；页面快照时间停了超过 10 分钟 = 主站可能故障 |
 
-后三条是 root 的 crontab，原文在 `deploy/v3/ops/crontab`。本机还可以用 `deploy/ops/pull-backup-mac.sh`（每天 04:30，校验后保留 30 份）把加密备份多拉一份（异地第三份）。
+后两条是 root 的 crontab，原文在 `deploy/v3/ops/crontab`。本机还可以用 `deploy/ops/pull-backup-mac.sh`（每天 04:30，校验后保留 30 份）把加密备份多拉一份（异地第三份）。
 
 ## 改密钥
 
@@ -113,7 +109,6 @@ docker exec owl-gate nai-ops smoke http://127.0.0.1:8000   # 线上冒烟（不�
 curl -s http://127.0.0.1:3003/healthz
 ```
 
-状态页事件没有后台入口，需要时直接写库（`incidents` / `incident_updates` 表，公开 `/status` 和 `/status.json` 照旧读）；`nai-ops` 里没有 `incident`、`announce`、`dm-broadcast`、`prompt-stats`（已删除）。
 
 ## 安全红线
 
@@ -149,3 +144,9 @@ curl -s http://127.0.0.1:3003/healthz
 ### 部署连接中断
 
 部署 SSH 使用保活，覆盖长时间的在途请求收尾。连接意外断开时，先核对容器状态、当前镜像、迁移标记与健康检查；不能仅凭客户端超时重复切换。若旧容器已正常退出且新镜像已提升，只继续启动步骤。数据库已迁移时，旧镜像回滚必须遵守上面的数据库版本检查。
+
+### 状态页移除部署
+
+部署前用 SQLite 一致快照保存数据库。新版本启动时删除 `incident_updates`、`incidents`、`status_hourly` 以及 `novelai_official_status` 设置；请求日志、成员、额度、上游快照和结算不受影响。
+
+宿主机需要同步删除 root crontab 的 `status_mirror.sh` 项并移除该脚本；备份原始 crontab 与 Caddy 配置。Caddy 只增量删除 `/status` 专属代理、错误降级分支和静态镜像链接，保留线上网络与信任代理配置，再用 `caddy-reload.sh` 校验、加载并核对。历史镜像对象应从实际镜像桶按对象清单清理，保留其他备份。

@@ -69,9 +69,6 @@ async fn the_kernel_routes_are_gone() {
 async fn jobs_registry_and_last_run() {
     let _clock = clock(Some(NOW)).await;
     let e = setup(&[]).await;
-    e.state
-        .jobs
-        .set_official_api(Some("http://127.0.0.1:9/never".into()));
     let names: Vec<&str> = gate_server::jobs::JOBS.iter().map(|j| j.name).collect();
     assert_eq!(names, NAMES, "按登记顺序");
     assert!(e.state.jobs.last().await.is_empty(), "还没跑过");

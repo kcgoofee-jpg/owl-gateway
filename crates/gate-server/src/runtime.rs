@@ -325,7 +325,7 @@ impl TagQueue {
     }
 }
 
-/// 最近 10 分钟上游调用结果（状态页判断「上游不稳定」）。
+/// 最近 10 分钟上游调用结果（首页与后台判断「上游不稳定」）。
 #[derive(Default)]
 pub struct UpstreamHealth {
     events: Mutex<VecDeque<(f64, bool)>>,

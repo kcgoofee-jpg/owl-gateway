@@ -20,7 +20,7 @@ env:
 
 jobs:
   web:
-    name: web (biome / tsc / vitest / build)
+    name: web (biome / tsc / vitest)
     runs-on: ubuntu-24.04
     # Hang guard only: normal runs finish in ~1 minute. A timeout fails the job, never passes it.
     timeout-minutes: 15
@@ -41,7 +41,7 @@ jobs:
       - run: pnpm biome check .
       - run: pnpm tsc --noEmit
       - run: pnpm vitest run
-      - run: pnpm vite build
+      # The image job builds the production bundle once.
 
   # Lint and test run on separate runners (shared rust-cache): clippy 的 check 产物和
   # test 的二进制产物本来就不能复用，串行等于把工作区编两遍。
@@ -76,30 +76,14 @@ jobs:
       - run: cargo test --workspace --locked
 
   e2e:
-    name: e2e (playwright, layout rules)
+    name: e2e (release smoke)
     runs-on: ubuntu-24.04
-    # No needs: web — the web job uploads nothing e2e consumes (e2e runs its own vite dev
-    # server from source), so serializing on it only lengthened the critical path. The run
-    # still fails if either job fails, and tools/deploy.sh refuses any non-success run.
-    # Hang guard only: ~8 minutes warm including the local stack and the full spec suite.
-    timeout-minutes: 40
+    timeout-minutes: 20
     steps:
       - uses: actions/checkout@v7
       - name: Use runner BoringSSL build tools
         run: bash tools/ci/build-deps.sh
         timeout-minutes: 5
-      # Prevent dpkg from rebuilding the man-db index after each package install.
-      - name: Skip man-db triggers
-        run: sudo rm -f /var/lib/man-db/auto-update
-      - name: Update apt indexes and install lightweight CJK font
-        # WQY MicroHei covers the simplified-Chinese UI text used by the layout checks;
-        # Noto CJK was a 61 MB package and dominated E2E setup downloads.
-        # Acquire::Retries: the 24-minute failed run (39969197783) was a slow apt mirror,
-        # not a regression — retry the download instead of burning the whole step timeout.
-        run: |
-          sudo apt-get update -o Acquire::Retries=3 -o Acquire::http::Timeout=30
-          sudo apt-get install -y -o Acquire::Retries=3 --no-install-recommends fonts-wqy-microhei
-        timeout-minutes: 10
       - run: rustup show active-toolchain || rustup toolchain install
       - uses: Swatinem/rust-cache@v2
         with:
@@ -131,12 +115,12 @@ jobs:
             sleep 2
           done
           cat /tmp/gate.log /tmp/vite.log; exit 1
-      - run: pnpm exec playwright test
+      - run: pnpm exec playwright test e2e/release.spec.ts
         working-directory: web
         env:
           E2E_BASE: http://localhost:5174
           E2E_COOKIES: ${{ runner.temp }}/owl-e2e-${{ github.run_id }}-${{ github.run_attempt }}/cookies.json
-        timeout-minutes: 20
+        timeout-minutes: 5
 
   deploy-safety:
     name: deploy-safety (shell and cutover guards)

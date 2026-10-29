@@ -122,3 +122,56 @@ fn ddl_failure_rolls_back_permissions_and_can_be_retried() {
     );
     retired(&conn);
 }
+
+#[tokio::test]
+async fn status_retirement_preserves_usage_and_pending_settlements() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("gate.db");
+    drop(Db::open(&path).unwrap());
+    let conn = Connection::open(&path).unwrap();
+    conn.execute_batch(
+        "CREATE TABLE incidents(id INTEGER PRIMARY KEY, title TEXT);
+         CREATE TABLE incident_updates(id INTEGER PRIMARY KEY, incident_id INTEGER);
+         CREATE TABLE status_hourly(hour INTEGER, code INTEGER, n INTEGER);
+         INSERT INTO incidents VALUES(1,'synthetic');
+         INSERT INTO status_hourly VALUES(0,200,1);
+         INSERT INTO site_settings VALUES('novelai_official_status','{}');
+         INSERT INTO usage_log(ts,kind,status,images) VALUES(1,'image','ok',1);
+         INSERT INTO request_settlements(request_id,rid,key_id,status,day,updated_at)
+         VALUES('synthetic-pending','synthetic',1,'uncertain','2030-01-01',1);",
+    )
+    .unwrap();
+    drop(conn);
+    for _ in 0..2 {
+        drop(Db::open(&path).unwrap());
+        let conn = Connection::open(&path).unwrap();
+        let retired: i64 = conn.query_row(
+            "SELECT count(*) FROM sqlite_master WHERE name IN ('incidents','incident_updates','status_hourly')",
+            [], |row| row.get(0),
+        ).unwrap();
+        assert_eq!(retired, 0);
+        assert_eq!(
+            conn.query_row("SELECT count(*) FROM usage_log", [], |row| row
+                .get::<_, i64>(0))
+                .unwrap(),
+            1
+        );
+        assert_eq!(
+            conn.query_row("SELECT status FROM request_settlements", [], |row| row
+                .get::<_, String>(
+                0
+            ))
+            .unwrap(),
+            "uncertain"
+        );
+        assert_eq!(
+            conn.query_row(
+                "SELECT count(*) FROM site_settings WHERE key='novelai_official_status'",
+                [],
+                |row| row.get::<_, i64>(0)
+            )
+            .unwrap(),
+            0
+        );
+    }
+}

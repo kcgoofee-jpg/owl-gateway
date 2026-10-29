@@ -1,5 +1,5 @@
 //! 真实二进制的优雅关停：SIGTERM 到达时即使浏览器还开着实时推送（SSE），进程也要很快退出，
-//! 并且按顺序收尾——取消后台循环 → HTTP 停止接收 → 等记账任务 → 状态码统计落库 → WAL 并回主库。
+//! 并且按顺序收尾——取消后台循环 → HTTP 停止接收 → 等记账任务 → WAL 并回主库。
 //!
 //! 只在 unix 上跑（用 `kill -TERM`）。公开仓库：全部是合成数据，不连任何外部服务。
 
@@ -27,8 +27,6 @@ fn spawn_gateway(port: u16, data: &std::path::Path) -> Child {
         .env("NAI_IMAGE_HOST", "http://127.0.0.1:9")
         .env("ADMIN_PASSWORD", "dev-admin-password-123")
         .env("SECRET_KEY", "test-secret-key-test-secret-key-0123456789")
-        // 维护循环启动就会取一次官方状态：指到不可达的本机端口，保证不出本机
-        .env("OFFICIAL_STATUS_URL", "http://127.0.0.1:9/never")
         .env("RUST_LOG", "info")
         .stdout(Stdio::null())
         .stderr(Stdio::null())

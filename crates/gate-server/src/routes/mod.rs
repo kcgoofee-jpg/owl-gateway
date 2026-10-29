@@ -1,4 +1,4 @@
-//! 路由表。按接口分组：公开页面与状态、成员接口（出图 / 工具 / 补全 / 查询自己的额度）、成员页、机器人桥接、后台、状态页。
+//! 路由表。按接口分组：公开页面与状态、成员接口（出图 / 工具 / 补全 / 查询自己的额度）、成员页、机器人桥接、后台。
 
 pub mod admin;
 mod image;
@@ -7,7 +7,6 @@ mod member;
 mod pages;
 pub(crate) mod public;
 mod registration;
-pub mod status;
 
 use crate::AppState;
 use crate::web::PUBLIC_CSP;
@@ -24,7 +23,6 @@ pub fn router(state: AppState) -> Router {
     Router::new()
         .merge(pages::router())
         .merge(image::router())
-        .merge(status::router())
         .merge(public::router())
         .merge(me::router())
         .merge(registration::router())
@@ -112,7 +110,7 @@ fn maintenance_page(head_only: bool) -> Response {
     response
 }
 
-/// 没有的路径：浏览器拿到 HTML 404（带站名与回首页 / 状态页的链接），
+/// 没有的路径：浏览器拿到 HTML 404（带站名与回首页的链接），
 /// API / 客户端（`Accept` 不含 `text/html`）仍拿原来的 JSON `{"detail": …}`，文案不变。
 async fn not_found(uri: axum::http::Uri, headers: HeaderMap) -> Response {
     if wants_html(&headers) {
@@ -153,7 +151,6 @@ const NOT_FOUND_HTML: &str = r#"<!doctype html>
 <p>这个地址没有内容，可能已经下线，或者链接写错了。</p>
 <nav aria-label="站内导航">
 <p><a href="/">回首页</a></p>
-<p><a href="/status">查看服务状态</a></p>
 </nav>
 </main>
 </body>
@@ -235,14 +232,13 @@ mod tests {
     }
 
     #[test]
-    fn html_404_has_no_inline_style_and_links_home_and_status() {
+    fn html_404_has_no_inline_style_and_links_home() {
         // 与首页共用 CSP（style-src 'self'）：页面里不能有 style 属性 / <style>
         assert!(!NOT_FOUND_HTML.contains("style="));
         assert!(!NOT_FOUND_HTML.contains("<style"));
         assert!(!NOT_FOUND_HTML.contains("<script"));
         assert!(NOT_FOUND_HTML.contains("猫头鹰公益站"));
         assert!(NOT_FOUND_HTML.contains(r#"href="/""#));
-        assert!(NOT_FOUND_HTML.contains(r#"href="/status""#));
         let resp = html_not_found();
         assert_eq!(resp.status(), axum::http::StatusCode::NOT_FOUND);
         assert_eq!(resp.headers()["content-type"], "text/html; charset=utf-8");

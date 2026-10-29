@@ -7,7 +7,7 @@
 //! | `upstream_snapshot` 上游 V5 快照 | 10 分钟 ±20%，满 1 小时才记 | 主动读一次订阅，写 `upstream_snapshots`（后台「额度记录」页估算 V5 实测恢复速度用） |
 //! | `breaker` 全站熔断 | 10 分钟 ±20% | 15 分钟内上游失败 ≥ 5 次、≥ 30%、来自 ≥ 2 把 Key → 停 5 分钟 |
 //! | `key_guard` 单 Key 限流 | 10 分钟 ±20% | 1 小时被拒 ≥ 120 次 → 暂停这把 Key 1 小时 |
-//! | `maintenance` 维护 | 5 分钟 ±20% | 状态码统计落库 / 设置了保留期的记录才清（线上全部永久保留）/ 自动关闭不用处理的 Bug（最多 10 分钟一次）/ 注册服务的三个同步（`registration::registrar_jobs`）/ 磁盘自检 / 官方状态 |
+//! | `maintenance` 维护 | 5 分钟 ±20% | 设置了保留期的记录才清（线上全部永久保留）/ 注册服务的三个同步（`registration::registrar_jobs`）/ 磁盘自检 |
 //! | `abuse_scan` 小号扫描 | 6 小时 ±10% | 行为相似 / 同设备 / 设备相近 / 指纹异常 / 新号 / 共享 Key，以及关联扫描（同 IP 换号 / 同时异地 / 同参考图 / 同外部账号 / 服务器重合 / 电量相同）写进待审队列（[`abuse_scan`]），不自动封号 |
 //! | `anlas_reconcile` Anlas 自动核对 | 1 小时 ±10% | 和后台「Anlas 消耗核对」同一套（[`reconcile`]）；忙时等不到空档就跳过，差距偏大记一条「注意」Bug |
 //! | `idle_recycle` 闲置回收 | 1 小时 | 长期不用的 Key 删除（不拉黑，之后还能再 /register；站点出不了图的服务日不算，见 [`idle_recycle_window`]）；`KEY_INACTIVITY_DELETE_DAYS=0` 时**什么都不做** |
@@ -98,30 +98,10 @@ pub async fn shutdown(state: &AppState) {
     {
         tracing::warn!("等待后台任务超过 {SHUTDOWN_WAIT_SECONDS} 秒，放弃等待");
     }
-    if let Err(e) = flush_status_stats(state).await {
-        tracing::warn!("关停时状态码统计落库失败：{e}");
-    }
     match state.db.wal_checkpoint().await {
         Ok((busy, log, done)) => tracing::info!(busy, log, done, "WAL 已并回主库"),
         Err(e) => tracing::warn!("关停时 WAL checkpoint 失败：{e}"),
     }
-}
-
-/// 把内存里累计的状态码分布写进 `status_hourly`；写失败放回去下次再写。
-pub async fn flush_status_stats(state: &AppState) -> Result<(), gate_db::DbError> {
-    let items = state.status_stats.drain();
-    if items.is_empty() {
-        return Ok(());
-    }
-    if let Err(e) = state.db.flush_status_hourly(&items).await {
-        for ((hour, code), n) in items {
-            for _ in 0..n {
-                state.status_stats.record(code, hour as f64);
-            }
-        }
-        return Err(e);
-    }
-    Ok(())
 }
 
 // ---------------------------------------------------------------------------
@@ -150,7 +130,6 @@ pub async fn maintenance_once(state: &AppState) -> Vec<(&'static str, JobError)>
     }
     crate::registration::registrar_jobs(state).await;
     step!("disk", "磁盘检查", disk_check(state));
-    step!("official", "官方状态", official_status(state));
     failed
 }
 
@@ -188,7 +167,6 @@ pub async fn purge(state: &AppState) -> Result<(), JobError> {
             tracing::info!("[purge] 已清掉 {cleared} 条日志里超过 {origin_days} 天的 UA / IP");
         }
     }
-    flush_status_stats(state).await?;
     Ok(())
 }
 
@@ -212,23 +190,6 @@ async fn disk_check(state: &AppState) -> Result<(), JobError> {
             6.0 * 3600.0,
         );
     }
-    Ok(())
-}
-
-/// NovelAI 官方状态（status.io 公开接口）：状态页那边的 `fetch_official`，维护每轮取一次，失败保留上次的结果。
-/// 地址默认是官方接口；测试用 `state.jobs.set_official_api(..)`（进程内）或环境变量 `OFFICIAL_STATUS_URL`（起真实二进制时）
-/// 指到本地 / 不可达的地址，保证不出本机。
-async fn official_status(state: &AppState) -> Result<(), JobError> {
-    let url = state
-        .jobs
-        .official_api()
-        .or_else(|| {
-            std::env::var("OFFICIAL_STATUS_URL")
-                .ok()
-                .filter(|u| !u.is_empty())
-        })
-        .unwrap_or_else(|| crate::routes::status::OFFICIAL_API.to_string());
-    crate::routes::status::fetch_official(&state.db, &url, state.now()).await;
     Ok(())
 }
 

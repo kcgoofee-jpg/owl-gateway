@@ -1303,7 +1303,6 @@ async fn browser_gets_html_404_but_clients_still_get_json() {
     let html = String::from_utf8(body).unwrap();
     assert!(html.contains("猫头鹰公益站"), "{html}");
     assert!(html.contains(r#"href="/""#), "{html}");
-    assert!(html.contains(r#"href="/status""#), "{html}");
     // CSP 与首页一致：不允许内联样式 / 脚本，所以 404 页用系统默认样式
     assert!(
         headers["content-security-policy"]

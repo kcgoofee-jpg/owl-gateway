@@ -4,14 +4,13 @@
 # 网关容器固定在 Docker 网络 service-tools_edge 的 172.30.0.10:8000（见 deploy/v3/compose.yml），宿主机能直连；
 # 网络只需建一次：docker network create --subnet 172.30.0.0/24 service-tools_edge。
 # 网关用 FORWARDED_ALLOW_IPS 只信任 Caddy 所在网桥（172.30.0.1）带来的 X-Forwarded-For，compose 里已经配好。
-# 部署时把下面的 MIRROR_BUCKET / REGION 换成 status_mirror.sh 推送的 S3 桶地址（线上不进仓库的真实值）。
 # 网关不可用时的降级页（502/503/504）：只给浏览器看的页面用；出图 / 用户接口不用它（客户端要拿到真实的错误码）。
-# 参数 {args[0]} = 状态码：/status 保持 200（沿用旧行为），首页等页面返回 503 + Retry-After，监控和爬虫能看出站点不可用。
+# 参数 {args[0]} = 降级响应状态码（503）。
 (degraded_page) {
 	header Content-Type "text/html; charset=utf-8"
 	header Cache-Control "no-store"
 	header Retry-After "15"
-	respond `<!DOCTYPE html><html lang="zh-CN"><head><meta charset="utf-8"><title>暂时不可用 · 猫头鹰公益站</title><meta name="viewport" content="width=device-width,initial-scale=1"><style>body{font-family:system-ui,-apple-system,sans-serif;background:#0f1117;color:#e6edf3;display:flex;align-items:center;justify-content:center;min-height:100vh;margin:0;padding:20px;box-sizing:border-box}.card{background:#161b22;border:1px solid #30363d;border-radius:12px;padding:32px;max-width:520px;width:100%;text-align:center;box-shadow:0 8px 24px rgba(0,0,0,0.5)}h1{font-size:22px;margin:0 0 16px;color:#f0883e}p{color:#8b949e;line-height:1.6;font-size:14px;margin:0 0 16px}.btn{display:inline-block;padding:10px 20px;background:#238636;color:#fff;text-decoration:none;border-radius:6px;font-weight:600;font-size:14px}.btn:hover{background:#2ea043}.badge{display:inline-block;padding:4px 10px;background:#f0883e22;color:#f0883e;border-radius:20px;font-size:12px;font-weight:600;margin-bottom:12px}a.l{color:#8b93f0}</style></head><body><div class="card"><div class="badge">暂时不可用</div><h1>网关自检中</h1><p>网关主服务暂时没有响应（可能正在发布新版本或自检），通常几秒到几分钟内恢复。恢复期间的出图请求可能失败，请稍后再试。</p><p><a class="btn" href="http://MIRROR_BUCKET.s3-website.REGION.amazonaws.com/" target="_blank" rel="noopener">打开独立状态页</a><br><span style="font-size:12px;color:#6e7681">备用状态页：只显示状态，不能出图</span></p><p><a class="l" href="https://status.novelai.net" target="_blank" rel="noopener">NovelAI 官方状态 ↗</a></p><p style="font-size:12px;color:#484f58;margin-top:24px">页面每 15 秒自动重新检查连接…</p></div><script>setTimeout(function(){ location.reload(); }, 15000);</script></body></html>` {args[0]}
+	respond `<!DOCTYPE html><html lang="zh-CN"><head><meta charset="utf-8"><title>暂时不可用 · 猫头鹰公益站</title><meta name="viewport" content="width=device-width,initial-scale=1"><style>body{font-family:system-ui,-apple-system,sans-serif;background:#0f1117;color:#e6edf3;display:flex;align-items:center;justify-content:center;min-height:100vh;margin:0;padding:20px;box-sizing:border-box}.card{background:#161b22;border:1px solid #30363d;border-radius:12px;padding:32px;max-width:520px;width:100%;text-align:center;box-shadow:0 8px 24px rgba(0,0,0,0.5)}h1{font-size:22px;margin:0 0 16px;color:#f0883e}p{color:#8b949e;line-height:1.6;font-size:14px;margin:0 0 16px}.btn{display:inline-block;padding:10px 20px;background:#238636;color:#fff;text-decoration:none;border-radius:6px;font-weight:600;font-size:14px}.btn:hover{background:#2ea043}.badge{display:inline-block;padding:4px 10px;background:#f0883e22;color:#f0883e;border-radius:20px;font-size:12px;font-weight:600;margin-bottom:12px}a.l{color:#8b93f0}</style></head><body><div class="card"><div class="badge">暂时不可用</div><h1>网关自检中</h1><p>网关主服务暂时没有响应（可能正在发布新版本或自检），通常几秒到几分钟内恢复。恢复期间的出图请求可能失败，请稍后再试。</p><p><a class="l" href="https://status.novelai.net" target="_blank" rel="noopener">NovelAI 官方状态 ↗</a></p><p style="font-size:12px;color:#484f58;margin-top:24px">页面每 15 秒自动重新检查连接…</p></div><script>setTimeout(function(){ location.reload(); }, 15000);</script></body></html>` {args[0]}
 }
 
 # 网关只有一个地址 172.30.0.10（owl-gate）。部署是先停后起（cutover.sh restart），不再有临时网关 .11，
@@ -37,7 +36,7 @@ gate.davidzhao.top {
 
 	# 只压缩网页、后台、前端资源和公开 JSON；出图接口与两条实时推送（SSE）不压缩，避免缓冲
 	@compress {
-		path / /admin /admin/* /status /status.json /public/* /_owl/*
+		path / /admin /admin/* /public/* /_owl/*
 		not path /public/live/stream /admin/api/events
 	}
 	encode @compress zstd gzip
@@ -47,19 +46,8 @@ gate.davidzhao.top {
 		-Server
 	}
 
-	# 页面降级：网关容器重启或 502/503/504 时，2 秒内快速降级到静态页（含独立状态页镜像的链接），避免同生共死报原始 502。
+	# 页面降级：网关容器重启或 502/503/504 时，2 秒内快速降级到静态页，避免同生共死报原始 502。
 	# 只管浏览器打开的页面；出图 / 用户接口（/ai /user /v1 …）仍走下面那条（最长等 150 秒让重启中的网关接上，客户端拿真实错误码）。
-	handle /status {
-		reverse_proxy 172.30.0.10:8000 {
-			import gate_lb
-			lb_try_duration 2s
-			lb_try_interval 500ms
-			@status_err status 502 503 504
-			handle_response @status_err {
-				import degraded_page 200
-			}
-		}
-	}
 	@pages {
 		method GET HEAD
 		path /
@@ -86,14 +74,6 @@ gate.davidzhao.top {
 		}
 		handle @page_down {
 			import degraded_page 503
-		}
-		@status_down {
-			expression {http.error.status_code} in [502, 503, 504]
-			method GET HEAD
-			path /status
-		}
-		handle @status_down {
-			import degraded_page 200
 		}
 	}
 
