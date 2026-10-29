@@ -98,3 +98,30 @@ Director Tools/Inventory/Tokenizer 等未开放 → toast。
 - 模型清单：New=V5 Curated/V5 Full；Legacy=V4.5 Curated/V4.5 Full/V4 Curated/V4 Full/
   Anime V3/Furry V3 —— 与 owl BASE_MODELS+V5_MODELS 一一对应。
 - Quality：Standard/Light/None；UC Preset：None/Light/Heavy/Human Focus/Furry（owl 同）。
+
+## 6. 移动端（≤860px，官方 390×844 实测 2026-10-29）
+
+官方手机版是**单列布局**，桌面三栏全部重排，无并排 400px 面板：
+
+- **导航行**（48px，bg #191B31）：取消选择 40×28 · Anlas 药丸（仅数字+⚡，无
+  "Anlas:" 前缀）+ 充值 · 汉堡 40×28。
+- **额度条**（导航行下，bg #191B31）："N% of Opus Generations remaining + More Info"
+  + 进度条 + ➕；桌面版这根条在页脚里。owl 同位复用 `nai-quota`（文案为站点额度口径）。
+- **画布**：占满其余空间；空状态 hero（Eczar "Get Started" /
+  "Get Inspiration from our quick start gallery!" / "Click an image to copy the prompt."）
+  + 两列瀑布流（列距 4、左右 10）。
+- **折叠提示词条**（44px，停靠页脚上方）：单行提示词预览 + ▲ 展开箭头；点开是
+  **底部抽屉**（官方为可滚动面板：Prompt/Reference Images/Chunks 标签、Prompt/UC、
+  编辑区、Transparent BG…）。owl 把侧栏滚动区（模型行/提示词卡/图生图/设置卡）整体
+  滑入为抽屉，遮罩点击收起。
+- **页脚**（40px 高，左右 10 间隙 8）：齿轮 48×40（#22253F）｜Generate 1 Image
+  258×40（#F5F3C2 + Anlas 徽标）｜时钟 48×40（历史）。owl：齿轮→设置抽屉、
+  时钟→全屏历史；Steps/Guidance/Seed/Sampler 参数行移动端不展示。
+- **历史**：时钟按钮开全屏覆盖层，两列瀑布流（图片 176 宽、列距 4、纵横比 3:4），
+  头部 History + ✕，底部 lock/download-all/delete 三钮。
+- **汉堡菜单**：触屏无 hover——按 `(hover: hover)` 门控悬停开启；触屏点按开合、
+  点菜单外收起。菜单条目与官方同名（Account Settings / Logout / Quick Start Gallery /
+  Director Tools / Usage Limit / Inventory / Tokenizer / Discord），Inventory 与
+  Tokenizer owl 未实现→报错提示。
+- viewport meta 与官方一致：`maximum-scale=1, user-scalable=no,
+  interactive-widget=resizes-content`（键盘弹起压缩内容而非整页缩放）。
