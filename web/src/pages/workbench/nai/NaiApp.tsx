@@ -50,9 +50,9 @@ import { QUICKSTART } from "../quickstart";
 import { me as meSignal, reloadMe, start } from "../store";
 import { tokenizeText } from "../tokenizer";
 import {
-  MODEL_BLURBS,
   composeNegative,
   composePositive,
+  MODEL_BLURBS,
   type QualityPreset,
   qualityPresetList,
   type UcPreset,
@@ -158,15 +158,7 @@ function PopItem(props: {
 }
 
 /** 本页专用箭头：闭合朝下、展开朝上（官方口径；共享 ChevronIcon 是侧向的，留给旧版用）。 */
-function NaiChevron({
-  size = 14,
-  open = false,
-  angle,
-}: {
-  size?: number;
-  open?: boolean;
-  angle?: number;
-}) {
+function NaiChevron({ size = 14, open = false, angle }: { size?: number; open?: boolean; angle?: number }) {
   return (
     <svg
       width={size}
@@ -1352,7 +1344,13 @@ export function NaiApp() {
                       <stop offset="1" stop-color="var(--nai-accent)" stop-opacity="0.05" />
                     </linearGradient>
                   </defs>
-                  <g fill="none" stroke="url(#nai-hero-g)" stroke-width="2.5" stroke-linecap="round" opacity="0.5">
+                  <g
+                    fill="none"
+                    stroke="url(#nai-hero-g)"
+                    stroke-width="2.5"
+                    stroke-linecap="round"
+                    opacity="0.5"
+                  >
                     <path d="M320 130 C 350 70, 420 60, 460 110" />
                     <path d="M240 180 C 300 150, 350 160, 390 200" />
                     <path d="M480 190 C 520 150, 570 150, 610 190" />

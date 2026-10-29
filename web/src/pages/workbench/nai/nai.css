@@ -69,9 +69,7 @@ body.nai-page .toast {
   inset: 0;
   background: var(--nai-base);
   color: var(--nai-text);
-  font-family:
-    "Source Sans Pro", -apple-system, "PingFang SC", "Segoe UI", "Microsoft YaHei",
-    sans-serif;
+  font-family: "Source Sans Pro", -apple-system, "PingFang SC", "Segoe UI", "Microsoft YaHei", sans-serif;
   font-size: 16px;
   line-height: 1.4;
   -webkit-font-smoothing: antialiased;
@@ -295,15 +293,6 @@ body.nai-page .toast {
   gap: 8px;
   min-width: 0;
   min-height: 36px;
-}
-.nai-model-cell .nai-pop {
-  flex: none;
-}
-.nai-model-cell .nai-pill {
-  width: auto;
-}
-.nai-model-cell .nai-pop-panel {
-  min-width: 300px;
 }
 .nai-model-cell:first-child {
   flex: 1.2;
