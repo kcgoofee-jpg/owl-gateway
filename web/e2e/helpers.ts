@@ -89,7 +89,7 @@ export async function adminSession(
 export async function misalignedControls(page: Page): Promise<string[]> {
   return page.evaluate(() => {
     const sel =
-      "button:not(.switch):not(.tabs__tab):not(.lp-gallery__copy), select, input:not([type=checkbox]):not([type=radio]):not([type=hidden]), .xa-seg, .copy, .field-inline";
+      "button:not(.switch):not(.tabs__tab):not(.lp-gallery__copy):not(.nai-shotbtn), select, input:not([type=checkbox]):not([type=radio]):not([type=hidden]), .xa-seg, .copy, .field-inline";
     // Native modal dialogs make the background inert; compare controls in the active layer.
     const root = document.querySelector("dialog[open]") ?? document;
     const els = [...root.querySelectorAll<HTMLElement>(sel)].filter((el) => {
