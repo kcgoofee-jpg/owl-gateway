@@ -6,7 +6,7 @@
  * 暂未实现的能力（角色提示词、图生图、放大、变体、局部重绘等）点击时给出明确提示。
  */
 
-import { ArrowRight, Clock, Download, LayoutGrid, Pencil, Settings, Wand2 } from "lucide-preact";
+import { ArrowRight, Clock, Download, LayoutGrid, LogIn, Pencil, Settings, User, Wand2 } from "lucide-preact";
 import { useEffect, useRef, useState } from "preact/hooks";
 import {
   BASE_MODELS,
@@ -30,10 +30,8 @@ import {
   CloseIcon,
   CopyIcon,
   ExpandIcon,
-  HistoryIcon,
   LandscapeIcon,
   MenuIcon,
-  OwlIcon,
   PinIcon,
   PlayIcon,
   PlusIcon,
@@ -229,13 +227,6 @@ export function NaiApp() {
   // 移动端（≤860px）：底部设置抽屉与全屏历史。桌面布局不渲染这两个入口。
   const [sheetOpen, setSheetOpen] = useState(false);
   const [histOpen, setHistOpen] = useState(false);
-  const [welcome, setWelcome] = useState(() => {
-    try {
-      return localStorage.getItem("owl-nai-welcome-v1") !== "1";
-    } catch {
-      return true;
-    }
-  });
   const [pop, setPop] = useState<"" | "model" | "quality" | "uc" | "size" | "rescat" | "sampler">("");
   const [suggest, setSuggest] = useState<{ tags: string[] }>({ tags: [] });
   const [tokens, setTokens] = useState<number | null>(null);
@@ -244,15 +235,6 @@ export function NaiApp() {
 
   const abortRef = useRef<AbortController | null>(null);
   useEffect(() => () => abortRef.current?.abort(), []);
-
-  const closeWelcome = () => {
-    setWelcome(false);
-    try {
-      localStorage.setItem("owl-nai-welcome-v1", "1");
-    } catch {
-      /* 隐私模式写不进去就每次都弹 */
-    }
-  };
 
   const cycleTheme = () => {
     const order: WbTheme[] = ["dark", "sand", "slate"];
@@ -621,7 +603,7 @@ export function NaiApp() {
               aria-label="取消选择图片"
               onClick={() => setViewing(null)}
             >
-              <OwlIcon size={22} />
+              <SparkleIcon size={20} />
             </button>
             <div class="nai-anlas">
               <span class="nai-anlas-label">
@@ -664,9 +646,9 @@ export function NaiApp() {
                       <button
                         type="button"
                         class="nai-menu-item"
-                        onClick={() => toast("账号设置请在旧版工作台管理。")}
+                        onClick={() => toast("账号设置暂未开放。", { error: true })}
                       >
-                        <OwlIcon size={18} />
+                        <User size={18} />
                         <span>Account Settings</span>
                       </button>
                       <button type="button" class="nai-menu-item" onClick={() => void logout()}>
@@ -676,7 +658,7 @@ export function NaiApp() {
                     </>
                   ) : (
                     <a class="nai-menu-item" href="/login">
-                      <OwlIcon size={18} />
+                      <LogIn size={18} />
                       <span>Discord Login</span>
                     </a>
                   )}
@@ -724,10 +706,6 @@ export function NaiApp() {
                     <Pencil size={16} />
                     <span>Tokenizer</span>
                   </button>
-                  <a class="nai-menu-item" href="/workbench?legacy=1">
-                    <HistoryIcon size={18} />
-                    <span>Legacy Workbench</span>
-                  </a>
                   <div class="nai-menu-group">Help</div>
                   <button
                     type="button"
@@ -741,7 +719,6 @@ export function NaiApp() {
                     <SparkleIcon size={16} />
                     <span>Switch Theme (Dark / Sand / Slate)</span>
                   </button>
-                  <div class="nai-menu-version">owl-gateway</div>
                 </div>
               )}
             </div>
@@ -1013,7 +990,7 @@ export function NaiApp() {
                 class="nai-sq-btn nai-sq-btn--dim"
                 title="上传参考图"
                 aria-label="上传参考图"
-                onClick={() => toast("图生图暂未开放，需要时可用旧版工作台（?legacy=1）。", { error: true })}
+                onClick={() => toast("图生图暂未开放。", { error: true })}
               >
                 <UploadIcon size={16} />
               </button>
@@ -1022,7 +999,7 @@ export function NaiApp() {
                 class="nai-sq-btn nai-sq-btn--dim"
                 title="编辑参考图"
                 aria-label="编辑参考图"
-                onClick={() => toast("图生图暂未开放，需要时可用旧版工作台（?legacy=1）。", { error: true })}
+                onClick={() => toast("图生图暂未开放。", { error: true })}
               >
                 <Pencil size={16} />
               </button>
@@ -1331,9 +1308,7 @@ export function NaiApp() {
                   class="nai-tool nai-tool--wide"
                   title="放大"
                   aria-label="放大"
-                  onClick={() =>
-                    toast("放大（Upscale）暂未开放，需要时可用旧版工作台（?legacy=1）。", { error: true })
-                  }
+                  onClick={() => toast("放大（Upscale）暂未开放。", { error: true })}
                 >
                   <ExpandIcon size={16} />
                   <AnlasIcon size={11} />
@@ -1361,9 +1336,7 @@ export function NaiApp() {
                   class="nai-tool"
                   title="局部重绘"
                   aria-label="局部重绘"
-                  onClick={() =>
-                    toast("局部重绘（Inpaint）暂未开放，需要时可用旧版工作台（?legacy=1）。", { error: true })
-                  }
+                  onClick={() => toast("局部重绘（Inpaint）暂未开放。", { error: true })}
                 >
                   <Wand2 size={17} />
                 </button>
@@ -1566,37 +1539,6 @@ export function NaiApp() {
           </div>
           <div class="nai-hist-list">{railItems}</div>
           {railFoot}
-        </div>
-      )}
-
-      {/* 欢迎弹窗（本站自己的引导，样式对齐官方模态规格） */}
-      {welcome && (
-        <div class="nai-overlay" role="dialog" aria-modal="true" aria-label="欢迎">
-          <div class="nai-modal">
-            <button type="button" class="nai-modal-close" aria-label="关闭" onClick={closeWelcome}>
-              <CloseIcon size={18} />
-            </button>
-            <div class="nai-modal-body">
-              <div class="nai-modal-mark">
-                <OwlIcon size={32} />
-              </div>
-              <div class="nai-modal-title">欢迎来到猫头鹰公益站</div>
-              <div class="nai-modal-sub">AI 动漫图像生成 · 网页直接出图</div>
-              <ul class="nai-modal-list">
-                <li>每日免费出图 {dailyImages || "—"} 张</li>
-                <li>
-                  V5 模型每日 {member?.today?.daily_v5 ?? member?.policy?.daily_v5 ?? "—"} 张（按 Key 开放）
-                </li>
-                <li>参数与官方客户端一致，出图即记账</li>
-              </ul>
-              <button type="button" class="nai-modal-cta" onClick={closeWelcome}>
-                开始创作
-              </button>
-              <span class="nai-modal-legacy">
-                习惯旧版界面？<a href="/workbench?legacy=1">点这里切换</a>
-              </span>
-            </div>
-          </div>
         </div>
       )}
     </div>

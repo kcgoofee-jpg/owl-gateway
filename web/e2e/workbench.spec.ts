@@ -1,7 +1,7 @@
 /**
- * 生图工作台（Beta）端到端：成员从首页入口跳到 /workbench（默认已是 NovelAI 风格复刻页），
- * 出图与批量链路细节在 ?legacy=1 的旧版工作台上走完（xtask dev 的假上游），再做窄屏布局探针；
- * 游客只看到登录引导。成员会话来自 cookies.json，没有就整组跳过。
+ * 生图工作台端到端：成员走网关真实出图（xtask dev 的假上游），
+ * 多张批量、token 计数、窄屏布局探针；游客能看到编辑器外壳但不出图。
+ * 成员会话来自 cookies.json，没有就整组跳过。
  */
 import { expect, type Page, test } from "@playwright/test";
 import { readCreds } from "./devEnv";
@@ -19,127 +19,76 @@ async function checkLayout(page: Page, where: string) {
   expect(await noHorizontalScroll(page)).toBe(true);
 }
 
-test.describe("生图工作台（Beta）", () => {
+test.describe("生图工作台", () => {
   test.skip(!hasMember, "需要成员会话（cargo xtask dev 的 cookies.json）");
+  // 真实出图走同一个假上游，串行避免并发限流
+  test.describe.configure({ mode: "serial" });
 
-  test("首页入口跳转 → 工作台真实出图一张并进画廊", async ({ page, context }) => {
+  test("首页入口跳转 → 工作台真实出图一张并进历史", async ({ page, context }) => {
     await asMember(context);
     const errors = watchConsole(page);
     await page.goto("/");
     const entry = page.locator("#workbench-entry");
     await expect(entry).toBeVisible();
-    await expect(entry).toContainText("生图工作台");
-    await expect(entry).toContainText("Beta");
     await entry.click();
     await expect(page).toHaveURL(/\/workbench$/);
     await expect(page.locator(".nai-generate")).toBeVisible();
-    // 出图链路细节继续在旧版工作台上验证（?legacy=1 显式进入）
-    await page.goto("/workbench?legacy=1");
-
-    const draw = page.locator('section[aria-label="出图"]');
-    await draw.locator(".wb-side textarea").first().fill("1girl, seaside, sunset");
-    await page.getByRole("button", { name: /生成/ }).click();
-    // 假上游回装着真 PNG 的 zip：走完网关排队 / 记账，图出现在舞台与画廊
-    await expect(page.locator(".nai-shotbtn img")).toBeVisible({ timeout: 30_000 });
-    await expect(page.locator(".wb-thumb")).toHaveCount(1);
-
-    // 大图弹窗有种子与提示词，可下载
-    await page.locator(".wb-shot").click();
-    const dialog = page.locator("dialog[open]");
-    await expect(dialog).toContainText("种子");
-    await expect(dialog).toContainText("提示词");
-    await expect(dialog).toContainText("下载");
-    await dialog.locator("footer").getByRole("button", { name: "关闭" }).click();
-    await expect(dialog).toBeHidden();
-
-    // 出过图后额度行还在（reloadMe 刷新过）
-    await expect(page.locator(".wb-quota")).toBeVisible();
-
+    await page.locator('textarea[aria-label="提示词"]').fill("1girl, seaside, sunset");
+    // 假上游回装着真 PNG 的 zip：走完网关排队 / 记账，图进历史栏并进入选中态
+    await page.locator(".nai-generate").click();
+    await expect(page.locator(".nai-rail-item img")).toBeVisible({ timeout: 30_000 });
+    await expect(page.locator(".nai-rail-item img")).toHaveCount(1);
+    await expect(page.locator(".nai-view-img")).toBeVisible();
+    // 出过图后额度条刷新
+    await expect(page.locator(".nai-side-foot .nai-quota")).toBeVisible();
     expect(errors).toEqual([]);
     expect(await seriousViolations(page)).toEqual([]);
     await checkLayout(page, "工作台出图页");
   });
 
-  test("模型分词器：Qwen / T5 / CLIP 切分与 Token ID 往返", async ({ page }) => {
-    test.setTimeout(60_000);
-    await page.goto("/workbench?preview=1&legacy=1");
-    await expect(page.locator(".nv-model__btn")).toContainText("V5 Curated");
-    await page.locator('textarea[aria-label="提示词"]').fill("a red owl");
-    await page.getByRole("button", { name: "分词器" }).click();
-    let dialog = page.getByRole("dialog", { name: "分词器" });
-    await expect(dialog).toContainText("Qwen 3.5 Tokenizer");
-    await expect(dialog).toContainText("Token：3");
-    await dialog.getByRole("tab", { name: "Token ID" }).click();
-    await expect(dialog).toContainText("64 2438 50514");
-    await dialog.getByRole("tab", { name: "ID 输入" }).click();
-    await dialog.getByLabel("分词 ID").fill("64 2438 50514");
-    await dialog.getByRole("tab", { name: "Token 文本" }).click();
-    await expect(dialog).toContainText("red");
-    await dialog.getByRole("button", { name: "关闭分词器" }).last().click();
-
-    await page.locator(".nv-model__btn").click();
-    await page.getByRole("option", { name: /V4\.5 Full/ }).click();
-    await page.getByRole("button", { name: "分词器" }).click();
-    dialog = page.getByRole("dialog", { name: "分词器" });
-    await expect(dialog).toContainText("T5 Tokenizer");
-    await expect(dialog).toContainText("Token：7");
-    await dialog.getByRole("tab", { name: "Token ID" }).click();
-    await expect(dialog).toContainText("3 9 1131 3 2381 40 1");
-    await dialog.getByRole("button", { name: "关闭分词器" }).last().click();
-
-    await page.locator(".nv-model__btn").click();
-    await page.getByRole("option", { name: /^V3/ }).click();
-    await page.locator('textarea[aria-label="提示词"]').fill("猫, 夕日!");
-    await page.getByRole("button", { name: "分词器" }).click();
-    dialog = page.getByRole("dialog", { name: "分词器" });
-    await expect(dialog).toContainText("CLIP Tokenizer");
-    await expect(dialog).toContainText("Token：8");
-    await dialog.getByRole("tab", { name: "Token ID" }).click();
-    await expect(dialog).toContainText("163 234 360 267 23170 243 37156 256");
-  });
-
-  test("批量出图：两组各一张跑完，队列与画廊都有数", async ({ page, context }) => {
-    test.setTimeout(90_000);
+  test("多张出图：图片数 2 → 历史两张", async ({ page, context }) => {
     await asMember(context);
     const errors = watchConsole(page);
-    await page.goto("/workbench?legacy=1");
+    await page.goto("/workbench");
     await expect(page.locator(".nai-generate")).toBeVisible();
-    await page.getByRole("button", { name: "菜单" }).click();
-    await page.getByRole("tab", { name: "批量" }).click();
-
-    const batch = page.locator('section[aria-label="批量出图"]');
-    await batch.locator("textarea").nth(0).fill("batch one");
-    await batch.locator("textarea").nth(1).fill("batch two");
-    await expect(batch).toContainText("这次会送出 2 张");
-    await page.getByRole("button", { name: "批量开始" }).click();
-
-    await expect(batch.locator(".wb-job--done")).toHaveCount(2, { timeout: 60_000 });
-    await expect(batch).toContainText("已完成 2");
-    await expect(page.locator(".wb-thumb")).toHaveCount(2);
-
+    await page.locator(".nai-seg--count button", { hasText: "2" }).click();
+    await page.locator('textarea[aria-label="提示词"]').fill("1boy, mountain, dawn");
+    await page.locator(".nai-generate").click();
+    await expect(page.locator(".nai-rail-item img")).toHaveCount(2, { timeout: 45_000 });
+    // 生成按钮文案随图片数变化
+    await expect(page.locator(".nai-generate")).toContainText("Generate 2 Images");
     expect(errors).toEqual([]);
     expect(await seriousViolations(page)).toEqual([]);
   });
 
-  test("窄屏布局：375 / 320 无横向滚动，批量页签同样干净", async ({ page, context }) => {
+  test("提示词 token 计数：输入后进度条有宽度", async ({ page, context }) => {
     await asMember(context);
-    await page.goto("/workbench?legacy=1");
+    await page.goto("/workbench");
+    await expect(page.locator(".nai-generate")).toBeVisible();
+    const bar = page.locator(".nai-tokenbar i");
+    await expect(bar).toHaveCSS("width", "0px");
+    await page.locator('textarea[aria-label="提示词"]').fill("1girl, silver hair, café window");
+    await expect(bar).not.toHaveCSS("width", "0px");
+  });
+
+  test("窄屏布局：375 / 320 无横向滚动", async ({ page, context }) => {
+    await asMember(context);
+    await page.goto("/workbench");
+    await expect(page.locator(".nai-generate")).toBeVisible();
     for (const w of [375, 320]) {
       await page.setViewportSize({ width: w, height: 900 });
       await expect(page.locator(".nai-generate")).toBeVisible();
       await checkLayout(page, `工作台 ${w}px`);
     }
-    await page.getByRole("button", { name: "菜单" }).click();
-    await page.getByRole("tab", { name: "批量" }).click();
-    await checkLayout(page, "工作台批量页 375px");
   });
 
-  test("游客访问 /workbench：只见登录引导，不出图", async ({ page }) => {
+  test("游客访问 /workbench：见编辑器外壳，生成给登录提示", async ({ page }) => {
     const errors = watchConsole(page);
-    await page.goto("/workbench?legacy=1");
-    await expect(page.locator(".card__title")).toContainText("生图工作台");
-    await expect(page.getByRole("link", { name: "用 Discord 登录" })).toBeVisible();
-    expect(page.locator(".wb-side")).toHaveCount(0);
+    await page.goto("/workbench");
+    await expect(page.locator(".nai-frame")).toBeVisible();
+    await expect(page.locator(".nai-generate")).toBeVisible();
+    await page.locator(".nai-generate").click();
+    await expect(page.locator(".toast").first()).toBeVisible();
     expect(errors).toEqual([]);
   });
 });

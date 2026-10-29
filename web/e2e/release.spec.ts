@@ -21,9 +21,6 @@ test("guest landing renders and member APIs require credentials", async ({ page,
 test("member generates an image through the gateway", async ({ page, context }) => {
   await asMember(context);
   await page.goto("/workbench");
-  // 默认进 NovelAI 风格复刻页；全新上下文首次访问会弹欢迎窗
-  const welcome = page.locator(".nai-modal-cta");
-  if (await welcome.count()) await welcome.click();
   await page.locator('textarea[aria-label="提示词"]').fill("an owl, night sky");
   await page.locator(".nai-generate").click();
   await expect(page.locator(".nai-view-img")).toBeVisible({ timeout: 30_000 });

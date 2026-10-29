@@ -97,6 +97,8 @@ export async function misalignedControls(page: Page): Promise<string[]> {
       if (!r.width || !r.height || getComputedStyle(el).visibility === "hidden") return false;
       // 复合控件只看外框
       if (el.parentElement?.closest(".xa-seg, .copy, .field-inline")) return false;
+      // nai 选中态底栏：官网同款混高布局（胶囊/齿轮/种子居中对齐），不适用等高探针
+      if (el.closest(".nai-view-bottom")) return false;
       // 收起的 <details> 里的控件看不见（Chrome 仍算出位置），标题行除外
       const d = el.closest("details:not([open])");
       if (d && !el.closest("summary")) return false;
