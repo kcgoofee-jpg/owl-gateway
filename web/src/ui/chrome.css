@@ -66,6 +66,9 @@
   align-items: center;
   gap: var(--sp-2);
 }
+.site-top__wb {
+  white-space: nowrap;
+}
 /* 主题切换：无边框的圆形图标按钮，悬停时出现浅底 */
 .icon-btn {
   flex: none;

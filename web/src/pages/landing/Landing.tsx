@@ -20,7 +20,6 @@ import { StatusCard } from "./StatusCard";
 import { createStore, type Store } from "./store";
 import { SiteFooter, Topbar } from "./Topbar";
 import type { MeMember } from "./types";
-import { WorkbenchEntry } from "./WorkbenchEntry";
 import "./landing.css";
 
 /** 「Key 在头像里」的一次性提示（每个浏览器一次）。 */
@@ -120,7 +119,6 @@ function MemberHome({ me }: { me: MeMember }) {
       <div class="wrap lp-body">
         <StatusCard class="reveal" />
         {me.coupons && me.coupons.length > 0 && <Coupons coupons={me.coupons} />}
-        <WorkbenchEntry me={me} />
         <MyRequestsCard />
       </div>
     </>
@@ -218,6 +216,7 @@ function Page({ store }: { store: Store }) {
         }
         loginOpen={me !== undefined && !member}
         brandHref="/"
+        workbench={Boolean(member?.has_key)}
       />
       {member?.has_key && member.requires_web_login && !loginGateDismissed && (
         <div class="lp-gate" role="status">

@@ -122,6 +122,8 @@ export function Topbar(props: {
   user?: TopbarUser | undefined;
   /** 顶栏右侧是否显示游客登录入口 */
   loginOpen: boolean;
+  /** 已登录且有 Key 时，顶栏放「生图工作台」按钮，点进去就是 /workbench。 */
+  workbench?: boolean;
   /** Homepage brand links directly to the inspiration gallery. */
   brandHref?: string;
 }) {
@@ -137,6 +139,11 @@ export function Topbar(props: {
           <span class="brand__name">猫头鹰公益站</span>
         </a>
         <div class="site-top__right">
+          {props.workbench && (
+            <a id="workbench-entry" class="btn btn--primary btn--sm site-top__wb" href="/workbench">
+              生图工作台
+            </a>
+          )}
           {!props.user && props.loginOpen && (
             <a class="btn btn--primary" href={loginHref} aria-label="用 Discord 登录">
               登录

@@ -27,8 +27,8 @@ test.describe("生图工作台（Beta）", () => {
     await page.goto("/");
     const entry = page.locator("#workbench-entry");
     await expect(entry).toBeVisible();
-    await expect(entry.locator(".badge")).toHaveText("Beta");
-    await entry.getByRole("link", { name: "前往工作台" }).click();
+    await expect(entry).toHaveText("生图工作台");
+    await entry.click();
     await expect(page).toHaveURL(/\/workbench$/);
     await expect(page.locator("h1")).toContainText("生图工作台");
 
