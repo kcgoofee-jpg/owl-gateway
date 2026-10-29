@@ -354,8 +354,9 @@ test.describe("登录成员", () => {
       else await expect(item.locator(".ring__num")).toHaveText("∞");
     }
     await expect(page.getByText("我今天的额度")).toHaveCount(0);
-    // 有 Key 的成员不显示三步上手；游客才有的内容不出现
-    await expect(page.getByRole("heading", { name: "使用须知" })).toHaveCount(0);
+    // 有 Key 的成员不显示三步上手，仍能查看使用须知
+    await expect(page.getByRole("heading", { name: "使用须知" })).toBeVisible();
+    await expect(page.locator(".lp-rules")).toContainText("非商业公益服务");
     expect(errors).toEqual([]);
   });
 

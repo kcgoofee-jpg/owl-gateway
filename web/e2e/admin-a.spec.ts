@@ -496,15 +496,15 @@ test.describe("已登录", () => {
     await expect(page.getByRole("combobox", { name: /^每页/ })).toHaveValue("50");
     await expect(page.getByRole("link", { name: "请求日志" })).toHaveAttribute("aria-current", "page");
     await expect(page.locator(".lg-sum")).toContainText(/^共 [\d,]+/);
-    // 状态 / 原因 / IP 都在地址栏里；原因只在「拒绝」下出现
+    // 状态和原因在地址栏里；日志页不再提供 IP 筛选
     await open(
       page,
-      "/admin/logs/usage?status=rejected&reason=queue_full&ip=203.0.113.9",
+      "/admin/logs/usage?status=rejected&reason=queue_full",
       PAGES[1]?.ready as never,
     );
     await expect(page.getByRole("combobox", { name: /^状态/ })).toHaveValue("rejected");
     await expect(page.getByRole("combobox", { name: /^原因/ })).toHaveValue("queue_full");
-    await expect(page.getByRole("searchbox", { name: /^IP/ })).toHaveValue("203.0.113.9");
+    await expect(page.getByRole("searchbox", { name: /^IP/ })).toHaveCount(0);
     await page.getByRole("combobox", { name: /^状态/ }).selectOption("ok");
     await expect(page).toHaveURL(/status=ok/);
     await expect(page).not.toHaveURL(/reason=/);
