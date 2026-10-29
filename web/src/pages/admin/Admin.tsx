@@ -1,5 +1,5 @@
 /**
- * 后台外壳：登录门、侧栏导航（8 个分区）、路由、⌘K 命令面板、全局刷新节拍。
+ * 后台外壳：登录门、侧栏导航、路由、全局刷新节拍。
  *
  * 分区组件放在 ./sections/<id>.tsx，默认导出一个无参组件；数据用 useAdmin(url) 取，
  * 它跟着全局「刷新节拍」自动重取（SSE 推送事件时，或 SSE 不可用时页面可见每 15 秒一次）。
@@ -13,23 +13,20 @@ import {
   LogOut,
   Menu as MenuIcon,
   Moon,
-  Search,
   Server,
   SlidersHorizontal,
   Sun,
   Users,
 } from "lucide-preact";
 import type { ComponentChildren, ComponentType } from "preact";
-import { useEffect, useMemo, useRef, useState } from "preact/hooks";
+import { useEffect, useState } from "preact/hooks";
 import { LocationProvider, lazy, Route, Router, useLocation } from "preact-iso";
 import { ApiError, getJSON, sendJSON } from "../../lib/api";
 import { effectiveTheme, themeChoice, toggleTheme } from "../../lib/theme";
-import { Button, cx, Dialog, Field, Skeleton, toast } from "../../ui";
+import { Button, cx, Field, Skeleton, toast } from "../../ui";
 import "./admin.css";
 import { SitepaidBanner } from "./SitepaidHints";
 import { edits } from "./sections/live";
-import { memberLabel } from "./sections/members/logic";
-import type { Member } from "./sections/members/types";
 
 /* ---------------- 分区注册表 ---------------- */
 export type SectionId = "members" | "logs" | "upstream" | "onboarding" | "limits" | "system";
@@ -300,104 +297,6 @@ function NotFound() {
   );
 }
 
-/* ---------------- 命令面板（⌘K / Ctrl+K） ---------------- */
-function CommandPalette(props: { open: boolean; onClose: () => void }) {
-  const { route } = useLocation();
-  const [q, setQ] = useState("");
-  const [members, setMembers] = useState<Member[]>([]);
-  const [sel, setSel] = useState(0);
-  const input = useRef<HTMLInputElement>(null);
-  useEffect(() => {
-    if (!props.open) return;
-    setQ("");
-    setSel(0);
-    setTimeout(() => input.current?.focus(), 0);
-    getShared<{ members: Member[] }>("/admin/api/members")
-      // 以成员为主：停用的 Key 不列出（谁用过、什么时候停用的，操作日志里都有）
-      .then((r) => setMembers(r.members.filter((m) => m.enabled)))
-      .catch(() => setMembers([]));
-  }, [props.open]);
-  const items = useMemo(() => {
-    const needle = q.trim().toLowerCase();
-    const secs = SECTIONS.filter((s) => !needle || s.label.toLowerCase().includes(needle)).map((s) => ({
-      key: `s:${s.id}`,
-      label: s.label,
-      hint: "",
-      go: () => route(s.path),
-    }));
-    const mem = needle
-      ? members
-          .filter((m) =>
-            `${m.name} ${m.discord?.username ?? ""} ${m.discord?.display_name ?? ""} ${m.discord_id ?? ""} #${m.id}`
-              .toLowerCase()
-              .includes(needle),
-          )
-          .slice(0, 8)
-          .map((m) => ({
-            key: `m:${m.id}`,
-            label: memberLabel(m),
-            hint: `成员 #${m.id}`,
-            go: () => route(`/admin/members?focus=${m.id}`),
-          }))
-      : [];
-    return [...secs, ...mem];
-  }, [q, members, route]);
-  const run = (i: number) => {
-    items[i]?.go();
-    props.onClose();
-  };
-  return (
-    <Dialog open={props.open} onClose={props.onClose} title="跳转">
-      <div class="cmdk">
-        <div class="cmdk__search">
-          <Search size={16} aria-hidden="true" />
-          <input
-            ref={input}
-            class="input"
-            // 只承诺搜分区：成员 / Key 搜索还没做（结果里偶然出现成员不算数）
-            placeholder="搜索分区名"
-            aria-label="搜索分区"
-            value={q}
-            onInput={(e) => {
-              setQ((e.target as HTMLInputElement).value);
-              setSel(0);
-            }}
-            onKeyDown={(e) => {
-              if (e.key === "ArrowDown") {
-                e.preventDefault();
-                setSel((s) => Math.min(items.length - 1, s + 1));
-              } else if (e.key === "ArrowUp") {
-                e.preventDefault();
-                setSel((s) => Math.max(0, s - 1));
-              } else if (e.key === "Enter") {
-                e.preventDefault();
-                run(sel);
-              }
-            }}
-          />
-        </div>
-        <div class="cmdk__list" role="listbox" aria-label="结果">
-          {items.map((it, i) => (
-            <button
-              type="button"
-              key={it.key}
-              role="option"
-              aria-selected={i === sel}
-              class={cx("cmdk__item", i === sel && "is-sel")}
-              onMouseEnter={() => setSel(i)}
-              onClick={() => run(i)}
-            >
-              <span>{it.label}</span>
-              {it.hint && <span class="muted small">{it.hint}</span>}
-            </button>
-          ))}
-          {!items.length && <p class="muted small cmdk__empty">没有匹配的结果</p>}
-        </div>
-      </div>
-    </Dialog>
-  );
-}
-
 /* ---------------- 外壳 ---------------- */
 const drawerOpen = signal(false);
 
@@ -435,22 +334,11 @@ function Nav() {
 
 function Shell(props: { children: ComponentChildren; dataLive?: boolean }) {
   const dataLive = props.dataLive ?? true;
-  const [palette, setPalette] = useState(false);
   // 鉴权探针还没成功时不要开轮询 / SSE：避免后台壳在错误态里继续打接口
   useEffect(() => {
     if (!dataLive) return;
     return startTicker();
   }, [dataLive]);
-  useEffect(() => {
-    const onKey = (e: KeyboardEvent) => {
-      if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === "k") {
-        e.preventDefault();
-        setPalette(true);
-      }
-    };
-    addEventListener("keydown", onKey);
-    return () => removeEventListener("keydown", onKey);
-  }, []);
   const dark = themeChoice.value ? themeChoice.value === "dark" : effectiveTheme() === "dark";
   const ThemeIcon = dark ? Sun : Moon;
   return (
@@ -459,11 +347,6 @@ function Shell(props: { children: ComponentChildren; dataLive?: boolean }) {
         <div class="admin-brand">
           <span aria-hidden="true">🦉</span> 猫头鹰公益站
         </div>
-        <button type="button" class="admin-search" onClick={() => setPalette(true)}>
-          <Search size={15} aria-hidden="true" />
-          <span>跳转…</span>
-          <kbd>⌘K</kbd>
-        </button>
         <Nav />
         <div class="admin-side__foot">
           <Button variant="ghost" onClick={toggleTheme}>
@@ -505,16 +388,12 @@ function Shell(props: { children: ComponentChildren; dataLive?: boolean }) {
           </Button>
           <span class="admin-brand">🦉 猫头鹰公益站</span>
           <span class="spacer" />
-          <Button variant="ghost" icon aria-label="跳转" onClick={() => setPalette(true)}>
-            <Search size={18} aria-hidden="true" />
-          </Button>
         </header>
         <main class="admin-content">
           {dataLive && <SitepaidBanner />}
           {props.children}
         </main>
       </div>
-      <CommandPalette open={palette} onClose={() => setPalette(false)} />
     </div>
   );
 }

@@ -48,7 +48,7 @@ fn key_id_list(raw: &str) -> Result<Vec<i64>, ApiError> {
     Ok(parts.iter().filter_map(|x| x.parse().ok()).collect())
 }
 
-/// 请求日志（每次请求一行）：按成员 / 功能 / 状态 / 来源 IP / 原因码 / 错误编号筛选，服务端分页。
+/// 请求日志（每次请求一行）：按成员 / 功能 / 文生图版本 / 状态 / 原因码 / 错误编号筛选，服务端分页。
 /// `summary` 是同一组筛选条件下各状态的条数（不受 `status` 自己影响，这样筛了状态也看得到其他状态有多少）。
 async fn logs(State(state): State<AppState>, _s: AdminSession, q: AdminQuery) -> R {
     let key_raw = q.text("key_id").to_string();
@@ -59,9 +59,9 @@ async fn logs(State(state): State<AppState>, _s: AdminSession, q: AdminQuery) ->
     };
     let page = q.int("page", 1)?;
     let feature = q.get("feature").map(str::to_string);
+    let model_version = q.text("model_version").to_string();
     let rid = q.text("rid").to_string();
     let status = primitives::strip(q.text("status")).to_string();
-    let ip = primitives::strip(q.text("ip")).to_string();
     let reason = primitives::strip(q.text("reason")).to_string();
     let per_page = q.int("per_page", 20)?;
     let per_page: i64 = if matches!(per_page, 20 | 50 | 100) {
@@ -83,11 +83,13 @@ async fn logs(State(state): State<AppState>, _s: AdminSession, q: AdminQuery) ->
     {
         return Err(http(422, "未知功能"));
     }
+    if !matches!(model_version.as_str(), "" | "v45" | "v5")
+        || (!model_version.is_empty() && feature.as_deref() != Some("image"))
+    {
+        return Err(http(422, "未知文生图版本"));
+    }
     if !matches!(status.as_str(), "" | "ok" | "rejected" | "error") {
         return Err(http(422, "未知状态"));
-    }
-    if !ip.is_empty() && ip.parse::<std::net::IpAddr>().is_err() {
-        return Err(http(422, "IP 格式不对"));
     }
     if reason.len() > 24
         || !reason
@@ -112,9 +114,9 @@ async fn logs(State(state): State<AppState>, _s: AdminSession, q: AdminQuery) ->
         key_id,
         kinds,
         rid,
+        model_version,
         key_ids,
         status: String::new(),
-        ip,
         reason,
     };
     let summary = st.db.log_summary(&filter).await?;

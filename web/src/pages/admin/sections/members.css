@@ -259,33 +259,15 @@
   display: grid;
   gap: var(--sp-3);
   padding: var(--sp-4);
-  border: 1px solid var(--border);
+  border: 0;
   border-radius: var(--radius);
-  background: var(--surface);
-}
-.mb-card.is-focus {
-  border-color: var(--accent);
+  background: var(--surface-2);
 }
 .mb-card__top {
   display: flex;
   align-items: flex-start;
   justify-content: space-between;
   gap: var(--sp-2);
-}
-
-/* 定位高亮 */
-@keyframes mb-focus {
-  0%,
-  35% {
-    background: var(--accent-soft);
-    box-shadow: 0 0 0 2px var(--accent);
-  }
-  100% {
-    box-shadow: 0 0 0 0 transparent;
-  }
-}
-.mb-card.is-focus {
-  animation: mb-focus 2.4s ease-out;
 }
 
 /* 表格行状态（放在最后，特异性最高） */
@@ -297,9 +279,6 @@
 }
 .mb-table .mb-row.is-open td:first-child {
   box-shadow: inset 3px 0 0 var(--accent);
-}
-.mb-table .mb-row.is-focus td {
-  animation: mb-focus 2.4s ease-out;
 }
 
 /* 详情 */

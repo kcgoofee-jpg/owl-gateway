@@ -1,12 +1,12 @@
-/** 请求日志：每次请求一行（成员、模型、状态、耗时、消耗、来源 IP、客户端）；按成员 / 功能 / 状态 / IP / 编号筛选，服务端分页。 */
+/** 请求日志：每次请求一行；按成员 / 功能 / 文生图版本 / 状态 / 编号筛选，服务端分页。完整 IP 放在展开详情中。 */
 import { ChevronDown } from "lucide-preact";
 import { Fragment } from "preact";
 import { useEffect, useRef, useState } from "preact/hooks";
-import { fullTime, maskIp, num, withUnit } from "../../../../lib/format";
+import { fullTime, num, withUnit } from "../../../../lib/format";
 import { Badge, Button, CopyField, cx, SearchSelect, Skeleton } from "../../../../ui";
 import { useAdmin } from "../../Admin";
 import { LoadError, TableWrap } from "../_kit";
-import { FEATURES } from "../features";
+import { LOG_FEATURES } from "../features";
 import { FreshBar, useFrozenList, useScrolledPast } from "../live";
 import { memberKeyOptions } from "../members/logic";
 import { Empty, NARROW, Pager, useDebounced, useMedia, usePageData } from "../members/shared";
@@ -18,18 +18,10 @@ import { uaLabel } from "./ua";
 
 const SIZES = [20, 50, 100];
 const STATUSES = Object.entries(STATUS_TEXT).map(([id, label]) => ({ id, label }));
-const COLS = 9;
-
-/** 完整的 IPv4 / IPv6 才拿去筛（输入到一半不筛） */
-export function isIp(s: string): boolean {
-  const v4 = /^(\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})$/.exec(s);
-  if (v4) return v4.slice(1).every((x) => Number(x) <= 255);
-  return /^[0-9a-f:.]+$/i.test(s) && (s.match(/:/g)?.length ?? 0) >= 2 && s.length <= 45;
-}
-
+const COLS = 8;
 type Filter = (patch: Record<string, string | null>) => void;
 
-function Status(props: { l: UsageLog; onFilter: Filter }) {
+function Status(props: { l: UsageLog; onFilter: (patch: Record<string, string | null>) => void }) {
   const { l } = props;
   const label = l.status === "rejected" ? l.reason_label : "";
   return (
@@ -80,44 +72,7 @@ function Cost(props: { l: UsageLog }) {
   return <span class="lg-cost">{parts}</span>;
 }
 
-/**
- * 来源 IP：默认只展示打码后的前两段（IPv4）/ 前两组（IPv6），点「显示」才展开完整 IP。
- * 展开时本应记一条审计（谁看了完整 IP），但审计接口还没有，这里先不发请求；等后端加接口再接。
- */
-function Ip(props: { l: UsageLog; onFilter: Filter }) {
-  const ip = props.l.src;
-  const [shown, setShown] = useState(false);
-  if (!ip) return <span class="muted">—</span>;
-  const masked = maskIp(ip);
-  // 库里本来就是打码值（旧数据是 203.0.*.*）：没有再可展开的完整 IP，只显示打码值
-  if (masked === ip) return <span class="mono lg-ip">{masked}</span>;
-  return (
-    <span class="lg-ipis">
-      {shown ? (
-        <button
-          type="button"
-          class="lg-link mono lg-ip"
-          title={`只看 ${ip}`}
-          onClick={() => props.onFilter({ ip, page: null })}
-        >
-          {ip}
-        </button>
-      ) : (
-        <span class="mono lg-ip">{masked}</span>
-      )}
-      <button
-        type="button"
-        class="lg-link lg-iptoggle"
-        aria-pressed={shown}
-        aria-label={`${shown ? "隐藏" : "显示"}第 ${props.l.id} 条请求的完整 IP`}
-        onClick={() => setShown((v) => !v)}
-      >
-        {shown ? "隐藏" : "显示"}
-      </button>
-    </span>
-  );
-}
-
+/** 用量日志的来源 IP 只在展开详情中显示。 */
 function Client(props: { l: UsageLog }) {
   const ua = props.l.client;
   return (
@@ -180,6 +135,8 @@ function More(props: { l: UsageLog }) {
       )}
       <dt>上游账号</dt>
       <dd class="mono">{l.token_id || <span class="muted">—</span>}</dd>
+      <dt>来源 IP</dt>
+      <dd class="mono">{l.src || <span class="muted">—</span>}</dd>
       <dt>UA 原文</dt>
       <dd class="lg-wrap">{l.client || <span class="muted">—</span>}</dd>
       {HINTS.map(([k, label]) => (
@@ -232,12 +189,23 @@ export function Usage() {
   const page = intParam(query.page, 1);
   const per = intParam(query.per, 20, SIZES);
   const key = /^\d+(,\d+)*$/.test(query.key ?? "") ? (query.key as string) : "";
-  const feature = FEATURES.some((f) => f.id === query.feature) ? (query.feature as string) : "";
+  const requestedFeature =
+    query.feature === "image" && (query.model_version === "v45" || query.model_version === "v5")
+      ? `image_${query.model_version}`
+      : query.feature;
+  const selectedFeature = LOG_FEATURES.some((f) => f.id === requestedFeature)
+    ? (requestedFeature as string)
+    : "";
+  const feature = selectedFeature.startsWith("image_") ? "image" : selectedFeature;
+  const modelVersion = selectedFeature === "image_v45" ? "v45" : selectedFeature === "image_v5" ? "v5" : "";
   const status = STATUSES.some((s) => s.id === query.status) ? (query.status as string) : "";
   const reason =
     status === "rejected" && /^[a-z0-9_]{1,24}$/.test(query.reason ?? "") ? (query.reason as string) : "";
-  const ip = isIp(query.ip ?? "") ? (query.ip as string) : "";
-  const rid = (query.rid ?? "").toLowerCase().replace(/[^0-9a-f]/g, "");
+  // 后端按请求编号前 16 位匹配；前端保持同一口径，避免输入和结果条件不一致。
+  const rid = (query.rid ?? "")
+    .toLowerCase()
+    .replace(/[^0-9a-f]/g, "")
+    .slice(0, 16);
 
   const [ridInput, setRidInput] = useState(rid);
   useEffect(() => setRidInput(rid), [rid]);
@@ -246,18 +214,10 @@ export function Usage() {
     const clean = dRid
       .trim()
       .toLowerCase()
-      .replace(/[^0-9a-f]/g, "");
+      .replace(/[^0-9a-f]/g, "")
+      .slice(0, 16);
     if (clean !== rid) set({ rid: clean, page: null });
   }, [dRid]);
-
-  const [ipInput, setIpInput] = useState(ip);
-  useEffect(() => setIpInput(ip), [ip]);
-  const dIp = useDebounced(ipInput, 350);
-  useEffect(() => {
-    const clean = dIp.trim();
-    const next = isIp(clean) ? clean : "";
-    if (next !== ip) set({ ip: next, page: null });
-  }, [dIp]);
 
   const memberList = members.data?.members ?? [];
   const options = memberKeyOptions(memberList);
@@ -270,9 +230,9 @@ export function Usage() {
   if (key) qs.set("key_id", key);
   if (rid) qs.set("rid", rid);
   if (feature) qs.set("feature", feature);
+  if (modelVersion) qs.set("model_version", modelVersion);
   if (status) qs.set("status", status);
   if (reason) qs.set("reason", reason);
-  if (ip) qs.set("ip", ip);
   qs.set("per_page", String(per));
   qs.set("page", String(page));
   const { data, error, pending } = usePageData<LogsResp>(`/admin/api/logs?${qs}`);
@@ -298,11 +258,15 @@ export function Usage() {
         <span class="field-inline__k">功能</span>
         <select
           class="select"
-          value={feature}
-          onChange={(e) => set({ feature: e.currentTarget.value, page: null })}
+          value={selectedFeature}
+          onChange={(e) => {
+            const value = e.currentTarget.value;
+            const version = value === "image_v45" ? "v45" : value === "image_v5" ? "v5" : null;
+            set({ feature: version ? "image" : value, model_version: version, page: null });
+          }}
         >
           <option value="">全部</option>
-          {FEATURES.map((f) => (
+          {LOG_FEATURES.map((f) => (
             <option key={f.id} value={f.id}>
               {f.short}
             </option>
@@ -342,19 +306,12 @@ export function Usage() {
         </label>
       )}
       <label class="field-inline">
-        <span class="field-inline__k">IP</span>
-        <input
-          class="input mono lg-ipin"
-          type="search"
-          value={ipInput}
-          onInput={(e) => setIpInput(e.currentTarget.value)}
-        />
-      </label>
-      <label class="field-inline">
         <span class="field-inline__k">编号</span>
         <input
           class="input mono lg-ridin"
           type="search"
+          aria-label="按请求编号筛选日志"
+          placeholder="编号前 16 位"
           value={ridInput}
           onInput={(e) => setRidInput(e.currentTarget.value)}
         />
@@ -422,7 +379,6 @@ export function Usage() {
                       <Cost l={l} />
                     </div>
                     <div class="lg-card__meta small">
-                      <Ip l={l} onFilter={set} />
                       <Client l={l} />
                     </div>
                     <details
@@ -451,7 +407,6 @@ export function Usage() {
                       <th scope="col">状态</th>
                       <th scope="col">耗时</th>
                       <th scope="col">消耗</th>
-                      <th scope="col">IP</th>
                       <th scope="col">客户端</th>
                     </tr>
                   </thead>
@@ -479,9 +434,6 @@ export function Usage() {
                           </td>
                           <td>
                             <Cost l={l} />
-                          </td>
-                          <td>
-                            <Ip l={l} onFilter={set} />
                           </td>
                           <td>
                             <Client l={l} />

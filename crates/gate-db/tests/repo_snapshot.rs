@@ -519,6 +519,7 @@ async fn call(db: &Db, c: &Case) -> Out {
                 key_id: opt_int(a(2, "key_id")),
                 kinds: a(3, "kinds").filter(|v| !v.is_null()).map(str_list),
                 rid: s(a(5, "rid"), ""),
+                model_version: s(a(10, "model_version"), ""),
                 key_ids: a(6, "key_ids")
                     .filter(|v| !v.is_null())
                     .map(|v| {
@@ -530,7 +531,6 @@ async fn call(db: &Db, c: &Case) -> Out {
                     })
                     .unwrap_or_default(),
                 status: s(a(7, "status"), ""),
-                ip: s(a(8, "ip"), ""),
                 reason: s(a(9, "reason"), ""),
             };
             json!(
@@ -543,6 +543,7 @@ async fn call(db: &Db, c: &Case) -> Out {
                 key_id: opt_int(a(0, "key_id")),
                 kinds: a(1, "kinds").filter(|v| !v.is_null()).map(str_list),
                 rid: s(a(3, "rid"), ""),
+                model_version: s(a(8, "model_version"), ""),
                 key_ids: a(4, "key_ids")
                     .filter(|v| !v.is_null())
                     .map(|v| {
@@ -554,7 +555,6 @@ async fn call(db: &Db, c: &Case) -> Out {
                     })
                     .unwrap_or_default(),
                 status: s(a(5, "status"), ""),
-                ip: s(a(6, "ip"), ""),
                 reason: s(a(7, "reason"), ""),
             };
             json!(db.log_summary(&fl).await?)

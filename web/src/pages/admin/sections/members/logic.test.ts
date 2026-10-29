@@ -4,7 +4,6 @@ import {
   buildFilters,
   countFilter,
   DAY,
-  findByKeyId,
   hasReason,
   matchesQuery,
   memberIssues,
@@ -274,11 +273,6 @@ describe("排序 / 身份 / 查找", () => {
         mk({ discord: { id: "1", username: "u", display_name: "昵称", avatar_url: "", profile_url: "" } }),
       ),
     ).toBe("昵称");
-  });
-  it("按任一把 Key 找到合并后的成员", () => {
-    const a = mk({ all_key_ids: [11, 12], id: 12 });
-    expect(findByKeyId([a], 11)).toBe(a);
-    expect(findByKeyId([a], 99)).toBeUndefined();
   });
 });
 

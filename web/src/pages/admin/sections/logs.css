@@ -56,9 +56,6 @@
 }
 
 /* 请求日志 */
-.lg-ipin {
-  width: 11rem;
-}
 .lg-ridin {
   width: 8rem;
 }
@@ -86,28 +83,6 @@
 .lg-link:focus-visible {
   outline: 2px solid var(--focus);
   outline-offset: 2px;
-}
-.lg-ip {
-  font-size: var(--fs-xs);
-  white-space: nowrap;
-  max-width: 16ch;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  display: inline-block;
-  vertical-align: bottom;
-}
-/* 来源 IP：打码值 + 一个「显示 / 隐藏」小按钮（默认不暴露完整 IP） */
-.lg-ipis {
-  display: inline-flex;
-  align-items: baseline;
-  gap: 4px;
-  max-width: 100%;
-}
-.lg-iptoggle {
-  flex: none;
-  color: var(--muted);
-  font-size: var(--fs-xs);
-  white-space: nowrap;
 }
 .lg-ua,
 .lg-who {

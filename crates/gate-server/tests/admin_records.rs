@@ -23,8 +23,13 @@ async fn usage_logs_filter_and_paginate() {
             1 => (2, "upscale"),
             _ => (1, "chat"),
         };
+        let model = if i % 2 == 0 {
+            "nai-diffusion-4-5-full"
+        } else {
+            "nai-diffusion-5-full"
+        };
         sql.push_str(&format!(
-            "INSERT INTO usage_log(ts, key_id, key_name, kind, model, status, images, rid) VALUES ({}.0, {kid}, 'k{kid}', '{kind}', 'm', 'ok', 1, 'ab{:02x}');",
+            "INSERT INTO usage_log(ts, key_id, key_name, kind, model, status, images, rid) VALUES ({}.0, {kid}, 'k{kid}', '{kind}', '{model}', 'ok', 1, 'ab{:02x}');",
             1000 + i,
             i
         ));
@@ -94,6 +99,18 @@ async fn usage_logs_filter_and_paginate() {
         a.get(&format!("{A}/logs?feature=upscale")).await.json()["total"],
         15
     );
+    assert_eq!(
+        a.get(&format!("{A}/logs?feature=image&model_version=v45"))
+            .await
+            .json()["total"],
+        8
+    );
+    assert_eq!(
+        a.get(&format!("{A}/logs?feature=image&model_version=v5"))
+            .await
+            .json()["total"],
+        7
+    );
     // 文本生成 / 语音已删：不能再按它们筛选；旧的 chat / text 记录仍在全部列表里
     for f in ["text", "voice"] {
         a.get(&format!("{A}/logs?feature={f}"))
@@ -135,15 +152,6 @@ async fn usage_logs_filter_and_paginate() {
     );
     assert_eq!(v["logs"][0]["client"], "curl/8");
     assert_eq!(v["logs"][0]["src"], "203.0.113.9");
-    let v = a
-        .get(&format!("{A}/logs?ip=%20203.0.113.9%20"))
-        .await
-        .json();
-    assert_eq!(v["total"], 2, "同一个 IP 用过的所有 Key");
-    assert_eq!(
-        v["summary"],
-        json!({"total": 2, "ok": 0, "rejected": 2, "error": 0})
-    );
     assert_eq!(
         a.get(&format!("{A}/logs?reason=queue_full")).await.json()["total"],
         1
@@ -165,8 +173,8 @@ async fn usage_logs_filter_and_paginate() {
     );
     for (q, msg) in [
         ("status=oops", "未知状态"),
-        ("ip=203.0.113", "IP 格式不对"),
-        ("ip=203.0.113.9;drop", "IP 格式不对"),
+        ("model_version=v3", "未知文生图版本"),
+        ("feature=upscale&model_version=v5", "未知文生图版本"),
         ("reason=Queue-Full", "未知原因码"),
         ("key_id=1,x", "Key 编号无效"),
         ("key_id=1,", "Key 编号无效"),

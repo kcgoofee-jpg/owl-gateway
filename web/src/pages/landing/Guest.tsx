@@ -165,6 +165,9 @@ function Rules() {
   const extra = m.limits?.key_image_queue ?? 0;
   return (
     <dl class="lp-rules">
+      <Rule k="服务">
+        非商业公益服务，不保证持续可用；不保存提示词或生成图，请求结果和额度记录仅用于排障与防滥用。
+      </Rule>
       <Rule k="规格">
         可用模型和功能以登录后显示的个人权限为准。免费尺寸不超过 1024×1024（或等像素），步数不超过 28。Vibe
         要消耗 Anlas，并受个人额度限制。

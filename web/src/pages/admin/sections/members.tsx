@@ -1,9 +1,9 @@
 /**
  * 成员：列表（今日 / 近 7 天 / 累计用量）、筛选搜索排序、展开详情与全部 Key 操作。
- * 支持 ?focus=<Key 编号>（⌘K 面板跳转到这里，滚动并高亮该成员）和 ?filter=<筛选 id>（总览的「成员要处理」）。
+ * 支持 ?filter=<筛选 id>（总览的「成员要处理」）。
  */
 import { ChevronDown, Plus, Search } from "lucide-preact";
-import { useEffect, useMemo, useRef, useState } from "preact/hooks";
+import { useMemo, useRef, useState } from "preact/hooks";
 import { useLocation } from "preact-iso";
 import { usedOf, withUnit } from "../../../lib/format";
 import { Button, Menu, toast } from "../../../ui";
@@ -38,7 +38,6 @@ import {
   ALL_FILTER,
   buildFilters,
   countFilter,
-  findByKeyId,
   hasReason,
   matchesQuery,
   memberIssues,
@@ -84,7 +83,6 @@ export default function Members() {
   const [open, setOpen] = useState<Set<number>>(new Set());
   const [limit, setLimit] = useState(PAGE);
   const [dlg, setDlg] = useState<Dlg | null>(null);
-  const [focusId, setFocusId] = useState<number | null>(null);
   const [inviting, setInviting] = useState(false);
 
   const now = Date.now() / 1000;
@@ -132,37 +130,6 @@ export default function Members() {
   });
   const frozenList = live.rows ?? list;
   const shown = frozenList.slice(0, limit);
-
-  /* ?focus=<Key 编号>：展开、滚到视野中央并高亮 */
-  const focusParam = Number(query.focus) || 0;
-  const handled = useRef(0);
-  useEffect(() => {
-    if (!focusParam || !rows.length || handled.current === focusParam) return;
-    const m = findByKeyId(rows, focusParam);
-    if (!m) return;
-    handled.current = focusParam;
-    setFilter(ALL_FILTER);
-    setReason(null);
-    setSearch("");
-    setOpen((s) => new Set(s).add(m.id));
-    setFocusId(m.id);
-    const idx = sortMembers(rows, sort, dir).findIndex((x) => x.id === m.id);
-    if (idx >= limit) setLimit(idx + 10);
-  }, [focusParam, rows, sort, dir, limit]);
-  useEffect(() => {
-    if (focusId === null) return;
-    const t = setTimeout(() => {
-      document.getElementById(`mb-m-${focusId}`)?.scrollIntoView({
-        block: "center",
-        behavior: matchMedia("(prefers-reduced-motion: reduce)").matches ? "auto" : "smooth",
-      });
-    }, 60);
-    const clear = setTimeout(() => setFocusId(null), 6000);
-    return () => {
-      clearTimeout(t);
-      clearTimeout(clear);
-    };
-  }, [focusId]);
 
   const toggleOpen = (id: number) =>
     setOpen((s) => {
@@ -536,7 +503,6 @@ export default function Members() {
                 onSort={onSort}
                 open={open}
                 onToggle={toggleOpen}
-                focusId={focusId}
                 act={act}
               />
               {frozenList.length > shown.length && (

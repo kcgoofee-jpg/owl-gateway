@@ -253,18 +253,20 @@ export function rejectReasons(rows: Member[]): Array<{ tag: string; count: numbe
 export const hasReason = (m: Member, tag: string): boolean => m.auto_tags.some((x) => x.tag === tag);
 
 export function matchesQuery(m: Member, raw: string): boolean {
-  const q = raw.trim().toLowerCase();
-  if (!q) return true;
-  return (
-    m.name.toLowerCase().includes(q) ||
-    String(m.discord_id || "").includes(q) ||
-    [m.discord?.username, m.discord?.display_name].some((v) =>
-      String(v || "")
-        .toLowerCase()
-        .includes(q),
-    ) ||
-    m.tags.some((t) => `${t.tag} ${t.note || ""}`.toLowerCase().includes(q))
+  const terms = raw.normalize("NFKC").trim().toLowerCase().split(/\s+/).filter(Boolean);
+  if (!terms.length) return true;
+  const fields = [
+    m.name,
+    m.discord_id,
+    m.discord?.username,
+    m.discord?.display_name,
+    ...m.tags.flatMap((t) => [t.tag, t.note]),
+  ].map((v) =>
+    String(v || "")
+      .normalize("NFKC")
+      .toLowerCase(),
   );
+  return terms.every((term) => fields.some((field) => field.includes(term)));
 }
 
 /** 排序只留表头点击这一处（换向也在表头）；数字列大的在前，同值按名称正序 */
@@ -285,10 +287,6 @@ export function sortMembers<T extends Member>(list: T[], key: SortKey, dir: "asc
     return sign * (f(a) - f(b)) || compareText(titleOf(a), titleOf(b));
   });
 }
-
-/** 在成员列表里找到某个 Key（或合并后的任一把 Key）对应的成员 */
-export const findByKeyId = <T extends Member>(list: T[], id: number): T | undefined =>
-  list.find((m) => m.id === id || (m.all_key_ids || []).includes(id));
 
 export function scopeTextOf(s: { v5: boolean; anlas: boolean }): string {
   return scopeText(`v45${s.v5 ? ",v5" : ""}${s.anlas ? ",anlas" : ""}`);

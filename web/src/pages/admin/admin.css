@@ -12,32 +12,13 @@
   flex-direction: column;
   gap: var(--sp-3);
   padding: var(--sp-4) var(--sp-3);
-  border-right: 1px solid var(--border);
-  background: var(--surface);
+  background: var(--surface-2);
   overflow-y: auto;
 }
 .admin-brand {
   font-weight: 700;
   font-size: var(--fs-md);
   padding: 0 var(--sp-2);
-}
-.admin-search {
-  display: flex;
-  align-items: center;
-  gap: var(--sp-2);
-  padding: var(--sp-2) var(--sp-3);
-  border: 1px solid var(--border);
-  border-radius: var(--radius-sm);
-  background: var(--surface-2);
-  color: var(--muted);
-  font: var(--fs-sm) / 1.4 var(--font);
-  cursor: pointer;
-  text-align: left;
-}
-.admin-search kbd {
-  margin-left: auto;
-  font-size: var(--fs-xs);
-  color: var(--muted);
 }
 .admin-nav {
   display: grid;
@@ -84,6 +65,13 @@
   display: grid;
   gap: var(--sp-4);
 }
+
+/* 后台内容以留白和轻分隔组织，避免每个区块都套一层卡片边框。 */
+.admin-content .card {
+  border-color: transparent;
+  box-shadow: none;
+  background: transparent;
+}
 .admin-scrim {
   display: none;
 }
@@ -120,7 +108,6 @@
     align-items: center;
     gap: var(--sp-2);
     padding: var(--sp-2) var(--sp-3);
-    border-bottom: 1px solid var(--border);
     background: color-mix(in srgb, var(--surface) 92%, transparent);
     backdrop-filter: blur(8px);
   }
@@ -147,43 +134,6 @@
 .admin-login__err {
   color: var(--danger);
   font-size: var(--fs-sm);
-}
-
-/* 命令面板 */
-.cmdk {
-  display: grid;
-  gap: var(--sp-3);
-}
-.cmdk__search {
-  display: flex;
-  align-items: center;
-  gap: var(--sp-2);
-  color: var(--muted);
-}
-.cmdk__list {
-  display: grid;
-  gap: 2px;
-  max-height: 50vh;
-  overflow: auto;
-}
-.cmdk__item {
-  display: flex;
-  justify-content: space-between;
-  gap: var(--sp-3);
-  padding: var(--sp-2) var(--sp-3);
-  border: 0;
-  border-radius: var(--radius-sm);
-  background: none;
-  color: var(--text);
-  font: var(--fs-sm) / 1.4 var(--font);
-  text-align: left;
-  cursor: pointer;
-}
-.cmdk__item.is-sel {
-  background: var(--accent-soft);
-}
-.cmdk__empty {
-  padding: var(--sp-3);
 }
 
 /* 分区通用：页头 + 指标格 */

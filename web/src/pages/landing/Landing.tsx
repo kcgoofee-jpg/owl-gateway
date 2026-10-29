@@ -18,7 +18,7 @@ import { QuotaRings } from "./Rings";
 import { Splash, type Landing as SplashLanding, splashActive } from "./Splash";
 import { StatusCard } from "./StatusCard";
 import { createStore, type Store } from "./store";
-import { SiteFooter, Topbar } from "./Topbar";
+import { Topbar } from "./Topbar";
 import type { MeMember } from "./types";
 import "./landing.css";
 
@@ -255,7 +255,6 @@ function Page({ store }: { store: Store }) {
           <GuestHome />
         )}
       </main>
-      <SiteFooter />
     </>
   );
 }

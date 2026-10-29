@@ -437,21 +437,9 @@
   overflow-wrap: anywhere;
 }
 
-/* ---------- 页脚 ---------- */
-.lp-foot {
-  padding: var(--sp-6) var(--sp-4) var(--sp-10);
-  border-top: 1px solid var(--border);
-  text-align: center;
-  font-size: var(--fs-sm);
-  color: var(--muted);
-}
-.lp-foot a,
 .lp-main p a {
   color: var(--accent-text);
   text-decoration: underline;
-}
-.lp-foot .lp-foot__nowrap {
-  white-space: nowrap; /* 链接名不拆开：不让「使用体验问卷」折出孤字 */
 }
 
 /* 没有 Key：左边一段说明，右边 Discord 按钮（按钮按内容宽，不撑满）；窄屏上下排，按钮占满一行 */
@@ -727,21 +715,6 @@
 .lp-use-rules li {
   text-wrap: pretty;
 }
-.lp-use-terms {
-  width: fit-content;
-  max-width: 100%;
-  margin-inline: auto;
-  text-align: left;
-}
-.lp-use-terms summary {
-  cursor: pointer;
-  text-align: center;
-}
-/* Closed native details must not leave hidden text in layout measurements. */
-.lp-use-terms:not([open]) > :not(summary) {
-  display: none;
-}
-
 /* 生图工作台入口卡：说明一行 + 主按钮一行（按钮不能放进 <p>，见 WorkbenchEntry 注释） */
 .wb-entry__row {
   display: grid;

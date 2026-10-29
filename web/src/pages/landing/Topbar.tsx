@@ -4,7 +4,6 @@ import { ApiError, sendJSON } from "../../lib/api";
 import { animate, reduceMotion } from "../../lib/motion";
 import { effectiveTheme, themeChoice, toggleTheme } from "../../lib/theme";
 import { CopyField, Menu, toast } from "../../ui";
-import { UsageRules } from "./UsageRules";
 import "../../ui/chrome.css";
 import { useLoginHref } from "../../lib/deviceid";
 
@@ -155,22 +154,5 @@ export function Topbar(props: {
         </div>
       </div>
     </header>
-  );
-}
-
-export function SiteFooter(props: { note?: string }) {
-  return (
-    <footer class="lp-foot">
-      <p>
-        猫头鹰公益站 · 非商业公益服务，不保证可用性
-        {props.note ? ` · ${props.note}` : ""}
-      </p>
-      <p>本站不保存提示词或生成图片；请求结果与额度记录用于排障和防滥用。</p>
-      <details class="lp-use-terms">
-        <summary>使用规则</summary>
-        <p>禁止以下行为：</p>
-        <UsageRules />
-      </details>
-    </footer>
   );
 }

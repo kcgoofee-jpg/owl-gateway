@@ -130,12 +130,12 @@ pub struct LogFilter {
     pub kinds: Option<Vec<String>>,
     /// 空串 = 不筛。
     pub rid: String,
+    /// 文生图模型版本（v45 / v5）；空串 = 不筛。
+    pub model_version: String,
     /// 同一成员的多把 Key 一起查；空 = 不筛（与 `key_id` 同时给时两条都要满足）。
     pub key_ids: Vec<i64>,
     /// ok / rejected / error；空串 = 不筛。
     pub status: String,
-    /// 来源 IP（`src` 原文，精确匹配）；空串 = 不筛。
-    pub ip: String,
     /// 拒绝原因码（精确匹配）；空串 = 不筛。
     pub reason: String,
 }
@@ -238,6 +238,11 @@ fn log_filter(f: &LogFilter) -> (String, Vec<SqlValue>) {
         clauses.push("rid=?".into());
         args.push(SqlValue::Text(f.rid.clone()));
     }
+    match f.model_version.as_str() {
+        "v45" => clauses.push("lower(model) LIKE '%diffusion-4-5%'".into()),
+        "v5" => clauses.push("lower(model) LIKE '%diffusion-5%'".into()),
+        _ => {}
+    }
     if let Some(k) = f.key_id.filter(|k| *k != 0) {
         clauses.push("key_id=?".into());
         args.push(SqlValue::Integer(k));
@@ -249,11 +254,6 @@ fn log_filter(f: &LogFilter) -> (String, Vec<SqlValue>) {
     if !f.status.is_empty() {
         clauses.push("status=?".into());
         args.push(SqlValue::Text(f.status.clone()));
-    }
-    if !f.ip.is_empty() {
-        // `src!=''` 写出来才能用上部分索引 idx_log_src（WHERE src!=''）
-        clauses.push("src!='' AND src=?".into());
-        args.push(SqlValue::Text(f.ip.clone()));
     }
     if !f.reason.is_empty() {
         clauses.push("reason=?".into());
