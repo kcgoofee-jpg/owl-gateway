@@ -75,7 +75,8 @@
 .site-top__beta {
   padding: 0 6px;
   border-radius: 999px;
-  background: rgb(255 255 255 / 24%);
+  background: #fff;
+  color: #1b1d36;
   font-size: 11px;
   font-weight: 700;
   line-height: 18px;

@@ -111,7 +111,7 @@
 }
 .nai-app {
   --nai-sidebar: 400px;
-  --nai-history: 140px;
+  --nai-history: 200px;
   --nai-top: 52px;
   position: relative;
   box-sizing: border-box;
@@ -928,14 +928,14 @@
   appearance: none;
   width: auto;
   max-width: 100%;
-  height: 20px;
-  padding: 0 10px;
+  height: 24px;
+  padding: 0 12px;
   border: 0;
-  border-radius: 10px;
+  border-radius: 12px;
   background: var(--nai-panel);
   color: var(--nai-text);
   font: inherit;
-  font-size: 12px;
+  font-size: 13px;
   font-weight: 600;
   cursor: pointer;
 }
@@ -1223,7 +1223,6 @@
   gap: 10px;
   padding: 8px 12px 12px;
   background: var(--nai-panel);
-  contain: layout paint;
 }
 .nai-footgrid {
   display: grid;
@@ -1232,7 +1231,7 @@
 }
 .nv-stats {
   display: grid;
-  grid-template-columns: 48px 48px 36px minmax(120px, 1fr) 28px;
+  grid-template-columns: 48px 52px 36px minmax(0, 1fr) 28px;
   gap: 8px;
   align-items: end;
   padding: 8px 10px;
@@ -1397,9 +1396,11 @@
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  width: 34px;
+  width: 40px;
+  height: 40px;
   padding: 0;
-  background: transparent;
+  border-radius: 8px;
+  background: var(--nai-control);
 }
 .wb-shot {
   flex: 1;
@@ -1459,24 +1460,32 @@
   min-height: 0;
   overflow: auto;
   background: var(--nai-panel);
-  padding: 12px 8px 10px;
+  padding: 0;
   contain: strict;
   content-visibility: auto;
 }
 .nai-history h2 {
-  margin: 0 0 8px;
-  font-size: 13px;
-  font-weight: 600;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 0;
+  padding: 14px 16px 12px;
+  border-bottom: 1px solid #2e3254;
+  font-size: 16px;
+  font-weight: 700;
+  line-height: 24px;
 }
 .nai-history p {
-  margin: 0 0 8px;
+  margin: 0;
+  padding: 12px 16px;
   color: var(--nai-muted);
-  font-size: 12px;
+  font-size: 14px;
+  line-height: 20px;
 }
 .wb-thumb {
   display: block;
-  width: 100%;
-  margin: 0 0 8px;
+  width: calc(100% - 24px);
+  margin: 12px;
   padding: 0;
   border: 0;
   border-radius: 6px;
@@ -1572,10 +1581,10 @@ dialog.dialog {
   z-index: 8;
   top: calc(100% + 4px);
   left: 0;
-  min-width: 148px;
-  padding: 8px;
-  border-radius: 8px;
-  background: var(--nai-header);
+  min-width: 112px;
+  padding: 4px;
+  border-radius: 6px;
+  background: #22253f;
   box-shadow: var(--nai-shadow);
 }
 .nv-pop__menu--up {
@@ -1590,20 +1599,25 @@ dialog.dialog {
   align-items: center;
   gap: 8px;
   width: 100%;
-  height: 36px;
-  padding: 0 10px;
+  height: 32px;
+  padding: 0 12px;
   border: 0;
   border-radius: 4px;
   background: transparent;
-  color: var(--nai-text);
-  font: inherit;
-  font-weight: 700;
+  color: #fff;
+  font-family: "Source Sans Pro", "Segoe UI", sans-serif;
+  font-size: 16px;
+  font-weight: 600;
+  line-height: 24px;
   text-align: left;
   cursor: pointer;
 }
-.nv-pop__menu button:hover,
+.nv-pop__menu button:hover {
+  background: #2a2d4a;
+}
 .nv-pop__menu button[aria-selected="true"] {
-  background: var(--nai-control);
+  background: transparent;
+  color: #f5f3c2;
 }
 .nv-action__btns .nv-pop__menu {
   left: auto;
@@ -1909,6 +1923,7 @@ dialog.dialog {
   align-items: center;
   gap: 6px;
   width: 100%;
+  min-width: 0;
   height: 24px;
   padding: 0;
   border: 0;
@@ -1919,6 +1934,19 @@ dialog.dialog {
   font-weight: 700;
   text-align: left;
   cursor: pointer;
+}
+.nv-sampler svg {
+  flex: none;
+  transform: rotate(90deg);
+}
+.nv-sampler__name {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.nv-stats > label {
+  min-width: 0;
 }
 .nv-sampler--wide {
   height: 36px;

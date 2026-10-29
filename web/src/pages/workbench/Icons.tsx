@@ -79,16 +79,23 @@ export function ChevronIcon({ size = 16, open = false }: IconProps & { open?: bo
   );
 }
 
-export function HistoryIcon({ size = 16 }: IconProps) {
+export function HistoryIcon({ size = 22 }: IconProps) {
   return (
     <svg width={size} height={size} viewBox="0 0 24 24" fill="none" aria-hidden="true">
       <path
-        d="M4 12a8 8 0 1 0 2.3-5.6M4 4v5h5"
+        d="M12 7.5V12l2.6 1.6"
         stroke="currentColor"
-        stroke-width="2"
+        stroke-width="1.8"
         stroke-linecap="round"
         stroke-linejoin="round"
       />
+      <path
+        d="M5.2 8.2A8 8 0 1 1 4.2 13"
+        stroke="currentColor"
+        stroke-width="1.8"
+        stroke-linecap="round"
+      />
+      <path d="M4.2 5.2v3.4h3.4" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" />
     </svg>
   );
 }

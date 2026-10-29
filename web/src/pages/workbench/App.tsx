@@ -150,6 +150,22 @@ function Workbench({ me }: { me: MeMember }) {
 
   return (
     <div class={prefs.reducedMotion ? "nai-app is-quiet" : "nai-app"} data-wb-theme={prefs.theme}>
+      {import.meta.env.PROD && (
+        <Dialog
+          open
+          title="生图工作台还在测试"
+          onClose={() => {
+            location.href = "/";
+          }}
+          footer={
+            <a class="btn btn--primary" href="/">
+              返回首页
+            </a>
+          }
+        >
+          <p>这个页面还不能用。测完才会开放，请先回首页。</p>
+        </Dialog>
+      )}
       <header class="nv-top">
         <a class="nv-mark" href="/" aria-label="首页">
           <span class="nv-eyes" aria-hidden="true">

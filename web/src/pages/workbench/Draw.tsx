@@ -2187,22 +2187,20 @@ export function DrawPane(props: {
         )}
       </section>
       <aside class="nai-history" hidden={!props.historyOpen || props.hideHistory} aria-label="本次画廊">
-        <h2>历史</h2>
-        <p>刷新即清空</p>
-        {props.shots.length === 0 ? (
-          <p>还没有图。</p>
-        ) : (
-          props.shots.map((s, i) => (
-            <button
-              key={`${s.attrs.seed}-${i}`}
-              type="button"
-              class="wb-thumb"
-              onClick={() => props.openShot(s)}
-            >
-              <img src={s.url} alt={`画廊图 ${s.attrs.seed}`} loading="lazy" decoding="async" />
-            </button>
-          ))
-        )}
+        <h2>
+          历史
+          <PlayIcon size={12} />
+        </h2>
+        {props.shots.map((s, i) => (
+          <button
+            key={`${s.attrs.seed}-${i}`}
+            type="button"
+            class="wb-thumb"
+            onClick={() => props.openShot(s)}
+          >
+            <img src={s.url} alt={`画廊图 ${s.attrs.seed}`} loading="lazy" decoding="async" />
+          </button>
+        ))}
       </aside>
     </section>
   );
@@ -2277,8 +2275,8 @@ function SamplerPick(props: {
             props.onToggle();
           }}
         >
-          {SAMPLER_LABEL[props.value] ?? props.value}
-          {!props.compact && <ChevronIcon size={14} />}
+          <span class="nv-sampler__name">{SAMPLER_LABEL[props.value] ?? props.value}</span>
+          <ChevronIcon size={14} />
         </button>
         {props.open && (
           <div class="nv-pop__menu nv-pop__menu--up" role="listbox" aria-label="采样器">
