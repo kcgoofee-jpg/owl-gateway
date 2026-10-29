@@ -27,7 +27,7 @@ function contrast(a: string, b: string): number {
   return (x + 0.05) / (y + 0.05);
 }
 
-const TEXT = ["text", "text-2", "muted", "accent-text", "ok", "warn", "orange", "danger", "info", "v5"];
+const TEXT = ["text", "text-2", "muted", "accent-text", "ok", "warn", "danger", "info", "v5"];
 // 额度类型色（c-*）只画圆环和进度条，不当文字色：按非文字图形的 3:1 查（WCAG 1.4.11），轨道底色也算
 const GRAPHICS = ["c-v45", "c-v5", "c-anlas", "c-site", "c-site-v5"];
 const GRAPHIC_BACKGROUNDS = ["bg", "surface", "surface-2", "surface-3"];
