@@ -1,6 +1,7 @@
 /**
- * 生图工作台（Beta）端到端：成员从首页入口跳到 /workbench，走完整出图与批量链路（xtask dev 的假上游），
- * 再做窄屏布局探针；游客只看到登录引导。成员会话来自 cookies.json，没有就整组跳过。
+ * 生图工作台（Beta）端到端：成员从首页入口跳到 /workbench（默认已是 NovelAI 风格复刻页），
+ * 出图与批量链路细节在 ?legacy=1 的旧版工作台上走完（xtask dev 的假上游），再做窄屏布局探针；
+ * 游客只看到登录引导。成员会话来自 cookies.json，没有就整组跳过。
  */
 import { expect, type Page, test } from "@playwright/test";
 import { readCreds } from "./devEnv";
@@ -32,6 +33,8 @@ test.describe("生图工作台（Beta）", () => {
     await entry.click();
     await expect(page).toHaveURL(/\/workbench$/);
     await expect(page.locator(".nai-generate")).toBeVisible();
+    // 出图链路细节继续在旧版工作台上验证（?legacy=1 显式进入）
+    await page.goto("/workbench?legacy=1");
 
     const draw = page.locator('section[aria-label="出图"]');
     await draw.locator(".wb-side textarea").first().fill("1girl, seaside, sunset");
@@ -59,7 +62,7 @@ test.describe("生图工作台（Beta）", () => {
 
   test("模型分词器：Qwen / T5 / CLIP 切分与 Token ID 往返", async ({ page }) => {
     test.setTimeout(60_000);
-    await page.goto("/workbench?preview=1");
+    await page.goto("/workbench?preview=1&legacy=1");
     await expect(page.locator(".nv-model__btn")).toContainText("V5 Curated");
     await page.locator('textarea[aria-label="提示词"]').fill("a red owl");
     await page.getByRole("button", { name: "分词器" }).click();
@@ -99,7 +102,7 @@ test.describe("生图工作台（Beta）", () => {
     test.setTimeout(90_000);
     await asMember(context);
     const errors = watchConsole(page);
-    await page.goto("/workbench");
+    await page.goto("/workbench?legacy=1");
     await expect(page.locator(".nai-generate")).toBeVisible();
     await page.getByRole("button", { name: "菜单" }).click();
     await page.getByRole("tab", { name: "批量" }).click();
@@ -120,7 +123,7 @@ test.describe("生图工作台（Beta）", () => {
 
   test("窄屏布局：375 / 320 无横向滚动，批量页签同样干净", async ({ page, context }) => {
     await asMember(context);
-    await page.goto("/workbench");
+    await page.goto("/workbench?legacy=1");
     for (const w of [375, 320]) {
       await page.setViewportSize({ width: w, height: 900 });
       await expect(page.locator(".nai-generate")).toBeVisible();
@@ -133,7 +136,7 @@ test.describe("生图工作台（Beta）", () => {
 
   test("游客访问 /workbench：只见登录引导，不出图", async ({ page }) => {
     const errors = watchConsole(page);
-    await page.goto("/workbench");
+    await page.goto("/workbench?legacy=1");
     await expect(page.locator(".card__title")).toContainText("生图工作台");
     await expect(page.getByRole("link", { name: "用 Discord 登录" })).toBeVisible();
     expect(page.locator(".wb-side")).toHaveCount(0);

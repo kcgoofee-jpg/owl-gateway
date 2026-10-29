@@ -508,6 +508,7 @@ export function NaiApp() {
                 <div class="nai-block-body">
                   <textarea
                     class="nai-textarea"
+                    aria-label="提示词"
                     placeholder="写下你想画的内容，比如：1girl, sunset, very aesthetic"
                     value={prompt}
                     onInput={(e) => setPrompt((e.target as HTMLTextAreaElement).value)}
@@ -588,6 +589,7 @@ export function NaiApp() {
                 <div class="nai-block-body">
                   <textarea
                     class="nai-textarea"
+                    aria-label="负面提示词"
                     placeholder="不希望出现的内容（低质量词由预设自动带上）"
                     value={negative}
                     onInput={(e) => setNegative((e.target as HTMLTextAreaElement).value)}

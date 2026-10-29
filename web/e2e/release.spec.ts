@@ -21,11 +21,14 @@ test("guest landing renders and member APIs require credentials", async ({ page,
 test("member generates an image through the gateway", async ({ page, context }) => {
   await asMember(context);
   await page.goto("/workbench");
-  await page.getByRole("textbox", { name: "提示词", exact: true }).fill("an owl, night sky");
-  await page.getByRole("button", { name: /生成/ }).click();
-  await expect(page.locator(".nai-shotbtn img")).toBeVisible({ timeout: 30_000 });
+  // 默认进 NovelAI 风格复刻页；全新上下文首次访问会弹欢迎窗
+  const welcome = page.locator(".nai-modal-cta");
+  if (await welcome.count()) await welcome.click();
+  await page.locator('textarea[aria-label="提示词"]').fill("an owl, night sky");
+  await page.locator(".nai-generate").click();
+  await expect(page.locator(".nai-viewer-stage img")).toBeVisible({ timeout: 30_000 });
   expect(
-    await page.locator(".nai-shotbtn img").evaluate((image) => (image as HTMLImageElement).naturalWidth),
+    await page.locator(".nai-viewer-stage img").evaluate((image) => (image as HTMLImageElement).naturalWidth),
   ).toBeGreaterThan(0);
 });
 
