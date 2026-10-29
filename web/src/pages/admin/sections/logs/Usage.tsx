@@ -171,9 +171,10 @@ function More(props: { l: UsageLog }) {
       <dd>{l.rid ? <CopyField value={l.rid} label="编号" /> : <span class="muted">—</span>}</dd>
       {l.correlation_id && (
         <>
-          <dt>NovelAI 排障号</dt>
+          <dt>上游关联号</dt>
           <dd>
-            <CopyField value={l.correlation_id} label="排障号" />
+            <CopyField value={l.correlation_id} label="上游关联号" />
+            <span class="small muted">本站生成并随请求发送给上游，不是上游返回的错误编号。</span>
           </dd>
         </>
       )}

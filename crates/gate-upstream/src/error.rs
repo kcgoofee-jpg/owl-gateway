@@ -12,6 +12,8 @@ pub struct UpstreamError {
     pub transport: bool,
     /// 拒绝原因码（账号保护挡住时带上 gate_core::reasons 的码；旧版靠 str 子类 Reason 携带）。
     pub code: String,
+    /// `Retry-After` from the upstream 429, preserved for browser clients.
+    pub retry_after: Option<u64>,
     /// 网关自己的回调（全站冷却 / V5 续费确认 / 额度复核）拒绝的：旧版是 GateError 原样穿过 `request()`，
     /// 状态码与原因码不能再按上游错误改写成 502。
     pub local: bool,
@@ -25,6 +27,7 @@ impl UpstreamError {
             billing_uncertain: false,
             transport: false,
             code: String::new(),
+            retry_after: None,
             local: false,
         }
     }

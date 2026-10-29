@@ -3,6 +3,7 @@
 //! 这里用 `Arc<Mutex<..>>` 放进请求扩展，同时用 tokio task-local 让错误响应等「拿不到 Request 的地方」
 //! 也能读到请求编号；派生出去的任务只要带上 `ReqCtx` 的克隆，同样能写回。
 
+use std::sync::atomic::{AtomicU8, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::Instant;
 
@@ -11,7 +12,17 @@ tokio::task_local! {
 }
 
 #[derive(Clone)]
-pub struct ReqCtx(Arc<Mutex<Inner>>);
+pub struct ReqCtx(Arc<Mutex<Inner>>, Arc<RequestLifecycle>);
+
+const REQUEST_WAITING: u8 = 0;
+const REQUEST_DISPATCHING: u8 = 1;
+const REQUEST_DISPATCHED: u8 = 2;
+const REQUEST_CANCELLED: u8 = 3;
+const REQUEST_FINISHED: u8 = 4;
+
+struct RequestLifecycle {
+    stage: AtomicU8,
+}
 
 impl std::fmt::Debug for ReqCtx {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
@@ -51,6 +62,7 @@ struct Inner {
     share: i64,
     /// 本请求遇到上游「并发锁」的次数（网关已在同一账号上重试；不算 429）。
     locked: u32,
+    client_disconnected: bool,
 }
 
 /// `snapshot()`：写进用量日志的计时字段。
@@ -71,35 +83,113 @@ impl Default for ReqCtx {
 
 impl ReqCtx {
     pub fn new() -> Self {
-        Self(Arc::new(Mutex::new(Inner {
-            internal_id: hex::encode(rand::random::<[u8; 16]>()),
-            correlation_id: new_correlation_id(),
-            settlement_reserved: false,
-            settlement_day: None,
-            execution_unknown: false,
-            rid: new_rid(),
-            t0: Instant::now(),
-            sent: None,
-            up_status: 0,
-            logged: false,
-            upstream_fault: false,
-            model: String::new(),
-            token_id: None,
-            key_id: None,
-            key_name: String::new(),
-            peer: String::new(),
-            xff: String::new(),
-            ua: String::new(),
-            hints: Default::default(),
-            on_sent: None,
-            on_queued: None,
-            share: 0,
-            locked: 0,
-        })))
+        Self(
+            Arc::new(Mutex::new(Inner {
+                internal_id: hex::encode(rand::random::<[u8; 16]>()),
+                correlation_id: new_correlation_id(),
+                settlement_reserved: false,
+                settlement_day: None,
+                execution_unknown: false,
+                rid: new_rid(),
+                t0: Instant::now(),
+                sent: None,
+                up_status: 0,
+                logged: false,
+                upstream_fault: false,
+                model: String::new(),
+                token_id: None,
+                key_id: None,
+                key_name: String::new(),
+                peer: String::new(),
+                xff: String::new(),
+                ua: String::new(),
+                hints: Default::default(),
+                on_sent: None,
+                on_queued: None,
+                share: 0,
+                locked: 0,
+                client_disconnected: false,
+            })),
+            Arc::new(RequestLifecycle {
+                stage: AtomicU8::new(REQUEST_WAITING),
+            }),
+        )
     }
 
     fn with<R>(&self, f: impl FnOnce(&mut Inner) -> R) -> R {
         f(&mut self.0.lock().expect("reqctx"))
+    }
+
+    /// Atomically claim the right to persist dispatch. Once claimed, disconnect handling must
+    /// let this operation finish: the durable write and upstream POST form one conservative unit.
+    pub fn claim_dispatch(&self) -> bool {
+        match self.1.stage.compare_exchange(
+            REQUEST_WAITING,
+            REQUEST_DISPATCHING,
+            Ordering::AcqRel,
+            Ordering::Acquire,
+        ) {
+            Ok(_) => true,
+            Err(REQUEST_DISPATCHING | REQUEST_DISPATCHED) => true,
+            Err(_) => false,
+        }
+    }
+
+    pub fn dispatch_persisted(&self) {
+        self.1.stage.store(REQUEST_DISPATCHED, Ordering::Release);
+    }
+
+    /// Returns true only when a caller disconnect wins before dispatch has begun.
+    pub fn cancel_before_dispatch(&self) -> bool {
+        self.1
+            .stage
+            .compare_exchange(
+                REQUEST_WAITING,
+                REQUEST_CANCELLED,
+                Ordering::AcqRel,
+                Ordering::Acquire,
+            )
+            .is_ok()
+    }
+
+    pub fn finish_lifecycle(&self) {
+        let mut stage = self.1.stage.load(Ordering::Acquire);
+        while stage != REQUEST_CANCELLED && stage != REQUEST_FINISHED {
+            match self.1.stage.compare_exchange_weak(
+                stage,
+                REQUEST_FINISHED,
+                Ordering::AcqRel,
+                Ordering::Acquire,
+            ) {
+                Ok(_) => break,
+                Err(current) => stage = current,
+            }
+        }
+    }
+
+    pub fn lifecycle_stage(&self) -> &'static str {
+        match self.1.stage.load(Ordering::Acquire) {
+            REQUEST_WAITING => "queued",
+            REQUEST_DISPATCHING => "dispatching",
+            REQUEST_DISPATCHED => "dispatched",
+            REQUEST_CANCELLED => "cancelled_before_dispatch",
+            _ => "finished",
+        }
+    }
+
+    pub fn mark_client_disconnected(&self) -> bool {
+        self.with(|inner| {
+            if inner.client_disconnected {
+                false
+            } else {
+                inner.client_disconnected = true;
+                true
+            }
+        })
+    }
+
+    pub fn elapsed_ms(&self) -> u64 {
+        self.with(|inner| inner.t0.elapsed().as_millis().min(u128::from(u64::MAX)) as u64)
     }
 
     pub fn rid(&self) -> String {
@@ -333,6 +423,28 @@ impl gate_upstream::client::Observer for ReqCtx {
 #[cfg(test)]
 mod tests {
     use super::ReqCtx;
+
+    #[test]
+    fn disconnect_wins_before_dispatch_and_prevents_dispatch() {
+        let ctx = ReqCtx::new();
+        assert!(ctx.cancel_before_dispatch());
+        assert_eq!(ctx.lifecycle_stage(), "cancelled_before_dispatch");
+        assert!(!ctx.claim_dispatch());
+    }
+
+    #[test]
+    fn dispatch_claim_wins_and_cannot_be_cancelled() {
+        let ctx = ReqCtx::new();
+        assert!(ctx.claim_dispatch());
+        assert_eq!(ctx.lifecycle_stage(), "dispatching");
+        assert!(!ctx.cancel_before_dispatch());
+        assert!(
+            ctx.claim_dispatch(),
+            "dispatch retries after a lock are allowed"
+        );
+        ctx.dispatch_persisted();
+        assert_eq!(ctx.lifecycle_stage(), "dispatched");
+    }
 
     #[test]
     fn correlation_id_is_six_alphanumeric_and_separate_from_request_ids() {

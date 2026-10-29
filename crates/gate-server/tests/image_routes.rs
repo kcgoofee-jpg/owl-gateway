@@ -192,6 +192,60 @@ async fn image_tool_sends_and_persists_support_correlation_id() {
 }
 
 #[tokio::test]
+async fn image_tool_upstream_5xx_marks_unknown_in_body_and_settlement() {
+    use base64::Engine;
+    let e = setup(&[]).await;
+    common::policy_for(
+        &e.state,
+        1,
+        json!({"daily_anlas":10,"paid_parameters":true,"img2img":true,"image":true,"vibe":true,"tags":false,"upscale":true,"augment":true}),
+    )
+    .await;
+    let image = image::GrayImage::from_fn(64, 64, |x, y| image::Luma([((x * 4) ^ y) as u8]));
+    let mut png = std::io::Cursor::new(Vec::new());
+    image.write_to(&mut png, image::ImageFormat::Png).unwrap();
+    let source = base64::engine::general_purpose::STANDARD.encode(png.into_inner());
+    e.mock.push(
+        "/ai/upscale",
+        Reply::json(500, &json!({"message":"temporary upstream error"})),
+    );
+
+    let (status, _, body) = call(
+        &e.state,
+        "POST",
+        "/ai/upscale",
+        Some(TOKEN),
+        Some(json!({"image": source})),
+    )
+    .await;
+
+    assert_eq!(status, 502);
+    let response: Value = serde_json::from_slice(&body).unwrap();
+    assert_eq!(response["error"]["execution_unknown"], true);
+    assert_eq!(response["error"]["retryable"], false);
+    assert!(response["message"].as_str().unwrap().contains("结果未知"));
+    let row = logs(&e.state)
+        .await
+        .into_iter()
+        .find(|row| row["kind"] == "upscale")
+        .unwrap();
+    let rid = row["rid"].as_str().unwrap().to_string();
+    let settlement_status: String = e
+        .state
+        .db
+        .read(move |c| {
+            c.query_row(
+                "SELECT status FROM request_settlements WHERE rid=?",
+                [rid],
+                |r| r.get(0),
+            )
+        })
+        .await
+        .unwrap();
+    assert_eq!(settlement_status, "uncertain");
+}
+
+#[tokio::test]
 async fn nonstream_body_drop_keeps_success_charge_and_marks_interrupted() {
     let e = setup(&[]).await;
     let req = Request::builder()
@@ -291,6 +345,270 @@ async fn disconnect_before_generation_finishes_still_commits_once_and_marks_inte
         [rid], |r| r.get(0),
     )).await.unwrap();
     assert_eq!(delivery, "transport_interrupted");
+}
+
+#[tokio::test]
+async fn disconnect_while_waiting_for_upstream_cancels_before_dispatch_and_releases_the_slot() {
+    let e = setup(&[]).await;
+    const SECOND_SUBJECT: &str = "900000000000000002";
+    const SECOND_TOKEN: &str = "nai-test-member-key-000000000000000001";
+    let second = gate_db::repo::keys::NewKey {
+        name: "第二测试成员".into(),
+        token: SECOND_TOKEN.into(),
+        enabled: true,
+        expires_at: None,
+        discord_id: Some(SECOND_SUBJECT.into()),
+    };
+    e.state.db.create_key(&second, e.state.now()).await.unwrap();
+    e.state
+        .db
+        .set_member_overrides(
+            SECOND_SUBJECT,
+            &gate_core::member_policy::MemberOverrides {
+                daily_images: Some(100),
+                daily_v5: Some(10),
+                rpm: Some(60),
+                v5: Some(true),
+                image: Some(true),
+                vibe: Some(true),
+                tags: Some(true),
+                ..Default::default()
+            },
+        )
+        .await
+        .unwrap();
+    e.mock.push(
+        "/ai/generate-image",
+        Reply::Chunks {
+            status: 200,
+            content_type: "application/zip".into(),
+            chunks: vec![(
+                std::time::Duration::from_millis(500),
+                bytes::Bytes::from(gate_testkit::zip_of_pngs(1)),
+            )],
+        },
+    );
+    e.mock.push(
+        "/ai/generate-image",
+        Reply::status(200, bytes::Bytes::from(gate_testkit::zip_of_pngs(1))),
+    );
+
+    let request = |token: &str| {
+        Request::builder()
+            .method("POST")
+            .uri("/ai/generate-image")
+            .header("authorization", format!("Bearer {token}"))
+            .header("content-type", "application/json")
+            .body(Body::from(
+                serde_json::to_vec(&image_body("nai-diffusion-4-5-full", 1)).unwrap(),
+            ))
+            .unwrap()
+    };
+    let first = tokio::spawn(gate_server::app(e.state.clone()).oneshot(request(TOKEN)));
+    tokio::time::timeout(std::time::Duration::from_secs(1), async {
+        while e.mock.requests_to("/ai/generate-image").is_empty() {
+            tokio::time::sleep(std::time::Duration::from_millis(2)).await;
+        }
+    })
+    .await
+    .expect("first request should reach the scripted upstream");
+
+    let second = tokio::spawn(gate_server::app(e.state.clone()).oneshot(request(SECOND_TOKEN)));
+    tokio::time::timeout(std::time::Duration::from_secs(1), async {
+        loop {
+            let queued = e
+                .state
+                .db
+                .read(|c| {
+                    c.query_row(
+                        "SELECT COUNT(*) FROM request_settlements WHERE status='reserved'",
+                        [],
+                        |r| r.get::<_, i64>(0),
+                    )
+                })
+                .await
+                .unwrap();
+            if queued == 1 {
+                break;
+            }
+            tokio::time::sleep(std::time::Duration::from_millis(2)).await;
+        }
+    })
+    .await
+    .expect("second request should reserve budget while waiting for the upstream slot");
+    second.abort();
+    let _ = second.await;
+
+    let response = first.await.unwrap().unwrap();
+    assert_eq!(response.status(), 200);
+    let image = axum::body::to_bytes(response.into_body(), 1024 * 1024)
+        .await
+        .unwrap();
+    assert!(image.starts_with(b"PK"));
+
+    let rows = logs(&e.state).await;
+    let cancelled = rows
+        .iter()
+        .find(|row| row["status"] == "cancelled")
+        .expect("pre-dispatch disconnect should be recorded as cancelled");
+    assert_eq!(cancelled["reason"], "client_disconnected");
+    assert_eq!(cancelled["images"], 0);
+    let cancelled_rid = cancelled["rid"].as_str().unwrap().to_string();
+    let reservation_status: String = e
+        .state
+        .db
+        .read(move |c| {
+            c.query_row(
+                "SELECT status FROM request_settlements WHERE rid=?",
+                [cancelled_rid],
+                |r| r.get(0),
+            )
+        })
+        .await
+        .unwrap();
+    assert_eq!(reservation_status, "released");
+    assert_eq!(e.mock.requests_to("/ai/generate-image").len(), 1);
+    assert!(e.state.guard.with(|g| g.entries.is_empty()));
+    assert!(e.state.budget.lock().await.reservations.is_empty());
+
+    let (status, _, body) = call(
+        &e.state,
+        "POST",
+        "/ai/generate-image",
+        Some(SECOND_TOKEN),
+        Some(image_body("nai-diffusion-4-5-full", 1)),
+    )
+    .await;
+    assert_eq!(status, 200, "{}", String::from_utf8_lossy(&body));
+    assert_eq!(e.mock.requests_to("/ai/generate-image").len(), 2);
+}
+
+#[tokio::test]
+async fn stream_disconnect_while_upstream_is_busy_cancels_before_headers_and_releases_the_slot() {
+    let e = setup(&[]).await;
+    const SECOND_SUBJECT: &str = "900000000000000003";
+    const SECOND_TOKEN: &str = "nai-test-member-key-000000000000000002";
+    let second = gate_db::repo::keys::NewKey {
+        name: "流式测试成员".into(),
+        token: SECOND_TOKEN.into(),
+        enabled: true,
+        expires_at: None,
+        discord_id: Some(SECOND_SUBJECT.into()),
+    };
+    e.state.db.create_key(&second, e.state.now()).await.unwrap();
+    e.state
+        .db
+        .set_member_overrides(
+            SECOND_SUBJECT,
+            &gate_core::member_policy::MemberOverrides {
+                daily_images: Some(100),
+                daily_v5: Some(10),
+                rpm: Some(60),
+                v5: Some(true),
+                image: Some(true),
+                vibe: Some(true),
+                tags: Some(true),
+                ..Default::default()
+            },
+        )
+        .await
+        .unwrap();
+    e.mock.push(
+        "/ai/generate-image",
+        Reply::Chunks {
+            status: 200,
+            content_type: "application/zip".into(),
+            chunks: vec![(
+                std::time::Duration::from_millis(500),
+                bytes::Bytes::from(gate_testkit::zip_of_pngs(1)),
+            )],
+        },
+    );
+    e.mock.push(
+        "/ai/generate-image",
+        Reply::status(200, bytes::Bytes::from(gate_testkit::zip_of_pngs(1))),
+    );
+
+    let request = |token: &str, path: &str, mut body: Value| {
+        if path.ends_with("-stream") {
+            body["parameters"]["stream"] = json!("msgpack");
+        }
+        Request::builder()
+            .method("POST")
+            .uri(path)
+            .header("authorization", format!("Bearer {token}"))
+            .header("content-type", "application/json")
+            .body(Body::from(serde_json::to_vec(&body).unwrap()))
+            .unwrap()
+    };
+    let first = tokio::spawn(gate_server::app(e.state.clone()).oneshot(request(
+        TOKEN,
+        "/ai/generate-image",
+        image_body("nai-diffusion-4-5-full", 1),
+    )));
+    tokio::time::timeout(std::time::Duration::from_secs(1), async {
+        while e.mock.requests_to("/ai/generate-image").is_empty() {
+            tokio::time::sleep(std::time::Duration::from_millis(2)).await;
+        }
+    })
+    .await
+    .expect("first request should reach the scripted upstream");
+
+    let second = tokio::spawn(gate_server::app(e.state.clone()).oneshot(request(
+        SECOND_TOKEN,
+        "/ai/generate-image-stream",
+        image_body("nai-diffusion-4-5-full", 1),
+    )));
+    tokio::time::timeout(std::time::Duration::from_secs(1), async {
+        loop {
+            let queued = e
+                .state
+                .db
+                .read(|c| {
+                    c.query_row(
+                        "SELECT COUNT(*) FROM request_settlements WHERE status='reserved'",
+                        [],
+                        |r| r.get::<_, i64>(0),
+                    )
+                })
+                .await
+                .unwrap();
+            if queued == 1 {
+                break;
+            }
+            tokio::time::sleep(std::time::Duration::from_millis(2)).await;
+        }
+    })
+    .await
+    .expect("stream request should reserve budget while upstream is busy");
+    second.abort();
+    let _ = second.await;
+
+    let response = first.await.unwrap().unwrap();
+    assert_eq!(response.status(), 200);
+    let _ = axum::body::to_bytes(response.into_body(), 1024 * 1024)
+        .await
+        .unwrap();
+    let rows = logs(&e.state).await;
+    let cancelled = rows
+        .iter()
+        .find(|row| row["kind"] == "image_stream" && row["status"] == "cancelled")
+        .expect("pre-dispatch stream disconnect should be recorded as cancelled");
+    assert_eq!(cancelled["reason"], "client_disconnected");
+    assert!(e.mock.requests_to("/ai/generate-image-stream").is_empty());
+    assert!(e.state.guard.with(|g| g.entries.is_empty()));
+    assert!(e.state.budget.lock().await.reservations.is_empty());
+
+    let (status, _, body) = call(
+        &e.state,
+        "POST",
+        "/ai/generate-image",
+        Some(SECOND_TOKEN),
+        Some(image_body("nai-diffusion-4-5-full", 1)),
+    )
+    .await;
+    assert_eq!(status, 200, "{}", String::from_utf8_lossy(&body));
+    assert_eq!(e.mock.requests_to("/ai/generate-image").len(), 2);
 }
 
 #[tokio::test]
@@ -511,6 +829,52 @@ async fn vibe_requires_member_permission_and_shared_budget_without_paid_bypass()
             assert_eq!(e.mock.requests_to("/ai/encode-vibe").len(), 1);
         }
     }
+}
+
+#[tokio::test]
+async fn vibe_invalid_success_response_marks_execution_unknown_in_log_and_body() {
+    let e = setup(&[]).await;
+    configure_public_vibe(&e, true, 10, true).await;
+    e.mock.push(
+        "/ai/encode-vibe",
+        Reply::Status {
+            status: 200,
+            headers: vec![("content-type".into(), "application/octet-stream".into())],
+            body: bytes::Bytes::new(),
+        },
+    );
+
+    let (status, _, body) = call(
+        &e.state,
+        "POST",
+        "/ai/encode-vibe",
+        Some(TOKEN),
+        Some(vibe_payload()),
+    )
+    .await;
+
+    assert_eq!(status, 502);
+    let response: Value = serde_json::from_slice(&body).unwrap();
+    assert_eq!(response["error"]["execution_unknown"], true);
+    assert_eq!(response["error"]["retryable"], false);
+    assert!(response["message"].as_str().unwrap().contains("结果未知"));
+    let rows = logs(&e.state).await;
+    let error = rows.iter().find(|row| row["status"] == "error").unwrap();
+    let rid = error["rid"].as_str().unwrap().to_string();
+    let (settlement_status, anlas): (String, f64) = e
+        .state
+        .db
+        .read(move |c| {
+            c.query_row(
+                "SELECT status,anlas FROM request_settlements WHERE rid=?",
+                [rid],
+                |r| Ok((r.get(0)?, r.get(1)?)),
+            )
+        })
+        .await
+        .unwrap();
+    assert_eq!(settlement_status, "uncertain");
+    assert_eq!(anlas, gate_core::policy::VIBE_ENCODING_ANLAS as f64);
 }
 
 #[tokio::test]
@@ -1196,15 +1560,21 @@ async fn bad_weight_is_rejected_with_param_reason() {
 async fn upstream_429_pauses_all_image_generation() {
     let e = setup(&[]).await;
     e.mock.push("/ai/generate-image", Reply::rate_limited("30"));
-    let (status, _, body) = call(
-        &e.state,
-        "POST",
-        "/ai/generate-image",
-        Some(TOKEN),
-        Some(image_body("nai-diffusion-4-5-full", 1)),
-    )
-    .await;
+    let (status, headers, body) = Call::new("POST", "/ai/generate-image")
+        .bearer(TOKEN)
+        .header("origin", "http://127.0.0.1:8000")
+        .json(image_body("nai-diffusion-4-5-full", 1))
+        .send(&e.state)
+        .await;
     assert_eq!(status, 429, "{}", String::from_utf8_lossy(&body));
+    assert_eq!(headers["retry-after"], "30");
+    assert!(
+        headers["access-control-expose-headers"]
+            .to_str()
+            .unwrap()
+            .to_ascii_lowercase()
+            .contains("retry-after")
+    );
     assert!(e.state.cooldown.remaining(e.state.now()) >= 59);
     let (status, _, body) = call(
         &e.state,
@@ -1322,7 +1692,7 @@ async fn queue_timeout_is_a_rejection_for_both_response_modes() {
             tokio::time::sleep(std::time::Duration::from_millis(5)).await;
         }
         assert_eq!(e.mock.requests_to("/ai/generate-image").len(), 1);
-        let (status, _, body) = call(
+        let (status, headers, body) = call(
             &e.state,
             "POST",
             path,
@@ -1331,6 +1701,7 @@ async fn queue_timeout_is_a_rejection_for_both_response_modes() {
         )
         .await;
         assert_eq!(status, 429, "{}", String::from_utf8_lossy(&body));
+        assert_eq!(headers["retry-after"], "15");
         assert_eq!(first.await.unwrap().0, StatusCode::OK);
         assert!(e.mock.requests_to("/ai/generate-image-stream").is_empty());
         assert_eq!(e.mock.requests_to("/ai/generate-image").len(), 1);
@@ -1452,6 +1823,23 @@ async fn cors_preflight_allows_authorization_and_fallbacks_are_json() {
             .unwrap()
             .contains("authorization")
     );
+    let req = Request::builder()
+        .method("GET")
+        .uri("/ai/generate-image")
+        .header("origin", "https://client.example")
+        .body(Body::empty())
+        .unwrap();
+    let resp = gate_server::app(e.state.clone())
+        .oneshot(req)
+        .await
+        .unwrap();
+    let exposed = resp.headers()["access-control-expose-headers"]
+        .to_str()
+        .unwrap()
+        .to_ascii_lowercase();
+    assert!(exposed.contains("retry-after"), "{exposed}");
+    assert!(exposed.contains("x-request-id"), "{exposed}");
+    assert_eq!(resp.headers()["access-control-allow-origin"], "*");
     let (status, _, body) = call(&e.state, "GET", "/no-such-path", None, None).await;
     assert_eq!(
         (status.as_u16(), String::from_utf8_lossy(&body).to_string()),

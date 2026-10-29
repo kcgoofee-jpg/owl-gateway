@@ -74,7 +74,7 @@ export function RequestRow({ r }: { r: MyRequest }) {
     r.wait_s != null && r.wait_s >= 1 ? `排队 ${Math.round(r.wait_s)} 秒` : "",
     r.dur_s != null ? `出图 ${Math.round(r.dur_s)} 秒` : "",
     r.rid ? `编号 ${r.rid}` : "",
-    r.correlation_id ? `NovelAI 排障号 ${r.correlation_id}` : "",
+    r.correlation_id ? `上游关联号 ${r.correlation_id}` : "",
   ]
     .filter(Boolean)
     .join(" · ");
@@ -88,7 +88,14 @@ export function RequestRow({ r }: { r: MyRequest }) {
         {r.status === "ok" && pendingSettlement && (
           <Badge tone={pendingSettlement.tone}>{pendingSettlement.text}</Badge>
         )}
-        {delivery && <Badge tone={delivery.tone}>{delivery.text}</Badge>}
+        {delivery && (
+          <Badge
+            tone={delivery.tone}
+            title="只表示网关没有完整交付响应，不能据此判断由浏览器、插件或网络哪一端断开。"
+          >
+            {delivery.text}
+          </Badge>
+        )}
       </div>
       {r.status === "ok" ? (
         <p class="lp-req__line">{okLine(r)}</p>

@@ -3,7 +3,9 @@
 
 use super::params::Prepared;
 use super::settle::{Billing, resolve_v5};
-use super::{before_dispatch, detail160, on_429, on_dispatch, track_delivery};
+use super::{
+    before_dispatch, detail160, log_client_disconnect, on_429, on_dispatch, track_delivery,
+};
 use crate::accounting::Entry;
 use crate::admission::{Est, acquire_slots, image_admission, reserve_image_budget};
 use crate::auth::check_image_cooldown;
@@ -55,7 +57,7 @@ struct StreamSink {
 
 enum Head {
     Start,
-    Error(u16, Value),
+    Error(u16, Option<u64>, Value),
 }
 
 impl StreamSink {
@@ -85,9 +87,14 @@ impl StreamSink {
 
     async fn error(&mut self, error: GateError) {
         let status = crate::error::member_status(error.status, error.upstream).0;
+        let retry_after = (status == 429).then(|| {
+            error
+                .retry_after
+                .unwrap_or_else(|| crate::error::retry_after_default(&error.code))
+        });
         let body = error.response_body();
         if let Some(h) = self.head.take() {
-            let _ = h.send(Head::Error(status, body));
+            let _ = h.send(Head::Error(status, retry_after, body));
         } else {
             let message = body["message"].as_str().unwrap_or("请求失败");
             let ev = json!({"event_type": "error", "error": body["error"], "message": message, "status_code": status});
@@ -146,11 +153,11 @@ pub(super) async fn stream(
             h.insert("x-accel-buffering", HeaderValue::from_static("no"));
             Ok(track_delivery(r, &state, &ctx))
         }
-        Ok(Head::Error(status, body)) => {
+        Ok(Head::Error(status, retry_after, body)) => {
             let mut r = json_response(status, &body);
-            if status == 429 {
+            if let Some(secs) = retry_after {
                 r.headers_mut()
-                    .insert("retry-after", HeaderValue::from(15u64));
+                    .insert("retry-after", HeaderValue::from(secs));
             }
             let h = r.headers_mut();
             h.insert("cache-control", HeaderValue::from_static("no-store"));
@@ -197,7 +204,28 @@ async fn run_stream(
     };
     let held = tokio::select! {
         r = queued => r,
-        _ = disconnect.cancelled() => return, // 排队时断开：直接取消，不记账
+        _ = disconnect.cancelled() => {
+            let stage = ctx.lifecycle_stage();
+            if ctx.cancel_before_dispatch() {
+                log_client_disconnect(&ctx, stage, "stream_disconnected_while_queued", false, false);
+                if let Err(error) = state
+                    .db
+                    .release_request_reservation(&ctx.internal_id(), state.now())
+                    .await
+                {
+                    tracing::error!(%error, rid = %ctx.rid(), "failed to release streaming reservation after client disconnect");
+                }
+                let cancelled = Entry::new("image_stream", &prep.model, "cancelled")
+                    .detail("派发前客户端断开，未向上游发送、未扣费")
+                    .reason("client_disconnected");
+                if let Some(task) = state.record_context(&ctx, cancelled)
+                    && let Err(error) = task.await
+                {
+                    tracing::error!(%error, "stream disconnect accounting task failed");
+                }
+            }
+            return;
+        },
     };
     let res = match held {
         Ok((admission, slots, reserved)) => {
@@ -313,7 +341,11 @@ async fn perform_stream(
                     _ = disconnect.cancelled(), if !seen_cancel => {
                         seen_cancel = true;
                         if !dispatched.load(Ordering::SeqCst) {
-                            return Ok(Err(None)); // 还没发往上游：取消
+                            let stage = ctx.lifecycle_stage();
+                            if ctx.cancel_before_dispatch() {
+                                log_client_disconnect(ctx, stage, "stream_disconnected_before_dispatch", false, false);
+                                return Ok(Err(None)); // durable dispatch claim 未取得：取消
+                            }
                         }
                     }
                 }
@@ -480,7 +512,8 @@ async fn perform_stream(
                 ctx,
                 &key,
                 Entry::new("image_stream", &model, "cancelled")
-                    .detail("排队时客户端断开（未发到上游，未记费）"),
+                    .detail("派发前客户端断开，未向上游发送、未扣费")
+                    .reason("client_disconnected"),
             )
             .await;
     } else if !(local_reject && completed == 0) {

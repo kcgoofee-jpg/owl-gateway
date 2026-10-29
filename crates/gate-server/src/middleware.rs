@@ -165,6 +165,10 @@ pub fn cors(origins: &[String]) -> Option<tower_http::cors::CorsLayer> {
                 Method::PUT,
             ])
             .allow_headers(AllowHeaders::mirror_request())
+            .expose_headers([
+                axum::http::HeaderName::from_static("retry-after"),
+                axum::http::HeaderName::from_static("x-request-id"),
+            ])
             .max_age(std::time::Duration::from_secs(600)),
     )
 }

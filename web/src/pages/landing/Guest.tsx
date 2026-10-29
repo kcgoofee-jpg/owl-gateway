@@ -80,6 +80,9 @@ function Guides() {
                     <span class="lp-nb">「接口地址」填接入地址</span> <code>{location.origin}</code>
                   </li>
                   <li>「API Key」填写你的 Key</li>
+                  <li>接入地址填写站点根地址；连接测试只验证基础连接，不代表所有模型或功能均可用</li>
+                  <li>“同时出图数”控制并发，“每次请求图片数”是另一项参数；本站每次最多生成一张</li>
+                  <li>V5 不支持 Vibe 参考图；请求历史中的“已取消”表示尚未派发就断开</li>
                 </ol>
               </div>
             ),

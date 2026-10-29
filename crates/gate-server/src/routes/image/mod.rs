@@ -10,9 +10,8 @@
 //! - `tags`：标签补全。
 //!
 //! 取消语义：
-//! - 排队阶段（排队、额度核对）客户端断开 = 直接取消，不记账；
-//! - 一旦开始上游操作，就在后台任务里跑完并记账（成员断开也不中断），额度预留 / 排队登记
-//!   随任务一起释放；流式请求在真正发往上游之前断开仍可取消（记一条「cancelled」）。
+//! - 持久化派发边界之前客户端断开 = 取消排队并释放额度，不向上游发送；
+//! - 派发边界开始后，保留后台任务完成结算；普通与流式请求使用相同的非幂等请求保护原则。
 //!
 //! 每把 Key 的限速只有排队与 RPM 两层：2.x 的 15 秒出图间隔、「同时在途 ≤ 4」对出图请求已删除
 //! （都与排队重复）。
@@ -23,6 +22,7 @@ mod stream;
 mod tags;
 mod tools;
 
+use crate::accounting::Entry;
 use crate::admission::{acquire_slots, guard_hard_block, image_admission, reserve_image_budget};
 use crate::auth::{authenticate, check_image_cooldown, check_rpm, ctx_of, require_feature};
 use crate::body::{IMAGE_BODY_LIMIT, read_image_payload};
@@ -74,23 +74,57 @@ pub fn router() -> Router<AppState> {
 /// 上游错误 → 成员接口错误的统一转换。网关回调的拒绝原样穿过。
 pub(super) fn up_to_gate(e: UpstreamError) -> GateError {
     if e.local {
-        return GateError::with_code(e.status, e.message, e.code);
+        let mut error = GateError::with_code(e.status, e.message, e.code);
+        if let Some(secs) = e.retry_after {
+            error = error.retry_after(secs);
+        }
+        return error;
     }
     let status = if matches!(e.status, 429 | 503) {
         e.status
     } else {
         502
     };
-    GateError::with_code(status, e.message, e.code)
+    let retry_after = e.retry_after;
+    let mut error = GateError::with_code(status, e.message, e.code)
         .uncertain(e.billing_uncertain)
-        .from_upstream(true)
+        .from_upstream(true);
+    if let Some(secs) = retry_after {
+        error = error.retry_after(secs);
+    }
+    error
 }
 
 pub(super) fn local(e: ApiError) -> UpstreamError {
     match e {
-        ApiError::Gate(g) => UpstreamError::local(g.status, g.message, g.code),
+        ApiError::Gate(g) => UpstreamError {
+            retry_after: g.retry_after,
+            ..UpstreamError::local(g.status, g.message, g.code)
+        },
         ApiError::Http(h) => UpstreamError::local(h.status, text(&h.detail), ""),
         ApiError::Internal(i) => UpstreamError::local(500, i.0, ""),
+    }
+}
+
+pub(super) fn log_client_disconnect(
+    ctx: &ReqCtx,
+    stage: &str,
+    reason: &str,
+    dispatch_claimed: bool,
+    dispatched: bool,
+) {
+    if ctx.mark_client_disconnected() {
+        tracing::info!(
+            rid = %ctx.rid(),
+            correlation_id = %ctx.correlation_id(),
+            elapsed_ms = ctx.elapsed_ms(),
+            stage,
+            reason,
+            dispatch_claimed,
+            dispatched,
+            event = "client_disconnected",
+            "客户端连接在请求响应完整结束前关闭"
+        );
     }
 }
 
@@ -153,9 +187,20 @@ pub(super) fn on_dispatch(
     Box::new(move || {
         let (_s, c, reserved) = (s.clone(), c.clone(), reserved.clone());
         Box::pin(async move {
+            if !c.claim_dispatch() {
+                return Err(local(
+                    GateError::with_code(
+                        499,
+                        "客户端已断开，未向上游派发。",
+                        "client_disconnected",
+                    )
+                    .into(),
+                ));
+            }
             match reserved.prepare_dispatch(&c.correlation_id()).await {
                 Ok((day, _month)) => {
                     c.set_settlement_day(day);
+                    c.dispatch_persisted();
                     Ok(())
                 }
                 Err(e) => Err(local(e)),
@@ -164,22 +209,88 @@ pub(super) fn on_dispatch(
     })
 }
 
-/// 已经开始的上游操作：放进后台任务跑完（含记账），调用方断开也不中断。
-/// `delivered`：结果已经完整交给客户端（之后断开不算「没拿到图」）。
+/// 所有可能产生非幂等上游请求的工作都由后台任务统一管理。
+/// 调用方在派发竞争前断开时丢弃排队 future；派发边界获胜后则继续完成并结算。
 pub(super) async fn shielded<T: Send + 'static>(
     state: &AppState,
     ctx: &ReqCtx,
+    cancelled: Entry,
     fut: impl Future<Output = Result<T, ApiError>> + Send + 'static,
 ) -> Result<T, ApiError> {
-    let (tx, rx) = tokio::sync::oneshot::channel();
+    let (mut tx, rx) = tokio::sync::oneshot::channel();
     let (c, s) = (ctx.clone(), state.clone());
     state.tasks.spawn(ctx.clone().scope(async move {
-        let r = fut.await;
-        // 调用方已经走了：客户端自己的行为，不记 Bug（见 stream.rs），只留一行日志
-        if tx.send(r).is_err() {
-            tracing::info!(rid = %c.rid(), "客户端在图片返回前断开连接（图已生成并计数）");
-            if let Err(e) = s.db.set_request_delivery(&c.internal_id(), "transport_interrupted", s.now()).await {
-                tracing::error!(error = %e, request_id = %c.internal_id(), "delivery state update failed after early disconnect");
+        let mut fut = Box::pin(fut);
+        let mut disconnected = false;
+        loop {
+            tokio::select! {
+                biased;
+                _ = tx.closed(), if !disconnected => {
+                    disconnected = true;
+                    let stage = c.lifecycle_stage();
+                    let cancelled_before_dispatch = c.cancel_before_dispatch();
+                    log_client_disconnect(
+                        &c,
+                        stage,
+                        "response_not_returned",
+                        matches!(stage, "dispatching" | "dispatched") || c.was_sent(),
+                        c.was_sent(),
+                    );
+                    if cancelled_before_dispatch {
+                        // Dropping the queued future releases Admission, Reserved, and upstream
+                        // scheduler guards. Reserved's durable close is idempotent with the log.
+                        drop(fut);
+                        c.finish_lifecycle();
+                        match s
+                            .db
+                            .release_request_reservation(&c.internal_id(), s.now())
+                            .await
+                        {
+                            Ok(true) => c.mark_settlement_reserved(),
+                            Ok(false) => {}
+                            Err(error) => tracing::error!(%error, rid = %c.rid(), "failed to release reservation after client disconnect"),
+                        }
+                        if let Some(task) = s.record_context(&c, cancelled)
+                            && let Err(error) = task.await
+                        {
+                            tracing::error!(%error, "client disconnect accounting task failed");
+                        }
+                        return;
+                    }
+
+                    // The dispatch claim won the race. Keep the POST and accounting alive, but
+                    // persist the lost response immediately (the body wrapper is installed later).
+                    let db = s.db.clone();
+                    let request_id = c.internal_id();
+                    let now = s.now();
+                    s.tasks.spawn(async move {
+                        if let Err(error) = db.set_request_delivery(&request_id, "transport_interrupted", now).await {
+                            tracing::error!(%error, request_id, "delivery state update failed after client disconnect");
+                        }
+                    });
+                }
+                result = &mut fut => {
+                    let stage = c.lifecycle_stage();
+                    c.finish_lifecycle();
+                    if tx.send(result).is_err() {
+                        log_client_disconnect(
+                            &c,
+                            stage,
+                            "response_not_returned",
+                            c.was_sent(),
+                            c.was_sent(),
+                        );
+                        let db = s.db.clone();
+                        let request_id = c.internal_id();
+                        let now = s.now();
+                        s.tasks.spawn(async move {
+                            if let Err(error) = db.set_request_delivery(&request_id, "transport_interrupted", now).await {
+                                tracing::error!(%error, request_id, "delivery state update failed after client disconnect");
+                            }
+                        });
+                    }
+                    return;
+                }
             }
         }
     }));
@@ -211,10 +322,20 @@ pub(super) fn track_delivery(mut response: Response, state: &AppState, ctx: &Req
         inner: Pin<Box<dyn Stream<Item = Result<Bytes, axum::Error>> + Send>>,
         state: AppState,
         request_id: String,
+        ctx: ReqCtx,
         terminal: bool,
     }
     impl Delivery {
-        fn mark(&self, value: &'static str) {
+        fn mark(&self, value: &'static str, reason: &'static str) {
+            if value == "transport_interrupted" {
+                log_client_disconnect(
+                    &self.ctx,
+                    "response_body",
+                    reason,
+                    self.ctx.was_sent(),
+                    self.ctx.was_sent(),
+                );
+            }
             let (s, id, value) = (
                 self.state.clone(),
                 self.request_id.clone(),
@@ -238,14 +359,14 @@ pub(super) fn track_delivery(mut response: Response, state: &AppState, ctx: &Req
                 Poll::Ready(None) => {
                     if !self.terminal {
                         self.terminal = true;
-                        self.mark("transport_complete");
+                        self.mark("transport_complete", "response_body_complete");
                     }
                     Poll::Ready(None)
                 }
                 Poll::Ready(Some(Err(error))) => {
                     if !self.terminal {
                         self.terminal = true;
-                        self.mark("transport_interrupted");
+                        self.mark("transport_interrupted", "response_body_error");
                     }
                     Poll::Ready(Some(Err(error)))
                 }
@@ -256,7 +377,7 @@ pub(super) fn track_delivery(mut response: Response, state: &AppState, ctx: &Req
     impl Drop for Delivery {
         fn drop(&mut self) {
             if !self.terminal {
-                self.mark("transport_interrupted");
+                self.mark("transport_interrupted", "response_body_dropped_before_eof");
             }
         }
     }
@@ -265,6 +386,7 @@ pub(super) fn track_delivery(mut response: Response, state: &AppState, ctx: &Req
         inner: Box::pin(body.into_data_stream()),
         state: state.clone(),
         request_id: ctx.internal_id(),
+        ctx: ctx.clone(),
         terminal: false,
     });
     response
@@ -301,27 +423,28 @@ async fn generate(state: AppState, req: Request, streaming: bool) -> ApiResult {
         return stream::stream(state, ctx, prep).await;
     }
     let key = prep.key.clone();
-    async {
-        let admission = image_admission(&state, &ctx, &key).await?;
-        let slots = acquire_slots(&state);
+    let cancelled = Entry::new("image", &prep.model, "cancelled")
+        .detail("派发前客户端断开，未向上游发送、未扣费")
+        .reason("client_disconnected");
+    let (s, c) = (state.clone(), ctx.clone());
+    shielded(&state, &ctx, cancelled, async move {
+        let admission = image_admission(&s, &c, &key).await?;
+        let slots = acquire_slots(&s);
         // 排队 / 预算等待之后再查一次冷却和额度
-        check_image_cooldown(&state)?;
+        check_image_cooldown(&s)?;
         let reserved = reserve_image_budget(
-            &state,
-            &ctx,
+            &s,
+            &c,
             &key,
             &prep.est,
             prep.legacy_free_images,
             crate::admission::DispatchRequirements::image(&prep.body)?,
         )
         .await?;
-        let (s, c) = (state.clone(), ctx.clone());
-        shielded(&state, &ctx, async move {
-            let _held = (admission, slots);
-            settle::perform_generation(&s, &c, prep, Arc::new(reserved)).await
-        })
-        .await
-    }
+        let reserved = Arc::new(reserved);
+        let _held = (admission, slots, reserved.clone());
+        settle::perform_generation(&s, &c, prep, reserved).await
+    })
     .await
 }
 

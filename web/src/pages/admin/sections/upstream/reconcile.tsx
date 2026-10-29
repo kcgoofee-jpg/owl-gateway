@@ -184,7 +184,11 @@ function Settlements({ items, csrf }: { items: Settlement[]; csrf: string }) {
                 <strong>RID {item.rid}</strong> · Key {item.key_id} · {item.service_day} /{" "}
                 {item.service_month}
               </p>
-              {item.correlation_id && <p class="muted small">NovelAI 排障号：{item.correlation_id}</p>}
+              {item.correlation_id && (
+                <p class="muted small" title="本站生成并随请求发送给上游，不是上游返回的错误编号。">
+                  上游关联号：{item.correlation_id}
+                </p>
+              )}
               <p class="muted small">
                 预留 {item.reserved_anlas} Anlas · V5 {item.reserved_v5} · 免费图 {item.reserved_legacy}
                 {item.is_vibe ? " · Vibe" : ""}

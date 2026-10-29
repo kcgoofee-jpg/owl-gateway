@@ -120,6 +120,12 @@ impl AppState {
         self.record_identity(ctx, key.id(), key.name(), e)
     }
 
+    /// Record an authenticated request without retaining its `Key` in a background task.
+    pub fn record_context(&self, ctx: &ReqCtx, e: Entry) -> Option<tokio::task::JoinHandle<()>> {
+        let (key_id, key_name) = ctx.key()?;
+        Some(self.record_identity(ctx, key_id, &key_name, e))
+    }
+
     fn record_identity(
         &self,
         ctx: &ReqCtx,

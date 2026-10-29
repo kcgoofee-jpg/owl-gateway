@@ -51,7 +51,12 @@ export function timing(waitMs: number, durMs: number): { gen: string; wait: stri
   return { gen: durMs ? secondsText(durMs) : "", wait: waitMs >= 100 ? secondsText(waitMs) : "" };
 }
 
-export const STATUS_TEXT: Record<string, string> = { ok: "成功", rejected: "拒绝", error: "错误" };
+export const STATUS_TEXT: Record<string, string> = {
+  ok: "成功",
+  rejected: "拒绝",
+  error: "错误",
+  cancelled: "已取消",
+};
 export const statusText = (s: string | null | undefined): string => STATUS_TEXT[s ?? ""] ?? (s || "错误");
 export const statusTone = (s: string): "ok" | "warn" | "danger" =>
-  s === "ok" ? "ok" : s === "rejected" ? "warn" : "danger";
+  s === "ok" ? "ok" : s === "rejected" || s === "cancelled" ? "warn" : "danger";

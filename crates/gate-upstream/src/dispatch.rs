@@ -281,7 +281,10 @@ async fn on_429(
     if let Some(cb) = cb.on_rate_limited.as_ref() {
         cb(retry_after).await;
     }
-    UpstreamError::new(429, RATE_LIMITED_IMAGE)
+    UpstreamError {
+        retry_after: Some(retry_after.max(1.0).ceil() as u64),
+        ..UpstreamError::new(429, RATE_LIMITED_IMAGE)
+    }
 }
 
 /// 上游 403（`peek` 是正文前 300 字节）：「模型不存在」也是 403，不算账号被拒；其余记一次账号级 403。

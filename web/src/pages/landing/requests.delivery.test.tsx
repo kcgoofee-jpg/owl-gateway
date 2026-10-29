@@ -72,7 +72,7 @@ describe("request delivery status", () => {
   it("merges the secondary facts into one muted meta line（10-27 排版精简）", () => {
     render(<RequestRow r={{ ...base, correlation_id: "aB12z9", wait_s: 54, dur_s: 37 }} />, host);
     const meta = host.querySelector(".lp-req__meta.muted");
-    expect(meta?.textContent).toBe("排队 54 秒 · 出图 37 秒 · 编号 abc12345 · NovelAI 排障号 aB12z9");
+    expect(meta?.textContent).toBe("排队 54 秒 · 出图 37 秒 · 编号 abc12345 · 上游关联号 aB12z9");
     expect(host.querySelector(".lp-req__head")?.textContent).not.toContain("编号");
   });
 });

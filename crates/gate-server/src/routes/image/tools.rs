@@ -40,9 +40,6 @@ pub(super) async fn tool(
     )
     .await?;
     let body = read_image_payload(&parts.headers, body, IMAGE_BODY_LIMIT).await?;
-    let admission = image_admission(&state, &ctx, &key).await?;
-    let slots = acquire_slots(&state);
-    check_image_cooldown(&state)?;
     let body = Value::Object(body);
     let op = operation.to_string();
     let (payload, cost) = tokio::task::spawn_blocking(move || prepare_tool(&body, &op))
@@ -59,23 +56,29 @@ pub(super) async fn tool(
         v5: 0,
         is_vibe: false,
     };
-    let reserved = Arc::new(
-        reserve_image_budget(
-            &state,
-            &ctx,
-            &key,
-            &est,
-            0,
-            crate::admission::DispatchRequirements::feature(if operation == "upscale" {
-                "upscale"
-            } else {
-                "augment"
-            }),
-        )
-        .await?,
-    );
     let (s, c) = (state.clone(), ctx.clone());
-    shielded(&state, &ctx, async move {
+    let cancelled = Entry::new(operation, &model, "cancelled")
+        .detail("派发前客户端断开，未向上游发送、未扣费")
+        .reason("client_disconnected");
+    shielded(&state, &ctx, cancelled, async move {
+        let admission = image_admission(&s, &c, &key).await?;
+        let slots = acquire_slots(&s);
+        check_image_cooldown(&s)?;
+        let reserved = Arc::new(
+            reserve_image_budget(
+                &s,
+                &c,
+                &key,
+                &est,
+                0,
+                crate::admission::DispatchRequirements::feature(if operation == "upscale" {
+                    "upscale"
+                } else {
+                    "augment"
+                }),
+            )
+            .await?,
+        );
         let _held = (admission, slots, reserved.clone());
         let state = s;
         let ctx = c;
@@ -103,14 +106,28 @@ pub(super) async fn tool(
             };
             billing_uncertain = matches!(resp.status, 200 | 201) || resp.status >= 500;
             if !matches!(resp.status, 200 | 201) {
-                return Err((
-                    GateError::new(
-                        tool_status(resp.status),
-                        format!("NovelAI 未完成图片处理，未扣费。请稍后重试。状态码 {}。", resp.status),
-                    )
-                    .from_upstream(true),
-                    false,
-                ));
+                let uncertain = resp.status >= 500;
+                let error = GateError::new(
+                    tool_status(resp.status),
+                    if uncertain {
+                        format!(
+                            "NovelAI 图片工具返回 HTTP {}，执行结果未知。请先在“我的请求”中核对。",
+                            resp.status
+                        )
+                    } else {
+                        format!(
+                            "NovelAI 未完成图片处理，未扣费。请稍后重试。状态码 {}。",
+                            resp.status
+                        )
+                    },
+                )
+                .from_upstream(true);
+                let error = if uncertain {
+                    error.uncertain(true).retryable(false)
+                } else {
+                    error
+                };
+                return Err((error, false));
             }
             let content = resp.body.clone();
             let req_type = text(
@@ -136,7 +153,11 @@ pub(super) async fn tool(
                     },
                 )
                 .await;
-            Ok(track_delivery(binary(resp.body, &media, true), &state, &ctx))
+            Ok(track_delivery(
+                binary(resp.body, &media, true),
+                &state,
+                &ctx,
+            ))
         }
         .await;
         match failed {
@@ -144,7 +165,7 @@ pub(super) async fn tool(
             Err((exc, opaque)) => {
                 billing_uncertain |= exc.billing_uncertain;
                 let detail = if opaque {
-                    "图片工具连接失败或返回无效结果，未记费".to_string()
+                    "图片工具连接失败或返回无效结果，执行结果未知".to_string()
                 } else {
                     exc.message.clone()
                 };
@@ -155,17 +176,33 @@ pub(super) async fn tool(
                         Entry::new(operation, &model, "error")
                             .detail(detail)
                             .unconfirmed(if billing_uncertain { cost as f64 } else { 0.0 })
-                            .execution_unknown(billing_uncertain || opaque, if billing_uncertain || opaque { cost as f64 } else { 0.0 }, 0, 0),
+                            .execution_unknown(
+                                billing_uncertain || opaque,
+                                if billing_uncertain || opaque {
+                                    cost as f64
+                                } else {
+                                    0.0
+                                },
+                                0,
+                                0,
+                            ),
                     )
                     .await;
                 if opaque {
                     return Err(GateError::new(
                         502,
-                        "图片工具连接 NovelAI 失败或结果无效，未扣费。请稍后手动重试。给客户端作者：请勿自动重试",
+                        "图片工具连接中断，执行结果未知。请先在“我的请求”中核对；请勿自动重试。",
                     )
+                    .uncertain(true)
+                    .retryable(false)
                     .from_upstream(true)
                     .into());
                 }
+                let exc = if billing_uncertain || opaque {
+                    exc.uncertain(true).retryable(false)
+                } else {
+                    exc
+                };
                 Err(exc.into())
             }
         }
@@ -211,28 +248,30 @@ pub(super) async fn vibe(state: AppState, req: Request) -> Result<Response, ApiE
         v5: 0,
         is_vibe: true,
     };
-    {
-        let snapshot = state.budget.lock().await.clone();
-        admission::quota_image_check(&state, &snapshot, &key, &est, 0, None).await?;
-    }
-    let admission = image_admission(&state, &ctx, &key).await?;
-    let slots = acquire_slots(&state);
-    check_image_cooldown(&state)?;
-    let reserved = Arc::new(
-        reserve_image_budget(
-            &state,
-            &ctx,
-            &key,
-            &est,
-            0,
-            crate::admission::DispatchRequirements::feature("vibe"),
-        )
-        .await?,
-    );
     let (s, c) = (state.clone(), ctx.clone());
-    shielded(&state, &ctx, async move {
+    let cancelled = Entry::new("vibe_encode", &model, "cancelled")
+        .detail("派发前客户端断开，未向上游发送、未扣费")
+        .reason("client_disconnected");
+    shielded(&state, &ctx, cancelled, async move {
+        let snapshot = s.budget.lock().await.clone();
+        admission::quota_image_check(&s, &snapshot, &key, &est, 0, None).await?;
+        let admission = image_admission(&s, &c, &key).await?;
+        let slots = acquire_slots(&s);
+        check_image_cooldown(&s)?;
+        let reserved = Arc::new(
+            reserve_image_budget(
+                &s,
+                &c,
+                &key,
+                &est,
+                0,
+                crate::admission::DispatchRequirements::feature("vibe"),
+            )
+            .await?,
+        );
         let _held = (admission, slots, reserved.clone());
-        let (state, ctx) = (s, c);
+        let state = s;
+        let ctx = c;
         let mut opts = RequestOpts::post(
             format!("{}/ai/encode-vibe", state.nai.image_host()),
             &payload,
@@ -265,36 +304,58 @@ pub(super) async fn vibe(state: AppState, req: Request) -> Result<Response, ApiE
                         err_entry("上游编码请求失败，未记费".into(), anlas, true),
                     )
                     .await;
-                return Err(
-                    GateError::new(502, "Vibe 编码时连接 NovelAI 失败，未扣费。请稍后手动重试。给客户端作者：请勿自动重试")
-                        .from_upstream(true)
-                        .into(),
-                );
+                return Err(GateError::new(
+                    502,
+                    "Vibe 编码连接中断，执行结果未知。请先在“我的请求”中核对；请勿自动重试。",
+                )
+                .uncertain(true)
+                .retryable(false)
+                .from_upstream(true)
+                .into());
             }
             Err(e) => {
                 let exc = up_to_gate(e);
                 let unconfirmed = if exc.billing_uncertain { anlas } else { 0.0 };
                 state
-                    .settle_record(&ctx, &key, err_entry(exc.message.clone(), unconfirmed, exc.billing_uncertain))
+                    .settle_record(
+                        &ctx,
+                        &key,
+                        err_entry(exc.message.clone(), unconfirmed, exc.billing_uncertain),
+                    )
                     .await;
                 return Err(exc.into());
             }
         };
         if !matches!(resp.status, 200 | 201) {
             let unconfirmed = if resp.status >= 500 { anlas } else { 0.0 };
+            let uncertain = resp.status >= 500;
             state
                 .settle_record(
                     &ctx,
                     &key,
-                    err_entry(format!("upstream {}", resp.status), unconfirmed, resp.status >= 500),
+                    err_entry(format!("upstream {}", resp.status), unconfirmed, uncertain),
                 )
                 .await;
-            return Err(GateError::new(
+            let error = GateError::new(
                 tool_status(resp.status),
-                format!("NovelAI 未完成 Vibe 编码，未扣费。请稍后重试。状态码 {}。", resp.status),
+                if uncertain {
+                    format!(
+                        "NovelAI Vibe 编码返回 HTTP {}，执行结果未知。请先在“我的请求”中核对。",
+                        resp.status
+                    )
+                } else {
+                    format!(
+                        "NovelAI 未完成 Vibe 编码，未扣费。请稍后重试。状态码 {}。",
+                        resp.status
+                    )
+                },
             )
-            .from_upstream(true)
-            .into());
+            .from_upstream(true);
+            return Err(if uncertain {
+                error.uncertain(true).retryable(false).into()
+            } else {
+                error.into()
+            });
         }
         let ct = resp
             .headers
@@ -310,9 +371,14 @@ pub(super) async fn vibe(state: AppState, req: Request) -> Result<Response, ApiE
                     err_entry("上游未返回有效二进制编码，未记费".into(), anlas, true),
                 )
                 .await;
-            return Err(GateError::new(502, "Vibe 编码时 NovelAI 返回的数据无效，未扣费。请稍后重试。")
-                .from_upstream(true)
-                .into());
+            return Err(GateError::new(
+                502,
+                "Vibe 编码返回的数据无效，执行结果未知。请先在“我的请求”中核对。",
+            )
+            .uncertain(true)
+            .retryable(false)
+            .from_upstream(true)
+            .into());
         }
         state
             .settle_record(
@@ -325,7 +391,11 @@ pub(super) async fn vibe(state: AppState, req: Request) -> Result<Response, ApiE
                 },
             )
             .await;
-        Ok(track_delivery(binary(resp.body, "application/octet-stream", true), &state, &ctx))
+        Ok(track_delivery(
+            binary(resp.body, "application/octet-stream", true),
+            &state,
+            &ctx,
+        ))
     })
     .await
 }
