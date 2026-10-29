@@ -1,0 +1,1298 @@
+/*
+ * NovelAI 风格生图页皮肤。全部为本站原创实现：
+ * 布局规格（宽高/圆角/间距/配色）取自对参考页面渲染结果的结构化测量，
+ * 不包含任何第三方源码、字体文件、图片或图标资产。
+ */
+
+@font-face {
+  font-family: "Source Sans 3";
+  src: url("../../assets/source-sans-3-latin.woff2") format("woff2");
+  font-weight: 200 900;
+  font-style: normal;
+  font-display: swap;
+}
+
+.nai-root {
+  /* 深色默认（Dark） */
+  --nai-base: #13152c;
+  --nai-panel: #191b31;
+  --nai-inset: #0e0f21;
+  --nai-border: #22253f;
+  --nai-accent: #f5f3c2;
+  --nai-accent-ink: #13152c;
+  --nai-text: #ffffff;
+  --nai-muted: #9fa2c0;
+  --nai-danger: #f26d6d;
+
+  position: fixed;
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+  background: var(--nai-base);
+  color: var(--nai-text);
+  font-family:
+    "Source Sans 3", "Source Sans Pro", -apple-system, "PingFang SC", "Segoe UI", "Microsoft YaHei",
+    sans-serif;
+  font-size: 16px;
+  line-height: 1.4;
+  -webkit-font-smoothing: antialiased;
+}
+
+.nai-root[data-theme="sand"] {
+  --nai-base: #ebdab4;
+  --nai-panel: #dfcda4;
+  --nai-inset: #e6d4ae;
+  --nai-border: #c2ac80;
+  --nai-accent: #ab0613;
+  --nai-accent-ink: #fff8ec;
+  --nai-text: #241a10;
+  --nai-muted: #6b5a42;
+  --nai-danger: #ab0613;
+}
+
+.nai-root[data-theme="slate"] {
+  --nai-base: #02030b;
+  --nai-panel: #1e2231;
+  --nai-inset: #12141f;
+  --nai-border: #2b3048;
+  --nai-accent: #71ffc3;
+  --nai-accent-ink: #02030b;
+  --nai-text: #ffffff;
+  --nai-muted: #8b90a8;
+  --nai-danger: #ff8080;
+}
+
+.nai-root *,
+.nai-root *::before,
+.nai-root *::after {
+  box-sizing: border-box;
+}
+
+.nai-root :where(button) {
+  font: inherit;
+  color: inherit;
+  background: none;
+  border: none;
+  padding: 0;
+  cursor: pointer;
+}
+
+.nai-root a {
+  color: inherit;
+  text-decoration: none;
+}
+
+.nai-root :where(input, textarea) {
+  font: inherit;
+  color: var(--nai-text);
+  background: transparent;
+  border: none;
+  outline: none;
+}
+
+.nai-root input[type="number"]::-webkit-outer-spin-button,
+.nai-root input[type="number"]::-webkit-inner-spin-button {
+  -webkit-appearance: none;
+  margin: 0;
+}
+
+.nai-root input[type="number"] {
+  -moz-appearance: textfield;
+  appearance: textfield;
+}
+
+.nai-root ::selection {
+  background: color-mix(in srgb, var(--nai-accent) 45%, transparent);
+}
+
+/* 滚动条：细杆，与面板同色系 */
+.nai-root ::-webkit-scrollbar {
+  width: 7px;
+  height: 7px;
+}
+
+.nai-root ::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+.nai-root ::-webkit-scrollbar-thumb {
+  background: var(--nai-border);
+  border-radius: 4px;
+}
+
+/* ---------------- 顶栏 ---------------- */
+
+.nai-topbar {
+  position: relative;
+  z-index: 99;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex: none;
+  height: 52px;
+  background: var(--nai-border);
+}
+
+.nai-topbar-inner {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 20px;
+  font-size: 18px;
+  font-weight: 700;
+}
+
+.nai-topbar-actions {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  height: 32px;
+}
+
+.nai-topbar-signup {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 5px;
+  height: 32px;
+  padding: 3px 20px;
+  border-radius: 3px;
+  background: var(--nai-accent);
+  color: var(--nai-accent-ink);
+  font-size: 16px;
+  font-weight: 600;
+  line-height: 24px;
+}
+
+.nai-topbar-signup:hover {
+  filter: brightness(1.08);
+}
+
+.nai-topbar-login {
+  display: flex;
+  align-items: center;
+  height: 32px;
+  padding: 3px 12px;
+  border-radius: 3px;
+  font-size: 16px;
+  font-weight: 600;
+  line-height: 24px;
+  color: var(--nai-accent);
+}
+
+.nai-topbar-login:hover {
+  text-decoration: underline;
+}
+
+/* ---------------- 主体三栏 ---------------- */
+
+.nai-body {
+  display: flex;
+  flex: 1;
+  min-height: 0;
+}
+
+/* ---------------- 左侧设置栏 ---------------- */
+
+.nai-sidebar {
+  display: flex;
+  flex-direction: column;
+  flex: none;
+  width: 400px;
+  min-width: 400px;
+  padding: 0;
+  background: var(--nai-panel);
+}
+
+.nai-sidebar-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  flex: none;
+  height: 62px;
+  padding: 12px 12px 8px;
+}
+
+.nai-brand {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 18px;
+  font-weight: 700;
+  color: var(--nai-accent);
+}
+
+.nai-head-actions {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.nai-icon-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 30px;
+  height: 32px;
+  border-radius: 4px;
+  color: var(--nai-text);
+}
+
+.nai-icon-btn:hover {
+  background: var(--nai-border);
+}
+
+.nai-icon-btn:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
+.nai-sidebar-scroll {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  padding: 12px 0 0 12px;
+}
+
+.nai-groups {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  padding-right: 5px;
+}
+
+.nai-divider {
+  flex: none;
+  height: 1px;
+  background: var(--nai-border);
+}
+
+.nai-sidebar-bottom {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  flex: none;
+  padding: 12px;
+}
+
+/* 状态 / 提示框（额度钳制说明、错误） */
+.nai-status {
+  border: 1px solid var(--nai-border);
+  border-right: none;
+  border-radius: 8px;
+  background: var(--nai-panel);
+  padding: 8px 12px;
+  font-size: 13px;
+  line-height: 20px;
+  color: var(--nai-muted);
+}
+
+.nai-status--error {
+  color: var(--nai-danger);
+}
+
+/* 生成按钮 */
+.nai-generate {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  height: 40px;
+  padding: 4px 8px 4px 12px;
+  border-radius: 4px;
+  background: var(--nai-accent);
+  color: var(--nai-accent-ink);
+  font-size: 16px;
+  font-weight: 700;
+}
+
+.nai-generate:hover {
+  filter: brightness(1.05);
+}
+
+.nai-generate:active {
+  filter: brightness(0.95);
+}
+
+.nai-generate:disabled {
+  opacity: 0.6;
+  cursor: wait;
+}
+
+.nai-generate-badge {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 4px;
+  height: 24px;
+  padding: 0 8px;
+  border-radius: 4px;
+  background: var(--nai-accent-ink);
+  color: var(--nai-accent);
+  font-size: 16px;
+  font-weight: 600;
+}
+
+/* ---------------- 选择器胶囊 ---------------- */
+
+.nai-pills-row {
+  display: flex;
+  gap: 8px;
+}
+
+.nai-pill {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  height: 36px;
+  padding: 4px 4px 4px 12px;
+  border: 1px solid var(--nai-border);
+  border-radius: 8px;
+}
+
+.nai-pill:hover {
+  border-color: color-mix(in srgb, var(--nai-border) 60%, var(--nai-text));
+}
+
+.nai-pill-label {
+  font-size: 16px;
+  line-height: 20px;
+}
+
+.nai-pill-value {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 16px;
+  line-height: 24px;
+}
+
+.nai-pill-chevron {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 26px;
+  height: 26px;
+  border-radius: 4px;
+  color: var(--nai-muted);
+}
+
+/* ---------------- 提示词 / 负面提示词块 ---------------- */
+
+.nai-block {
+  background: var(--nai-inset);
+  border: 1px solid var(--nai-border);
+  border-radius: 8px 8px 0 0;
+}
+
+.nai-block-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 12px 12px 0;
+}
+
+.nai-block-title {
+  font-size: 14px;
+  font-weight: 600;
+  line-height: 21px;
+}
+
+.nai-block-actions {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.nai-block-body {
+  padding: 5px 12px;
+}
+
+.nai-textarea {
+  display: block;
+  width: 100%;
+  min-height: 96px;
+  max-height: 240px;
+  resize: none;
+  font-size: 14px;
+  line-height: 21px;
+}
+
+.nai-textarea::placeholder {
+  color: var(--nai-muted);
+  opacity: 0.7;
+}
+
+.nai-block-foot {
+  display: flex;
+  flex-direction: column;
+  padding: 2px 12px 8px;
+}
+
+.nai-block-foot-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  min-height: 28px;
+  padding-bottom: 4px;
+}
+
+.nai-quality-note {
+  font-size: 14px;
+  color: var(--nai-muted);
+}
+
+.nai-quality-note b {
+  color: var(--nai-text);
+  font-weight: 400;
+}
+
+/* 小下拉胶囊（质量预设 / UC 预设） */
+.nai-miniselect {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  height: 24px;
+  padding: 0 8px;
+  border: 1px solid var(--nai-border);
+  border-radius: 4px;
+  font-size: 14px;
+  line-height: 20px;
+}
+
+.nai-miniselect:hover {
+  border-color: color-mix(in srgb, var(--nai-border) 60%, var(--nai-text));
+}
+
+.nai-chips-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-height: 27px;
+  overflow-x: auto;
+  scrollbar-width: none;
+}
+
+.nai-chips-row::-webkit-scrollbar {
+  display: none;
+}
+
+.nai-chip {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  height: 24px;
+  padding: 0 10px;
+  border-radius: 12px;
+  background: color-mix(in srgb, var(--nai-border) 70%, transparent);
+  font-size: 13px;
+  line-height: 20px;
+  white-space: nowrap;
+  color: var(--nai-text);
+}
+
+.nai-chip:hover {
+  background: var(--nai-border);
+}
+
+.nai-chip[aria-pressed="true"] {
+  background: var(--nai-accent);
+  color: var(--nai-accent-ink);
+}
+
+/* 负面提示词块：虚线边框，收合指示 */
+.nai-block--uc {
+  border-style: dashed;
+  border-top: none;
+  border-radius: 0 0 8px 8px;
+}
+
+.nai-block--uc .nai-textarea {
+  min-height: 72px;
+}
+
+.nai-block--collapsed .nai-block-body,
+.nai-block--collapsed .nai-block-foot {
+  display: none;
+}
+
+/* ---------------- 角色提示词卡 ---------------- */
+
+.nai-card {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 12px;
+  border: 1px solid var(--nai-border);
+  border-radius: 8px;
+  background: var(--nai-panel);
+}
+
+.nai-card-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.nai-card-text {
+  font-size: 14px;
+  line-height: 20px;
+  color: var(--nai-muted);
+}
+
+.nai-card-expand {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex: none;
+  width: 32px;
+  height: 32px;
+  border: 1px solid var(--nai-border);
+  border-radius: 8px;
+}
+
+.nai-card-expand:hover {
+  background: var(--nai-border);
+}
+
+/* ---------------- 参考图 / 图生图 ---------------- */
+
+.nai-group-label {
+  font-size: 14px;
+  line-height: 21px;
+}
+
+.nai-i2i-box {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 12px;
+  border: 1px solid var(--nai-border);
+  border-radius: 8px;
+  background: var(--nai-inset);
+}
+
+.nai-i2i-title {
+  font-size: 14px;
+  font-weight: 600;
+}
+
+.nai-i2i-sub {
+  margin-top: 2px;
+  font-size: 13px;
+  color: var(--nai-muted);
+}
+
+/* ---------------- 图像设置 ---------------- */
+
+.nai-settings {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.nai-set-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.nai-set-label {
+  font-size: 14px;
+  line-height: 21px;
+}
+
+/* 数字输入胶囊 */
+.nai-number {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  height: 28px;
+  padding: 0 8px;
+  border-radius: 4px;
+  background: var(--nai-border);
+}
+
+.nai-number input {
+  width: 44px;
+  text-align: center;
+  font-size: 16px;
+  line-height: 20px;
+}
+
+.nai-number-swap {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 16px;
+  height: 16px;
+  color: var(--nai-muted);
+  font-size: 14px;
+}
+
+.nai-number-swap:hover {
+  color: var(--nai-text);
+}
+
+/* 尺寸分类 + 比例按钮 */
+.nai-size-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.nai-size-select {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 6px;
+  height: 28px;
+  padding: 0 4px 0 10px;
+  border: 1px solid var(--nai-border);
+  border-radius: 4px;
+  font-size: 14px;
+}
+
+.nai-size-select:hover {
+  border-color: color-mix(in srgb, var(--nai-border) 60%, var(--nai-text));
+}
+
+.nai-orient-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  border-radius: 4px;
+  background: var(--nai-border);
+  color: var(--nai-muted);
+}
+
+.nai-orient-btn[aria-pressed="true"] {
+  background: var(--nai-accent);
+  color: var(--nai-accent-ink);
+}
+
+/* 张数分段选择 */
+.nai-segment {
+  display: flex;
+  gap: 4px;
+  padding: 4px;
+  border: 1px solid var(--nai-border);
+  border-radius: 8px;
+  background: var(--nai-panel);
+}
+
+.nai-segment button {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex: 1;
+  height: 30px;
+  border-radius: 4px;
+  font-size: 16px;
+  font-weight: 600;
+  line-height: 20px;
+}
+
+.nai-segment button:hover {
+  background: color-mix(in srgb, var(--nai-border) 55%, transparent);
+}
+
+.nai-segment button[aria-pressed="true"],
+.nai-segment button[aria-pressed="true"]:hover {
+  background: var(--nai-border);
+}
+
+/* 种子行 */
+.nai-seed-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.nai-seed-input {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  height: 28px;
+  padding: 0 10px;
+  border-radius: 4px;
+  background: var(--nai-border);
+}
+
+.nai-seed-input input {
+  width: 100%;
+  font-size: 14px;
+  line-height: 20px;
+}
+
+.nai-square-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex: none;
+  width: 28px;
+  height: 28px;
+  border-radius: 4px;
+  background: var(--nai-border);
+  color: var(--nai-text);
+}
+
+.nai-square-btn:hover {
+  filter: brightness(1.15);
+}
+
+.nai-square-btn:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
+/* 采样器选择（整行胶囊） */
+.nai-sampler-select {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  height: 36px;
+  padding: 4px 4px 4px 12px;
+  border: 1px solid var(--nai-border);
+  border-radius: 8px;
+}
+
+.nai-sampler-select:hover {
+  border-color: color-mix(in srgb, var(--nai-border) 60%, var(--nai-text));
+}
+
+/* ---------------- 下拉面板 ---------------- */
+
+.nai-pop {
+  position: relative;
+}
+
+.nai-pop-panel {
+  position: absolute;
+  top: calc(100% + 6px);
+  left: 0;
+  z-index: 300;
+  min-width: 100%;
+  max-height: 320px;
+  overflow-y: auto;
+  padding: 4px;
+  border: 1px solid var(--nai-border);
+  border-radius: 8px;
+  background: var(--nai-panel);
+  box-shadow: 0 10px 30px rgba(0, 0, 0, 0.45);
+}
+
+.nai-pop-panel--right {
+  left: auto;
+  right: 0;
+}
+
+.nai-pop-group {
+  padding: 6px 8px 2px;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--nai-muted);
+}
+
+.nai-pop-item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  width: 100%;
+  padding: 8px 10px;
+  border-radius: 4px;
+  font-size: 14px;
+  line-height: 20px;
+  text-align: left;
+}
+
+.nai-pop-item:hover {
+  background: var(--nai-border);
+}
+
+.nai-pop-item[data-selected="true"] {
+  background: var(--nai-border);
+  color: var(--nai-accent);
+  font-weight: 600;
+}
+
+.nai-pop-item:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+.nai-pop-item-sub {
+  font-size: 12px;
+  color: var(--nai-muted);
+}
+
+/* ---------------- 画布区 ---------------- */
+
+.nai-canvas {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  min-width: 0;
+  min-height: 0;
+}
+
+.nai-gallery {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  padding: 20px 40px 40px;
+}
+
+.nai-gallery-hero {
+  position: relative;
+  display: flex;
+  align-items: flex-end;
+  justify-content: center;
+  height: 230px;
+  margin-bottom: 26px;
+}
+
+.nai-gallery-hero svg {
+  position: absolute;
+  bottom: 0;
+  left: 50%;
+  transform: translateX(-50%);
+  width: min(691px, 90%);
+  height: auto;
+  opacity: 0.85;
+  pointer-events: none;
+}
+
+.nai-gallery-title {
+  position: relative;
+  font-size: 20px;
+  font-weight: 700;
+  color: var(--nai-accent);
+}
+
+.nai-gallery-sub {
+  font-size: 16px;
+  margin-top: 4px;
+}
+
+.nai-gallery-hint {
+  font-size: 16px;
+  margin-top: 36px;
+}
+
+.nai-qs-grid {
+  display: grid;
+  grid-template-columns: repeat(3, 271px);
+  justify-content: center;
+  gap: 4px;
+  margin-top: 4px;
+}
+
+.nai-qs-card {
+  position: relative;
+  aspect-ratio: 271 / 396;
+  border-radius: 2px;
+  overflow: hidden;
+  cursor: pointer;
+  border: 1px solid var(--nai-border);
+}
+
+/* 原创装饰底图：按卡片序号取色，纯 CSS 渐变 */
+.nai-qs-art {
+  position: absolute;
+  inset: 0;
+}
+
+.nai-qs-copy {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  opacity: 0;
+  background: rgba(14, 15, 33, 0.72);
+  color: #fff;
+  font-size: 14px;
+  font-weight: 600;
+  transition: opacity 0.15s ease;
+}
+
+.nai-qs-card:hover .nai-qs-copy {
+  opacity: 1;
+}
+
+/* ---------------- 画布查看器 ---------------- */
+
+.nai-viewer {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  min-height: 0;
+}
+
+.nai-viewer-bar {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  flex: none;
+  padding: 8px 10px 6px;
+  background: var(--nai-panel);
+  border-bottom: 1px solid var(--nai-border);
+}
+
+.nai-viewer-bar-spacer {
+  flex: 1;
+}
+
+.nai-anlas-chip {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  height: 28px;
+  padding: 0 10px;
+  border-radius: 4px;
+  background: var(--nai-border);
+  font-size: 14px;
+  font-weight: 600;
+}
+
+.nai-viewer-stage {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 24px;
+  overflow: hidden;
+}
+
+.nai-viewer-stage img {
+  max-width: 100%;
+  max-height: 100%;
+  object-fit: contain;
+  border-radius: 2px;
+}
+
+.nai-viewer-meta {
+  flex: none;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 16px;
+  padding: 6px 10px 10px;
+  font-size: 13px;
+  color: var(--nai-muted);
+}
+
+/* ---------------- 右侧工具栏 ---------------- */
+
+.nai-rail {
+  display: flex;
+  flex-direction: column;
+  flex: none;
+  width: 140px;
+  min-width: 140px;
+  background: var(--nai-panel);
+  border-left: 1px solid var(--nai-border);
+}
+
+.nai-rail-head {
+  flex: none;
+  padding: 12px 10px 8px;
+}
+
+.nai-rail-history {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
+  width: 100%;
+  height: 40px;
+  padding: 7px 12px;
+  border: 1px solid var(--nai-border);
+  border-radius: 4px;
+  font-size: 16px;
+  font-weight: 600;
+}
+
+.nai-rail-history:hover {
+  background: var(--nai-border);
+}
+
+.nai-rail-tools {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 8px;
+  border-top: 1px solid var(--nai-border);
+  border-bottom: 1px solid var(--nai-border);
+}
+
+.nai-tool-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 46px;
+  height: 46px;
+  border-radius: 4px;
+  background: var(--nai-border);
+  color: var(--nai-text);
+}
+
+.nai-tool-btn:hover {
+  filter: brightness(1.15);
+}
+
+.nai-tool-btn[aria-pressed="true"] {
+  background: var(--nai-accent);
+  color: var(--nai-accent-ink);
+}
+
+.nai-rail-foot {
+  flex: none;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 10px 12px;
+}
+
+/* 历史面板展开时替换右栏 */
+.nai-rail--history {
+  width: 340px;
+  min-width: 340px;
+}
+
+.nai-history-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 6px;
+  align-content: start;
+  width: 100%;
+  padding: 4px 2px;
+}
+
+.nai-history-item {
+  position: relative;
+  aspect-ratio: 1;
+  border-radius: 4px;
+  overflow: hidden;
+  border: 1px solid var(--nai-border);
+  cursor: pointer;
+}
+
+.nai-history-item img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: block;
+}
+
+.nai-history-item[data-active="true"] {
+  border-color: var(--nai-accent);
+}
+
+.nai-history-empty {
+  padding: 20px 10px;
+  font-size: 13px;
+  color: var(--nai-muted);
+  text-align: center;
+  line-height: 20px;
+}
+
+/* ---------------- 欢迎弹窗 ---------------- */
+
+.nai-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 12000;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(10, 11, 24, 0.72);
+}
+
+.nai-modal {
+  position: relative;
+  width: 502px;
+  max-width: calc(100vw - 32px);
+  max-height: calc(100vh - 48px);
+  overflow-y: auto;
+  border: 1px solid var(--nai-border);
+  border-radius: 3px;
+  background: var(--nai-panel);
+  box-shadow: 0 24px 64px rgba(0, 0, 0, 0.5);
+}
+
+.nai-modal-close {
+  position: absolute;
+  top: 12px;
+  right: 12px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 32px;
+  height: 32px;
+  border-radius: 3px;
+  color: var(--nai-muted);
+}
+
+.nai-modal-close:hover {
+  background: var(--nai-border);
+  color: var(--nai-text);
+}
+
+.nai-modal-body {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 15px;
+  padding: 56px 30px 30px;
+  text-align: center;
+}
+
+.nai-modal-mark {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 50px;
+  height: 50px;
+  border-radius: 8px;
+  background: var(--nai-accent);
+  color: var(--nai-accent-ink);
+}
+
+.nai-modal-title {
+  font-size: 24px;
+  font-weight: 700;
+}
+
+.nai-modal-sub {
+  font-size: 16px;
+  color: var(--nai-muted);
+}
+
+.nai-modal-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 0;
+  margin: 0;
+  list-style: none;
+  font-size: 15px;
+  text-align: left;
+}
+
+.nai-modal-list li {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.nai-modal-list li::before {
+  content: "";
+  flex: none;
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--nai-accent);
+}
+
+.nai-modal-cta {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 5px;
+  width: 100%;
+  height: 46px;
+  padding: 10px;
+  border: 1px solid var(--nai-accent);
+  border-radius: 3px;
+  background: var(--nai-border);
+  color: var(--nai-accent);
+  font-size: 16px;
+  font-weight: 600;
+}
+
+.nai-modal-cta:hover {
+  background: color-mix(in srgb, var(--nai-accent) 12%, var(--nai-border));
+}
+
+.nai-modal-legacy {
+  font-size: 13px;
+  color: var(--nai-muted);
+}
+
+.nai-modal-legacy a {
+  text-decoration: underline;
+}
+
+/* ---------------- 窄屏适配（保持可用） ---------------- */
+
+@media (max-width: 1180px) {
+  .nai-sidebar {
+    width: 340px;
+    min-width: 340px;
+  }
+
+  .nai-rail {
+    width: 64px;
+    min-width: 64px;
+  }
+
+  .nai-rail--history {
+    width: 300px;
+    min-width: 300px;
+  }
+
+  .nai-rail-history span {
+    display: none;
+  }
+
+  .nai-qs-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+@media (max-width: 860px) {
+  .nai-body {
+    flex-direction: column;
+  }
+
+  .nai-sidebar {
+    width: 100%;
+    min-width: 0;
+    order: 2;
+  }
+
+  .nai-canvas {
+    order: 1;
+    min-height: 52vh;
+  }
+
+  .nai-rail {
+    display: none;
+  }
+
+  .nai-groups {
+    padding-right: 12px;
+  }
+}
