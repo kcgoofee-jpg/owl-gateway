@@ -36,9 +36,9 @@ export const SIZE_PRESETS: Array<{ id: string; label: string; w?: number; h?: nu
 export const SAMPLERS_V4 = [
   "k_euler_ancestral",
   "k_euler",
-  "k_dpmpp_2m",
   "k_dpmpp_2s_ancestral",
   "k_dpmpp_sde",
+  "k_dpmpp_2m",
 ];
 export const SAMPLERS_V3 = ["k_euler_ancestral", "k_euler", "k_lms", "k_dpm_2", "k_dpm_2_ancestral", "ddim"];
 export const NOISE_SCHEDULES = ["karras", "exponential", "polyexponential"];

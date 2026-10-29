@@ -1,5 +1,5 @@
 /** workbench-config：预设组合、图参组装、五组批量展开、队列失败分类、token 粗估。 */
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { DEFAULT_FORM } from "../../lib/nai-config";
 import {
   type BatchGroup,
@@ -11,12 +11,22 @@ import {
   composeNegative,
   composePositive,
   defaultGroups,
+  directorRequest,
+  enhanceLevel,
+  enhanceScales,
+  estimateAnlasCost,
   estimateTokens,
+  expandPromptRandomizer,
   MAX_BATCH_TASKS,
   modesFor,
+  pendingVibeEncodes,
+  prepareVibeRefs,
   qualityTags,
+  randomCharacterPrompt,
+  resolutionGroup,
   tokenLimit,
   ucOptions,
+  upscaleRequest,
 } from "./workbench-config";
 
 describe("质量与负面预设", () => {
@@ -48,6 +58,10 @@ describe("质量与负面预设", () => {
   it("V3 不选预设且自己写了负面时，lowres 兜底让位；没写时补 lowres", () => {
     expect(composeNegative("nai-diffusion-3", "bad hands", "none", "1girl")).toBe("bad hands");
     expect(composeNegative("nai-diffusion-3", "", "none", "1girl")).toBe("lowres");
+  });
+
+  it("V4.5 Curated 的负面预设带人物重点，对齐官网 Human Focus", () => {
+    expect(Object.keys(ucOptions("nai-diffusion-4-5-curated"))).toEqual(["none", "light", "heavy", "human"]);
   });
 
   it("各模型都至少有无 / 轻量 / 强力 三档可选", () => {
@@ -221,5 +235,164 @@ describe("token 粗估", () => {
     expect(estimateTokens("猫头鹰")).toBe(3);
     // 1.2::tag:: 的权重前缀剥掉：只剩 tag 本体（8 字符 ≈ 2），不剥会是 4
     expect(estimateTokens("1.2::abcdef::")).toBe(2);
+  });
+});
+
+describe("官方绘图页参数", () => {
+  it("V4 参考图先走编码，V3 保持原图", async () => {
+    const encoded = await prepareVibeRefs(
+      "nai-diffusion-4-5-full",
+      [{ image: "raw", strength: 0.6, extracted: 1 }],
+      async (image) => `enc:${image}`,
+    );
+    expect(encoded).toEqual([{ image: "enc:raw", strength: 0.6, extracted: 1 }]);
+    const raw = await prepareVibeRefs(
+      "nai-diffusion-3",
+      [{ image: "raw", strength: 0.4 }],
+      async () => "nope",
+    );
+    expect(raw).toEqual([{ image: "raw", strength: 0.4 }]);
+    expect(
+      await prepareVibeRefs("nai-diffusion-5-full", [{ image: "raw", strength: 1 }], async () => "nope"),
+    ).toEqual([]);
+  });
+
+  it("V4 信息提取没改就复用编码，改了才重新请求", async () => {
+    const encode = vi.fn(async (image: string) => `enc:${image}`);
+    const reused = await prepareVibeRefs(
+      "nai-diffusion-4-full",
+      [{ image: "raw", strength: 0.6, extracted: 0.8, encoded: "enc:raw", encodedAt: 0.8 }],
+      encode,
+    );
+    expect(reused).toEqual([{ image: "enc:raw", strength: 0.6, extracted: 0.8 }]);
+    expect(encode).not.toHaveBeenCalled();
+    const again = await prepareVibeRefs(
+      "nai-diffusion-4-full",
+      [{ image: "raw", strength: 0.6, extracted: 0.4, encoded: "enc:raw", encodedAt: 0.8 }],
+      encode,
+    );
+    expect(again).toEqual([{ image: "enc:raw", strength: 0.6, extracted: 0.4 }]);
+    expect(encode).toHaveBeenCalledTimes(1);
+  });
+
+  it("精准参考和角色提示词写进请求，并和 Vibe 互斥", () => {
+    const body = buildTaskRequest(
+      {
+        form: DEFAULT_FORM,
+        mode: "generate",
+        strength: 0,
+        noise: 0,
+        refs: [{ image: "VIBE", strength: 0.5 }],
+        precise: [{ image: "PNG", caption: "character", extracted: 1, strength: 0.8, fidelity: 0.4 }],
+        characters: [{ prompt: "1girl", uc: "bad hands", center: { x: 0.2, y: 0.3 } }],
+      },
+      7,
+    );
+    const p = body.parameters as Record<string, unknown>;
+    expect(p.reference_image_multiple).toBeUndefined();
+    expect(p.director_reference_images).toEqual(["PNG"]);
+    expect(p.director_reference_strength_values).toEqual([0.8]);
+    expect(p.director_reference_secondary_strength_values).toEqual([0.4]);
+    expect(p.characterPrompts).toEqual([
+      { prompt: "1girl", uc: "bad hands", center: { x: 0.2, y: 0.3 }, enabled: true },
+    ]);
+    expect(p.use_coords).toBe(true);
+  });
+
+  it("分辨率分组、Variety+、V3 SMEA 用 sm / sm_dyn", () => {
+    expect(resolutionGroup(832, 1216)).toBe("normal");
+    expect(resolutionGroup(100, 100)).toBe("custom");
+    const smea = buildTaskRequest(
+      {
+        form: { ...DEFAULT_FORM, model: "nai-diffusion-3", smea: true },
+        mode: "generate",
+        strength: 0,
+        noise: 0,
+        refs: [],
+        varietyPlus: true,
+      },
+      1,
+    );
+    const p = smea.parameters as Record<string, unknown>;
+    expect(p.sm).toBe(true);
+    expect(p.sm_dyn).toBe(true);
+    expect(p.smea).toBeUndefined();
+    expect(typeof p.skip_cfg_above_sigma).toBe("number");
+    const v5 = buildTaskRequest(
+      {
+        form: { ...DEFAULT_FORM, model: "nai-diffusion-5-full", sampler: "k_euler_ancestral" },
+        mode: "generate",
+        strength: 0,
+        noise: 0,
+        refs: [],
+      },
+      1,
+    );
+    expect((v5.parameters as { prefer_brownian: boolean }).prefer_brownian).toBe(true);
+  });
+
+  it("导演表情写进 prompt，放大固定 2 倍", () => {
+    expect(
+      directorRequest({ image: "aa", tool: "emotion", prompt: "soft", emotion: "happy", defry: 9 }),
+    ).toEqual({
+      image: "aa",
+      req_type: "emotion",
+      prompt: "happy, soft",
+      defry: 5,
+    });
+    expect(upscaleRequest("aa")).toMatchObject({ scale: 2, declared_blur_sigma: 0 });
+    expect(enhanceScales(832, 1216)).toEqual([1]);
+    expect(enhanceScales(640, 640)).toEqual([1, 1.5, 2]);
+    expect(enhanceLevel(5)).toEqual({ strength: 0.7, noise: 0.1 });
+  });
+});
+
+describe("随机器、角色开关、Anlas", () => {
+  it("||选项|| 出图时取一项，并清掉多余逗号", () => {
+    expect(expandPromptRandomizer("1girl, ||red|red|| hair")).toBe("1girl, red hair");
+    expect(expandPromptRandomizer("a, ||,||, b")).toBe("a, b");
+  });
+
+  it("关掉的角色不进请求", () => {
+    const body = buildTaskRequest(
+      {
+        form: { ...DEFAULT_FORM, model: "nai-diffusion-4-5-full" },
+        mode: "generate",
+        strength: 0,
+        noise: 0,
+        refs: [],
+        characters: [
+          { prompt: "girl", uc: "", enabled: false },
+          { prompt: "boy", uc: "bad hands", enabled: true },
+        ],
+      },
+      1,
+    );
+    expect((body.parameters as { characterPrompts: unknown }).characterPrompts).toEqual([
+      { prompt: "boy", uc: "bad hands", enabled: true },
+    ]);
+  });
+
+  it("规格内免费档 Anlas 为 0；待编码 Vibe +2", () => {
+    const base = {
+      width: 832,
+      height: 1216,
+      steps: 23,
+      nSamples: 1,
+      paid: false,
+      pendingVibeEncodes: 0,
+      vibeCount: 0,
+      preciseCount: 0,
+    };
+    expect(estimateAnlasCost(base)).toBe(0);
+    expect(estimateAnlasCost({ ...base, pendingVibeEncodes: 1 })).toBe(2);
+    expect(estimateAnlasCost({ ...base, preciseCount: 1 })).toBe(5);
+    expect(pendingVibeEncodes([{ extracted: 1 }, { extracted: 0.6, encodedAt: 0.6 }], true)).toBe(1);
+    expect(pendingVibeEncodes([{ extracted: 1, encodedAt: 1 }], true)).toBe(0);
+  });
+
+  it("随机角色带性别词", () => {
+    expect(randomCharacterPrompt("female").prompt).toMatch(/girl|1girl/);
+    expect(randomCharacterPrompt("male").prompt).toMatch(/boy|1boy|man/);
   });
 });

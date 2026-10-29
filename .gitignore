@@ -14,6 +14,9 @@ exports/
 # 含成员身份的审计报告只放本地 exports/，不进公开仓库
 docs/AUDIT_*
 
+# novelai.net/image 公开前端镜像（只读证据，不进仓库）
+/novelai-image-rebuild/
+
 # 浏览器检查工具（playwright-cli）的运行残留
 .playwright-cli/
 

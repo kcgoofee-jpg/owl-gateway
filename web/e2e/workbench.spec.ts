@@ -30,16 +30,11 @@ test.describe("生图工作台（Beta）", () => {
     await expect(entry).toHaveText("生图工作台");
     await entry.click();
     await expect(page).toHaveURL(/\/workbench$/);
-    await expect(page.locator("h1")).toContainText("生图工作台");
+    await expect(page.locator(".nai-generate")).toBeVisible();
 
-    // 提示在位：Beta 行、画廊口径、计费口径（两个页签常驻挂载，选择器要按面板限定）
-    await expect(page.locator(".wb-beta")).toContainText("刷新即清空");
     const draw = page.locator('section[aria-label="出图"]');
-    await expect(draw.locator(".wb-side")).toContainText("英文标签、逗号分隔");
-    await expect(draw.locator(".wb-side")).toContainText("计入今天的");
-
     await draw.locator(".wb-side textarea").first().fill("1girl, seaside, sunset");
-    await page.getByRole("button", { name: "生成" }).click();
+    await page.getByRole("button", { name: /生成/ }).click();
     // 假上游回装着真 PNG 的 zip：走完网关排队 / 记账，图出现在舞台与画廊
     await expect(page.locator(".wb-shot img")).toBeVisible({ timeout: 30_000 });
     await expect(page.locator(".wb-thumb")).toHaveCount(1);
@@ -66,8 +61,9 @@ test.describe("生图工作台（Beta）", () => {
     await asMember(context);
     const errors = watchConsole(page);
     await page.goto("/workbench");
-    await expect(page.getByRole("heading", { name: /生图工作台/ }).first()).toBeVisible();
-    await page.getByRole("tab", { name: "批量出图" }).click();
+    await expect(page.locator(".nai-generate")).toBeVisible();
+    await page.getByRole("button", { name: "菜单" }).click();
+    await page.getByRole("tab", { name: "批量" }).click();
 
     const batch = page.locator('section[aria-label="批量出图"]');
     await batch.locator("textarea").nth(0).fill("batch one");
@@ -88,10 +84,11 @@ test.describe("生图工作台（Beta）", () => {
     await page.goto("/workbench");
     for (const w of [375, 320]) {
       await page.setViewportSize({ width: w, height: 900 });
-      await expect(page.locator("h1")).toBeVisible();
+      await expect(page.locator(".nai-generate")).toBeVisible();
       await checkLayout(page, `工作台 ${w}px`);
     }
-    await page.getByRole("tab", { name: "批量出图" }).click();
+    await page.getByRole("button", { name: "菜单" }).click();
+    await page.getByRole("tab", { name: "批量" }).click();
     await checkLayout(page, "工作台批量页 375px");
   });
 

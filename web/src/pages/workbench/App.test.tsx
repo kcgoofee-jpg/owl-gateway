@@ -139,7 +139,7 @@ describe("WorkbenchApp", () => {
     expect(h.querySelector(".wb-modes")).toBeNull();
     expect(h.textContent).not.toContain("参考图（Vibe）");
     // V5 没开：模型清单里没有 V5
-    expect(need<HTMLSelectElement>(h, ".wb-side select").textContent).not.toContain("V5 Full");
+    expect(h.textContent).not.toContain("V5 Full");
     // tags 开着：标签补全在
     expect(h.textContent).toContain("标签补全");
     // 额度行来自 me.today
@@ -153,7 +153,7 @@ describe("WorkbenchApp", () => {
     expect(modes).toEqual(["文生图", "图生图", "局部重绘"]);
     await click([...h.querySelectorAll<HTMLButtonElement>(".wb-mode")][1] as HTMLButtonElement);
     await type(need<HTMLTextAreaElement>(h, ".wb-side textarea"), "same girl");
-    await click(buttonByText(h, "生成"));
+    await click(h.querySelector("button.nai-generate") as HTMLButtonElement);
     await settle();
     expect(h.textContent).toContain("先传一张原图");
     expect(fetchMock).not.toHaveBeenCalled();
@@ -165,12 +165,12 @@ describe("WorkbenchApp", () => {
     await type(need<HTMLTextAreaElement>(h, ".wb-side textarea"), "1girl, seaside");
     // 画师词是侧栏第一个文本输入框；默认质量预设「无」→ 组合结果只有画师 + 提示词
     await type(need<HTMLInputElement>(h, ".wb-side input.input"), "artist:owl");
-    await click(buttonByText(h, "生成"));
+    await click(h.querySelector("button.nai-generate") as HTMLButtonElement);
     await settle();
     const [, init] = fetchMock.mock.calls[0] as [string, RequestInit];
     expect(new Headers(init.headers).get("authorization")).toBe("Bearer k-test");
     const body = JSON.parse(String(init.body)) as { input: string; parameters: { negative_prompt: string } };
-    expect(body.input).toBe("artist:owl, 1girl, seaside");
+    expect(body.input).toBe("artist:owl, 1girl, seaside, very aesthetic, masterpiece, no text");
     // 默认负面预设「轻量」：预设词在前
     expect(body.parameters.negative_prompt).toContain("lowres");
     expect(h.querySelector(".wb-shot img")).toBeTruthy();
@@ -181,7 +181,7 @@ describe("WorkbenchApp", () => {
   it("批量：两组各一张跑完进画廊，请求体带各组的词", async () => {
     fetchMock.mockResolvedValueOnce(okImage()).mockResolvedValueOnce(okImage());
     const h = await mount();
-    await click(buttonByText(h, "批量出图"));
+    await click(buttonByText(h, "批量"));
     const batch = need<HTMLElement>(h, 'section[aria-label="批量出图"]');
     const prompts = [...batch.querySelectorAll<HTMLTextAreaElement>("textarea")];
     await type(prompts[0] as HTMLTextAreaElement, "g one");
@@ -209,7 +209,7 @@ describe("WorkbenchApp", () => {
   it("批量失败：任务标失败、队列暂停，出现「继续」", async () => {
     fetchMock.mockResolvedValueOnce(errJson(500, { message: "上游暂时不可用", status: 500 }));
     const h = await mount();
-    await click(buttonByText(h, "批量出图"));
+    await click(buttonByText(h, "批量"));
     const batch = need<HTMLElement>(h, 'section[aria-label="批量出图"]');
     const prompts = [...batch.querySelectorAll<HTMLTextAreaElement>("textarea")];
     await type(prompts[0] as HTMLTextAreaElement, "boom");
@@ -241,7 +241,7 @@ describe("WorkbenchApp", () => {
       )
       .mockResolvedValueOnce(okImage());
     const h = await mount();
-    await click(buttonByText(h, "批量出图"));
+    await click(buttonByText(h, "批量"));
     const batch = need<HTMLElement>(h, 'section[aria-label="批量出图"]');
     await type(batch.querySelector<HTMLTextAreaElement>("textarea") as HTMLTextAreaElement, "slow down");
     await click(buttonByText(h, "批量开始"));

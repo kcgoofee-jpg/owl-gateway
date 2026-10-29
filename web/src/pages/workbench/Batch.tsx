@@ -8,9 +8,8 @@
 import { useRef, useState } from "preact/hooks";
 import { clampForm, type PaintForm, resolveSeed } from "../../lib/nai-config";
 import type { ImageBytes } from "../../lib/nai-image";
-import { Button, cx, Notice } from "../../ui";
+import { cx } from "../../ui";
 import { makeShot, postImages, type Shot, WorkbenchError } from "./api";
-import { FieldBlock } from "./bits";
 import { reloadMe } from "./store";
 import {
   batchTasks,
@@ -180,169 +179,176 @@ export function BatchPane(props: {
   const list = jobs.length ? frozen.current : [];
 
   return (
-    <section class="wb-pane" role="tabpanel" hidden={props.hidden} aria-label="批量出图">
-      <aside class="wb-side">
-        <Notice tone="warn">
-          批量按顺序一张一张跑，页面别关；限速会自动等待，失败或「结果待核对」会暂停整条队列。批量只跑文生图，
-          模型 / 尺寸 / 步数用「出图」页的参数。
-        </Notice>
-        {props.mode !== "generate" && (
-          <Notice tone="warn">「出图」页当前是图生图 / 局部重绘模式，批量仍按文生图送出。</Notice>
-        )}
-        <FieldBlock label="共用词" hint="开关打开 = 所有组都用这里的词；关掉后各组用自己的。">
-          <input
-            class="input"
-            value={shared.artist}
-            onInput={(e) => props.setShared({ ...shared, artist: e.currentTarget.value })}
-            placeholder="共用画师词"
-            aria-label="共用画师词"
-          />
-          <input
-            class="input"
-            value={shared.quality}
-            onInput={(e) => props.setShared({ ...shared, quality: e.currentTarget.value })}
-            placeholder="共用质量词"
-            aria-label="共用质量词"
-          />
-          <input
-            class="input"
-            value={shared.negative}
-            onInput={(e) => props.setShared({ ...shared, negative: e.currentTarget.value })}
-            placeholder="共用负面词"
-            aria-label="共用负面词"
-          />
-        </FieldBlock>
-        <div class="wb-unified">
-          {(["artist", "quality", "negative"] as const).map((k) => (
-            <label key={k} class="wb-check">
-              <input
-                type="checkbox"
-                checked={unified[k]}
-                onChange={(e) => props.setUnified({ ...unified, [k]: e.currentTarget.checked })}
-              />
-              {UNIFIED_LABELS[k]}
-            </label>
-          ))}
-        </div>
-        {groups.map((g, i) => (
-          <FieldBlock label={`第 ${i + 1} 组`} key={g.id}>
-            <label class="wb-check">
-              <input
-                type="checkbox"
-                checked={g.enabled}
-                onChange={(e) =>
-                  props.setGroups(
-                    groups.map((x, k) => (k === i ? { ...x, enabled: e.currentTarget.checked } : x)),
-                  )
-                }
-              />
-              参与批量
-            </label>
-            <textarea
-              class="textarea"
-              rows={2}
-              value={g.prompt}
-              onInput={(e) =>
-                props.setGroups(groups.map((x, k) => (k === i ? { ...x, prompt: e.currentTarget.value } : x)))
-              }
-              placeholder="这组的提示词"
-              aria-label={`第 ${i + 1} 组提示词`}
+    <section class="nai-shell nai-batch" role="tabpanel" hidden={props.hidden} aria-label="批量出图">
+      <aside class="nai-sidebar wb-side">
+        <div class="nai-scroll">
+          <p class="nai-note">
+            批量按顺序一张一张跑。限速会自动等待，失败会暂停整条队列。批量只跑文生图，模型、尺寸和步数用绘图页的参数。
+          </p>
+          {props.mode !== "generate" && <p class="nai-note">绘图页当前不是文生图，批量仍按文生图送出。</p>}
+          <div class="nai-card">
+            <span class="nai-meter">共用词。开关打开时所有组都用这里的词。</span>
+            <input
+              class="nai-input"
+              value={shared.artist}
+              onInput={(e) => props.setShared({ ...shared, artist: e.currentTarget.value })}
+              placeholder="共用画师词"
+              aria-label="共用画师词"
             />
-            {!unified.artist && (
-              <input
-                class="input"
-                value={g.artist}
+            <input
+              class="nai-input"
+              value={shared.quality}
+              onInput={(e) => props.setShared({ ...shared, quality: e.currentTarget.value })}
+              placeholder="共用质量词"
+              aria-label="共用质量词"
+            />
+            <input
+              class="nai-input"
+              value={shared.negative}
+              onInput={(e) => props.setShared({ ...shared, negative: e.currentTarget.value })}
+              placeholder="共用负面词"
+              aria-label="共用负面词"
+            />
+          </div>
+          <div class="wb-unified">
+            {(["artist", "quality", "negative"] as const).map((k) => (
+              <label key={k} class="wb-check">
+                <input
+                  type="checkbox"
+                  checked={unified[k]}
+                  onChange={(e) => props.setUnified({ ...unified, [k]: e.currentTarget.checked })}
+                />
+                {UNIFIED_LABELS[k]}
+              </label>
+            ))}
+          </div>
+          {groups.map((g, i) => (
+            <div class="nai-card" key={g.id}>
+              <label class="wb-check">
+                <input
+                  type="checkbox"
+                  checked={g.enabled}
+                  onChange={(e) =>
+                    props.setGroups(
+                      groups.map((x, k) => (k === i ? { ...x, enabled: e.currentTarget.checked } : x)),
+                    )
+                  }
+                />
+                参与批量
+              </label>
+              <textarea
+                class="nai-textarea"
+                rows={2}
+                value={g.prompt}
                 onInput={(e) =>
                   props.setGroups(
-                    groups.map((x, k) => (k === i ? { ...x, artist: e.currentTarget.value } : x)),
+                    groups.map((x, k) => (k === i ? { ...x, prompt: e.currentTarget.value } : x)),
                   )
                 }
-                placeholder="这组的画师词"
-                aria-label={`第 ${i + 1} 组画师词`}
+                placeholder="这组的提示词"
+                aria-label={`第 ${i + 1} 组提示词`}
               />
+              {!unified.artist && (
+                <input
+                  class="nai-input"
+                  value={g.artist}
+                  onInput={(e) =>
+                    props.setGroups(
+                      groups.map((x, k) => (k === i ? { ...x, artist: e.currentTarget.value } : x)),
+                    )
+                  }
+                  placeholder="这组的画师词"
+                  aria-label={`第 ${i + 1} 组画师词`}
+                />
+              )}
+              {!unified.quality && (
+                <input
+                  class="nai-input"
+                  value={g.quality}
+                  onInput={(e) =>
+                    props.setGroups(
+                      groups.map((x, k) => (k === i ? { ...x, quality: e.currentTarget.value } : x)),
+                    )
+                  }
+                  placeholder="这组的质量词"
+                  aria-label={`第 ${i + 1} 组质量词`}
+                />
+              )}
+              {!unified.negative && (
+                <input
+                  class="nai-input"
+                  value={g.negative}
+                  onInput={(e) =>
+                    props.setGroups(
+                      groups.map((x, k) => (k === i ? { ...x, negative: e.currentTarget.value } : x)),
+                    )
+                  }
+                  placeholder="这组的负面词"
+                  aria-label={`第 ${i + 1} 组负面词`}
+                />
+              )}
+              <label class="wb-range">
+                张数
+                <input
+                  class="nai-input wb-group__count"
+                  type="number"
+                  min={1}
+                  max={20}
+                  value={g.count}
+                  onInput={(e) =>
+                    props.setGroups(
+                      groups.map((x, k) =>
+                        k === i ? { ...x, count: clampCount(Number(e.currentTarget.value)) } : x,
+                      ),
+                    )
+                  }
+                  aria-label={`第 ${i + 1} 组张数`}
+                />
+              </label>
+            </div>
+          ))}
+          <p class="muted small">
+            这次会送出 {tasks.length} 张（每组 1–{MAX_PER_GROUP} 张，一次最多 {MAX_BATCH_TASKS}
+            张）。成图进「本次画廊」，刷新即清空。
+          </p>
+          <div class="nai-actions">
+            {phase === "idle" && (
+              <button
+                type="button"
+                class="nai-btn nai-btn--primary"
+                onClick={() => void start()}
+                disabled={!tasks.length}
+              >
+                批量开始
+              </button>
             )}
-            {!unified.quality && (
-              <input
-                class="input"
-                value={g.quality}
-                onInput={(e) =>
-                  props.setGroups(
-                    groups.map((x, k) => (k === i ? { ...x, quality: e.currentTarget.value } : x)),
-                  )
-                }
-                placeholder="这组的质量词"
-                aria-label={`第 ${i + 1} 组质量词`}
-              />
+            {phase === "running" && (
+              <>
+                <button type="button" class="nai-btn nai-btn--primary" onClick={pause}>
+                  暂停
+                </button>
+                <button type="button" class="nai-btn" onClick={cancelCurrent}>
+                  取消当前
+                </button>
+              </>
             )}
-            {!unified.negative && (
-              <input
-                class="input"
-                value={g.negative}
-                onInput={(e) =>
-                  props.setGroups(
-                    groups.map((x, k) => (k === i ? { ...x, negative: e.currentTarget.value } : x)),
-                  )
-                }
-                placeholder="这组的负面词"
-                aria-label={`第 ${i + 1} 组负面词`}
-              />
+            {phase === "paused" && (
+              <>
+                <button type="button" class="nai-btn nai-btn--primary" onClick={resume}>
+                  继续
+                </button>
+                <button type="button" class="nai-btn" onClick={cancelCurrent}>
+                  取消当前
+                </button>
+                <button type="button" class="nai-btn" onClick={stop}>
+                  清空重来
+                </button>
+              </>
             )}
-            <label class="wb-range">
-              张数
-              <input
-                class="input wb-group__count"
-                type="number"
-                min={1}
-                max={20}
-                value={g.count}
-                onInput={(e) =>
-                  props.setGroups(
-                    groups.map((x, k) =>
-                      k === i ? { ...x, count: clampCount(Number(e.currentTarget.value)) } : x,
-                    ),
-                  )
-                }
-                aria-label={`第 ${i + 1} 组张数`}
-              />
-            </label>
-          </FieldBlock>
-        ))}
-        <p class="muted small">
-          这次会送出 {tasks.length} 张（每组 1–{MAX_PER_GROUP} 张，一次最多 {MAX_BATCH_TASKS}
-          张）。成图进「本次画廊」，刷新即清空。
-        </p>
-        <div class="wb-submit">
-          {phase === "idle" && (
-            <Button variant="primary" size="lg" onClick={() => void start()} disabled={!tasks.length}>
-              批量开始
-            </Button>
-          )}
-          {phase === "running" && (
-            <>
-              <Button variant="primary" size="lg" onClick={pause}>
-                暂停
-              </Button>
-              <Button variant="ghost" size="lg" onClick={cancelCurrent}>
-                取消当前
-              </Button>
-            </>
-          )}
-          {phase === "paused" && (
-            <>
-              <Button variant="primary" size="lg" onClick={resume}>
-                继续
-              </Button>
-              <Button variant="ghost" size="lg" onClick={cancelCurrent}>
-                取消当前
-              </Button>
-              <Button variant="ghost" size="lg" onClick={stop}>
-                清空重来
-              </Button>
-            </>
-          )}
+          </div>
         </div>
       </aside>
-      <section class="wb-stage" aria-label="批量进度">
+      <section class="nai-main" aria-label="批量进度">
         <header class="wb-queue__head">
           <p>
             共 {jobs.length} 张 · 已完成 {done}
@@ -369,9 +375,13 @@ export function BatchPane(props: {
                 )}
                 {j.detail && <span class="wb-job__detail small">{j.detail}</span>}
                 {j.status === "done" && shots.current[i] && (
-                  <Button variant="ghost" size="sm" onClick={() => props.openShot(shots.current[i] as Shot)}>
+                  <button
+                    type="button"
+                    class="nai-btn"
+                    onClick={() => props.openShot(shots.current[i] as Shot)}
+                  >
                     查看
-                  </Button>
+                  </button>
                 )}
               </li>
             ))}
