@@ -43,7 +43,7 @@ export function SwapIcon({ size = 14 }: IconProps) {
 export function PortraitIcon({ size = 18 }: IconProps) {
   return (
     <svg width={size} height={size} viewBox="0 0 24 24" fill="none" aria-hidden="true">
-      <rect x="7" y="3" width="10" height="18" rx="2" stroke="currentColor" stroke-width="2" />
+      <rect x="8.5" y="3.5" width="7" height="17" rx="1.5" stroke="currentColor" stroke-width="1.6" />
     </svg>
   );
 }
@@ -93,17 +93,38 @@ export function HistoryIcon({ size = 16 }: IconProps) {
   );
 }
 
-export function SeedIcon({ size = 14 }: IconProps) {
+export function SeedIcon({ size = 16 }: IconProps) {
   return (
     <svg width={size} height={size} viewBox="0 0 24 24" fill="none" aria-hidden="true">
       <path
-        d="M12 4v8l5 3"
+        d="M12 20c0-5 3.2-8 7-9.2C15 15 13.5 18 12 20Z"
         stroke="currentColor"
-        stroke-width="2"
-        stroke-linecap="round"
+        stroke-width="1.6"
         stroke-linejoin="round"
       />
-      <circle cx="12" cy="12" r="9" stroke="currentColor" stroke-width="2" />
+      <path
+        d="M12 20C12 14 8.2 11 4 10c3.2 4 5.2 7 8 10Z"
+        stroke="currentColor"
+        stroke-width="1.6"
+        stroke-linejoin="round"
+      />
+      <path d="M12 20V11" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" />
+    </svg>
+  );
+}
+
+export function AnlasIcon({ size = 14 }: IconProps) {
+  return (
+    <svg width={size} height={size} viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
+      <path d="M12 2 15 9l7 3-7 3-3 7-3-7-7-3 7-3 3-7Z" />
+    </svg>
+  );
+}
+
+export function PlayIcon({ size = 16 }: IconProps) {
+  return (
+    <svg width={size} height={size} viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
+      <path d="M8 5.5v13l11-6.5-11-6.5Z" />
     </svg>
   );
 }

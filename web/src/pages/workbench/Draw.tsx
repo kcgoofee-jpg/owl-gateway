@@ -19,6 +19,7 @@ import { toast } from "../../ui";
 import { encodeVibe, fetchSuggestions, makeShot, postImages, postTool, type Shot } from "./api";
 import { readImageFile } from "./files";
 import {
+  AnlasIcon,
   ArrowIcon,
   CheckIcon,
   ChevronIcon,
@@ -32,6 +33,7 @@ import {
   KebabIcon,
   LandscapeIcon,
   PinIcon,
+  PlayIcon,
   PlusIcon,
   PortraitIcon,
   RefreshIcon,
@@ -722,8 +724,8 @@ export function DrawPane(props: {
       <aside class={advanced ? "nai-sidebar wb-side is-advanced" : "nai-sidebar wb-side"}>
         <div class="nai-scroll">
           <div class="nv-model">
-            <span>模型</span>
             <div class="nv-model__pick">
+              <span class="nv-model__k">模型</span>
               <button
                 type="button"
                 class="nv-model__btn"
@@ -759,7 +761,7 @@ export function DrawPane(props: {
                                 setModelOpen(false);
                               }}
                             >
-                              <b>{m.label}</b>
+                              <b class="nv-model__name">{m.label}</b>
                               <span class="nv-model__blurb">{meta?.blurb ?? ""}</span>
                             </button>
                           );
@@ -1981,7 +1983,7 @@ export function DrawPane(props: {
                 aria-label="打开 AI 设置"
                 onClick={() => setAdvanced(true)}
               >
-                <ChevronIcon open={false} />
+                <PlayIcon size={14} />
               </button>
             </div>
           )}
@@ -2006,6 +2008,7 @@ export function DrawPane(props: {
             <span>{running ? "生成中…" : `生成 ${count} 张`}</span>
             <span class="nv-costchip">
               {anlas}
+              <AnlasIcon size={12} />
               <span class="nv-sr">Anlas</span>
             </span>
           </button>

@@ -10,7 +10,7 @@ import type { Shot } from "./api";
 import { BatchPane } from "./Batch";
 import { DirectorPane } from "./Director";
 import { DrawPane, type DrawState } from "./Draw";
-import { MenuIcon, PlusIcon } from "./Icons";
+import { AnlasIcon, MenuIcon, PlusIcon } from "./Icons";
 import { loadPrefs, savePrefs, type WbPrefs } from "./prefs";
 import { SettingsModal, type SettingsTab } from "./Settings";
 import { me as meSignal, start } from "./store";
@@ -164,6 +164,7 @@ function Workbench({ me }: { me: MeMember }) {
         <div class="nv-anlas-group">
           <span class="nv-anlas wb-quota">
             Anlas: <b>{me.today?.anlas ?? 0}</b>
+            <AnlasIcon />
           </span>
           <button
             type="button"
