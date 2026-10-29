@@ -36,7 +36,7 @@ test.describe("生图工作台（Beta）", () => {
     await draw.locator(".wb-side textarea").first().fill("1girl, seaside, sunset");
     await page.getByRole("button", { name: /生成/ }).click();
     // 假上游回装着真 PNG 的 zip：走完网关排队 / 记账，图出现在舞台与画廊
-    await expect(page.locator(".wb-shot img")).toBeVisible({ timeout: 30_000 });
+    await expect(page.locator(".nai-shotbtn img")).toBeVisible({ timeout: 30_000 });
     await expect(page.locator(".wb-thumb")).toHaveCount(1);
 
     // 大图弹窗有种子与提示词，可下载

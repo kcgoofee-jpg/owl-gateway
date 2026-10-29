@@ -53,7 +53,7 @@
   --nai-input: #0e0f21;
   --nai-control-hover: #2d2f48;
   --nai-text: #ffffff;
-  --nai-muted: rgb(255 255 255 / 63%);
+  --nai-muted: #d7d9ee;
   --nai-placeholder: rgb(255 255 255 / 38%);
   --nai-line: #22253f;
   --nai-accent: #f5f3c2;
@@ -1999,6 +1999,9 @@ dialog.dialog {
 }
 .nv-quick__col:nth-child(3) {
   margin-top: 24px;
+}
+.nai-app .muted {
+  color: var(--nai-muted);
 }
 .nv-quick .nv-quick__card img {
   display: block;

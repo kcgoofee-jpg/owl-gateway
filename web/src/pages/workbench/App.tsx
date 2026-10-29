@@ -156,7 +156,7 @@ function Workbench({ me }: { me: MeMember }) {
             <i />
             <i />
           </span>
-          <h1>生图工作台</h1>
+          <h1 class="sr-only">生图工作台</h1>
         </a>
         <span class="nv-sr">Beta</span>
         <span class="nv-sr">{quota}</span>
