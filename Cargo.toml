@@ -33,7 +33,7 @@ multer = "=3.1.0"
 # wreq-util 的 emulation-compression 让 emulation 自己给出 Accept-Encoding（与 UA 同一个 profile）。
 wreq = { version = "=0.16.1", features = ["json", "stream", "gzip", "deflate", "brotli", "zstd", "socks"] }
 wreq-util = { version = "=0.2.0", features = ["emulation-compression"] }
-reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls"] }
+reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls", "stream"] }
 rustls = { version = "0.23", default-features = false, features = ["ring", "std", "tls12"] }
 rusqlite = { version = "0.40", features = ["bundled", "backup"] }
 jiff = { version = "0.2", features = ["tzdb-bundle-always"] }

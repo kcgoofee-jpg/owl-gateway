@@ -11,6 +11,7 @@ export type WbPrefs = {
   hideHistory: boolean;
   reducedMotion: boolean;
   transparentBg: boolean;
+  straightAlpha: boolean;
 };
 
 const KEY = "owl-wb-prefs";
@@ -44,6 +45,7 @@ export const DEFAULT_PREFS: WbPrefs = {
   hideHistory: false,
   reducedMotion: false,
   transparentBg: false,
+  straightAlpha: false,
 };
 
 function storedTheme(parsed: Partial<WbPrefs> & { v?: number }): WbTheme {
@@ -66,6 +68,7 @@ export function loadPrefs(): WbPrefs {
       hideHistory: parsed.hideHistory === true,
       reducedMotion: parsed.reducedMotion === true,
       transparentBg: parsed.transparentBg === true,
+      straightAlpha: parsed.straightAlpha === true,
     };
   } catch {
     return { ...DEFAULT_PREFS };

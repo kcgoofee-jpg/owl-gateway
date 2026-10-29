@@ -15,6 +15,8 @@ import { defineConfig, devices } from "@playwright/test";
 export default defineConfig({
   testDir: "./e2e",
   fullyParallel: true,
+  // `cargo xtask dev` fixtures share one synthetic database; parallel mutation can trip request cooldowns.
+  ...(process.env.CI ? { workers: 1 } : {}),
   forbidOnly: !!process.env.CI,
   retries: 0,
   reporter: [["list"]],

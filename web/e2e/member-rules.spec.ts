@@ -10,6 +10,9 @@ import {
 import { orphans } from "./orphans";
 
 let session: Cookie[] = [];
+// These viewport cases edit the same synthetic database settings; do not race their save/restore steps.
+test.describe.configure({ mode: "serial" });
+
 test.beforeAll(async ({ browser, baseURL }) => {
   const password = readCreds().admin_password ?? process.env.E2E_ADMIN_PASSWORD;
   if (!password) throw new Error("member-rules requires a running synthetic dev stack");

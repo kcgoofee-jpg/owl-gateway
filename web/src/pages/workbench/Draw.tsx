@@ -32,7 +32,6 @@ import {
   InpaintIcon,
   KebabIcon,
   LandscapeIcon,
-  PinIcon,
   PlayIcon,
   PlusIcon,
   PortraitIcon,
@@ -49,19 +48,21 @@ import {
 import { MaskEditor } from "./MaskEditor";
 import { QUICKSTART, quickstartSrc } from "./quickstart";
 import { reloadMe } from "./store";
+import { decodeTokenIds, type TokenizedText, tokenizerLabel, tokenizeText } from "./tokenizer";
 import {
+  applyModelModePrompt,
   buildTaskRequest,
   type CharacterGender,
   type CharacterPayload,
+  type CharacterPositionMode,
+  characterLimit,
   composeNegative,
   composePositive,
   enhanceLevel,
   enhanceScales,
   estimateAnlasCost,
-  estimateTokens,
   expandPromptRandomizer,
   isPngDataUrl,
-  MAX_CHARACTERS,
   MAX_PRECISE,
   MAX_REFS,
   MODE_LABELS,
@@ -83,7 +84,7 @@ import {
   randomCharacterPrompt,
   resolutionGroup,
   type SourceImage,
-  tokenBudget,
+  snapCharacterCenter,
   tokenLimit,
   UC_LABELS,
   type UcPreset,
@@ -99,7 +100,6 @@ export type CharacterDraft = {
   name: string;
   prompt: string;
   uc: string;
-  placed: boolean;
   x: number;
   y: number;
   enabled: boolean;
@@ -122,6 +122,8 @@ export type PreciseDraft = {
 
 export type DrawState = {
   form: PaintForm;
+  modelMode: "anime" | "furry";
+  positionMode: CharacterPositionMode;
   qualityPreset: QualityPreset;
   ucPreset: UcPreset;
   mode: WbMode;
@@ -142,7 +144,7 @@ const SAMPLER_LABEL: Record<string, string> = {
   k_euler: "Euler",
   k_dpmpp_2m: "DPM++ 2M",
   k_dpmpp_2s_ancestral: "DPM++ 2S Ancestral",
-  k_dpmpp_sde: "DPM++ SDE",
+  k_dpmpp_sde: "DPM++ 2M SDE",
   k_lms: "LMS",
   k_dpm_2: "DPM2",
   k_dpm_2_ancestral: "DPM2 Ancestral",
@@ -156,7 +158,6 @@ const blankChar = (partial: Partial<CharacterDraft> = {}): CharacterDraft => ({
   name: "角色 1",
   prompt: "",
   uc: "",
-  placed: false,
   x: 0.5,
   y: 0.5,
   enabled: true,
@@ -167,7 +168,6 @@ const blankChar = (partial: Partial<CharacterDraft> = {}): CharacterDraft => ({
   ...partial,
 });
 
-const GENDER_LABEL: Record<CharacterGender, string> = { female: "女", male: "男", none: "其他" };
 const GENDER_MARK: Record<CharacterGender, string> = { female: "♀", male: "♂", none: "○" };
 
 const clamp01 = (raw: string): number => Math.min(1, Math.max(0, Number(raw) || 0));
@@ -206,6 +206,7 @@ export function DrawPane(props: {
   autoDownload?: boolean;
   hideHistory?: boolean;
   transparentBg?: boolean;
+  straightAlpha?: boolean;
   setTransparentBg?: (v: boolean) => void;
 }) {
   const { draw, patch, patchForm, paid } = props;
@@ -220,6 +221,7 @@ export function DrawPane(props: {
   const [enhanceScale, setEnhanceScale] = useState(1);
   const [enhanceMag, setEnhanceMag] = useState(3);
   const [count, setCount] = useState(1);
+  const sampleCount = paid ? count : 1;
   const transparentBg = props.transparentBg === true;
   const [modelOpen, setModelOpen] = useState(false);
   const [promptFocus, setPromptFocus] = useState(false);
@@ -234,6 +236,12 @@ export function DrawPane(props: {
   const [samplerOpen, setSamplerOpen] = useState(false);
   const [tokenizerOpen, setTokenizerOpen] = useState(false);
   const [tokenDraft, setTokenDraft] = useState("");
+  const [tokenInputMode, setTokenInputMode] = useState<"text" | "ids">("text");
+  const [tokenOutputMode, setTokenOutputMode] = useState<"text" | "ids">("text");
+  const [tokenIdsDraft, setTokenIdsDraft] = useState("");
+  const [tokenResult, setTokenResult] = useState<TokenizedText | null>(null);
+  const [tokenBusy, setTokenBusy] = useState(false);
+  const [tokenError, setTokenError] = useState<string | null>(null);
 
   useEffect(() => {
     if (!running) return;
@@ -241,6 +249,33 @@ export function DrawPane(props: {
     const t = setInterval(() => setElapsed((s) => s + 1), 1000);
     return () => clearInterval(t);
   }, [running]);
+
+  useEffect(() => {
+    if (!tokenizerOpen) return;
+    let current = true;
+    setTokenBusy(true);
+    setTokenError(null);
+    const result =
+      tokenInputMode === "text"
+        ? tokenizeText(draw.form.model, tokenDraft)
+        : decodeTokenIds(draw.form.model, tokenIdsDraft);
+    result
+      .then((value) => {
+        if (current) setTokenResult(value);
+      })
+      .catch((err: unknown) => {
+        if (current) {
+          setTokenResult(null);
+          setTokenError(err instanceof Error ? err.message : "分词器暂时不可用。");
+        }
+      })
+      .finally(() => {
+        if (current) setTokenBusy(false);
+      });
+    return () => {
+      current = false;
+    };
+  }, [tokenizerOpen, draw.form.model, tokenInputMode, tokenDraft, tokenIdsDraft]);
 
   useEffect(() => {
     if (!modelOpen && !vibeMenu && !addGenderOpen && !qualityOpen && !ucOpen && !samplerOpen) return;
@@ -286,6 +321,8 @@ export function DrawPane(props: {
       ucPreset: ucs.includes(draw.ucPreset) ? draw.ucPreset : "none",
       qualityPreset: qs.includes(draw.qualityPreset) ? draw.qualityPreset : "none",
       mode: modes.includes(draw.mode) ? draw.mode : "generate",
+      modelMode:
+        id === "nai-diffusion-furry-3" ? "furry" : id === "nai-diffusion-3" ? "anime" : draw.modelMode,
       varietyPlus: isV5(id) ? false : draw.varietyPlus,
       precise: id.startsWith("nai-diffusion-4-5") ? draw.precise : [],
       refs: vibeWire(id) === "none" ? [] : draw.refs,
@@ -343,25 +380,27 @@ export function DrawPane(props: {
       expandPromptRandomizer(draw.form.positive),
       expandPromptRandomizer(draw.artist),
       draw.qualityPreset,
+      transparentBg,
     );
+    const modePrompt = applyModelModePrompt(model, positive, draw.modelMode);
     const negative = composeNegative(
       model,
       expandPromptRandomizer(draw.form.negative),
       draw.ucPreset,
-      positive,
+      modePrompt,
     );
-    return clampForm({ ...draw.form, positive, negative }, paid);
+    return clampForm({ ...draw.form, positive: modePrompt, negative }, paid);
   };
 
   const characters = (): CharacterPayload[] =>
     draw.characters
       .filter((c) => c.enabled && expandPromptRandomizer(c.prompt).trim())
-      .slice(0, MAX_CHARACTERS)
+      .slice(0, characterLimit(model))
       .map((c) => ({
         prompt: expandPromptRandomizer(c.prompt),
         uc: expandPromptRandomizer(c.uc),
         enabled: true,
-        ...(c.placed ? { center: { x: c.x, y: c.y } } : {}),
+        ...(draw.positionMode === "custom" ? { center: snapCharacterCenter(model, { x: c.x, y: c.y }) } : {}),
       }));
 
   const generate = async () => {
@@ -391,7 +430,7 @@ export function DrawPane(props: {
       return;
     }
     const { form: clamped, notes } = composed();
-    const send = withTransparent(clamped, transparentBg);
+    const send = clamped;
     setNote(notes.length ? notes.join("；") : null);
     const controller = new AbortController();
     abort.current = controller;
@@ -433,6 +472,9 @@ export function DrawPane(props: {
           noise: draw.i2iNoise,
           refs,
           characters: characters(),
+          positionMode: draw.positionMode,
+          transparentBackground: transparentBg && isV5(model),
+          straightAlpha: props.straightAlpha === true,
           precise: draw.precise.map((r) => ({
             image: r.b64,
             caption: r.caption,
@@ -444,7 +486,7 @@ export function DrawPane(props: {
         },
         seed,
       );
-      (body.parameters as Record<string, unknown>).n_samples = count;
+      (body.parameters as Record<string, unknown>).n_samples = sampleCount;
       const imgs = await postImages(body, props.apiKey, controller.signal);
       const first = imgs[0];
       if (!first) throw new Error("返回里没有图片。");
@@ -642,11 +684,18 @@ export function DrawPane(props: {
     draw.form.positive,
     draw.artist,
     qualityHint,
-    draw.form.negative,
-    ...draw.characters.filter((c) => c.enabled).flatMap((c) => [c.prompt, c.uc]),
+    ...draw.characters.filter((c) => c.enabled).map((c) => c.prompt),
   ];
-  const promptTokens = tokenBudget(allPromptParts);
+  const promptLocal = useModelTokenCount(model, draw.form.positive);
+  const promptTotal = useModelTokenCount(model, allPromptParts.filter(Boolean).join(", "));
+  const negativeCount = useModelTokenCount(model, draw.form.negative);
+  const promptTokens = { local: promptLocal.count, total: promptTotal.count };
   const limit = tokenLimit(model);
+  const promptTokenStatus = [promptLocal.status, promptTotal.status].includes("error")
+    ? "分词器暂不可用"
+    : [promptLocal.status, promptTotal.status].includes("loading")
+      ? "正在读取分词器…"
+      : `这段用了 ${promptTokens.local} 个 token，当前合计 ${promptTokens.total}。上限 ${limit}`;
   const vibePending = pendingVibeEncodes(
     draw.refs.filter((r) => r.enabled !== false),
     wire === "encoded",
@@ -655,7 +704,7 @@ export function DrawPane(props: {
     width: draw.form.width,
     height: draw.form.height,
     steps: draw.form.steps,
-    nSamples: count,
+    nSamples: sampleCount,
     paid,
     smea: draw.form.smea,
     strength: draw.mode === "generate" ? 1 : draw.strength,
@@ -678,17 +727,17 @@ export function DrawPane(props: {
     patch({ characters: next });
   };
   const rollRandom = () => {
-    const n = Math.min(MAX_CHARACTERS, 1 + Math.floor(Math.random() * 3));
+    const n = Math.min(characterLimit(model), 1 + Math.floor(Math.random() * 3));
     const chars = Array.from({ length: n }, (_, i) => {
       const rolled = randomCharacterPrompt();
       return blankChar({ ...rolled, name: `角色 ${i + 1}`, fromRandom: true, open: n === 1 });
     });
     patchForm({ positive: randomBasePrompt() });
-    patch({ characters: v4 ? chars : [] });
+    patch({ characters: v4 || isV5(model) ? chars : [] });
     setRandomMode(true);
   };
   const applyQuickstart = (prompt: string) => {
-    if (props.v5Open && !isV5(model)) chooseModel("nai-diffusion-5-full");
+    if (props.v5Open && !isV5(model)) chooseModel("nai-diffusion-5-curated");
     patchForm({ positive: prompt });
     patch({ qualityPreset: "standard" });
     setPromptTab("prompt");
@@ -697,7 +746,7 @@ export function DrawPane(props: {
   const resetAi = () => {
     patchForm({
       steps: 23,
-      scale: 5,
+      scale: isV5(model) ? 7 : 5,
       sampler: "k_euler_ancestral",
       seed: "-1",
       noise: noiseChoices(model)[0] ?? "karras",
@@ -772,11 +821,25 @@ export function DrawPane(props: {
                 </div>
               )}
             </div>
-            <span class="nv-mode-tag" title="本站模型按动漫数据集出图">
+            <button
+              type="button"
+              class="nv-mode-tag"
+              aria-label={`切换模型模式，当前${draw.modelMode === "furry" ? "兽人" : "动漫"}`}
+              title="模型模式会在提示词开头加入对应数据集标记"
+              onClick={() => {
+                if (isV3(model)) {
+                  chooseModel(
+                    model === "nai-diffusion-furry-3" ? "nai-diffusion-3" : "nai-diffusion-furry-3",
+                  );
+                } else {
+                  patch({ modelMode: draw.modelMode === "furry" ? "anime" : "furry" });
+                }
+              }}
+            >
               模式
               <SparkleIcon size={14} />
-              动漫
-            </span>
+              {draw.modelMode === "furry" ? "兽人" : "动漫"}
+            </button>
           </div>
           {modes.length > 1 && (
             <fieldset class="wb-modes nv-sr" aria-label="模式">
@@ -822,6 +885,9 @@ export function DrawPane(props: {
                     title="分词器"
                     onClick={() => {
                       setTokenDraft(draw.form.negative);
+                      setTokenInputMode("text");
+                      setTokenOutputMode("text");
+                      setTokenIdsDraft("");
                       setTokenizerOpen(true);
                     }}
                   >
@@ -854,6 +920,9 @@ export function DrawPane(props: {
                         title="分词器"
                         onClick={() => {
                           setTokenDraft(draw.form.positive);
+                          setTokenInputMode("text");
+                          setTokenOutputMode("text");
+                          setTokenIdsDraft("");
                           setTokenizerOpen(true);
                         }}
                       >
@@ -904,6 +973,17 @@ export function DrawPane(props: {
                   onInput={(e) => patchForm({ positive: e.currentTarget.value })}
                 />
                 <div class="nv-pillrow nv-pillrow--end">
+                  {isV5(model) && props.setTransparentBg && (
+                    <button
+                      type="button"
+                      class={transparentBg ? "nv-pill is-on" : "nv-pill"}
+                      aria-pressed={transparentBg}
+                      aria-label="透明背景"
+                      onClick={() => props.setTransparentBg?.(!transparentBg)}
+                    >
+                      透明背景
+                    </button>
+                  )}
                   <span class="nv-bubble">
                     <div class="nv-pop">
                       <button
@@ -946,13 +1026,10 @@ export function DrawPane(props: {
                     ) : null}
                   </span>
                 </div>
-                <div
-                  class="nv-bar"
-                  title={`这段用了 ${promptTokens.local} 个 token，当前合计 ${promptTokens.total}。上限 ${limit}`}
-                >
+                <div class="nv-bar" title={promptTokenStatus}>
                   <span
                     style={{
-                      width: `${Math.min(100, Math.round((promptTokens.local / limit) * 100))}%`,
+                      width: `${promptLocal.status === "ready" ? Math.min(100, Math.round((promptTokens.local / limit) * 100)) : 0}%`,
                     }}
                   />
                 </div>
@@ -1021,17 +1098,25 @@ export function DrawPane(props: {
                     )}
                   </div>
                 </div>
-                <div class="nv-bar" aria-hidden="true">
+                <div
+                  class="nv-bar"
+                  aria-hidden="true"
+                  title={
+                    negativeCount.status === "error"
+                      ? "分词器暂不可用"
+                      : `${negativeCount.count} tokens / ${limit}`
+                  }
+                >
                   <span
                     style={{
-                      width: `${Math.min(100, Math.round((estimateTokens(draw.form.negative) / tokenLimit(model)) * 100))}%`,
+                      width: `${negativeCount.status === "ready" ? Math.min(100, Math.round((negativeCount.count / tokenLimit(model)) * 100)) : 0}%`,
                     }}
                   />
                 </div>
               </>
             )}
           </div>
-          {v4 && (
+          {(v4 || isV5(model)) && (
             <div class="nv-chars">
               <div class="nv-chars__head">
                 <div>
@@ -1044,7 +1129,7 @@ export function DrawPane(props: {
                     class="nv-plusbtn"
                     aria-label="添加角色"
                     aria-expanded={addGenderOpen}
-                    disabled={draw.characters.length >= MAX_CHARACTERS}
+                    disabled={draw.characters.length >= characterLimit(model)}
                     onClick={(e) => {
                       e.stopPropagation();
                       setAddGenderOpen((v) => !v);
@@ -1085,19 +1170,26 @@ export function DrawPane(props: {
                   清空随机角色
                 </button>
               )}
+              <fieldset class="nv-seg" aria-label="角色位置">
+                <legend>位置</legend>
+                <button
+                  type="button"
+                  aria-pressed={draw.positionMode === "ai"}
+                  onClick={() => patch({ positionMode: "ai" })}
+                >
+                  AI 自动
+                </button>
+                <button
+                  type="button"
+                  aria-pressed={draw.positionMode === "custom"}
+                  onClick={() => patch({ positionMode: "custom" })}
+                >
+                  自定义
+                </button>
+              </fieldset>
               {draw.characters.map((c, i) => (
                 <div key={c.id} class={c.open ? "nv-char is-open" : "nv-char"}>
                   <div class="nv-char__bar">
-                    <button
-                      type="button"
-                      class={c.placed ? "nv-icon is-on" : "nv-icon"}
-                      aria-label="使用位置"
-                      aria-pressed={c.placed}
-                      title={`${GENDER_LABEL[c.gender]} · 使用位置`}
-                      onClick={() => patchChar(c.id, { placed: !c.placed })}
-                    >
-                      <PinIcon />
-                    </button>
                     <input
                       class="nv-char__name"
                       aria-label={`角色 ${i + 1} 名称`}
@@ -1186,14 +1278,8 @@ export function DrawPane(props: {
                           )
                         }
                       />
-                      <div class="nv-bar" aria-hidden="true">
-                        <span
-                          style={{
-                            width: `${Math.min(100, Math.round((estimateTokens(c.ucTab ? c.uc : c.prompt) / limit) * 100))}%`,
-                          }}
-                        />
-                      </div>
-                      {c.placed && (
+                      <TokenLengthBar model={model} text={c.ucTab ? c.uc : c.prompt} limit={limit} />
+                      {draw.positionMode === "custom" && (
                         <div class="nai-footgrid">
                           <label class="nai-label">
                             X
@@ -1764,7 +1850,13 @@ export function DrawPane(props: {
               <span>图片数量</span>
               <div>
                 {[1, 2, 3, 4].map((n) => (
-                  <button key={n} type="button" aria-pressed={count === n} onClick={() => setCount(n)}>
+                  <button
+                    key={n}
+                    type="button"
+                    aria-pressed={sampleCount === n}
+                    disabled={!paid && n > 1}
+                    onClick={() => setCount(n)}
+                  >
                     {n}
                   </button>
                 ))}
@@ -2005,7 +2097,7 @@ export function DrawPane(props: {
             title="按当前提示词和参数出图。会计入今天的额度。"
             onClick={() => void generate()}
           >
-            <span>{running ? "生成中…" : `生成 ${count} 张`}</span>
+            <span>{running ? "生成中…" : `生成 ${sampleCount} 张`}</span>
             <span class="nv-costchip">
               {anlas}
               <AnlasIcon size={12} />
@@ -2035,19 +2127,80 @@ export function DrawPane(props: {
                 <CloseIcon />
               </button>
             </header>
-            <p>送进模型前，文字会先切成 token。平均大约 4 个字符一个 token，常用词常常就是一个 token。</p>
             <p>
-              当前模型用的是 <b>{tokenizerName(model)}</b>。这里是粗估，不是官方分词器。
+              当前图像模型使用 <b>{tokenizerLabel(model)}</b>。提示词在本地切分，不会发送给 NovelAI。
             </p>
+            <div class="nv-tabs" role="tablist" aria-label="分词器输入类型">
+              <button
+                type="button"
+                role="tab"
+                aria-selected={tokenInputMode === "text"}
+                onClick={() => setTokenInputMode("text")}
+              >
+                文本输入
+              </button>
+              <button
+                type="button"
+                role="tab"
+                aria-selected={tokenInputMode === "ids"}
+                onClick={() => setTokenInputMode("ids")}
+              >
+                ID 输入
+              </button>
+            </div>
             <textarea
               class="nai-textarea"
-              aria-label="分词文本"
-              placeholder="在这里输入文字，下面会显示粗估结果。"
-              value={tokenDraft}
-              onInput={(e) => setTokenDraft(e.currentTarget.value)}
+              aria-label={tokenInputMode === "text" ? "分词文本" : "分词 ID"}
+              placeholder={
+                tokenInputMode === "text"
+                  ? "在这里输入文字，下面会显示切分结果。"
+                  : "输入空格或逗号分隔的 token ID。"
+              }
+              value={tokenInputMode === "text" ? tokenDraft : tokenIdsDraft}
+              onInput={(e) =>
+                tokenInputMode === "text"
+                  ? setTokenDraft(e.currentTarget.value)
+                  : setTokenIdsDraft(e.currentTarget.value)
+              }
             />
+            <div class="nv-tabs" role="tablist" aria-label="分词器输出类型">
+              <button
+                type="button"
+                role="tab"
+                aria-selected={tokenOutputMode === "text"}
+                onClick={() => setTokenOutputMode("text")}
+              >
+                Token 文本
+              </button>
+              <button
+                type="button"
+                role="tab"
+                aria-selected={tokenOutputMode === "ids"}
+                onClick={() => setTokenOutputMode("ids")}
+              >
+                Token ID
+              </button>
+            </div>
+            <div class="nv-token__pieces" aria-live="polite">
+              {tokenBusy ? (
+                <span class="nv-token__status">正在读取分词器…</span>
+              ) : tokenError ? (
+                <span class="nv-token__error">{tokenError}</span>
+              ) : tokenResult ? (
+                tokenOutputMode === "ids" ? (
+                  <span>{tokenResult.ids.join(" ")}</span>
+                ) : (
+                  tokenResult.tokens.map((token, i) => (
+                    <span class="nv-token__piece" key={`${i}-${token}`}>
+                      {token}
+                    </span>
+                  ))
+                )
+              ) : null}
+            </div>
             <p class="nv-token__stat">
-              Token：{estimateTokens(tokenDraft)}　字符：{tokenDraft.length}
+              Token：{tokenResult?.ids.length ?? 0}　字符：
+              {tokenInputMode === "text" ? tokenDraft.length : (tokenResult?.text.length ?? 0)}
             </p>
           </div>
         </div>
@@ -2296,18 +2449,50 @@ function SamplerPick(props: {
   );
 }
 
-function tokenizerName(model: string): string {
-  if (isV5(model)) return "Qwen";
-  if (isV3(model)) return "CLIP";
-  return "T5";
+type TokenCountState = { status: "loading" | "ready" | "error"; count: number };
+
+function useModelTokenCount(model: string, text: string): TokenCountState {
+  const [result, setResult] = useState<TokenCountState>({ status: "loading", count: 0 });
+  useEffect(() => {
+    let current = true;
+    if (!text) {
+      setResult({ status: "ready", count: 0 });
+      return () => {
+        current = false;
+      };
+    }
+    setResult({ status: "loading", count: 0 });
+    tokenizeText(model, text)
+      .then((result) => {
+        if (current) setResult({ status: "ready", count: result.ids.length });
+      })
+      .catch(() => {
+        if (current) setResult({ status: "error", count: 0 });
+      });
+    return () => {
+      current = false;
+    };
+  }, [model, text]);
+  return result;
 }
 
-function withTransparent(form: PaintForm, on: boolean): PaintForm {
-  if (!on || form.positive.includes("transparent background")) return form;
-  return {
-    ...form,
-    positive: form.positive ? `${form.positive}, transparent background` : "transparent background",
-  };
+function TokenLengthBar({ model, text, limit }: { model: string; text: string; limit: number }) {
+  const result = useModelTokenCount(model, text);
+  const title =
+    result.status === "ready"
+      ? `${result.count} tokens / ${limit}`
+      : result.status === "loading"
+        ? "正在读取分词器…"
+        : "分词器暂不可用";
+  return (
+    <div class="nv-bar" aria-hidden="true" title={title}>
+      <span
+        style={{
+          width: `${result.status === "ready" ? Math.min(100, Math.round((result.count / limit) * 100)) : 0}%`,
+        }}
+      />
+    </div>
+  );
 }
 
 function appendTag(current: string, tag: string): string {

@@ -11,6 +11,7 @@ import { buildRequest, isV3, isV5, type PaintForm } from "../../lib/nai-config";
 /** 官方客户端的质量预设词（按模型）。 */
 const QUALITY_TAGS: Record<string, string> = {
   "nai-diffusion-5-full": "very aesthetic, masterpiece, no text",
+  "nai-diffusion-5-curated": "very aesthetic, masterpiece, no text",
   "nai-diffusion-4-5-full": "very aesthetic, masterpiece, no text",
   "nai-diffusion-4-5-curated": "very aesthetic, masterpiece, no text, -0.8::feet::, rating:general",
   "nai-diffusion-4-full": "no text, best quality, very aesthetic, absurdres",
@@ -140,8 +141,29 @@ export function composePositive(
   prompt: string,
   artist: string,
   preset: QualityPreset,
+  transparentBackground = false,
 ): string {
-  return joinPrompt(artist, prompt, qualityTags(model, preset));
+  const transparent = transparentBackground && isV5(model) ? "transparent background" : "";
+  if (!isV5(model)) return joinPrompt(artist, prompt, qualityTags(model, preset));
+  const manualTextAt = prompt.search(/\btext\s*:/i);
+  if (manualTextAt >= 0) {
+    const basePrompt = prompt.slice(0, manualTextAt).replace(/[,\s]+$/g, "");
+    const textBlock = prompt.slice(manualTextAt).trim();
+    const base = joinPrompt(artist, basePrompt, transparent, qualityTags(model, preset));
+    return `${base}${base ? "\n\n" : ""}${textBlock}`;
+  }
+  const quoted = /"([\s\S]*?)"|“([\s\S]*?)”|‘([\s\S]*?)’|「([\s\S]*?)」|『([\s\S]*?)』|＂([\s\S]*?)＂/g;
+  const lines: string[] = [];
+  const withoutText = prompt.replace(quoted, (_match, ...parts: string[]) => {
+    const value = parts
+      .slice(0, 6)
+      .find((part) => part !== undefined)
+      ?.trim();
+    if (value) lines.unshift(value);
+    return "";
+  });
+  const base = joinPrompt(artist, withoutText, transparent, qualityTags(model, preset));
+  return lines.length ? `${base}${base ? "\n\n" : ""}teXt:\n${lines.join("\n\n")}` : base;
 }
 
 /**
@@ -171,6 +193,13 @@ export const MODE_LABELS: Record<WbMode, string> = {
   img2img: "图生图",
   infill: "局部重绘",
 };
+
+export type ModelMode = "anime" | "furry";
+
+export function applyModelModePrompt(model: string, prompt: string, mode: ModelMode): string {
+  if (mode !== "furry" || isV3(model) || /^\s*(?:fur|background) dataset\b/i.test(prompt)) return prompt;
+  return `fur dataset, ${prompt}`;
+}
 
 /** 图生图 / 局部重绘走网关的 policy.img2img 开关；没开就只给文生图。 */
 export function modesFor(policy: { img2img?: boolean } | undefined): WbMode[] {
@@ -222,6 +251,16 @@ export type PrecisePayload = {
 };
 
 export type CharacterGender = "none" | "female" | "male";
+export type CharacterPositionMode = "ai" | "custom";
+
+export function snapCharacterCenter(
+  model: string,
+  center: { x: number; y: number },
+): { x: number; y: number } {
+  if (isV5(model)) return center;
+  const snap = (value: number) => (Math.floor(Math.min(0.9999, Math.max(0, value)) * 5) + 0.5) / 5;
+  return { x: snap(center.x), y: snap(center.y) };
+}
 
 export type CharacterPayload = {
   prompt: string;
@@ -282,14 +321,21 @@ export function buildTaskRequest(
     noise: number;
     refs: RefPayload[];
     characters?: CharacterPayload[];
+    positionMode?: CharacterPositionMode;
     precise?: PrecisePayload[];
     varietyPlus?: boolean;
+    transparentBackground?: boolean;
+    straightAlpha?: boolean;
   },
   seed: number,
 ): Record<string, unknown> {
   const body = buildRequest(task.form, seed);
   if (task.mode !== "generate") body.action = task.mode;
   const p = body.parameters as Record<string, unknown>;
+  if (task.transparentBackground) {
+    p.tag_hint_transparent_background = true;
+    p.straight_alpha = task.straightAlpha === true;
+  }
   if (task.mode !== "generate") {
     p.image = task.source?.b64 ?? "";
     if (task.mode === "img2img") {
@@ -318,14 +364,14 @@ export function buildTaskRequest(
   }
   const characters = (task.characters ?? [])
     .filter((c) => c.enabled !== false && c.prompt.trim())
-    .slice(0, MAX_CHARACTERS);
-  if (characters.length && task.form.model.startsWith("nai-diffusion-4")) {
+    .slice(0, characterLimit(task.form.model));
+  if (characters.length && (task.form.model.startsWith("nai-diffusion-4") || isV5(task.form.model))) {
     p.characterPrompts = characters.map((c) => {
       const row: Record<string, unknown> = { prompt: c.prompt.trim(), uc: c.uc.trim(), enabled: true };
-      if (c.center) row.center = { x: c.center.x, y: c.center.y };
+      if (c.center) row.center = snapCharacterCenter(task.form.model, c.center);
       return row;
     });
-    if (characters.some((c) => c.center)) p.use_coords = true;
+    p.use_coords = task.positionMode === "custom";
   }
   if (p.smea === true || p.smea_dyn === true) {
     p.sm = true;
@@ -448,22 +494,12 @@ export function clampRetryAfter(sec: number | null): number {
 
 /** 各模型族的提示词上限（与官方客户端一致）：V5 走 Qwen、V4 系走 T5、V3 走 CLIP。 */
 export function tokenLimit(model: string): number {
-  return isV5(model) ? 1471 : isV3(model) ? 225 : 512;
+  return model === "nai-diffusion-5-curated" ? 703 : isV5(model) ? 1471 : isV3(model) ? 225 : 512;
 }
 
-/**
- * 粗估，不是官方 tokenizer：剥掉权重写法（1.2::tag::）和强调括号后，
- * 中日韩字符按 1 个 token、其余按 4 个字符 ≈ 1 个 token。只用来给「写多了没有」一个数量级参考。
- */
-export function estimateTokens(text: string): number {
-  const t = text.replace(/-?\d+(\.\d+)?::/g, "").replace(/[{}[\]]/g, "");
-  let cjk = 0;
-  let other = 0;
-  for (const ch of t) {
-    if (/[\u3000-\u9fff\u3040-\u30ff\uac00-\ud7af\uff00-\uffef]/.test(ch)) cjk++;
-    else other++;
-  }
-  return cjk + Math.ceil(other / 4);
+/** V5 supports 22 characters; earlier image models support six. */
+export function characterLimit(model: string): number {
+  return isV5(model) ? 22 : MAX_CHARACTERS;
 }
 
 /**
@@ -599,11 +635,6 @@ export function pendingVibeEncodes(
 ): number {
   if (!encodedWire) return 0;
   return refs.filter((r) => r.encodedAt !== r.extracted).length;
-}
-
-export function tokenBudget(parts: string[]): { local: number; total: number } {
-  const tokens = parts.map((p) => estimateTokens(p));
-  return { local: tokens[0] ?? 0, total: tokens.reduce((a, b) => a + b, 0) };
 }
 
 /* ---------------- 分辨率 / 高级 / 增强 / 导演 ---------------- */

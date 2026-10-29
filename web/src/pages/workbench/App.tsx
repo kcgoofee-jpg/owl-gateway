@@ -10,7 +10,7 @@ import type { Shot } from "./api";
 import { BatchPane } from "./Batch";
 import { DirectorPane } from "./Director";
 import { DrawPane, type DrawState } from "./Draw";
-import { AnlasIcon, MenuIcon, PlusIcon } from "./Icons";
+import { AnlasIcon, MenuIcon, OwlIcon, PlusIcon } from "./Icons";
 import { loadPrefs, savePrefs, type WbPrefs } from "./prefs";
 import { SettingsModal, type SettingsTab } from "./Settings";
 import { me as meSignal, start } from "./store";
@@ -32,6 +32,8 @@ const INITIAL_DRAW: DrawState = {
   refs: [],
   precise: [],
   characters: [],
+  positionMode: "ai",
+  modelMode: "anime",
   varietyPlus: false,
   suggest: { busy: false, tags: [] },
 };
@@ -70,7 +72,14 @@ function Workbench({ me }: { me: MeMember }) {
   const blocked = entryProblem(me);
   const [page, setPage] = useState<PageId>("draw");
   const [menuOpen, setMenuOpen] = useState(false);
-  const [draw, setDraw] = useState<DrawState>(() => ({ ...INITIAL_DRAW }));
+  const [draw, setDraw] = useState<DrawState>(() => ({
+    ...INITIAL_DRAW,
+    form: {
+      ...INITIAL_DRAW.form,
+      model: me.policy?.v5 ? "nai-diffusion-5-curated" : INITIAL_DRAW.form.model,
+      scale: me.policy?.v5 ? 7 : INITIAL_DRAW.form.scale,
+    },
+  }));
   const patch = (p: Partial<DrawState>) => setDraw((d) => ({ ...d, ...p }));
   const patchForm = (p: Partial<PaintForm>) => setDraw((d) => ({ ...d, form: { ...d.form, ...p } }));
   const [history, setHistory] = useState<Shot[]>(() => {
@@ -150,28 +159,9 @@ function Workbench({ me }: { me: MeMember }) {
 
   return (
     <div class={prefs.reducedMotion ? "nai-app is-quiet" : "nai-app"} data-wb-theme={prefs.theme}>
-      {import.meta.env.PROD && (
-        <Dialog
-          open
-          title="生图工作台还在测试"
-          onClose={() => {
-            location.href = "/";
-          }}
-          footer={
-            <a class="btn btn--primary" href="/">
-              返回首页
-            </a>
-          }
-        >
-          <p>这个页面还不能用。测完才会开放，请先回首页。</p>
-        </Dialog>
-      )}
       <header class="nv-top">
         <a class="nv-mark" href="/" aria-label="首页">
-          <span class="nv-eyes" aria-hidden="true">
-            <i />
-            <i />
-          </span>
+          <OwlIcon />
           <h1 class="sr-only">生图工作台</h1>
         </a>
         <span class="nv-beta">Beta</span>
@@ -273,6 +263,7 @@ function Workbench({ me }: { me: MeMember }) {
         autoDownload={prefs.autoDownload}
         hideHistory={prefs.hideHistory}
         transparentBg={prefs.transparentBg}
+        straightAlpha={prefs.straightAlpha}
         setTransparentBg={(v) => setPrefs({ ...prefs, transparentBg: v })}
       />
       {augment && <DirectorPane hidden={page !== "director"} apiKey={me.key ?? ""} addShots={addShots} />}

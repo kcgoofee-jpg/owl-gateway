@@ -2,6 +2,23 @@
 
 type IconProps = { size?: number; class?: string };
 
+export function OwlIcon({ size = 30, class: className }: IconProps) {
+  return (
+    <svg class={className} width={size} height={size} viewBox="0 0 32 32" fill="none" aria-hidden="true">
+      <path
+        d="m5 8 4 1.5 3-3L16 8l4-1.5 3 3L27 8v8.8c0 6.1-4 10.2-11 12.7-7-2.5-11-6.6-11-12.7V8Z"
+        fill="currentColor"
+      />
+      <path d="m10 7-1-3 4 2m6 0 4-2-1 3" stroke="currentColor" stroke-width="2" stroke-linejoin="round" />
+      <circle cx="12" cy="15" r="4.1" fill="var(--nai-panel, #111322)" />
+      <circle cx="20" cy="15" r="4.1" fill="var(--nai-panel, #111322)" />
+      <circle cx="12" cy="15" r="1.4" fill="var(--nai-eye, #ffc53d)" />
+      <circle cx="20" cy="15" r="1.4" fill="var(--nai-eye, #ffc53d)" />
+      <path d="m16 17.2-2 3h4l-2-3Z" fill="var(--nai-panel, #111322)" />
+    </svg>
+  );
+}
+
 export function MenuIcon({ size = 18 }: IconProps) {
   return (
     <svg width={size} height={size} viewBox="0 0 24 24" fill="none" aria-hidden="true">
@@ -89,13 +106,14 @@ export function HistoryIcon({ size = 22 }: IconProps) {
         stroke-linecap="round"
         stroke-linejoin="round"
       />
+      <path d="M5.2 8.2A8 8 0 1 1 4.2 13" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" />
       <path
-        d="M5.2 8.2A8 8 0 1 1 4.2 13"
+        d="M4.2 5.2v3.4h3.4"
         stroke="currentColor"
         stroke-width="1.8"
         stroke-linecap="round"
+        stroke-linejoin="round"
       />
-      <path d="M4.2 5.2v3.4h3.4" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" />
     </svg>
   );
 }

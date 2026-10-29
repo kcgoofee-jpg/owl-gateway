@@ -12,9 +12,12 @@
     "e2e": "playwright test"
   },
   "dependencies": {
+    "@huggingface/tokenizers": "0.2.0",
     "@preact/signals": "2.11.3",
+    "fflate": "0.8.2",
     "lucide-preact": "1.49.0",
     "motion": "13.5.1",
+    "nai-js-tokenizer": "1.1.0",
     "preact": "11.0.1",
     "preact-iso": "2.12.2"
   },

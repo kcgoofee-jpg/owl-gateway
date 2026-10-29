@@ -1,10 +1,12 @@
-/** workbench-config：预设组合、图参组装、五组批量展开、队列失败分类、token 粗估。 */
+/** workbench-config：预设组合、图参组装、五组批量展开、队列失败分类、模型限制。 */
 import { describe, expect, it, vi } from "vitest";
 import { DEFAULT_FORM } from "../../lib/nai-config";
 import {
+  applyModelModePrompt,
   type BatchGroup,
   batchTasks,
   buildTaskRequest,
+  characterLimit,
   clampCount,
   clampRetryAfter,
   classifyFailure,
@@ -15,7 +17,6 @@ import {
   enhanceLevel,
   enhanceScales,
   estimateAnlasCost,
-  estimateTokens,
   expandPromptRandomizer,
   MAX_BATCH_TASKS,
   modesFor,
@@ -24,12 +25,22 @@ import {
   qualityTags,
   randomCharacterPrompt,
   resolutionGroup,
+  snapCharacterCenter,
   tokenLimit,
   ucOptions,
   upscaleRequest,
 } from "./workbench-config";
 
 describe("质量与负面预设", () => {
+  it("兽人模式放在最终正向提示词最前面，并保留手写数据集前缀", () => {
+    expect(applyModelModePrompt("nai-diffusion-5-full", "artist:x, owl, quality", "furry")).toBe(
+      "fur dataset, artist:x, owl, quality",
+    );
+    expect(applyModelModePrompt("nai-diffusion-5-full", "background dataset, red owl", "furry")).toBe(
+      "background dataset, red owl",
+    );
+    expect(applyModelModePrompt("nai-diffusion-3", "owl", "furry")).toBe("owl");
+  });
   it("标准质量词按模型给；none 是空", () => {
     expect(qualityTags("nai-diffusion-4-5-full", "standard")).toBe("very aesthetic, masterpiece, no text");
     expect(qualityTags("nai-diffusion-4-5-full", "none")).toBe("");
@@ -37,13 +48,52 @@ describe("质量与负面预设", () => {
 
   it("V5 的「轻量」是官方短预设", () => {
     expect(qualityTags("nai-diffusion-5-full", "light")).toBe("very aesthetic, amazing quality, no text");
+    expect(qualityTags("nai-diffusion-5-curated", "standard")).toBe("very aesthetic, masterpiece, no text");
     expect(qualityTags("nai-diffusion-4-5-full", "light")).toBe("very aesthetic, masterpiece, no text");
+  });
+
+  it("V5 引号文本自动移到最后的 teXt 区块，手写 Text 区块不重复转换", () => {
+    expect(composePositive("nai-diffusion-5-full", '1girl holding "hello"', "", "standard")).toBe(
+      "1girl holding, very aesthetic, masterpiece, no text\n\nteXt:\nhello",
+    );
+    expect(composePositive("nai-diffusion-5-full", "1girl, Text: hello", "", "standard")).toBe(
+      "1girl, very aesthetic, masterpiece, no text\n\nText: hello",
+    );
   });
 
   it("正面组合顺序：画师词 → 提示词 → 质量词", () => {
     expect(composePositive("nai-diffusion-4-5-full", "1girl", "artist:x", "standard")).toBe(
       "artist:x, 1girl, very aesthetic, masterpiece, no text",
     );
+  });
+
+  it("透明背景使用 V5 请求标记，保持 teXt 区块末尾不变", () => {
+    const positive = composePositive(
+      "nai-diffusion-5-full",
+      'owl holding "hello"',
+      "artist:x",
+      "standard",
+      true,
+    );
+    const body = buildTaskRequest(
+      {
+        form: { ...DEFAULT_FORM, model: "nai-diffusion-5-full", positive },
+        mode: "generate",
+        strength: 0,
+        noise: 0,
+        refs: [],
+        transparentBackground: true,
+        straightAlpha: true,
+      },
+      7,
+    );
+    const input = body.input as string;
+    expect(input).toBe(positive);
+    expect(input).toContain("transparent background");
+    expect(input.indexOf("transparent background")).toBeLessThan(input.indexOf("teXt:"));
+    expect(input.endsWith("teXt:\nhello")).toBe(true);
+    expect((body.parameters as Record<string, unknown>).tag_hint_transparent_background).toBe(true);
+    expect((body.parameters as Record<string, unknown>).straight_alpha).toBe(true);
   });
 
   it("负面组合：非 Curated 选预设且提示词没写 nsfw 时自动带 nsfw", () => {
@@ -222,19 +272,22 @@ describe("队列失败分类", () => {
   });
 });
 
-describe("token 粗估", () => {
+describe("模型 token 上限与角色限制", () => {
   it("按模型族给上限：V5 / V4 系 / V3", () => {
     expect(tokenLimit("nai-diffusion-5-full")).toBe(1471);
+    expect(tokenLimit("nai-diffusion-5-curated")).toBe(703);
     expect(tokenLimit("nai-diffusion-4-5-full")).toBe(512);
     expect(tokenLimit("nai-diffusion-3")).toBe(225);
   });
 
-  it("中日韩按字、英文按 4 字符 ≈ 1；权重写法不占", () => {
-    expect(estimateTokens("abcdef")).toBe(2);
-    expect(estimateTokens("1girl, seaside, sunset, very aesthetic")).toBe(10);
-    expect(estimateTokens("猫头鹰")).toBe(3);
-    // 1.2::tag:: 的权重前缀剥掉：只剩 tag 本体（8 字符 ≈ 2），不剥会是 4
-    expect(estimateTokens("1.2::abcdef::")).toBe(2);
+  it("V5 角色上限为 22，其余模型沿用 6", () => {
+    expect(characterLimit("nai-diffusion-5-curated")).toBe(22);
+    expect(characterLimit("nai-diffusion-4-5-full")).toBe(6);
+  });
+
+  it("旧模型角色坐标吸附到 5×5 网格，V5 保留自由坐标", () => {
+    expect(snapCharacterCenter("nai-diffusion-4-5-full", { x: 0.25, y: 0.75 })).toEqual({ x: 0.3, y: 0.7 });
+    expect(snapCharacterCenter("nai-diffusion-5-full", { x: 0.25, y: 0.75 })).toEqual({ x: 0.25, y: 0.75 });
   });
 });
 
@@ -285,6 +338,7 @@ describe("官方绘图页参数", () => {
         refs: [{ image: "VIBE", strength: 0.5 }],
         precise: [{ image: "PNG", caption: "character", extracted: 1, strength: 0.8, fidelity: 0.4 }],
         characters: [{ prompt: "1girl", uc: "bad hands", center: { x: 0.2, y: 0.3 } }],
+        positionMode: "custom",
       },
       7,
     );
@@ -294,7 +348,7 @@ describe("官方绘图页参数", () => {
     expect(p.director_reference_strength_values).toEqual([0.8]);
     expect(p.director_reference_secondary_strength_values).toEqual([0.4]);
     expect(p.characterPrompts).toEqual([
-      { prompt: "1girl", uc: "bad hands", center: { x: 0.2, y: 0.3 }, enabled: true },
+      { prompt: "1girl", uc: "bad hands", center: { x: 0.3, y: 0.3 }, enabled: true },
     ]);
     expect(p.use_coords).toBe(true);
   });
@@ -318,6 +372,29 @@ describe("官方绘图页参数", () => {
     expect(p.sm_dyn).toBe(true);
     expect(p.smea).toBeUndefined();
     expect(typeof p.skip_cfg_above_sigma).toBe("number");
+    const v5Characters = buildTaskRequest(
+      {
+        form: { ...DEFAULT_FORM, model: "nai-diffusion-5-curated" },
+        mode: "generate",
+        strength: 0,
+        noise: 0,
+        refs: [],
+        positionMode: "custom",
+        characters: Array.from({ length: 23 }, (_, i) => ({
+          prompt: `character ${i}`,
+          uc: "",
+          center: { x: 0.25, y: 0.75 },
+        })),
+      },
+      1,
+    );
+    const v5Params = v5Characters.parameters as Record<string, unknown>;
+    expect(v5Params.use_coords).toBe(true);
+    expect(v5Params.characterPrompts).toHaveLength(22);
+    expect((v5Params.characterPrompts as Array<{ center: { x: number; y: number } }>)[0]?.center).toEqual({
+      x: 0.25,
+      y: 0.75,
+    });
     const v5 = buildTaskRequest(
       {
         form: { ...DEFAULT_FORM, model: "nai-diffusion-5-full", sampler: "k_euler_ancestral" },

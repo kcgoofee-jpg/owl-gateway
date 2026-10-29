@@ -44,7 +44,10 @@ const ME: MeMember = {
 };
 
 const fetchMock = vi.fn();
+const generationReplies: Response[] = [];
 const reloadMeMock = vi.mocked(reloadMe);
+
+const generationCalls = () => fetchMock.mock.calls.filter(([url]) => String(url) === "/ai/generate-image");
 
 let host: HTMLElement | null = null;
 
@@ -110,6 +113,12 @@ const errJson = (status: number, error: Record<string, unknown>) =>
 
 beforeEach(() => {
   fetchMock.mockReset();
+  generationReplies.length = 0;
+  fetchMock.mockImplementation((url: string) => {
+    if (url.startsWith("/public/tokenizer/"))
+      return Promise.resolve(new Response("not available", { status: 503 }));
+    return Promise.resolve(generationReplies.shift() ?? errJson(500, { message: "no queued mock response" }));
+  });
   reloadMeMock.mockReset();
   reloadMeMock.mockResolvedValue(undefined);
   me.value = ME;
@@ -146,6 +155,23 @@ describe("WorkbenchApp", () => {
     expect(h.textContent).toContain("今日 3/100");
   });
 
+  it("V5 权限默认 V5 Curated、Guidance 7，并切换动漫/兽人模式", async () => {
+    me.value = {
+      ...ME,
+      policy: { ...POLICY, v5: true, daily_v5: 20 },
+      today: { images: 0, daily_images: 100, v5: 0, daily_v5: 20 },
+    };
+    const h = await mount();
+    expect(buttonByText(h, "V5 Curated")).toBeTruthy();
+    expect(need<HTMLInputElement>(h, 'input[aria-label="引导"]').value).toBe("7");
+    const transparent = need<HTMLButtonElement>(h, 'button[aria-label="透明背景"]');
+    expect(transparent.getAttribute("aria-pressed")).toBe("false");
+    await click(transparent);
+    expect(transparent.getAttribute("aria-pressed")).toBe("true");
+    await click(need<HTMLButtonElement>(h, 'button[aria-label="切换模型模式，当前动漫"]'));
+    expect(h.textContent).toContain("兽人");
+  });
+
   it("img2img 开放：出现模式切换；没传原图生成会拦下", async () => {
     me.value = { ...ME, policy: { ...POLICY, img2img: true } };
     const h = await mount();
@@ -156,18 +182,18 @@ describe("WorkbenchApp", () => {
     await click(h.querySelector("button.nai-generate") as HTMLButtonElement);
     await settle();
     expect(h.textContent).toContain("先传一张原图");
-    expect(fetchMock).not.toHaveBeenCalled();
+    expect(generationCalls()).toHaveLength(0);
   });
 
   it("出图主链路：组合提示词、Bearer 头、成图进舞台与画廊、刷新额度", async () => {
-    fetchMock.mockResolvedValueOnce(okImage());
+    generationReplies.push(okImage());
     const h = await mount();
     await type(need<HTMLTextAreaElement>(h, ".wb-side textarea"), "1girl, seaside");
     // 画师词是侧栏第一个文本输入框；默认质量预设「无」→ 组合结果只有画师 + 提示词
     await type(need<HTMLInputElement>(h, ".wb-side input.input"), "artist:owl");
     await click(h.querySelector("button.nai-generate") as HTMLButtonElement);
     await settle();
-    const [, init] = fetchMock.mock.calls[0] as [string, RequestInit];
+    const [, init] = generationCalls()[0] as [string, RequestInit];
     expect(new Headers(init.headers).get("authorization")).toBe("Bearer k-test");
     const body = JSON.parse(String(init.body)) as { input: string; parameters: { negative_prompt: string } };
     expect(body.input).toBe("artist:owl, 1girl, seaside, very aesthetic, masterpiece, no text");
@@ -179,7 +205,7 @@ describe("WorkbenchApp", () => {
   });
 
   it("批量：两组各一张跑完进画廊，请求体带各组的词", async () => {
-    fetchMock.mockResolvedValueOnce(okImage()).mockResolvedValueOnce(okImage());
+    generationReplies.push(okImage(), okImage());
     const h = await mount();
     await click(buttonByText(h, "批量"));
     const batch = need<HTMLElement>(h, 'section[aria-label="批量出图"]');
@@ -192,11 +218,11 @@ describe("WorkbenchApp", () => {
       await new Promise((r) => setTimeout(r, 20));
     });
     await settle();
-    expect(fetchMock).toHaveBeenCalledTimes(2);
-    const b1 = JSON.parse(String((fetchMock.mock.calls[0] as [string, RequestInit])[1].body)) as {
+    expect(generationCalls()).toHaveLength(2);
+    const b1 = JSON.parse(String((generationCalls()[0] as [string, RequestInit])[1].body)) as {
       input: string;
     };
-    const b2 = JSON.parse(String((fetchMock.mock.calls[1] as [string, RequestInit])[1].body)) as {
+    const b2 = JSON.parse(String((generationCalls()[1] as [string, RequestInit])[1].body)) as {
       input: string;
     };
     expect(b1.input).toContain("g one");
@@ -207,7 +233,7 @@ describe("WorkbenchApp", () => {
   });
 
   it("批量失败：任务标失败、队列暂停，出现「继续」", async () => {
-    fetchMock.mockResolvedValueOnce(errJson(500, { message: "上游暂时不可用", status: 500 }));
+    generationReplies.push(errJson(500, { message: "上游暂时不可用", status: 500 }));
     const h = await mount();
     await click(buttonByText(h, "批量"));
     const batch = need<HTMLElement>(h, 'section[aria-label="批量出图"]');
@@ -226,20 +252,19 @@ describe("WorkbenchApp", () => {
   });
 
   it("限速：按 Retry-After 自动重试一次后成功", async () => {
-    fetchMock
-      .mockResolvedValueOnce(
-        new Response(
-          JSON.stringify({
-            statusCode: 429,
-            error: { retryable: true, execution_unknown: false, message: "太快了" },
-          }),
-          {
-            status: 429,
-            headers: { "content-type": "application/json", "retry-after": "1" },
-          },
-        ),
-      )
-      .mockResolvedValueOnce(okImage());
+    generationReplies.push(
+      new Response(
+        JSON.stringify({
+          statusCode: 429,
+          error: { retryable: true, execution_unknown: false, message: "太快了" },
+        }),
+        {
+          status: 429,
+          headers: { "content-type": "application/json", "retry-after": "1" },
+        },
+      ),
+      okImage(),
+    );
     const h = await mount();
     await click(buttonByText(h, "批量"));
     const batch = need<HTMLElement>(h, 'section[aria-label="批量出图"]');
@@ -250,7 +275,7 @@ describe("WorkbenchApp", () => {
       await new Promise((r) => setTimeout(r, 1200));
     });
     await settle();
-    expect(fetchMock).toHaveBeenCalledTimes(2);
+    expect(generationCalls()).toHaveLength(2);
     expect(h.querySelector(".wb-job--done")).toBeTruthy();
     expect(h.textContent).toContain("已完成 1");
   });

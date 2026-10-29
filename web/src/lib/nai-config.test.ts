@@ -130,7 +130,7 @@ describe("提示与闸门", () => {
 
   it("模型清单里 V5 单独一组，基础组里没有 V5", () => {
     expect(BASE_MODELS.some((m) => m.id.startsWith("nai-diffusion-5"))).toBe(false);
-    expect(V5_MODELS.map((m) => m.id)).toEqual(["nai-diffusion-5-full"]);
+    expect(V5_MODELS.map((m) => m.id)).toEqual(["nai-diffusion-5-curated", "nai-diffusion-5-full"]);
   });
 });
 

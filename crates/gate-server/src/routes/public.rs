@@ -16,18 +16,21 @@ use crate::session::{self, ADMIN_COOKIE, AdminSession};
 use crate::state::AppState;
 use axum::Router;
 use axum::body::Body;
-use axum::extract::{Request, State};
+use axum::extract::{Query, Request, State};
 use axum::http::{HeaderMap, HeaderValue, StatusCode, header};
 use axum::response::sse::{Event, KeepAlive, Sse};
 use axum::response::{IntoResponse, Response};
 use axum::routing::{get, post};
 use futures::StreamExt;
 use gate_core::primitives::take_chars;
+use serde::Deserialize;
 use serde_json::{Map, Value, json};
+use sha2::{Digest, Sha256};
 use std::convert::Infallible;
 use std::hash::{Hash, Hasher};
+use std::io::Read;
 use std::sync::Arc;
-use tokio::sync::watch;
+use tokio::sync::{OnceCell, watch};
 use tokio::time::{Duration, Instant};
 
 pub fn router() -> Router<AppState> {
@@ -35,6 +38,7 @@ pub fn router() -> Router<AppState> {
         .route("/public/live", get(public_live))
         .route("/public/live/stream", get(public_live_stream))
         .route("/public/device-fp", post(device_fp))
+        .route("/public/tokenizer/{model}", get(public_tokenizer))
         .route("/public/status", get(public_status))
         .route("/queue-status", get(queue_status))
         .route("/admin/api/events", get(admin_events));
@@ -54,6 +58,152 @@ pub fn router() -> Router<AppState> {
         r = r.route(p, get(user_information));
     }
     r
+}
+
+// The URL pins NovelAI's v2 tokenizer assets; hashes below intentionally keep one stable model per release.
+static QWEN_TOKENIZER: OnceCell<Vec<u8>> = OnceCell::const_new();
+static T5_TOKENIZER: OnceCell<Vec<u8>> = OnceCell::const_new();
+static CLIP_TOKENIZER: OnceCell<Vec<u8>> = OnceCell::const_new();
+const TOKENIZER_COMPRESSED_LIMIT: usize = 8 * 1024 * 1024;
+const TOKENIZER_JSON_LIMIT: usize = 32 * 1024 * 1024;
+
+fn tokenizer_sha256(model: &str) -> Option<&'static str> {
+    match model {
+        "qwen" => Some("f4040d875827d2f9edc30dd4d736bc4a853a19ceeb0d04f6e3648f17796d1667"),
+        "t5" => Some("3cbf698ff2c19efb5c75165d781c1d1b9c035baf119c3e71f1a380cbbfb9dfcb"),
+        "clip" => Some("05852800e8ca59374d5b6d6d3993d9ccea63b7613dc827d12abff64f601a1744"),
+        _ => None,
+    }
+}
+
+fn valid_tokenizer_data(model: &str, compressed: &[u8]) -> bool {
+    let Some(expected) = tokenizer_sha256(model) else {
+        return false;
+    };
+    let digest = Sha256::digest(compressed);
+    let actual: String = digest.iter().map(|byte| format!("{byte:02x}")).collect();
+    if actual != expected {
+        return false;
+    }
+    let decoder = flate2::read::DeflateDecoder::new(compressed);
+    let mut json_bytes = Vec::new();
+    if decoder
+        .take((TOKENIZER_JSON_LIMIT + 1) as u64)
+        .read_to_end(&mut json_bytes)
+        .is_err()
+        || json_bytes.len() > TOKENIZER_JSON_LIMIT
+    {
+        return false;
+    }
+    let Ok(data) = serde_json::from_slice::<Value>(&json_bytes) else {
+        return false;
+    };
+    match model {
+        "qwen" => {
+            data.get("config").is_some_and(Value::is_object)
+                && data.get("vocab").is_some_and(Value::is_object)
+                && data.get("merges").is_some_and(Value::is_array)
+                && data.get("specialTokens").is_some_and(Value::is_array)
+        }
+        "t5" => {
+            data.get("model")
+                .and_then(|value| value.get("type"))
+                .and_then(Value::as_str)
+                == Some("Unigram")
+                && data.get("normalizer").is_some()
+                && data.get("pre_tokenizer").is_some()
+        }
+        "clip" => data
+            .get("text")
+            .and_then(Value::as_str)
+            .is_some_and(|text| text.starts_with("bpe_simple_vocab_16e6.txt")),
+        _ => false,
+    }
+}
+
+#[derive(Deserialize)]
+struct TokenizerQuery {
+    sha256: String,
+}
+
+async fn public_tokenizer(
+    axum::extract::Path(model): axum::extract::Path<String>,
+    Query(query): Query<TokenizerQuery>,
+) -> Response {
+    let Some(expected_hash) = tokenizer_sha256(&model) else {
+        return StatusCode::NOT_FOUND.into_response();
+    };
+    if query.sha256 != expected_hash {
+        let mut response = StatusCode::CONFLICT.into_response();
+        response
+            .headers_mut()
+            .insert(header::CACHE_CONTROL, HeaderValue::from_static("no-store"));
+        return response;
+    }
+    let (filename, cache) = match model.as_str() {
+        "qwen" => ("qwen35_tokenizer.def", &QWEN_TOKENIZER),
+        "t5" => ("t5_tokenizer.def", &T5_TOKENIZER),
+        "clip" => ("clip_tokenizer.def", &CLIP_TOKENIZER),
+        _ => return StatusCode::NOT_FOUND.into_response(),
+    };
+    let bytes = cache
+        .get_or_try_init(|| async move {
+            let client = reqwest::Client::builder()
+                .timeout(Duration::from_secs(20))
+                .redirect(reqwest::redirect::Policy::none())
+                .build()
+                .map_err(|_| StatusCode::BAD_GATEWAY)?;
+            let response = client
+                .get(format!(
+                    "https://novelai.net/tokenizer/compressed/{filename}?v=2&static=true"
+                ))
+                .send()
+                .await
+                .map_err(|_| StatusCode::BAD_GATEWAY)?;
+            if !response.status().is_success() {
+                return Err(StatusCode::BAD_GATEWAY);
+            }
+            if response
+                .content_length()
+                .is_some_and(|length| length > TOKENIZER_COMPRESSED_LIMIT as u64)
+            {
+                return Err(StatusCode::BAD_GATEWAY);
+            }
+            let mut stream = response.bytes_stream();
+            let mut bytes = Vec::new();
+            while let Some(chunk) = stream.next().await {
+                let chunk = chunk.map_err(|_| StatusCode::BAD_GATEWAY)?;
+                if bytes.len().saturating_add(chunk.len()) > TOKENIZER_COMPRESSED_LIMIT {
+                    return Err(StatusCode::BAD_GATEWAY);
+                }
+                bytes.extend_from_slice(&chunk);
+            }
+            // Check the version-pinned static asset before caching it for this process lifetime.
+            if !valid_tokenizer_data(model.as_str(), &bytes) {
+                return Err(StatusCode::BAD_GATEWAY);
+            }
+            Ok::<_, StatusCode>(bytes)
+        })
+        .await;
+    let Ok(bytes) = bytes else {
+        return StatusCode::BAD_GATEWAY.into_response();
+    };
+    let mut response = Response::new(Body::from(bytes.clone()));
+    *response.status_mut() = StatusCode::OK;
+    let headers = response.headers_mut();
+    headers.insert(
+        header::CONTENT_TYPE,
+        HeaderValue::from_static("application/octet-stream"),
+    );
+    headers.insert(
+        header::CACHE_CONTROL,
+        HeaderValue::from_static("public, max-age=31536000, immutable"),
+    );
+    headers.insert(
+        "x-content-type-options",
+        HeaderValue::from_static("nosniff"),
+    );
+    response
 }
 
 // ------------------------------------------------------------------ 小件
@@ -744,6 +894,14 @@ pub async fn landing_boot(state: &AppState, headers: &HeaderMap) -> Option<Value
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn tokenizer_asset_names_are_whitelisted_and_version_pinned() {
+        assert!(tokenizer_sha256("qwen").is_some());
+        assert!(tokenizer_sha256("t5").is_some());
+        assert!(tokenizer_sha256("clip").is_some());
+        assert!(tokenizer_sha256("https://example.com/file").is_none());
+    }
 
     #[test]
     fn netloc_like_urlsplit() {

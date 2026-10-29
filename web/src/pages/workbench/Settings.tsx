@@ -91,7 +91,7 @@ export function SettingsModal(props: {
               <label class="nv-switch">
                 <span>
                   <b>透明背景</b>
-                  <i>在提示词里追加 transparent background。</i>
+                  <i>使用模型的透明背景生成标记。</i>
                 </span>
                 <input
                   type="checkbox"
@@ -99,6 +99,28 @@ export function SettingsModal(props: {
                   onChange={(e) => set({ transparentBg: e.currentTarget.checked })}
                 />
               </label>
+              <div class="nv-switch">
+                <span>
+                  <b>Alpha 模式</b>
+                  <i>只影响透明背景图片的 Alpha 通道格式。</i>
+                </span>
+                <fieldset class="nv-seg" aria-label="透明背景 Alpha 模式">
+                  <button
+                    type="button"
+                    aria-pressed={props.prefs.straightAlpha}
+                    onClick={() => set({ straightAlpha: true })}
+                  >
+                    Straight
+                  </button>
+                  <button
+                    type="button"
+                    aria-pressed={!props.prefs.straightAlpha}
+                    onClick={() => set({ straightAlpha: false })}
+                  >
+                    Premultiplied
+                  </button>
+                </fieldset>
+              </div>
               <label class="nv-switch">
                 <span>
                   <b>生成后自动下载</b>

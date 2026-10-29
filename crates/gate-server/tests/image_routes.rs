@@ -1546,6 +1546,44 @@ async fn v5_post(e: &common::Env, body: Value) -> (StatusCode, Vec<u8>) {
     (status, bytes)
 }
 
+#[tokio::test]
+async fn v5_curated_character_prompts_are_structured_before_upstream() {
+    let e = setup(&[]).await;
+    allow_v5(&e.state).await;
+    let mut body = image_body("nai-diffusion-5-curated", 1);
+    body["input"] = json!("fur dataset, red owl");
+    body["parameters"]["negative_prompt"] = json!("lowres");
+    body["parameters"]["use_coords"] = json!(true);
+    body["parameters"]["tag_hint_transparent_background"] = json!(true);
+    body["parameters"]["straight_alpha"] = json!(true);
+    body["parameters"]["characterPrompts"] = json!([{
+        "prompt": "owl girl",
+        "uc": "bad hands",
+        "enabled": true,
+        "center": {"x": 0.25, "y": 0.75}
+    }]);
+
+    let (status, response) = v5_post(&e, body).await;
+    assert_eq!(status, 200, "{}", String::from_utf8_lossy(&response));
+    let sent = last_sent(&e);
+    assert_eq!(
+        sent["parameters"]["v4_prompt"]["caption"]["base_caption"],
+        "fur dataset, red owl"
+    );
+    assert_eq!(
+        sent["parameters"]["v4_prompt"]["caption"]["char_captions"][0],
+        json!({"char_caption":"owl girl","centers":[{"x":0.25,"y":0.75}]})
+    );
+    assert_eq!(
+        sent["parameters"]["v4_negative_prompt"]["caption"]["char_captions"][0]["char_caption"],
+        "bad hands"
+    );
+    assert_eq!(sent["parameters"]["v4_prompt"]["use_coords"], true);
+    assert_eq!(sent["parameters"]["v4_prompt"]["use_order"], true);
+    assert_eq!(sent["parameters"]["tag_hint_transparent_background"], true);
+    assert_eq!(sent["parameters"]["straight_alpha"], true);
+}
+
 fn last_sent(e: &common::Env) -> Value {
     e.mock
         .requests_to("/ai/generate-image")

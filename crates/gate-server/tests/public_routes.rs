@@ -433,6 +433,21 @@ async fn public_live_me_for_logged_in_member_only() {
 // ------------------------------------------------------------------ /public/status
 
 #[tokio::test]
+async fn tokenizer_asset_rejects_unknown_hash_without_caching() {
+    let e = setup(&reg_env()).await;
+    let (status, headers, _) = raw(
+        &e.state,
+        "GET",
+        "/public/tokenizer/qwen?sha256=stale",
+        &[],
+        &[],
+    )
+    .await;
+    assert_eq!(status, StatusCode::CONFLICT);
+    assert_eq!(headers["cache-control"], "no-store");
+}
+
+#[tokio::test]
 async fn public_status_exposes_only_safe_fields() {
     let e = setup(&reg_env()).await;
     let (status, headers, v) = get_json(&e.state, "/public/status", &[]).await;

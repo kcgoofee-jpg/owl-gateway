@@ -57,6 +57,44 @@ test.describe("生图工作台（Beta）", () => {
     await checkLayout(page, "工作台出图页");
   });
 
+  test("模型分词器：Qwen / T5 / CLIP 切分与 Token ID 往返", async ({ page }) => {
+    test.setTimeout(60_000);
+    await page.goto("/workbench?preview=1");
+    await expect(page.locator(".nv-model__btn")).toContainText("V5 Curated");
+    await page.locator('textarea[aria-label="提示词"]').fill("a red owl");
+    await page.getByRole("button", { name: "分词器" }).click();
+    let dialog = page.getByRole("dialog", { name: "分词器" });
+    await expect(dialog).toContainText("Qwen 3.5 Tokenizer");
+    await expect(dialog).toContainText("Token：3");
+    await dialog.getByRole("tab", { name: "Token ID" }).click();
+    await expect(dialog).toContainText("64 2438 50514");
+    await dialog.getByRole("tab", { name: "ID 输入" }).click();
+    await dialog.getByLabel("分词 ID").fill("64 2438 50514");
+    await dialog.getByRole("tab", { name: "Token 文本" }).click();
+    await expect(dialog).toContainText("red");
+    await dialog.getByRole("button", { name: "关闭分词器" }).last().click();
+
+    await page.locator(".nv-model__btn").click();
+    await page.getByRole("option", { name: /V4\.5 Full/ }).click();
+    await page.getByRole("button", { name: "分词器" }).click();
+    dialog = page.getByRole("dialog", { name: "分词器" });
+    await expect(dialog).toContainText("T5 Tokenizer");
+    await expect(dialog).toContainText("Token：7");
+    await dialog.getByRole("tab", { name: "Token ID" }).click();
+    await expect(dialog).toContainText("3 9 1131 3 2381 40 1");
+    await dialog.getByRole("button", { name: "关闭分词器" }).last().click();
+
+    await page.locator(".nv-model__btn").click();
+    await page.getByRole("option", { name: /^V3/ }).click();
+    await page.locator('textarea[aria-label="提示词"]').fill("猫, 夕日!");
+    await page.getByRole("button", { name: "分词器" }).click();
+    dialog = page.getByRole("dialog", { name: "分词器" });
+    await expect(dialog).toContainText("CLIP Tokenizer");
+    await expect(dialog).toContainText("Token：8");
+    await dialog.getByRole("tab", { name: "Token ID" }).click();
+    await expect(dialog).toContainText("163 234 360 267 23170 243 37156 256");
+  });
+
   test("批量出图：两组各一张跑完，队列与画廊都有数", async ({ page, context }) => {
     test.setTimeout(90_000);
     await asMember(context);

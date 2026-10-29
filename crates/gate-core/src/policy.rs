@@ -91,6 +91,8 @@ pub const V4_V5_REJECTED_SAMPLERS: [&str; 8] = [
 pub const V5_REJECTED_SAMPLERS: [&str; 1] = ["k_dpm_2"];
 /// NovelAI V4 / V4.5 角色提示词上限。
 pub const MAX_CHARACTERS: usize = 6;
+/// NovelAI V5 Full / Curated 角色提示词上限。
+pub const MAX_V5_CHARACTERS: usize = 22;
 
 /// V5 Medium 档（蒸馏模型，锁 14 步 / Euler-a / Heavy 负面预设）。
 pub const V5_MEDIUM_OF: [(&str, &str); 2] = [
@@ -886,8 +888,8 @@ pub fn upstream_parameter_problem(body: &Value) -> Option<String> {
         }
     }
     let model = str_of_get(body.as_object().unwrap_or(empty_obj()), "model");
-    if model.starts_with("nai-diffusion-4") {
-        // V4 / V4.5 最多 6 个角色；超了上游不报清楚原因，直接回 500
+    if model.starts_with("nai-diffusion-4") || model.starts_with("nai-diffusion-5") {
+        // V4 / V4.5 最多 6 个角色，V5 最多 22 个。
         let mut counts = vec![match p.get("characterPrompts") {
             Some(Value::Array(a)) => a.len(),
             _ => 0,
@@ -904,9 +906,19 @@ pub fn upstream_parameter_problem(body: &Value) -> Option<String> {
             }
         }
         let max = counts.into_iter().max().unwrap_or(0);
-        if max > MAX_CHARACTERS {
+        let limit = if model.starts_with("nai-diffusion-5") {
+            MAX_V5_CHARACTERS
+        } else {
+            MAX_CHARACTERS
+        };
+        if max > limit {
+            let family = if model.starts_with("nai-diffusion-5") {
+                "V5"
+            } else {
+                "V4/V4.5"
+            };
             return Some(format!(
-                "角色数量超限：本次 {max} 个，V4/V4.5 最多 {MAX_CHARACTERS} 个，未扣费。请减少角色。"
+                "角色数量超限：本次 {max} 个，{family} 最多 {limit} 个，未扣费。请减少角色。"
             ));
         }
     }
@@ -1311,7 +1323,7 @@ fn centers(c: &Obj) -> Value {
     Value::Array(vec![Value::Object(pt)])
 }
 
-/// V4 / V4.5 必须带 `v4_prompt` / `v4_negative_prompt` 结构，缺了上游直接回 500、不说原因。
+/// V4 / V4.5 / V5 使用 `v4_prompt` / `v4_negative_prompt` 角色结构。
 /// 官方网页端用 input / negative_prompt / characterPrompts 拼出这两个结构，这里照做。
 pub fn fill_v4_prompt(payload: &Value) -> (Value, Vec<String>) {
     let Some(src) = payload.as_object() else {
@@ -1321,7 +1333,7 @@ pub fn fill_v4_prompt(payload: &Value) -> (Value, Vec<String>) {
     let Some(Value::Object(p0)) = src.get("parameters") else {
         return (payload.clone(), Vec::new());
     };
-    if !model.starts_with("nai-diffusion-4") {
+    if !model.starts_with("nai-diffusion-4") && !model.starts_with("nai-diffusion-5") {
         return (payload.clone(), Vec::new());
     }
     let mut notes = Vec::new();
@@ -1615,6 +1627,105 @@ pub fn is_connection_test(body: &Value) -> bool {
 mod tests {
     use super::*;
     use serde_json::json;
+
+    #[test]
+    fn v5_structured_prompts_include_base_and_character_captions() {
+        let payload = json!({
+            "model": "nai-diffusion-5-curated",
+            "input": "fur dataset, red owl",
+            "parameters": {
+                "negative_prompt": "lowres",
+                "use_coords": true,
+                "characterPrompts": [{
+                    "prompt": "owl girl",
+                    "uc": "bad hands",
+                    "center": {"x": 0.25, "y": 0.75}
+                }]
+            }
+        });
+        let (filled, _) = fill_v4_prompt(&payload);
+        assert_eq!(
+            filled["parameters"]["v4_prompt"],
+            json!({
+                "caption": {
+                    "base_caption": "fur dataset, red owl",
+                    "char_captions": [{
+                        "char_caption": "owl girl",
+                        "centers": [{"x": 0.25, "y": 0.75}]
+                    }]
+                },
+                "use_coords": true,
+                "use_order": true
+            })
+        );
+        assert_eq!(
+            filled["parameters"]["v4_negative_prompt"],
+            json!({
+                "caption": {
+                    "base_caption": "lowres",
+                    "char_captions": [{
+                        "char_caption": "bad hands",
+                        "centers": [{"x": 0.25, "y": 0.75}]
+                    }]
+                },
+                "legacy_uc": false
+            })
+        );
+    }
+
+    #[test]
+    fn v5_structured_prompts_are_added_even_without_characters() {
+        let payload = json!({
+            "model": "nai-diffusion-5-full",
+            "input": "simple circle",
+            "parameters": {"negative_prompt": "lowres"}
+        });
+        let (filled, _) = fill_v4_prompt(&payload);
+        assert_eq!(
+            filled["parameters"]["v4_prompt"],
+            json!({
+                "caption": {"base_caption": "simple circle", "char_captions": []},
+                "use_coords": false,
+                "use_order": true
+            })
+        );
+        assert_eq!(
+            filled["parameters"]["v4_negative_prompt"]["caption"]["char_captions"],
+            json!([])
+        );
+    }
+
+    #[test]
+    fn character_limits_follow_model_family() {
+        let v5_chars: Vec<Value> = (0..MAX_V5_CHARACTERS)
+            .map(|i| json!({"prompt": format!("character {i}")}))
+            .collect();
+        let v5 =
+            json!({"model":"nai-diffusion-5-curated","parameters":{"characterPrompts":v5_chars}});
+        assert_eq!(upstream_parameter_problem(&v5), None);
+
+        let too_many_v5: Vec<Value> = (0..=MAX_V5_CHARACTERS)
+            .map(|i| json!({"prompt": format!("character {i}")}))
+            .collect();
+        let v5 =
+            json!({"model":"nai-diffusion-5-full","parameters":{"characterPrompts":too_many_v5}});
+        assert!(
+            upstream_parameter_problem(&v5)
+                .unwrap()
+                .contains("最多 22 个")
+        );
+
+        let v4_chars: Vec<Value> = (0..=MAX_CHARACTERS)
+            .map(|i| json!({"prompt": format!("character {i}")}))
+            .collect();
+        let v4 =
+            json!({"model":"nai-diffusion-4-5-full","parameters":{"characterPrompts":v4_chars}});
+        assert!(
+            upstream_parameter_problem(&v4)
+                .unwrap()
+                .contains("最多 6 个")
+        );
+    }
 
     #[test]
     fn legacy_reference_fields_are_named_in_the_error() {

@@ -18,7 +18,10 @@ export const BASE_MODELS: ModelOption[] = [
   { id: "nai-diffusion-3", label: "V3", family: "v3" },
   { id: "nai-diffusion-furry-3", label: "Furry V3", family: "v3" },
 ];
-export const V5_MODELS: ModelOption[] = [{ id: "nai-diffusion-5-full", label: "V5 Full", family: "v5" }];
+export const V5_MODELS: ModelOption[] = [
+  { id: "nai-diffusion-5-curated", label: "V5 Curated", family: "v5" },
+  { id: "nai-diffusion-5-full", label: "V5 Full", family: "v5" },
+];
 
 /** 尺寸预设全部落在免费规格内（≤ 1024×1024 像素）；custom 用宽高输入框，走下面的钳制。 */
 export const SIZE_PRESETS: Array<{ id: string; label: string; w?: number; h?: number }> = [

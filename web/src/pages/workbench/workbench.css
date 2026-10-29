@@ -167,7 +167,7 @@
   align-items: center;
   gap: 6px;
   flex: none;
-  color: var(--nai-text);
+  color: var(--nai-eye, #ffc53d);
   text-decoration: none;
 }
 .nv-beta {
@@ -181,21 +181,6 @@
   font-size: 12px;
   font-weight: 700;
   line-height: 20px;
-}
-.nv-eyes {
-  display: flex;
-  align-items: center;
-  gap: 5px;
-  min-width: 32px;
-  min-height: 24px;
-}
-.nv-eyes i {
-  display: block;
-  flex: none;
-  width: 12px;
-  height: 12px;
-  border-radius: 50%;
-  background: var(--nai-eye, #ffc53d);
 }
 .nv-mark h1 {
   position: absolute;
@@ -405,9 +390,6 @@
 .nv-model__btn svg {
   flex: none;
   transform: rotate(90deg);
-}
-.nv-model__btn[aria-expanded="true"] svg {
-  transform: rotate(-90deg);
 }
 .nv-model__menu {
   position: absolute;
@@ -719,11 +701,14 @@
   gap: 6px;
   height: 36px;
   padding: 0 12px;
+  border: 0;
   border-radius: 8px;
   background: var(--nai-control);
   color: var(--nai-text);
   font-size: 14px;
   font-weight: 600;
+  font-family: inherit;
+  cursor: pointer;
 }
 .nv-model select {
   appearance: none;
@@ -1939,6 +1924,9 @@ dialog.dialog {
   flex: none;
   transform: rotate(90deg);
 }
+.nv-model__btn[aria-expanded="true"] svg {
+  transform: rotate(-90deg);
+}
 .nv-sampler__name {
   min-width: 0;
   overflow: hidden;
@@ -1958,6 +1946,9 @@ dialog.dialog {
   position: fixed;
   inset: 0;
   z-index: 30;
+}
+.nv-token .nv-set-bg {
+  z-index: 0;
 }
 .nv-token__card {
   position: relative;
@@ -1988,6 +1979,41 @@ dialog.dialog {
 .nv-token__card textarea {
   min-height: 120px;
   margin-bottom: 12px;
+}
+.nv-token__card .nv-tabs {
+  margin: 4px 0 10px;
+}
+.nv-token__pieces {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-start;
+  gap: 2px 4px;
+  min-height: 54px;
+  max-height: 180px;
+  margin-top: 8px;
+  padding: 10px;
+  overflow: auto;
+  border-radius: 6px;
+  background: var(--nai-control);
+  color: var(--nai-text);
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 13px;
+  line-height: 1.5;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+.nv-token__piece {
+  padding: 1px 3px;
+  border-radius: 3px;
+  background: var(--nai-panel-raised, var(--nai-panel));
+  white-space: pre-wrap;
+}
+.nv-token__status,
+.nv-token__error {
+  align-self: center;
+}
+.nv-token__error {
+  color: var(--nai-danger, #e26c6c);
 }
 .nv-token__card .nv-token__stat {
   color: var(--nai-text);
