@@ -26,9 +26,9 @@ test("member generates an image through the gateway", async ({ page, context }) 
   if (await welcome.count()) await welcome.click();
   await page.locator('textarea[aria-label="提示词"]').fill("an owl, night sky");
   await page.locator(".nai-generate").click();
-  await expect(page.locator(".nai-viewer-stage img")).toBeVisible({ timeout: 30_000 });
+  await expect(page.locator(".nai-view-img")).toBeVisible({ timeout: 30_000 });
   expect(
-    await page.locator(".nai-viewer-stage img").evaluate((image) => (image as HTMLImageElement).naturalWidth),
+    await page.locator(".nai-view-img").evaluate((image) => (image as HTMLImageElement).naturalWidth),
   ).toBeGreaterThan(0);
 });
 

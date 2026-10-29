@@ -1,15 +1,54 @@
 /*
  * NovelAI 风格生图页皮肤。全部为本站原创实现：
- * 布局规格（宽高/圆角/间距/配色）取自对参考页面渲染结果的结构化测量，
+ * 布局规格（宽高/圆角/间距/配色/过渡）取自对参考页面渲染结果的结构化测量（docs/nai-ui-catalog.md），
  * 不包含任何第三方源码、字体文件、图片或图标资产。
  */
 
+/* 字体走 public/fonts 的自托管文件（绝对路径，dev 与 prod 一致）。 */
 @font-face {
-  font-family: "Source Sans 3";
-  src: url("../../assets/source-sans-3-latin.woff2") format("woff2");
-  font-weight: 200 900;
+  font-family: "Source Sans Pro";
+  src: url("/_owl/fonts/SourceSansPro-Regular.ttf.woff2") format("woff2");
+  font-weight: 400;
   font-style: normal;
   font-display: swap;
+}
+@font-face {
+  font-family: "Source Sans Pro";
+  src: url("/_owl/fonts/SourceSansPro-Semibold.ttf.woff2") format("woff2");
+  font-weight: 600;
+  font-style: normal;
+  font-display: swap;
+}
+@font-face {
+  font-family: "Source Sans Pro";
+  src: url("/_owl/fonts/SourceSansPro-Bold.ttf.woff2") format("woff2");
+  font-weight: 700;
+  font-style: normal;
+  font-display: swap;
+}
+@font-face {
+  font-family: "Eczar";
+  src: url("/_owl/fonts/Eczar-Bold.woff2") format("woff2");
+  font-weight: 700;
+  font-style: normal;
+  font-display: swap;
+}
+
+/* nai 页的 toast 对齐官方：右上角、深底、小圆角。legacy 页不受影响。 */
+body.nai-page .toasts {
+  left: auto;
+  right: 24px;
+  top: 16px;
+  bottom: auto;
+  transform: none;
+  width: min(360px, calc(100vw - 48px));
+}
+body.nai-page .toast {
+  background: #22253f;
+  color: #fff;
+  border-radius: 2px;
+  font-size: 15px;
+  line-height: 22px;
 }
 
 .nai-root {
@@ -18,20 +57,20 @@
   --nai-panel: #191b31;
   --nai-inset: #0e0f21;
   --nai-border: #22253f;
+  --nai-hover: #303145;
   --nai-accent: #f5f3c2;
   --nai-accent-ink: #13152c;
   --nai-text: #ffffff;
   --nai-muted: #9fa2c0;
+  --nai-soft: rgba(255, 255, 255, 0.7);
   --nai-danger: #f26d6d;
 
   position: fixed;
   inset: 0;
-  display: flex;
-  flex-direction: column;
   background: var(--nai-base);
   color: var(--nai-text);
   font-family:
-    "Source Sans 3", "Source Sans Pro", -apple-system, "PingFang SC", "Segoe UI", "Microsoft YaHei",
+    "Source Sans Pro", -apple-system, "PingFang SC", "Segoe UI", "Microsoft YaHei",
     sans-serif;
   font-size: 16px;
   line-height: 1.4;
@@ -41,12 +80,14 @@
 .nai-root[data-theme="sand"] {
   --nai-base: #ebdab4;
   --nai-panel: #dfcda4;
-  --nai-inset: #e6d4ae;
+  --nai-inset: #d6c295;
   --nai-border: #c2ac80;
+  --nai-hover: #cdb88c;
   --nai-accent: #ab0613;
   --nai-accent-ink: #fff8ec;
   --nai-text: #241a10;
   --nai-muted: #6b5a42;
+  --nai-soft: rgba(36, 26, 16, 0.7);
   --nai-danger: #ab0613;
 }
 
@@ -55,10 +96,12 @@
   --nai-panel: #1e2231;
   --nai-inset: #12141f;
   --nai-border: #2b3048;
+  --nai-hover: #3a4062;
   --nai-accent: #71ffc3;
   --nai-accent-ink: #02030b;
   --nai-text: #ffffff;
   --nai-muted: #8b90a8;
+  --nai-soft: rgba(255, 255, 255, 0.7);
   --nai-danger: #ff8080;
 }
 
@@ -77,410 +120,417 @@
   cursor: pointer;
 }
 
-.nai-root a {
+.nai-root :where(input, textarea) {
+  font: inherit;
+  color: inherit;
+}
+
+.nai-root :where(a) {
   color: inherit;
   text-decoration: none;
 }
 
-.nai-root :where(input, textarea) {
-  font: inherit;
-  color: var(--nai-text);
-  background: transparent;
-  border: none;
-  outline: none;
+/* ---------- 三栏骨架：400 / 自适应 / 140 ---------- */
+.nai-frame {
+  display: grid;
+  grid-template-columns: 400px minmax(0, 1fr) 140px;
+  height: 100%;
 }
 
-.nai-root input[type="number"]::-webkit-outer-spin-button,
-.nai-root input[type="number"]::-webkit-inner-spin-button {
-  -webkit-appearance: none;
-  margin: 0;
-}
-
-.nai-root input[type="number"] {
-  -moz-appearance: textfield;
-  appearance: textfield;
-}
-
-.nai-root ::selection {
-  background: color-mix(in srgb, var(--nai-accent) 45%, transparent);
-}
-
-/* 滚动条：细杆，与面板同色系 */
+/* 官方 7px 细滚动条 */
 .nai-root ::-webkit-scrollbar {
   width: 7px;
   height: 7px;
 }
-
-.nai-root ::-webkit-scrollbar-track {
-  background: transparent;
-}
-
 .nai-root ::-webkit-scrollbar-thumb {
   background: var(--nai-border);
   border-radius: 4px;
 }
+.nai-root ::-webkit-scrollbar-track {
+  background: transparent;
+}
 
-/* ---------------- 顶栏 ---------------- */
-
-.nai-topbar {
+/* ============================================================
+   侧栏
+   ============================================================ */
+.nai-side {
   position: relative;
-  z-index: 99;
   display: flex;
-  align-items: center;
-  justify-content: center;
-  flex: none;
-  height: 52px;
-  background: var(--nai-border);
-}
-
-.nai-topbar-inner {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  padding: 10px 20px;
-  font-size: 18px;
-  font-weight: 700;
-}
-
-.nai-topbar-actions {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  height: 32px;
-}
-
-.nai-topbar-signup {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  gap: 5px;
-  height: 32px;
-  padding: 3px 20px;
-  border-radius: 3px;
-  background: var(--nai-accent);
-  color: var(--nai-accent-ink);
-  font-size: 16px;
-  font-weight: 600;
-  line-height: 24px;
-}
-
-.nai-topbar-signup:hover {
-  filter: brightness(1.08);
-}
-
-.nai-topbar-login {
-  display: flex;
-  align-items: center;
-  height: 32px;
-  padding: 3px 12px;
-  border-radius: 3px;
-  font-size: 16px;
-  font-weight: 600;
-  line-height: 24px;
-  color: var(--nai-accent);
-}
-
-.nai-topbar-login:hover {
-  text-decoration: underline;
-}
-
-/* ---------------- 主体三栏 ---------------- */
-
-.nai-body {
-  display: flex;
-  flex: 1;
+  flex-direction: column;
+  background: var(--nai-panel);
+  min-width: 0;
   min-height: 0;
 }
 
-/* ---------------- 左侧设置栏 ---------------- */
-
-.nai-sidebar {
-  display: flex;
-  flex-direction: column;
-  flex: none;
-  width: 400px;
-  min-width: 400px;
-  padding: 0;
-  background: var(--nai-panel);
-}
-
-.nai-sidebar-head {
+/* --- 导航行（62px，与画布工具条同排） --- */
+.nai-nav-row {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  gap: 10px;
-  flex: none;
-  height: 62px;
-  padding: 12px 12px 8px;
-}
-
-.nai-brand {
-  display: flex;
-  align-items: center;
   gap: 8px;
-  font-size: 18px;
-  font-weight: 700;
-  color: var(--nai-accent);
+  height: 62px;
+  padding: 0 12px;
+  flex: none;
 }
-
-.nai-head-actions {
-  display: flex;
-  align-items: center;
-  gap: 4px;
-}
-
-.nai-icon-btn {
+.nai-nav-ghost {
   display: flex;
   align-items: center;
   justify-content: center;
-  width: 30px;
-  height: 32px;
+  width: 44px;
+  height: 40px;
   border-radius: 4px;
-  color: var(--nai-text);
+  transition: background-color 0.08s ease-in-out;
 }
-
-.nai-icon-btn:hover {
+.nai-nav-ghost:hover {
   background: var(--nai-border);
 }
-
-.nai-icon-btn:disabled {
-  opacity: 0.4;
-  cursor: not-allowed;
-}
-
-.nai-sidebar-scroll {
-  flex: 1;
-  min-height: 0;
-  overflow-y: auto;
-  overscroll-behavior: contain;
-  padding: 12px 0 0 12px;
-}
-
-.nai-groups {
+.nai-anlas {
   display: flex;
-  flex-direction: column;
-  gap: 16px;
-  padding-right: 5px;
+  align-items: stretch;
 }
-
-.nai-divider {
-  flex: none;
-  height: 1px;
+.nai-anlas-label {
+  display: flex;
+  align-items: center;
+  gap: 5px;
   background: var(--nai-border);
+  border-radius: 8px 0 0 8px;
+  padding: 10px 10px 10px 14px;
+  font-size: 14px;
+  line-height: 21px;
+  font-weight: 600;
+  white-space: nowrap;
 }
-
-.nai-sidebar-bottom {
+.nai-anlas-plus {
   display: flex;
-  flex-direction: column;
-  gap: 10px;
-  flex: none;
-  padding: 12px;
+  align-items: center;
+  justify-content: center;
+  width: 42px;
+  background: var(--nai-border);
+  border-radius: 0 8px 8px 0;
+  transition: background 0.08s ease-in-out;
+}
+.nai-anlas-plus:hover {
+  background: var(--nai-hover);
+}
+.nai-nav-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 44px;
+  height: 40px;
+  border-radius: 4px;
+  background: var(--nai-border);
+  transition: background-color 0.08s ease-in-out;
+}
+.nai-nav-btn:hover,
+.nai-nav-btn[aria-expanded="true"] {
+  background: var(--nai-hover);
 }
 
-/* 状态 / 提示框（额度钳制说明、错误） */
-.nai-status {
-  border: 1px solid var(--nai-border);
-  border-right: none;
+/* 汉堡菜单：锚定侧栏左缘（官方同位），悬停/点击展开 */
+.nai-menu-panel {
+  position: absolute;
+  top: 174px;
+  left: 20px;
+  width: 345px;
+  z-index: 60;
+  background: var(--nai-inset);
   border-radius: 8px;
+  padding: 4px 12px 12px;
+  box-shadow:
+    0 0 0 1px rgba(59, 64, 109, 0.6),
+    0 4px 11px rgba(0, 0, 0, 0.2);
+}
+.nai-menu-group {
+  padding: 10px 0;
+  font-size: 14px;
+  line-height: 21px;
+  font-weight: 600;
+}
+.nai-menu-item {
+  display: flex;
+  align-items: center;
+  gap: 15px;
+  width: 100%;
+  height: 44px;
+  padding: 0 20px;
+  border-radius: 5px;
   background: var(--nai-panel);
-  padding: 8px 12px;
-  font-size: 13px;
-  line-height: 20px;
+  font-size: 16px;
+  line-height: 24px;
+  font-weight: 600;
+  transition: background 0.08s ease-in-out;
+  text-align: left;
+}
+.nai-menu-item:hover {
+  background: var(--nai-hover);
+}
+.nai-menu-version {
+  padding: 10px 20px;
+  font-size: 12px;
+  line-height: 18px;
   color: var(--nai-muted);
 }
 
-.nai-status--error {
-  color: var(--nai-danger);
-}
-
-/* 生成按钮 */
-.nai-generate {
+/* --- 滚动区 --- */
+.nai-side-scroll {
+  flex: 1 1 auto;
+  overflow-y: auto;
+  padding: 12px 8px 0 12px;
   display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 8px;
-  height: 40px;
-  padding: 4px 8px 4px 12px;
-  border-radius: 4px;
-  background: var(--nai-accent);
-  color: var(--nai-accent-ink);
-  font-size: 16px;
-  font-weight: 700;
+  flex-direction: column;
+  gap: 16px;
+  min-height: 0;
 }
 
-.nai-generate:hover {
-  filter: brightness(1.05);
-}
-
-.nai-generate:active {
-  filter: brightness(0.95);
-}
-
-.nai-generate:disabled {
-  opacity: 0.6;
-  cursor: wait;
-}
-
-.nai-generate-badge {
-  display: flex;
-  align-items: center;
-  justify-content: flex-end;
-  gap: 4px;
-  height: 24px;
-  padding: 0 8px;
-  border-radius: 4px;
-  background: var(--nai-accent-ink);
-  color: var(--nai-accent);
-  font-size: 16px;
-  font-weight: 600;
-}
-
-/* ---------------- 选择器胶囊 ---------------- */
-
-.nai-pills-row {
+/* Model / Mode 行 */
+.nai-model-row {
   display: flex;
   gap: 8px;
+  padding: 0 13px;
 }
-
+.nai-model-cell {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  min-height: 36px;
+}
+.nai-model-cell .nai-pop {
+  flex: none;
+}
+.nai-model-cell .nai-pill {
+  width: auto;
+}
+.nai-model-cell .nai-pop-panel {
+  min-width: 300px;
+}
+.nai-model-cell:first-child {
+  flex: 1.2;
+}
+.nai-model-cell:last-child {
+  flex: 1;
+}
+.nai-row-label {
+  font-size: 14px;
+  line-height: 21px;
+  color: var(--nai-soft);
+  flex: none;
+}
 .nai-pill {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  gap: 8px;
-  height: 36px;
-  padding: 4px 4px 4px 12px;
-  border: 1px solid var(--nai-border);
-  border-radius: 8px;
-}
-
-.nai-pill:hover {
-  border-color: color-mix(in srgb, var(--nai-border) 60%, var(--nai-text));
-}
-
-.nai-pill-label {
-  font-size: 16px;
-  line-height: 20px;
-}
-
-.nai-pill-value {
-  display: flex;
-  align-items: center;
   gap: 6px;
-  font-size: 16px;
-  line-height: 24px;
+  width: 100%;
+  min-height: 28px;
+  padding: 2px 10px;
+  border-radius: 4px;
+  background: var(--nai-border);
+  font-size: 14px;
+  line-height: 18px;
+  font-weight: 600;
+  transition: background 0.08s ease-in-out;
+}
+.nai-pill:hover {
+  background: var(--nai-hover);
+}
+.nai-pill--cat {
+  min-height: 34px;
+  width: auto;
 }
 
-.nai-pill-chevron {
+/* --- 下拉面板 --- */
+.nai-pop {
+  position: relative;
   display: flex;
-  align-items: center;
-  justify-content: center;
-  width: 26px;
-  height: 26px;
-  border-radius: 4px;
+  min-width: 0;
+  flex: 1 1 auto;
+}
+.nai-pop-panel {
+  position: absolute;
+  top: calc(100% + 4px);
+  left: 0;
+  z-index: 70;
+  min-width: 170px;
+  max-height: 300px;
+  overflow-y: auto;
+  padding: 8px 0;
+  background: var(--nai-panel);
+  box-shadow:
+    0 0 0 1px rgba(59, 64, 109, 0.6),
+    0 4px 11px rgba(0, 0, 0, 0.2);
+}
+.nai-pop-panel--right {
+  left: auto;
+  right: 0;
+}
+.nai-pop-cap {
+  padding: 0 12px;
+  font-size: 12px;
+  line-height: 18px;
+  font-weight: 500;
   color: var(--nai-muted);
 }
-
-/* ---------------- 提示词 / 负面提示词块 ---------------- */
-
-.nai-block {
-  background: var(--nai-inset);
-  border: 1px solid var(--nai-border);
-  border-radius: 8px 8px 0 0;
+.nai-pop-item {
+  display: flex;
+  flex-direction: column;
+  width: 100%;
+  padding: 8px 12px;
+  text-align: left;
+  transition: background 0.08s ease-in-out;
+}
+.nai-pop-item:hover {
+  background: var(--nai-hover);
+}
+.nai-pop-item[data-selected="true"] {
+  background: var(--nai-base);
+  color: var(--nai-accent);
+}
+.nai-pop-item:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+.nai-pop-item-title {
+  font-size: 14px;
+  line-height: 21px;
+  font-weight: 700;
+}
+.nai-pop-item-desc {
+  font-size: 14px;
+  line-height: 21px;
+  font-weight: 400;
+}
+.nai-pop-item:not([data-selected="true"]) .nai-pop-item-desc {
+  color: var(--nai-soft);
 }
 
-.nai-block-head {
+/* --- Prompt / Undesired Content 标签卡 --- */
+.nai-card {
+  border: 1px solid var(--nai-border);
+  border-radius: 8px;
+  background: var(--nai-inset);
+}
+.nai-card--box {
+  background: var(--nai-panel);
+}
+.nai-card-head {
   display: flex;
   align-items: center;
   justify-content: space-between;
   padding: 12px 12px 0;
 }
-
-.nai-block-title {
-  font-size: 14px;
-  font-weight: 600;
-  line-height: 21px;
-}
-
-.nai-block-actions {
+.nai-tabs {
   display: flex;
-  align-items: center;
+  gap: 8px;
+}
+.nai-tab {
+  padding: 2px 5px;
+  border-radius: 4px;
+}
+.nai-tab[data-active="true"] {
+  background: var(--nai-border);
+}
+.nai-tab button {
+  font-size: 14px;
+  line-height: 21px;
+  font-weight: 600;
+}
+.nai-tab:not([data-active="true"]) button {
+  color: var(--nai-muted);
+}
+.nai-card-actions {
+  display: flex;
   gap: 10px;
 }
-
-.nai-block-body {
+.nai-sq-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 30px;
+  height: 30px;
+  padding: 5px;
+  border-radius: 4px;
+  transition: background-color 0.08s ease-in-out;
+}
+.nai-sq-btn:hover {
+  background: var(--nai-border);
+}
+.nai-sq-btn--dim {
+  width: 44px;
+  height: 40px;
+  background: var(--nai-border);
+}
+.nai-sq-btn--dim:hover {
+  background: var(--nai-hover);
+}
+.nai-card-pane {
+  display: flex;
+  flex-direction: column;
+}
+.nai-card-editor {
+  position: relative;
   padding: 5px 12px;
 }
-
 .nai-textarea {
   display: block;
   width: 100%;
-  min-height: 96px;
-  max-height: 240px;
-  resize: none;
-  font-size: 14px;
-  line-height: 21px;
+  min-height: 126px;
+  resize: vertical;
+  background: transparent;
+  border: 0;
+  outline: none;
+  font-size: 16px;
+  line-height: 24px;
 }
-
-.nai-textarea::placeholder {
-  color: var(--nai-muted);
-  opacity: 0.7;
-}
-
-.nai-block-foot {
+.nai-suggest {
+  position: absolute;
+  left: 12px;
+  right: 12px;
+  bottom: 8px;
   display: flex;
-  flex-direction: column;
-  padding: 2px 12px 8px;
+  flex-wrap: wrap;
+  gap: 6px;
+  pointer-events: none;
 }
-
-.nai-block-foot-row {
+.nai-card-foot {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  padding: 2px 12px 10px;
+}
+.nai-toggle {
   display: flex;
   align-items: center;
-  justify-content: space-between;
-  gap: 8px;
-  min-height: 28px;
-  padding-bottom: 4px;
+  gap: 6px;
+  height: 20px;
+  padding: 0 8px;
+  border-radius: 4px;
+  background: var(--nai-border);
+  font-size: 13px;
+  line-height: 20px;
+  font-weight: 600;
+  transition: background 0.08s ease-in-out;
 }
-
-.nai-quality-note {
-  font-size: 14px;
-  color: var(--nai-muted);
+.nai-toggle:hover {
+  background: var(--nai-hover);
 }
-
-.nai-quality-note b {
-  color: var(--nai-text);
-  font-weight: 400;
-}
-
-/* 小下拉胶囊（质量预设 / UC 预设） */
 .nai-miniselect {
   display: flex;
   align-items: center;
   gap: 6px;
   height: 24px;
-  padding: 0 8px;
-  border: 1px solid var(--nai-border);
+  padding: 0 6px;
   border-radius: 4px;
   font-size: 14px;
-  line-height: 20px;
+  line-height: 21px;
+  font-weight: 600;
+  transition: background 0.08s ease-in-out;
 }
-
 .nai-miniselect:hover {
-  border-color: color-mix(in srgb, var(--nai-border) 60%, var(--nai-text));
+  background: var(--nai-border);
 }
-
-.nai-chips-row {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  min-height: 27px;
-  overflow-x: auto;
-  scrollbar-width: none;
-}
-
-.nai-chips-row::-webkit-scrollbar {
-  display: none;
-}
-
 .nai-chip {
   display: flex;
   align-items: center;
@@ -488,434 +538,507 @@
   height: 24px;
   padding: 0 10px;
   border-radius: 12px;
-  background: color-mix(in srgb, var(--nai-border) 70%, transparent);
+  background: var(--nai-border);
   font-size: 13px;
   line-height: 20px;
-  white-space: nowrap;
-  color: var(--nai-text);
+  transition: background 0.08s ease-in-out;
 }
-
 .nai-chip:hover {
-  background: var(--nai-border);
+  background: var(--nai-hover);
 }
-
-.nai-chip[aria-pressed="true"] {
-  background: var(--nai-accent);
-  color: var(--nai-accent-ink);
+.nai-suggest .nai-chip {
+  pointer-events: auto;
 }
-
-/* 负面提示词块：虚线边框，收合指示 */
-.nai-block--uc {
-  border-style: dashed;
-  border-top: none;
-  border-radius: 0 0 8px 8px;
-}
-
-.nai-block--uc .nai-textarea {
-  min-height: 72px;
-}
-
-.nai-block--collapsed .nai-block-body,
-.nai-block--collapsed .nai-block-foot {
-  display: none;
-}
-
-/* ---------------- 角色提示词卡 ---------------- */
-
-.nai-card {
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-  padding: 12px;
-  border: 1px solid var(--nai-border);
-  border-radius: 8px;
-  background: var(--nai-panel);
-}
-
-.nai-card-row {
+/* token 计量条：官方同款细条（槽 4px，米色填充） */
+.nai-tokenbar {
+  flex: 1 1 100%;
+  height: 14px;
   display: flex;
   align-items: center;
-  justify-content: space-between;
-  gap: 10px;
+  background: linear-gradient(var(--nai-border), var(--nai-border)) left center / 100% 4px no-repeat;
+  border-radius: 2px;
+}
+.nai-tokenbar i {
+  display: block;
+  height: 4px;
+  border-radius: 2px;
+  background: var(--nai-accent);
+  transition: width 0.3s ease;
 }
 
-.nai-card-text {
+/* --- 角色提示词卡（未开放） --- */
+.nai-char-row {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  padding: 12px 12px 0;
+}
+.nai-char-row > div:first-child {
+  flex: 1;
+  min-width: 0;
+}
+.nai-char-title {
+  font-size: 16px;
+  line-height: 24px;
+  font-weight: 600;
+}
+.nai-char-sub {
   font-size: 14px;
-  line-height: 20px;
+  line-height: 21px;
   color: var(--nai-muted);
 }
-
-.nai-card-expand {
+.nai-plus-btn {
   display: flex;
   align-items: center;
   justify-content: center;
-  flex: none;
-  width: 32px;
-  height: 32px;
-  border: 1px solid var(--nai-border);
-  border-radius: 8px;
-}
-
-.nai-card-expand:hover {
+  width: 44px;
+  height: 40px;
+  border-radius: 4px;
   background: var(--nai-border);
+  flex: none;
+  transition: background-color 0.08s ease-in-out;
 }
-
-/* ---------------- 参考图 / 图生图 ---------------- */
-
+.nai-plus-btn:hover {
+  background: var(--nai-hover);
+}
+.nai-char-pos {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 12px 12px;
+}
+/* --- 组标签 + Image2Image（未开放） --- */
 .nai-group-label {
   font-size: 14px;
   line-height: 21px;
+  color: var(--nai-muted);
+  margin-top: -8px;
 }
-
-.nai-i2i-box {
+.nai-i2i {
   display: flex;
   align-items: center;
-  justify-content: space-between;
   gap: 10px;
-  padding: 12px;
   border: 1px solid var(--nai-border);
   border-radius: 8px;
-  background: var(--nai-inset);
+  background: var(--nai-panel);
+  padding: 12px;
+}
+.nai-i2i-icon {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 34px;
+  height: 34px;
+  border-radius: 6px;
+  background: var(--nai-border);
+  flex: none;
+}
+.nai-i2i-text {
+  flex: 1;
+  min-width: 0;
 }
 
-.nai-i2i-title {
-  font-size: 14px;
-  font-weight: 600;
-}
-
-.nai-i2i-sub {
-  margin-top: 2px;
-  font-size: 13px;
-  color: var(--nai-muted);
-}
-
-/* ---------------- 图像设置 ---------------- */
-
+/* --- Image Settings --- */
 .nai-settings {
   display: flex;
   flex-direction: column;
   gap: 10px;
+  padding-bottom: 8px;
 }
-
-.nai-set-row {
+.nai-res-row {
   display: flex;
   align-items: center;
   justify-content: space-between;
   gap: 8px;
 }
-
-.nai-set-label {
+.nai-res-title {
+  font-size: 16px;
+  line-height: 24px;
+  font-weight: 700;
+}
+.nai-res-pill {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  background: var(--nai-border);
+  border-radius: 4px;
+  padding: 4px 8px;
+}
+.nai-res-pill input {
+  width: 44px;
+  background: transparent;
+  border: 0;
+  outline: none;
+  text-align: center;
   font-size: 14px;
   line-height: 21px;
+  font-weight: 600;
+  appearance: textfield;
+  -moz-appearance: textfield;
 }
-
-/* 数字输入胶囊 */
-.nai-number {
-  display: flex;
-  align-items: center;
-  gap: 4px;
-  height: 28px;
-  padding: 0 8px;
-  border-radius: 4px;
-  background: var(--nai-border);
+.nai-res-pill input::-webkit-outer-spin-button,
+.nai-res-pill input::-webkit-inner-spin-button {
+  -webkit-appearance: none;
+  margin: 0;
 }
-
-.nai-number input {
-  width: 44px;
-  text-align: center;
-  font-size: 16px;
-  line-height: 20px;
-}
-
-.nai-number-swap {
+.nai-res-swap {
   display: flex;
   align-items: center;
   justify-content: center;
-  width: 16px;
-  height: 16px;
+  width: 20px;
+  height: 24px;
+  border-radius: 3px;
+  transition: background 0.08s ease-in-out;
+}
+.nai-res-swap:hover {
+  background: var(--nai-hover);
+}
+.nai-res-x {
   color: var(--nai-muted);
   font-size: 14px;
 }
-
-.nai-number-swap:hover {
-  color: var(--nai-text);
-}
-
-/* 尺寸分类 + 比例按钮 */
-.nai-size-row {
+.nai-res-row2 {
   display: flex;
   align-items: center;
   gap: 8px;
 }
+.nai-res-row2 .nai-pop {
+  flex: none;
+}
 
-.nai-size-select {
-  flex: 1;
+/* ============================================================
+   侧栏 footer：参数行 / 额度条 / 生成
+   ============================================================ */
+.nai-side-foot {
+  flex: none;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 12px;
+  border-top: 1px solid var(--nai-border);
+}
+.nai-params {
   display: flex;
   align-items: center;
-  justify-content: space-between;
-  gap: 6px;
-  height: 28px;
-  padding: 0 4px 0 10px;
-  border: 1px solid var(--nai-border);
-  border-radius: 4px;
-  font-size: 14px;
-}
-
-.nai-size-select:hover {
-  border-color: color-mix(in srgb, var(--nai-border) 60%, var(--nai-text));
-}
-
-.nai-orient-btn {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  width: 28px;
-  height: 28px;
-  border-radius: 4px;
-  background: var(--nai-border);
-  color: var(--nai-muted);
-}
-
-.nai-orient-btn[aria-pressed="true"] {
-  background: var(--nai-accent);
-  color: var(--nai-accent-ink);
-}
-
-/* 张数分段选择 */
-.nai-segment {
-  display: flex;
-  gap: 4px;
-  padding: 4px;
   border: 1px solid var(--nai-border);
   border-radius: 8px;
   background: var(--nai-panel);
+  padding: 8px 0 8px 12px;
 }
-
-.nai-segment button {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  flex: 1;
-  height: 30px;
-  border-radius: 4px;
-  font-size: 16px;
-  font-weight: 600;
-  line-height: 20px;
-}
-
-.nai-segment button:hover {
-  background: color-mix(in srgb, var(--nai-border) 55%, transparent);
-}
-
-.nai-segment button[aria-pressed="true"],
-.nai-segment button[aria-pressed="true"]:hover {
-  background: var(--nai-border);
-}
-
-/* 种子行 */
-.nai-seed-row {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-}
-
-.nai-seed-input {
+.nai-params-grid {
   flex: 1;
   display: flex;
-  align-items: center;
-  height: 28px;
-  padding: 0 10px;
-  border-radius: 4px;
-  background: var(--nai-border);
+  align-items: flex-start;
+  gap: 10px 18px;
+  min-width: 0;
 }
-
-.nai-seed-input input {
-  width: 100%;
+.nai-param {
+  display: flex;
+  flex-direction: column;
   font-size: 14px;
-  line-height: 20px;
+  line-height: 21px;
 }
-
-.nai-square-btn {
+.nai-param > span {
+  color: var(--nai-soft);
+}
+.nai-param input {
+  width: 34px;
+  background: transparent;
+  border: 0;
+  outline: none;
+  font-size: 16px;
+  line-height: 24px;
+  font-weight: 600;
+  appearance: textfield;
+  -moz-appearance: textfield;
+}
+.nai-param input::-webkit-outer-spin-button,
+.nai-param input::-webkit-inner-spin-button {
+  -webkit-appearance: none;
+  margin: 0;
+}
+.nai-param-seed {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+.nai-param-seed input {
+  width: 56px;
+  font-size: 14px;
+}
+.nai-param-icon {
   display: flex;
   align-items: center;
   justify-content: center;
-  flex: none;
-  width: 28px;
-  height: 28px;
-  border-radius: 4px;
+  width: 26px;
+  height: 22px;
+  border-radius: 3px;
+  transition: background 0.08s ease-in-out;
+}
+.nai-param-icon:hover:not(:disabled) {
   background: var(--nai-border);
-  color: var(--nai-text);
 }
-
-.nai-square-btn:hover {
-  filter: brightness(1.15);
+.nai-param-icon:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
 }
-
-.nai-square-btn:disabled {
+.nai-param--sampler {
+  min-width: 0;
+}
+.nai-param--sampler .nai-pop {
+  flex: 1;
+}
+.nai-param--sampler .nai-pop-panel {
+  min-width: 170px;
+}
+.nai-param-value {
+  font-size: 16px;
+  line-height: 24px;
+  font-weight: 600;
+  white-space: nowrap;
+  border-radius: 3px;
+  transition: background 0.08s ease-in-out;
+}
+.nai-param-value:hover {
+  background: var(--nai-border);
+}
+.nai-play {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  align-self: stretch;
+  width: 42px;
+  border-radius: 4px;
+  flex: none;
+  transition: background-color 0.08s ease-in-out;
+}
+.nai-play:hover:not(:disabled) {
+  background: var(--nai-border);
+}
+.nai-play:disabled {
   opacity: 0.4;
   cursor: not-allowed;
 }
 
-/* 采样器选择（整行胶囊） */
-.nai-sampler-select {
-  width: 100%;
+.nai-quota {
+  border: 1px solid var(--nai-border);
+  border-radius: 8px;
+  background: var(--nai-inset);
+  padding: 5px 8px 7px;
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+.nai-quota-row {
   display: flex;
   align-items: center;
   justify-content: space-between;
   gap: 8px;
-  height: 36px;
-  padding: 4px 4px 4px 12px;
-  border: 1px solid var(--nai-border);
-  border-radius: 8px;
-}
-
-.nai-sampler-select:hover {
-  border-color: color-mix(in srgb, var(--nai-border) 60%, var(--nai-text));
-}
-
-/* ---------------- 下拉面板 ---------------- */
-
-.nai-pop {
-  position: relative;
-}
-
-.nai-pop-panel {
-  position: absolute;
-  top: calc(100% + 6px);
-  left: 0;
-  z-index: 300;
-  min-width: 100%;
-  max-height: 320px;
-  overflow-y: auto;
-  padding: 4px;
-  border: 1px solid var(--nai-border);
-  border-radius: 8px;
-  background: var(--nai-panel);
-  box-shadow: 0 10px 30px rgba(0, 0, 0, 0.45);
-}
-
-.nai-pop-panel--right {
-  left: auto;
-  right: 0;
-}
-
-.nai-pop-group {
-  padding: 6px 8px 2px;
-  font-size: 12px;
+  font-size: 13px;
+  line-height: 19.5px;
   font-weight: 600;
+}
+.nai-quota-more {
+  font-size: 12px;
+  line-height: 18px;
+  font-weight: 600;
+  color: var(--nai-accent);
+  text-decoration: underline;
+}
+.nai-quota-row2 {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.nai-quota-track {
+  flex: 1;
+  height: 6px;
+  border-radius: 3px;
+  background: var(--nai-border);
+  overflow: hidden;
+}
+.nai-quota-track i {
+  display: block;
+  height: 100%;
+  background: var(--nai-accent);
+  transition: width 0.4s ease;
+}
+.nai-quota-plus {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 18px;
+  height: 18px;
+  border-radius: 3px;
+  background: var(--nai-border);
+  flex: none;
+  transition: background 0.08s ease-in-out;
+}
+.nai-quota-plus:hover {
+  background: var(--nai-hover);
+}
+
+.nai-status {
+  font-size: 13px;
+  line-height: 19.5px;
   color: var(--nai-muted);
 }
 
-.nai-pop-item {
+.nai-generate {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  gap: 12px;
+  gap: 8px;
   width: 100%;
-  padding: 8px 10px;
+  height: 40px;
+  padding: 4px 8px 4px 12px;
   border-radius: 4px;
-  font-size: 14px;
-  line-height: 20px;
-  text-align: left;
+  background: var(--nai-accent);
+  color: var(--nai-accent-ink);
+  font-size: 16px;
+  line-height: 24px;
+  font-weight: 700;
+  transition:
+    color 0.1s ease,
+    background-color 0.1s ease,
+    transform 0.15s ease;
 }
-
-.nai-pop-item:hover {
-  background: var(--nai-border);
+.nai-generate:hover:not(:disabled) {
+  filter: brightness(1.04);
 }
-
-.nai-pop-item[data-selected="true"] {
-  background: var(--nai-border);
+.nai-generate:active:not(:disabled) {
+  transform: scale(0.99);
+}
+.nai-generate:disabled {
+  background: color-mix(in srgb, var(--nai-accent) 55%, var(--nai-border));
+  color: color-mix(in srgb, var(--nai-accent-ink) 70%, var(--nai-panel));
+  cursor: not-allowed;
+}
+.nai-generate-badge {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  height: 24px;
+  padding: 0 8px;
+  border-radius: 4px;
+  background: var(--nai-accent-ink);
   color: var(--nai-accent);
+  font-size: 16px;
+  line-height: 24px;
   font-weight: 600;
 }
 
-.nai-pop-item:disabled {
-  opacity: 0.45;
-  cursor: not-allowed;
-}
-
-.nai-pop-item-sub {
-  font-size: 12px;
-  color: var(--nai-muted);
-}
-
-/* ---------------- 画布区 ---------------- */
-
+/* ============================================================
+   画布
+   ============================================================ */
 .nai-canvas {
-  display: flex;
-  flex-direction: column;
-  flex: 1;
+  position: relative;
   min-width: 0;
   min-height: 0;
-}
-
-.nai-gallery {
-  flex: 1;
-  min-height: 0;
   overflow-y: auto;
-  padding: 20px 40px 40px;
+  overflow-x: hidden;
+  background: var(--nai-base);
 }
 
-.nai-gallery-hero {
-  position: relative;
-  display: flex;
-  align-items: flex-end;
-  justify-content: center;
-  height: 230px;
-  margin-bottom: 26px;
-}
-
-.nai-gallery-hero svg {
+/* 生成中：顶部进度条（官方同位的米色不定长条） */
+.nai-genbar {
   position: absolute;
+  top: 68px;
+  left: 16px;
+  right: 16px;
+  height: 4px;
+  border-radius: 2px;
+  background: var(--nai-border);
+  overflow: hidden;
+  z-index: 30;
+}
+.nai-genbar i {
+  position: absolute;
+  top: 0;
   bottom: 0;
+  width: 32%;
+  border-radius: 2px;
+  background: var(--nai-accent);
+  animation: nai-genbar-slide 1.2s ease-in-out infinite;
+}
+@keyframes nai-genbar-slide {
+  0% {
+    left: -32%;
+  }
+  100% {
+    left: 100%;
+  }
+}
+
+/* --- 空画廊：衬线标题 + 3 列 masonry --- */
+.nai-gallery {
+  position: relative;
+  min-height: 100%;
+  padding: 140px 50px 24px;
+}
+.nai-hero {
+  position: relative;
+  text-align: center;
+  margin-bottom: 40px;
+}
+.nai-hero-art {
+  position: absolute;
   left: 50%;
-  transform: translateX(-50%);
-  width: min(691px, 90%);
+  top: -58px;
+  width: 691px;
+  max-width: 96%;
   height: auto;
-  opacity: 0.85;
+  transform: translateX(-50%);
   pointer-events: none;
 }
-
-.nai-gallery-title {
+.nai-hero-title {
   position: relative;
+  margin: 0;
+  font-family: "Eczar", serif;
   font-size: 20px;
+  line-height: 30px;
   font-weight: 700;
   color: var(--nai-accent);
+  letter-spacing: 0.04em;
 }
-
-.nai-gallery-sub {
+.nai-hero-sub {
+  position: relative;
+  margin: 0;
   font-size: 16px;
-  margin-top: 4px;
+  line-height: 24px;
 }
-
-.nai-gallery-hint {
+.nai-hero-hint {
+  position: relative;
+  margin: 35px 0 0;
   font-size: 16px;
-  margin-top: 36px;
+  line-height: 24px;
+  color: var(--nai-soft);
 }
 
-.nai-qs-grid {
-  display: grid;
-  grid-template-columns: repeat(3, 271px);
-  justify-content: center;
-  gap: 4px;
-  margin-top: 4px;
+/* masonry：3 列、列距 4、卡片自然纵横比、圆角 8 */
+.nai-qs-masonry {
+  columns: 3;
+  column-gap: 4px;
 }
-
 .nai-qs-card {
   position: relative;
-  aspect-ratio: 271 / 396;
-  border-radius: 2px;
+  display: block;
+  width: 100%;
+  margin-bottom: 4px;
+  break-inside: avoid;
+  border-radius: 8px;
   overflow: hidden;
   cursor: pointer;
-  border: 1px solid var(--nai-border);
+  background: var(--nai-inset);
+  transition: filter 0.15s ease;
 }
-
-/* 原创装饰底图：按卡片序号取色，纯 CSS 渐变 */
+.nai-qs-card:hover {
+  filter: brightness(1.12);
+}
 .nai-qs-art {
   position: absolute;
   inset: 0;
 }
-
 .nai-qs-copy {
   position: absolute;
   inset: 0;
@@ -930,369 +1053,415 @@
   font-weight: 600;
   transition: opacity 0.15s ease;
 }
-
 .nai-qs-card:hover .nai-qs-copy {
   opacity: 1;
 }
 
-/* ---------------- 画布查看器 ---------------- */
+/* 生成中的画布占位 tile（深底 + 中心呼吸白点） */
+.nai-placeholder {
+  width: min(377px, 80%);
+  aspect-ratio: 832 / 1216;
+  margin: 8px auto 0;
+  border-radius: 8px;
+  background: var(--nai-inset);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+.nai-placeholder i {
+  width: 12px;
+  height: 12px;
+  border-radius: 50%;
+  background: rgba(255, 255, 255, 0.85);
+  animation: nai-pulse 1.1s ease-in-out infinite;
+}
+@keyframes nai-pulse {
+  0%,
+  100% {
+    opacity: 0.25;
+    transform: scale(0.8);
+  }
+  50% {
+    opacity: 1;
+    transform: scale(1);
+  }
+}
 
-.nai-viewer {
+/* --- 选中图查看态 --- */
+.nai-view {
   display: flex;
   flex-direction: column;
-  flex: 1;
-  min-height: 0;
+  height: 100%;
+  min-height: 100%;
 }
-
-.nai-viewer-bar {
+.nai-view-top,
+.nai-view-bottom {
   display: flex;
   align-items: center;
-  gap: 4px;
+  min-height: 66px;
+  padding: 11px 12px;
   flex: none;
-  padding: 8px 10px 6px;
-  background: var(--nai-panel);
-  border-bottom: 1px solid var(--nai-border);
 }
-
-.nai-viewer-bar-spacer {
-  flex: 1;
+.nai-view-top {
+  justify-content: center;
+  gap: 7px;
 }
-
-.nai-anlas-chip {
+.nai-view-bottom {
+  justify-content: space-between;
+}
+.nai-tool {
   display: flex;
   align-items: center;
+  justify-content: center;
   gap: 6px;
-  height: 28px;
-  padding: 0 10px;
-  border-radius: 4px;
+  width: 42px;
+  height: 42px;
+  border-radius: 3px;
+  transition: background-color 0.08s ease-in-out;
+}
+.nai-tool:hover {
+  background: var(--nai-border);
+}
+.nai-tool--wide {
+  width: 96px;
+  padding: 0 12px;
+  justify-content: space-between;
+}
+.nai-view-bottom-left,
+.nai-view-bottom-right {
+  display: flex;
+  align-items: center;
+  gap: 28px;
+  padding-right: 24px;
+}
+.nai-view-bottom-left .nai-res-pill {
+  height: 42px;
+  padding: 0 12px;
+}
+.nai-view-stage {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 0;
+  padding: 0 11px;
+}
+.nai-view-img {
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+  border-radius: 8px;
+  box-shadow: 0 0 0 1px rgba(59, 64, 109, 0.35);
+  transition: transform 0.25s cubic-bezier(0.22, 1, 0.36, 1);
+}
+.nai-seedpill {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  height: 32px;
+  align-self: center;
+  padding: 0 12px;
+  border-radius: 3px;
   background: var(--nai-border);
   font-size: 14px;
-  font-weight: 600;
+  line-height: 21px;
+  transition: background 0.08s ease-in-out;
+}
+.nai-seedpill:hover {
+  background: var(--nai-hover);
 }
 
-.nai-viewer-stage {
-  flex: 1;
-  min-height: 0;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  padding: 24px;
-  overflow: hidden;
-}
-
-.nai-viewer-stage img {
-  max-width: 100%;
-  max-height: 100%;
-  object-fit: contain;
-  border-radius: 2px;
-}
-
-.nai-viewer-meta {
-  flex: none;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  gap: 16px;
-  padding: 6px 10px 10px;
-  font-size: 13px;
-  color: var(--nai-muted);
-}
-
-/* ---------------- 右侧工具栏 ---------------- */
-
+/* ============================================================
+   右轨 History
+   ============================================================ */
 .nai-rail {
   display: flex;
   flex-direction: column;
-  flex: none;
-  width: 140px;
-  min-width: 140px;
   background: var(--nai-panel);
-  border-left: 1px solid var(--nai-border);
+  min-width: 0;
+  min-height: 0;
 }
-
 .nai-rail-head {
-  flex: none;
   padding: 12px 10px 8px;
+  flex: none;
 }
-
-.nai-rail-history {
+.nai-rail-toggle {
   display: flex;
   align-items: center;
-  justify-content: center;
   gap: 4px;
-  width: 100%;
   height: 40px;
   padding: 7px 12px;
-  border: 1px solid var(--nai-border);
   border-radius: 4px;
   font-size: 16px;
+  line-height: 20px;
   font-weight: 600;
+  transition: background-color 0.08s ease-in-out;
 }
-
-.nai-rail-history:hover {
+.nai-rail-toggle:hover {
   background: var(--nai-border);
 }
-
-.nai-rail-tools {
+.nai-rail-list {
   flex: 1;
-  min-height: 0;
   overflow-y: auto;
+  padding: 10px 10px;
   display: flex;
   flex-direction: column;
-  align-items: center;
   gap: 10px;
-  padding: 10px 8px;
-  border-top: 1px solid var(--nai-border);
-  border-bottom: 1px solid var(--nai-border);
+  min-height: 0;
 }
-
-.nai-tool-btn {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  width: 46px;
-  height: 46px;
-  border-radius: 4px;
-  background: var(--nai-border);
-  color: var(--nai-text);
-}
-
-.nai-tool-btn:hover {
-  filter: brightness(1.15);
-}
-
-.nai-tool-btn[aria-pressed="true"] {
-  background: var(--nai-accent);
-  color: var(--nai-accent-ink);
-}
-
-.nai-rail-foot {
-  flex: none;
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  gap: 8px;
-  padding: 8px 10px 12px;
-}
-
-/* 历史面板展开时替换右栏 */
-.nai-rail--history {
-  width: 340px;
-  min-width: 340px;
-}
-
-.nai-history-grid {
-  display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
-  gap: 6px;
-  align-content: start;
-  width: 100%;
-  padding: 4px 2px;
-}
-
-.nai-history-item {
+.nai-rail-item {
   position: relative;
-  aspect-ratio: 1;
+  width: 107px;
+  height: 107px;
   border-radius: 4px;
   overflow: hidden;
-  border: 1px solid var(--nai-border);
-  cursor: pointer;
+  background: var(--nai-inset);
+  border: 1px solid transparent;
+  flex: none;
 }
-
-.nai-history-item img {
+.nai-rail-item img {
   width: 100%;
   height: 100%;
   object-fit: cover;
   display: block;
 }
-
-.nai-history-item[data-active="true"] {
+.nai-rail-item:hover {
+  border-color: var(--nai-border);
+}
+.nai-rail-item[data-active="true"] {
   border-color: var(--nai-accent);
 }
-
-.nai-history-empty {
-  padding: 20px 10px;
-  font-size: 13px;
-  color: var(--nai-muted);
-  text-align: center;
-  line-height: 20px;
-}
-
-/* ---------------- 欢迎弹窗 ---------------- */
-
-.nai-overlay {
-  position: fixed;
-  inset: 0;
-  z-index: 12000;
+.nai-rail-item--spin {
   display: flex;
   align-items: center;
   justify-content: center;
-  background: rgba(10, 11, 24, 0.72);
+  border-color: var(--nai-accent);
+}
+.nai-rail-item--spin i {
+  width: 22px;
+  height: 22px;
+  border-radius: 50%;
+  border: 2.5px solid var(--nai-border);
+  border-top-color: #fff;
+  animation: nai-spin 0.9s linear infinite;
+}
+@keyframes nai-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+.nai-rail-foot {
+  display: flex;
+  justify-content: space-between;
+  padding: 10px;
+  flex: none;
+}
+.nai-rail-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 38px;
+  height: 28px;
+  border-radius: 4px;
+  transition: background-color 0.08s ease-in-out;
+}
+.nai-rail-btn:hover {
+  background: var(--nai-border);
+}
+.nai-rail-btn[data-danger="true"] {
+  background: #8f2f52;
+  color: #fff;
 }
 
+/* ============================================================
+   模态（欢迎引导；规格对齐官方模态：radius 3、外描边阴影、× 右上）
+   ============================================================ */
+.nai-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 90;
+  background: rgba(2, 3, 11, 0.6);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
 .nai-modal {
   position: relative;
-  width: 502px;
-  max-width: calc(100vw - 32px);
+  width: min(502px, calc(100vw - 32px));
   max-height: calc(100vh - 48px);
   overflow-y: auto;
-  border: 1px solid var(--nai-border);
   border-radius: 3px;
   background: var(--nai-panel);
-  box-shadow: 0 24px 64px rgba(0, 0, 0, 0.5);
+  box-shadow:
+    0 0 0 1px rgba(59, 64, 109, 0.6),
+    0 12px 40px rgba(0, 0, 0, 0.45);
 }
-
 .nai-modal-close {
   position: absolute;
-  top: 12px;
-  right: 12px;
+  top: 10px;
+  right: 10px;
   display: flex;
   align-items: center;
   justify-content: center;
   width: 32px;
   height: 32px;
-  border-radius: 3px;
-  color: var(--nai-muted);
+  border-radius: 4px;
+  transition: background 0.08s ease-in-out;
 }
-
 .nai-modal-close:hover {
   background: var(--nai-border);
-  color: var(--nai-text);
 }
-
 .nai-modal-body {
   display: flex;
   flex-direction: column;
   align-items: center;
-  gap: 15px;
-  padding: 56px 30px 30px;
+  gap: 8px;
+  padding: 48px 20px 32px;
   text-align: center;
 }
-
 .nai-modal-mark {
   display: flex;
   align-items: center;
   justify-content: center;
-  width: 50px;
-  height: 50px;
-  border-radius: 8px;
-  background: var(--nai-accent);
-  color: var(--nai-accent-ink);
+  width: 56px;
+  height: 56px;
+  border-radius: 12px;
+  background: var(--nai-border);
+  margin-bottom: 8px;
 }
-
 .nai-modal-title {
-  font-size: 24px;
+  font-family: "Eczar", serif;
+  font-size: 22px;
+  line-height: 33px;
   font-weight: 700;
+  color: var(--nai-accent);
 }
-
 .nai-modal-sub {
-  font-size: 16px;
-  color: var(--nai-muted);
+  font-size: 14px;
+  line-height: 21px;
+  color: var(--nai-soft);
 }
-
 .nai-modal-list {
+  margin: 8px 0 0;
+  padding: 0;
+  list-style: none;
   display: flex;
   flex-direction: column;
-  gap: 8px;
-  padding: 0;
-  margin: 0;
-  list-style: none;
-  font-size: 15px;
-  text-align: left;
+  gap: 4px;
+  font-size: 14px;
+  line-height: 21px;
+  color: var(--nai-soft);
 }
-
-.nai-modal-list li {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-}
-
-.nai-modal-list li::before {
-  content: "";
-  flex: none;
-  width: 6px;
-  height: 6px;
-  border-radius: 50%;
-  background: var(--nai-accent);
-}
-
 .nai-modal-cta {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  gap: 5px;
-  width: 100%;
-  height: 46px;
-  padding: 10px;
-  border: 1px solid var(--nai-accent);
-  border-radius: 3px;
-  background: var(--nai-border);
-  color: var(--nai-accent);
+  margin-top: 12px;
+  height: 40px;
+  padding: 0 24px;
+  border-radius: 4px;
+  background: var(--nai-accent);
+  color: var(--nai-accent-ink);
   font-size: 16px;
-  font-weight: 600;
+  font-weight: 700;
+  transition: filter 0.1s ease;
 }
-
 .nai-modal-cta:hover {
-  background: color-mix(in srgb, var(--nai-accent) 12%, var(--nai-border));
+  filter: brightness(1.05);
 }
-
 .nai-modal-legacy {
   font-size: 13px;
   color: var(--nai-muted);
 }
-
 .nai-modal-legacy a {
   text-decoration: underline;
 }
 
-/* ---------------- 窄屏适配（保持可用） ---------------- */
-
-@media (max-width: 1180px) {
-  .nai-sidebar {
-    width: 340px;
-    min-width: 340px;
-  }
-
-  .nai-rail {
-    width: 64px;
-    min-width: 64px;
-  }
-
-  .nai-rail--history {
-    width: 300px;
-    min-width: 300px;
-  }
-
-  .nai-rail-history span {
-    display: none;
-  }
-
-  .nai-qs-grid {
-    grid-template-columns: repeat(2, minmax(0, 1fr));
-  }
+.nai-root .nai-seg {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  border: 1px solid var(--nai-border);
+  border-radius: 8px;
+  padding: 4px;
+}
+.nai-root .nai-seg button {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 4px;
+  font-size: 16px;
+  line-height: 20px;
+  font-weight: 600;
+  transition: background 0.08s ease-in-out;
+}
+.nai-root .nai-seg--pos {
+  flex: 1;
+  background: var(--nai-panel);
+}
+.nai-root .nai-seg--pos button {
+  flex: 1;
+  height: 30px;
+  padding: 0 8px;
+}
+.nai-root .nai-seg--pos button.nai-seg-icon {
+  flex: none;
+  width: 33px;
+}
+.nai-root .nai-seg--orient button {
+  width: 78px;
+  height: 30px;
+}
+.nai-root .nai-seg--count {
+  width: 100%;
+  margin-top: 6px;
+}
+.nai-root .nai-seg--count button {
+  flex: 1;
+  height: 30px;
+  position: relative;
+}
+.nai-root .nai-seg--count button + button::before {
+  content: "";
+  position: absolute;
+  left: -3px;
+  top: 7px;
+  bottom: 7px;
+  width: 1px;
+  background: var(--nai-border);
+}
+.nai-root .nai-seg--count button[data-active="true"]::before {
+  display: none;
+}
+.nai-root .nai-seg button:hover {
+  background: var(--nai-border);
+}
+.nai-root .nai-seg button[data-active="true"] {
+  background: var(--nai-border);
 }
 
-@media (max-width: 860px) {
-  .nai-body {
-    flex-direction: column;
+/* ---------- 响应式 ---------- */
+@media (max-width: 1180px) {
+  .nai-frame {
+    grid-template-columns: 400px minmax(0, 1fr);
   }
-
-  .nai-sidebar {
-    width: 100%;
-    min-width: 0;
-    order: 2;
-  }
-
-  .nai-canvas {
-    order: 1;
-    min-height: 52vh;
-  }
-
   .nai-rail {
     display: none;
   }
-
-  .nai-groups {
-    padding-right: 12px;
+}
+@media (max-width: 860px) {
+  .nai-frame {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .nai-side {
+    display: none;
+  }
+  .nai-qs-masonry {
+    columns: 2;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .nai-genbar i,
+  .nai-placeholder i,
+  .nai-rail-item--spin i {
+    animation-duration: 0.01s;
+    animation-iteration-count: 1;
   }
 }
