@@ -158,7 +158,7 @@ function Workbench({ me }: { me: MeMember }) {
           </span>
           <h1 class="sr-only">生图工作台</h1>
         </a>
-        <span class="nv-sr">Beta</span>
+        <span class="nv-beta">Beta</span>
         <span class="nv-sr">{quota}</span>
         <span class="nv-top__spacer" />
         <div class="nv-anlas-group">

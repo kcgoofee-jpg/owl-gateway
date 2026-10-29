@@ -27,7 +27,8 @@ test.describe("生图工作台（Beta）", () => {
     await page.goto("/");
     const entry = page.locator("#workbench-entry");
     await expect(entry).toBeVisible();
-    await expect(entry).toHaveText("生图工作台");
+    await expect(entry).toContainText("生图工作台");
+    await expect(entry).toContainText("Beta");
     await entry.click();
     await expect(page).toHaveURL(/\/workbench$/);
     await expect(page.locator(".nai-generate")).toBeVisible();

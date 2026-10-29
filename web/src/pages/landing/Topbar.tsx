@@ -142,6 +142,7 @@ export function Topbar(props: {
           {props.workbench && (
             <a id="workbench-entry" class="btn btn--primary btn--sm site-top__wb" href="/workbench">
               生图工作台
+              <span class="site-top__beta">Beta</span>
             </a>
           )}
           {!props.user && props.loginOpen && (

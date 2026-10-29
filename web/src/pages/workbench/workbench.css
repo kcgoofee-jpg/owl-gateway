@@ -170,6 +170,18 @@
   color: var(--nai-text);
   text-decoration: none;
 }
+.nv-beta {
+  display: inline-flex;
+  align-items: center;
+  height: 20px;
+  padding: 0 8px;
+  border-radius: 999px;
+  background: var(--nai-accent);
+  color: var(--nai-accent-ink);
+  font-size: 12px;
+  font-weight: 700;
+  line-height: 20px;
+}
 .nv-eyes {
   display: flex;
   align-items: center;
@@ -1931,7 +1943,7 @@ dialog.dialog {
   width: 100%;
   height: 100%;
   overflow: auto;
-  padding: 108px 28px 40px;
+  padding: 28px 28px 40px;
 }
 .nv-quick__head {
   position: relative;
