@@ -480,6 +480,9 @@ body.nai-page .toast {
   display: flex;
   flex-wrap: wrap;
   gap: 6px;
+  padding: 4px;
+  border-radius: 6px;
+  background: color-mix(in srgb, var(--nai-inset) 90%, transparent);
   pointer-events: none;
 }
 .nai-card-foot {
