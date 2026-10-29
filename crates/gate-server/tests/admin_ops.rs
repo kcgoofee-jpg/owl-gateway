@@ -108,6 +108,103 @@ async fn settings_get_put_and_stored_strings() {
 }
 
 #[tokio::test]
+async fn maintenance_switch_pauses_public_routes_and_keeps_admin_and_health_available() {
+    let e = setup(&[]).await;
+    let admin = Admin::login_bare(&e.state).await;
+    assert_eq!(admin.get_ok("/ops").await["maintenance"]["enabled"], false);
+
+    for invalid in [
+        json!({}),
+        json!({"enabled": "true"}),
+        json!({"enabled": true, "extra": 1}),
+    ] {
+        assert_eq!(admin.put("/ops/maintenance", invalid).await.status, 422);
+    }
+    assert_eq!(common::setting(&e.state, "maintenance_mode").await, None);
+
+    assert_eq!(
+        admin
+            .put("/ops/maintenance", json!({"enabled": true}))
+            .await
+            .json(),
+        json!({"enabled": true})
+    );
+    assert_eq!(
+        common::setting(&e.state, "maintenance_mode")
+            .await
+            .as_deref(),
+        Some("1")
+    );
+
+    let page = common::send(&e.state, "GET", "/", None, None, &[("accept", "text/html")]).await;
+    assert_eq!(page.status, 200);
+    assert!(page.text().contains("维护中"));
+    assert_eq!(page.headers["cache-control"], "no-store");
+
+    let api = common::send(
+        &e.state,
+        "GET",
+        "/public/live",
+        None,
+        None,
+        &[("accept", "application/json")],
+    )
+    .await;
+    assert_eq!(api.status, 503);
+    assert_eq!(api.json()["detail"], "本站维护中，服务暂时暂停");
+    assert_eq!(api.headers["retry-after"], "30");
+    assert_eq!(
+        common::send(&e.state, "GET", "/healthz", None, None, &[])
+            .await
+            .status,
+        200
+    );
+    assert!(
+        admin.get_ok("/ops").await["maintenance"]["enabled"]
+            .as_bool()
+            .unwrap()
+    );
+
+    let restarted = e.restart().await;
+    let after_restart = Admin::login_bare(&restarted).await;
+    assert_eq!(
+        after_restart.get_ok("/ops").await["maintenance"]["enabled"],
+        true
+    );
+    assert_eq!(
+        common::send(&restarted, "GET", "/public/live", None, None, &[])
+            .await
+            .status,
+        503
+    );
+    assert_eq!(
+        after_restart
+            .put("/ops/maintenance", json!({"enabled": false}))
+            .await
+            .json(),
+        json!({"enabled": false})
+    );
+    assert_eq!(
+        common::send(&restarted, "GET", "/public/live", None, None, &[])
+            .await
+            .status,
+        200
+    );
+    restarted
+        .db
+        .set_setting("maintenance_mode", "corrupt")
+        .await
+        .unwrap();
+    assert_eq!(
+        common::send(&restarted, "GET", "/public/live", None, None, &[])
+            .await
+            .status,
+        503,
+        "损坏的维护开关不能意外恢复公共流量"
+    );
+}
+
+#[tokio::test]
 async fn retired_identity_lists_cannot_be_written_as_runtime_settings() {
     let env = setup(&[]).await;
     let api = Admin::login_bare(&env.state).await;

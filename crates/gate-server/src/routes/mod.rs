@@ -11,10 +11,14 @@ pub mod status;
 
 use crate::AppState;
 use crate::web::PUBLIC_CSP;
+use axum::Json;
 use axum::Router;
 use axum::body::Body;
-use axum::http::{HeaderMap, HeaderValue, StatusCode, header};
+use axum::extract::State;
+use axum::http::{HeaderMap, HeaderValue, Method, Request, StatusCode, header};
+use axum::middleware::{self, Next};
 use axum::response::{IntoResponse, Response};
+use serde_json::json;
 
 pub fn router(state: AppState) -> Router {
     Router::new()
@@ -31,7 +35,81 @@ pub fn router(state: AppState) -> Router {
         .method_not_allowed_fallback(|| async {
             crate::error::HttpError::new(405, "Method Not Allowed")
         })
+        .layer(middleware::from_fn_with_state(
+            state.clone(),
+            maintenance_gate,
+        ))
         .with_state(state)
+}
+
+/// 管理后台、静态资源与探针必须在维护时仍可用，以便恢复站点和检查容器。
+fn maintenance_bypass(path: &str) -> bool {
+    path == "/admin"
+        || path.starts_with("/admin/")
+        || path.starts_with("/_owl/")
+        || matches!(
+            path,
+            "/favicon.svg" | "/favicon.ico" | "/healthz" | "/readyz" | "/livez"
+        )
+}
+
+async fn maintenance_gate(
+    State(state): State<AppState>,
+    request: Request<Body>,
+    next: Next,
+) -> Response {
+    if maintenance_bypass(request.uri().path()) {
+        return next.run(request).await;
+    }
+    // 维护开关读取失败时 fail closed：避免数据库异常时继续接受新请求。
+    if !crate::ops::maintenance_mode(&state).await.unwrap_or(true) {
+        return next.run(request).await;
+    }
+    if (request.method() == Method::GET || request.method() == Method::HEAD)
+        && wants_html(request.headers())
+    {
+        return maintenance_page(request.method() == Method::HEAD);
+    }
+    let mut response = (
+        StatusCode::SERVICE_UNAVAILABLE,
+        Json(json!({"detail": "本站维护中，服务暂时暂停"})),
+    )
+        .into_response();
+    response
+        .headers_mut()
+        .insert(header::RETRY_AFTER, HeaderValue::from_static("30"));
+    response
+}
+
+/// 与 Caddy 的停机页保持同一深色卡片样式；页面无站内资源依赖，并定时重新检查维护状态。
+const MAINTENANCE_HTML: &str = r#"<!doctype html><html lang="zh-CN"><head><meta charset="utf-8"><title>维护中 · 猫头鹰公益站</title><meta name="viewport" content="width=device-width,initial-scale=1"><meta http-equiv="refresh" content="30"><style>body{font-family:system-ui,-apple-system,sans-serif;background:#0f1117;color:#e6edf3;display:flex;align-items:center;justify-content:center;min-height:100vh;margin:0;padding:20px;box-sizing:border-box}.card{background:#161b22;border:1px solid #30363d;border-radius:12px;padding:32px;max-width:520px;width:100%;text-align:center;box-shadow:0 8px 24px rgba(0,0,0,.5)}h1{font-size:22px;margin:0 0 16px;color:#f0883e}p{color:#8b949e;line-height:1.6;font-size:14px;margin:0 0 16px}.badge{display:inline-block;padding:4px 10px;background:#f0883e22;color:#f0883e;border-radius:20px;font-size:12px;font-weight:600;margin-bottom:12px}</style></head><body><main class="card"><div class="badge">维护中</div><h1>猫头鹰公益站暂停服务</h1><p>站点正在维护，公共页面与服务接口暂不可用。维护完成后会自动恢复，请稍后重试。</p><p>页面每 30 秒自动检查一次。</p></main></body></html>"#;
+
+fn maintenance_page(head_only: bool) -> Response {
+    let body = if head_only {
+        Body::empty()
+    } else {
+        Body::from(MAINTENANCE_HTML)
+    };
+    let mut response = Response::new(body);
+    *response.status_mut() = StatusCode::OK;
+    let headers = response.headers_mut();
+    headers.insert(
+        header::CONTENT_TYPE,
+        HeaderValue::from_static("text/html; charset=utf-8"),
+    );
+    headers.insert(header::CACHE_CONTROL, HeaderValue::from_static("no-store"));
+    headers.insert(header::RETRY_AFTER, HeaderValue::from_static("30"));
+    headers.insert(
+        "x-content-type-options",
+        HeaderValue::from_static("nosniff"),
+    );
+    headers.insert("x-frame-options", HeaderValue::from_static("DENY"));
+    headers.insert("referrer-policy", HeaderValue::from_static("no-referrer"));
+    headers.insert(
+        "content-security-policy",
+        HeaderValue::from_static("default-src 'none'; style-src 'unsafe-inline'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'"),
+    );
+    response
 }
 
 /// 没有的路径：浏览器拿到 HTML 404（带站名与回首页 / 状态页的链接），

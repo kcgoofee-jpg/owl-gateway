@@ -113,6 +113,7 @@ export function Switch(props: {
   onChange: (v: boolean) => void;
   labelledBy?: string | undefined;
   describedBy?: string | undefined;
+  disabled?: boolean | undefined;
 }) {
   return (
     <button
@@ -122,6 +123,7 @@ export function Switch(props: {
       aria-checked={props.checked}
       aria-labelledby={props.labelledBy}
       aria-describedby={props.describedBy}
+      disabled={props.disabled}
       onClick={() => props.onChange(!props.checked)}
     >
       <span class="switch__thumb" aria-hidden="true" />
@@ -135,6 +137,7 @@ export function SwitchRow(props: {
   desc?: ComponentChildren;
   checked: boolean;
   onChange: (v: boolean) => void;
+  disabled?: boolean | undefined;
   /** 标题右侧的小标记 */
   tag?: ComponentChildren;
 }) {
@@ -155,6 +158,7 @@ export function SwitchRow(props: {
       <Switch
         checked={props.checked}
         onChange={props.onChange}
+        disabled={props.disabled}
         labelledBy={`${id}-t`}
         describedBy={props.desc ? `${id}-d` : undefined}
       />

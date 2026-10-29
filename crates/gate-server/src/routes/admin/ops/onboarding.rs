@@ -40,6 +40,7 @@ async fn snapshot(state: &AppState) -> Result<Value, ApiError> {
             "labels": labels,
         },
         "log_retention": {"origin_keep_days": crate::settings::usage_origin_keep_days(&state.db).await?},
+        "maintenance": {"enabled": ops::maintenance_mode(state).await?},
         "upstream": upstream_health(state),
     }))
 }

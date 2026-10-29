@@ -1,11 +1,12 @@
 //! 测试告警、Discord 机器人（奶妹）在线状态（总览的「奶妹离线」提醒用）。
 
+use crate::body::read_json_body;
 use crate::error::{ApiResult, HttpError, InternalError, ok_json};
 use crate::session::AdminSession;
 use crate::state::AppState;
 use axum::Router;
-use axum::extract::State;
-use axum::routing::{get, post};
+use axum::extract::{Request, State};
+use axum::routing::{get, post, put};
 use gate_core::bot_config::{self, BotConfigError};
 use serde_json::json;
 
@@ -16,6 +17,22 @@ pub(super) fn router() -> Router<AppState> {
     Router::new()
         .route("/admin/api/alerts/test", post(alerts_test))
         .route("/admin/api/discord-bot", get(discord_bot_get))
+        .route("/admin/api/ops/maintenance", put(maintenance_put))
+}
+
+async fn maintenance_put(
+    State(state): State<AppState>,
+    _s: AdminSession,
+    req: Request,
+) -> ApiResult {
+    let (parts, body) = req.into_parts();
+    let body = read_json_body(&parts.headers, body, super::super::BODY_LIMIT).await?;
+    let enabled = match body.get("enabled").and_then(serde_json::Value::as_bool) {
+        Some(enabled) if body.len() == 1 => enabled,
+        _ => return Err(HttpError::new(422, "enabled 必须是布尔值").into()),
+    };
+    crate::ops::set_maintenance_mode(&state, enabled).await?;
+    Ok(ok_json(&json!({"enabled": enabled})))
 }
 
 // ------------------------------------------------------------------ 测试告警

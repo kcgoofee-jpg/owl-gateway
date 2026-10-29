@@ -196,6 +196,14 @@ pub static V5_PAUSED: Spec = spec(
     "额度 / V5",
     "V5 暂停：开着时所有 V5 请求直接拒（不扣费）",
 );
+/// 人工维护模式：开启后公共网站与服务接口统一返回维护页 / 503；后台与健康检查仍可访问。
+pub static MAINTENANCE_MODE: Spec = spec(
+    "maintenance_mode",
+    Kind::Flag,
+    SpecDefault::Bool(false),
+    "system",
+    "维护模式：暂停公共网站与服务接口，后台和健康检查保留",
+);
 pub static ALGO_NOTICE: Spec = spec(
     "algo_notice",
     Kind::Str,
@@ -237,7 +245,7 @@ pub static V5_MEDIUM_MODE: Spec = Spec {
 };
 
 /// 登记表（已删除的设置不在里面；新增的追加在末尾）。
-pub static ALL: [&Spec; 9] = [
+pub static ALL: [&Spec; 10] = [
     &MEMBER_SWEEP,
     &ISSUE_HOURLY_CAP,
     &REGISTER_OPEN,
@@ -247,6 +255,7 @@ pub static ALL: [&Spec; 9] = [
     &ALGO_NOTICE,
     &V5_MEDIUM_MODE,
     &ORIGIN_KEEP_DAYS,
+    &MAINTENANCE_MODE,
 ];
 
 /// `default_of(spec)`：登记表里写死的默认值（不取环境变量）。

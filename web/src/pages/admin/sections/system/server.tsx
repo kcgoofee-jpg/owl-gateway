@@ -1,13 +1,48 @@
 /** 告警渠道和请求来源保留设置。 */
 import { useState } from "preact/hooks";
 import { Badge, Button, Card } from "../../../../ui";
-import { useAdmin } from "../../Admin";
+import { act, useAdmin } from "../../Admin";
 import { actOrError, ConfirmDialog } from "../_kit";
-import { withTone } from "./forms";
+import { SwitchRow, withTone } from "./forms";
 
 export type ServerStatus = {
   alerts: { configured: boolean; sent: number };
 };
+
+export function MaintenanceCard() {
+  const { data } = useAdmin<{ maintenance: { enabled: boolean } }>("/admin/api/ops");
+  const [override, setOverride] = useState<boolean | null>(null);
+  const [saving, setSaving] = useState(false);
+  if (!data) return null;
+  const enabled = override ?? data.maintenance.enabled;
+  const change = async (next: boolean) => {
+    if (saving || next === enabled) return;
+    setOverride(next);
+    setSaving(true);
+    const result = await act<{ enabled: boolean }>(
+      "PUT",
+      "/admin/api/ops/maintenance",
+      { enabled: next },
+      next ? "全站服务已暂停" : "全站服务已恢复",
+    );
+    setOverride(result?.enabled ?? enabled);
+    setSaving(false);
+  };
+  return (
+    <Card
+      title="全站维护"
+      sub="暂停公共页面与业务接口；后台和健康检查仍可用，方便恢复服务。已开始的请求继续完成。"
+    >
+      <SwitchRow
+        title={enabled ? "维护模式已开启" : "暂停所有公共服务"}
+        desc="开启后，访客页面显示维护中，成员和客户端请求会收到 503。"
+        checked={enabled}
+        disabled={saving}
+        onChange={(value) => void change(value)}
+      />
+    </Card>
+  );
+}
 
 export function AlertsCard() {
   const { data } = useAdmin<ServerStatus>("/admin/api/status");

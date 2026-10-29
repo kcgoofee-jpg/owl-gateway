@@ -7,4 +7,5 @@
 {"in":{"fn":"spec","key":"algo_notice"},"out":{"key":"algo_notice","kind":"str","default":"","owner":"quota_algo → 首页","doc":"首页显示的今日额度说明","lo":null,"hi":null,"choices":[]}}
 {"in":{"fn":"spec","key":"v5_medium_mode"},"out":{"key":"v5_medium_mode","kind":"choice","default":"off","owner":"出图 / 后台额度页","doc":"V5 Medium 降档：off 关闭 / on 全部 V5 Full 请求改走 Medium","lo":null,"hi":null,"choices":["off","on"]}}
 {"in":{"fn":"spec","key":"usage_origin_keep_days"},"out":{"key":"usage_origin_keep_days","kind":"int","default":0,"owner":"audit","doc":"请求日志里的来源 IP 和客户端保留几天，到期清除；0 = 永久","lo":0,"hi":365,"choices":[]}}
-{"in":{"fn":"all_keys"},"out":["member_sweep","issue_hourly_cap","register_open","global_daily_v5","global_daily_anlas","global_monthly_anlas","algo_notice","v5_medium_mode","usage_origin_keep_days"]}
+{"in":{"fn":"spec","key":"maintenance_mode"},"out":{"key":"maintenance_mode","kind":"flag","default":false,"owner":"system","doc":"维护模式：暂停公共网站与服务接口，后台和健康检查保留","lo":null,"hi":null,"choices":[]}}
+{"in":{"fn":"all_keys"},"out":["member_sweep","issue_hourly_cap","register_open","global_daily_v5","global_daily_anlas","global_monthly_anlas","algo_notice","v5_medium_mode","usage_origin_keep_days","maintenance_mode"]}

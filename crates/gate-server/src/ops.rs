@@ -68,6 +68,30 @@ pub async fn v5_paused(db: &Db) -> Result<bool, DbError> {
     crate::settings::site_bool(db, &site_flags::V5_PAUSED).await
 }
 
+/// 全站手动维护开关。维护期间公共路由由 `routes` 中间件统一拦截。
+pub async fn maintenance_mode(state: &AppState) -> Result<bool, DbError> {
+    let raw = state
+        .db
+        .get_setting(site_flags::MAINTENANCE_MODE.key)
+        .await?;
+    Ok(match raw.as_deref() {
+        None | Some("0") => false,
+        Some("1") => true,
+        // An unrecognized persisted value must not silently reopen public traffic.
+        Some(_) => true,
+    })
+}
+
+pub async fn set_maintenance_mode(state: &AppState, enabled: bool) -> Result<(), DbError> {
+    state
+        .db
+        .set_setting(
+            site_flags::MAINTENANCE_MODE.key,
+            if enabled { "1" } else { "0" },
+        )
+        .await
+}
+
 /// 全站共享 V5 上限，0 表示停用。
 pub async fn global_daily_v5(db: &Db) -> Result<i64, DbError> {
     Ok(i64::from(db.shared_budgets().await?.daily_v5))
