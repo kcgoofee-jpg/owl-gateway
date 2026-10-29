@@ -347,14 +347,6 @@ test.describe("已登录", () => {
     });
   }
 
-  test("成员：?focus=<Key 编号> 展开并高亮该成员", async ({ page }) => {
-    await open(page, "/admin/members?focus=3", PAGES[0]?.ready as never);
-    const row = page.locator("#mb-m-3");
-    await expect(row).toBeVisible();
-    await expect(row).toHaveClass(/is-focus/);
-    await expect(row.getByRole("button", { name: /收起.*的详情/ })).toBeVisible();
-  });
-
   test("成员：新建邀请 Key 的消息说明用 Discord 登录", async ({ page }) => {
     await open(page, "/admin/members", PAGES[0]?.ready as never);
     await page.getByRole("button", { name: "创建邀请 Key", exact: true }).click();

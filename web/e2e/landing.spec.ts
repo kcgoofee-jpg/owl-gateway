@@ -30,7 +30,7 @@ test.beforeEach(async ({ page }) => {
 });
 
 test.describe("游客", () => {
-  test("渲染：实时状态、客户端设置、使用须知、页脚", async ({ page }) => {
+  test("渲染：实时状态、客户端设置和使用须知", async ({ page }) => {
     const errors = watchConsole(page, "/public/live/stream");
     await page.goto("/");
     // h1 只给读屏：屏幕上不显示标题、介绍语和说明小字
@@ -88,12 +88,9 @@ test.describe("游客", () => {
       expect(text, `旧文案「${gone}」应已删除`).not.toContain(gone);
     }
 
-    // 页脚
-    const foot = page.getByRole("contentinfo");
-    await expect(foot).toContainText("非商业公益服务，不保证可用性");
-    // 「本站说明」页已下线（站长 10-22）：页脚不再有这个入口
-    await expect(foot.getByRole("link", { name: "本站说明" })).toHaveCount(0);
-    await expect(foot.getByRole("link", { name: "隐私" })).toHaveCount(0);
+    await expect(page.locator(".lp-foot")).toHaveCount(0);
+    await expect(rules).toContainText("非商业公益服务，不保证持续可用");
+    await expect(rules).toContainText("不保存提示词或生成图");
     expect(errors).toEqual([]);
   });
 

@@ -12,9 +12,8 @@ for (const member of [false, true])
       }
       await page.setViewportSize({ width, height: 900 });
       await page.goto("/");
-      const footer = page.locator(".lp-foot");
-      await footer.getByText("使用规则", { exact: true }).click();
-      const terms = footer.locator("details");
+      await page.getByRole("tab", { name: "使用须知" }).click();
+      const terms = page.locator(".lp-rules");
       for (const rule of [
         "商业化使用",
         "共享、转借、倒卖或公开 Key",
@@ -24,7 +23,9 @@ for (const member of [false, true])
       ]) {
         await expect(terms.getByText(rule, { exact: true })).toBeVisible();
       }
-      await expect(footer).toContainText("不保存提示词或生成图片");
+      await expect(terms).toContainText("非商业公益服务，不保证持续可用");
+      await expect(terms).toContainText("不保存提示词或生成图");
+      await expect(page.locator(".lp-foot")).toHaveCount(0);
       expect(await noHorizontalScroll(page, { loose: true })).toBe(true);
       expect(await orphans(page)).toEqual([]);
     });
