@@ -12,7 +12,7 @@ for (const member of [false, true])
       }
       await page.setViewportSize({ width, height: 900 });
       await page.goto("/");
-      await page.getByRole("tab", { name: "使用须知" }).click();
+      if (!member) await page.getByRole("tab", { name: "使用须知" }).click();
       const terms = page.locator(".lp-rules");
       for (const rule of [
         "商业化使用",

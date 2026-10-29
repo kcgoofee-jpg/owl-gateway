@@ -195,6 +195,14 @@ function Rules() {
   );
 }
 
+export function UsageNoticeCard() {
+  return (
+    <Card title="使用须知" class="reveal">
+      <Rules />
+    </Card>
+  );
+}
+
 export function GuestGuides() {
   return <Guides />;
 }

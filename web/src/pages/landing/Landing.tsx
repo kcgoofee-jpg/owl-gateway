@@ -10,7 +10,7 @@ import { Skeleton, toast } from "../../ui";
 import { StoreCtx } from "./ctx";
 import { Gallery } from "./Gallery";
 import { Grain } from "./Grain";
-import { GuestGuides, JoinServerCard } from "./Guest";
+import { GuestGuides, JoinServerCard, UsageNoticeCard } from "./Guest";
 import { displayName } from "./helpers";
 import { Coupons } from "./Member";
 import { MyRequestsCard } from "./Requests";
@@ -121,6 +121,9 @@ function MemberHome({ me }: { me: MeMember }) {
         {me.coupons && me.coupons.length > 0 && <Coupons coupons={me.coupons} />}
         <MyRequestsCard />
       </div>
+      <div class="wrap wrap--narrow lp-body">
+        <UsageNoticeCard />
+      </div>
     </>
   );
 }
@@ -128,11 +131,16 @@ function MemberHome({ me }: { me: MeMember }) {
 /** 登录了但还没有 Key：只放加入服务器的入口，下面是状态区。 */
 function NoKeyHome() {
   return (
-    <div class="wrap lp-body lp-body--top">
-      <h1 class="sr-only">猫头鹰公益站</h1>
-      <JoinServerCard />
-      <StatusCard />
-    </div>
+    <>
+      <div class="wrap lp-body lp-body--top">
+        <h1 class="sr-only">猫头鹰公益站</h1>
+        <JoinServerCard />
+        <StatusCard />
+      </div>
+      <div class="wrap wrap--narrow lp-body">
+        <UsageNoticeCard />
+      </div>
+    </>
   );
 }
 

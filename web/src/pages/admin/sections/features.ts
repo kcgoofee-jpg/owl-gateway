@@ -13,6 +13,7 @@ export const FEATURES: Feature[] = [
 
 /** 日志筛选专用：把文生图按记录中的模型版本拆开，不影响其他功能权限设置。 */
 export const LOG_FEATURES: Feature[] = [
+  { id: "image", label: "文生图（全部版本）", short: "文生图（全部）" },
   { id: "image_v45", label: "文生图 V4.5", short: "文生图 V4.5" },
   { id: "image_v5", label: "文生图 V5", short: "文生图 V5" },
   ...FEATURES.filter((f) => f.id !== "image"),
