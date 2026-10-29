@@ -6,7 +6,7 @@
  * 暂未实现的能力（角色提示词、图生图、放大、变体、局部重绘等）点击时给出明确提示。
  */
 
-import { ArrowRight, Download, LayoutGrid, Pencil, Settings, Wand2 } from "lucide-preact";
+import { ArrowRight, Clock, Download, LayoutGrid, Pencil, Settings, Wand2 } from "lucide-preact";
 import { useEffect, useRef, useState } from "preact/hooks";
 import {
   BASE_MODELS,
@@ -226,6 +226,9 @@ export function NaiApp() {
   const [pinned, setPinned] = useState<number[]>([]);
   const [confirmClear, setConfirmClear] = useState(false);
   const [railCollapsed, setRailCollapsed] = useState(false);
+  // 移动端（≤860px）：底部设置抽屉与全屏历史。桌面布局不渲染这两个入口。
+  const [sheetOpen, setSheetOpen] = useState(false);
+  const [histOpen, setHistOpen] = useState(false);
   const [welcome, setWelcome] = useState(() => {
     try {
       return localStorage.getItem("owl-nai-welcome-v1") !== "1";
@@ -481,14 +484,29 @@ export function NaiApp() {
     toast("已清空本次会话的历史。");
   };
 
+  // 触屏点按也会先派发 mouseenter，只有支持悬停的设备才走 hover 开启。
+  const canHover = typeof window.matchMedia === "function" && window.matchMedia("(hover: hover)").matches;
   const navMenuEnter = () => {
+    if (!canHover) return;
     if (menuTimer.current) window.clearTimeout(menuTimer.current);
     setMenuOpen(true);
   };
   const navMenuLeave = () => {
+    if (!canHover) return;
     if (menuTimer.current) window.clearTimeout(menuTimer.current);
     menuTimer.current = window.setTimeout(() => setMenuOpen(false), 220);
   };
+
+  // 触屏没有 mouseleave：点菜单以外任意处收起。
+  useEffect(() => {
+    if (!menuOpen || canHover) return;
+    const onDoc = (e: Event) => {
+      const t = e.target as Element | null;
+      if (!t?.closest(".nai-menu-wrap")) setMenuOpen(false);
+    };
+    document.addEventListener("click", onDoc, true);
+    return () => document.removeEventListener("click", onDoc, true);
+  }, [menuOpen]);
 
   const logout = async () => {
     try {
@@ -499,6 +517,95 @@ export function NaiApp() {
       toast("退出失败，请稍后再试。", { error: true });
     }
   };
+
+  // 额度条与历史条目在桌面/移动两处复用（同一份状态，纯展示 + 提示）。
+  const quotaBlock = (
+    <div class="nai-quota">
+      <div class="nai-quota-row">
+        <span>
+          {quotaPct}% 已用 · 今日剩 {Math.max(0, dailyImages - usedToday)} 张
+        </span>
+        <button
+          type="button"
+          class="nai-quota-more"
+          onClick={() => toast("免费额度每日重置；V5 按策略另行计数。")}
+        >
+          More Info
+        </button>
+      </div>
+      <div class="nai-quota-row2">
+        <div class="nai-quota-track" aria-hidden="true">
+          <i style={{ width: `${quotaPct}%` }} />
+        </div>
+        <button
+          type="button"
+          class="nai-quota-plus"
+          title="充值"
+          aria-label="充值"
+          onClick={() => toast("充值暂未开放，出图额度由站长按日发放。", { error: true })}
+        >
+          <PlusIcon size={10} />
+        </button>
+      </div>
+    </div>
+  );
+  const railItems = (
+    <>
+      {busy && (
+        <div class="nai-rail-item nai-rail-item--spin" aria-hidden="true">
+          <i />
+        </div>
+      )}
+      {shots.map((s, i) => (
+        <button
+          key={`${s.attrs.seed}-${i}`}
+          type="button"
+          class="nai-rail-item"
+          data-active={viewing === i ? "true" : "false"}
+          title={`${s.attrs.seed} · ${s.attrs.width}×${s.attrs.height}`}
+          onClick={() => {
+            setViewing(i);
+            setHistOpen(false);
+          }}
+        >
+          <img src={s.url} alt={`历史 ${i + 1}`} loading="lazy" />
+        </button>
+      ))}
+    </>
+  );
+  const railFoot = (
+    <div class="nai-rail-foot">
+      <button
+        type="button"
+        class="nai-rail-btn"
+        title="锁定滚动"
+        aria-label="锁定历史滚动"
+        aria-pressed="false"
+        onClick={() => toast("历史滚动锁定暂未开放。")}
+      >
+        <PinIcon size={14} />
+      </button>
+      <button
+        type="button"
+        class="nai-rail-btn"
+        title="打包下载"
+        aria-label="下载全部图片"
+        onClick={downloadAll}
+      >
+        <Download size={14} />
+      </button>
+      <button
+        type="button"
+        class="nai-rail-btn"
+        title={confirmClear ? "再点一次确认清空" : "清空历史"}
+        aria-label="删除图片"
+        data-danger={confirmClear ? "true" : "false"}
+        onClick={clearHistory}
+      >
+        <TrashIcon size={14} />
+      </button>
+    </div>
+  );
 
   return (
     <div class="nai-root" data-theme={theme}>
@@ -518,7 +625,8 @@ export function NaiApp() {
             </button>
             <div class="nai-anlas">
               <span class="nai-anlas-label">
-                Anlas: {anlas}
+                <span class="nai-anlas-pre">Anlas: </span>
+                {anlas}
                 <AnlasIcon size={11} />
               </span>
               <button
@@ -550,7 +658,7 @@ export function NaiApp() {
                   onMouseEnter={navMenuEnter}
                   onMouseLeave={navMenuLeave}
                 >
-                  <div class="nai-menu-group">账号</div>
+                  <div class="nai-menu-group">Account</div>
                   {member ? (
                     <>
                       <button
@@ -559,20 +667,20 @@ export function NaiApp() {
                         onClick={() => toast("账号设置请在旧版工作台管理。")}
                       >
                         <OwlIcon size={18} />
-                        <span>账号设置</span>
+                        <span>Account Settings</span>
                       </button>
                       <button type="button" class="nai-menu-item" onClick={() => void logout()}>
                         <CloseIcon size={16} />
-                        <span>退出登录</span>
+                        <span>Logout</span>
                       </button>
                     </>
                   ) : (
                     <a class="nai-menu-item" href="/login">
                       <OwlIcon size={18} />
-                      <span>Discord 登录</span>
+                      <span>Discord Login</span>
                     </a>
                   )}
-                  <div class="nai-menu-group">其他</div>
+                  <div class="nai-menu-group">Others</div>
                   <button
                     type="button"
                     class="nai-menu-item"
@@ -582,7 +690,7 @@ export function NaiApp() {
                     }}
                   >
                     <SparkleIcon size={16} />
-                    <span>快速开始图库</span>
+                    <span>Quick Start Gallery</span>
                   </button>
                   <button
                     type="button"
@@ -590,7 +698,7 @@ export function NaiApp() {
                     onClick={() => toast("导演工具（重绘/增强/改姿势）暂未开放。", { error: true })}
                   >
                     <Wand2 size={16} />
-                    <span>导演工具</span>
+                    <span>Director Tools</span>
                   </button>
                   <button
                     type="button"
@@ -598,24 +706,40 @@ export function NaiApp() {
                     onClick={() => toast("额度说明：免费额度每日重置，见下方进度条。")}
                   >
                     <AnlasIcon size={14} />
-                    <span>额度说明</span>
+                    <span>Usage Limit</span>
+                  </button>
+                  <button
+                    type="button"
+                    class="nai-menu-item"
+                    onClick={() => toast("库存（Inventory）暂未开放。", { error: true })}
+                  >
+                    <LayoutGrid size={16} />
+                    <span>Inventory</span>
+                  </button>
+                  <button
+                    type="button"
+                    class="nai-menu-item"
+                    onClick={() => toast("Tokenizer 页面暂未开放，实时计数见提示词卡下方。")}
+                  >
+                    <Pencil size={16} />
+                    <span>Tokenizer</span>
                   </button>
                   <a class="nai-menu-item" href="/workbench?legacy=1">
                     <HistoryIcon size={18} />
-                    <span>旧版工作台</span>
+                    <span>Legacy Workbench</span>
                   </a>
-                  <div class="nai-menu-group">帮助</div>
+                  <div class="nai-menu-group">Help</div>
                   <button
                     type="button"
                     class="nai-menu-item"
                     onClick={() => toast("使用教程暂未开放，先写提示词再点生成即可。")}
                   >
                     <PlayIcon size={16} />
-                    <span>使用教程</span>
+                    <span>Tutorial</span>
                   </button>
                   <button type="button" class="nai-menu-item" onClick={cycleTheme}>
                     <SparkleIcon size={16} />
-                    <span>切换主题（Dark / Sand / Slate）</span>
+                    <span>Switch Theme (Dark / Sand / Slate)</span>
                   </button>
                   <div class="nai-menu-version">owl-gateway</div>
                 </div>
@@ -623,8 +747,11 @@ export function NaiApp() {
             </div>
           </div>
 
-          {/* 滚动区 */}
-          <div class="nai-side-scroll">
+          {/* 移动端顶部额度条（≤860 显示，桌面隐藏） */}
+          <div class="nai-quota-bar">{quotaBlock}</div>
+
+          {/* 滚动区（≤860 时变为底部设置抽屉） */}
+          <div class={`nai-side-scroll${sheetOpen ? " nai-side-scroll--open" : ""}`}>
             {/* Model / Mode */}
             <div class="nai-model-row">
               <div class="nai-model-cell">
@@ -1012,6 +1139,19 @@ export function NaiApp() {
             </div>
           </div>
 
+          {/* 移动端折叠提示词条：点开底部设置抽屉（≤860 显示） */}
+          <button
+            type="button"
+            class="nai-mbar"
+            aria-expanded={sheetOpen ? "true" : "false"}
+            onClick={() => setSheetOpen(!sheetOpen)}
+          >
+            <span class="nai-mbar-text" data-empty={prompt ? undefined : "true"}>
+              {prompt || "Type your prompt here…"}
+            </span>
+            <NaiChevron size={14} angle={sheetOpen ? 0 : 180} />
+          </button>
+
           {/* footer：参数行 / 额度条 / 生成 */}
           <div class="nai-side-foot">
             <div class="nai-params">
@@ -1120,47 +1260,40 @@ export function NaiApp() {
               </button>
             </div>
 
-            <div class="nai-quota">
-              <div class="nai-quota-row">
-                <span>
-                  {quotaPct}% 已用 · 今日剩 {Math.max(0, dailyImages - usedToday)} 张
-                </span>
-                <button
-                  type="button"
-                  class="nai-quota-more"
-                  onClick={() => toast("免费额度每日重置；V5 按策略另行计数。")}
-                >
-                  More Info
-                </button>
-              </div>
-              <div class="nai-quota-row2">
-                <div class="nai-quota-track" aria-hidden="true">
-                  <i style={{ width: `${quotaPct}%` }} />
-                </div>
-                <button
-                  type="button"
-                  class="nai-quota-plus"
-                  title="充值"
-                  aria-label="充值"
-                  onClick={() => toast("充值暂未开放，出图额度由站长按日发放。", { error: true })}
-                >
-                  <PlusIcon size={10} />
-                </button>
-              </div>
-            </div>
+            {quotaBlock}
 
             {notes.length > 0 && (
               <div class="nai-status" role="status">
                 {notes.join("；")}
               </div>
             )}
-            <button type="button" class="nai-generate" disabled={busy} onClick={() => void generate()}>
-              <span>{`Generate ${count} Image${count > 1 ? "s" : ""}`}</span>
-              <span class="nai-generate-badge">
-                {busy ? "…" : "0"}
-                <AnlasIcon size={10} />
-              </span>
-            </button>
+            <div class="nai-generate-row">
+              <button
+                type="button"
+                class="nai-foot-icon nai-foot-gear"
+                title="生成设置"
+                aria-label="生成设置"
+                onClick={() => setSheetOpen(true)}
+              >
+                <Settings size={16} />
+              </button>
+              <button type="button" class="nai-generate" disabled={busy} onClick={() => void generate()}>
+                <span>{`Generate ${count} Image${count > 1 ? "s" : ""}`}</span>
+                <span class="nai-generate-badge">
+                  {busy ? "…" : "0"}
+                  <AnlasIcon size={10} />
+                </span>
+              </button>
+              <button
+                type="button"
+                class="nai-foot-icon nai-foot-hist"
+                title="历史图片"
+                aria-label="历史图片"
+                onClick={() => setHistOpen(true)}
+              >
+                <Clock size={16} />
+              </button>
+            </div>
           </div>
         </aside>
 
@@ -1370,8 +1503,8 @@ export function NaiApp() {
                   </g>
                 </svg>
                 <h1 class="nai-hero-title">Get Started</h1>
-                <p class="nai-hero-sub">从快速开始图库找点灵感！</p>
-                <p class="nai-hero-hint">点击卡片复制提示词。</p>
+                <p class="nai-hero-sub">Get Inspiration from our quick start gallery!</p>
+                <p class="nai-hero-hint">Click an image to copy the prompt.</p>
               </div>
               <div class="nai-qs-masonry">
                 {QUICKSTART.slice(0, 12).map((card, i) => (
@@ -1402,60 +1535,39 @@ export function NaiApp() {
           </div>
           {!railCollapsed && (
             <>
-              <div class="nai-rail-list">
-                {busy && (
-                  <div class="nai-rail-item nai-rail-item--spin" aria-hidden="true">
-                    <i />
-                  </div>
-                )}
-                {shots.map((s, i) => (
-                  <button
-                    key={`${s.attrs.seed}-${i}`}
-                    type="button"
-                    class="nai-rail-item"
-                    data-active={viewing === i ? "true" : "false"}
-                    title={`${s.attrs.seed} · ${s.attrs.width}×${s.attrs.height}`}
-                    onClick={() => setViewing(i)}
-                  >
-                    <img src={s.url} alt={`历史 ${i + 1}`} loading="lazy" />
-                  </button>
-                ))}
-              </div>
-              <div class="nai-rail-foot">
-                <button
-                  type="button"
-                  class="nai-rail-btn"
-                  title="锁定滚动"
-                  aria-label="锁定历史滚动"
-                  aria-pressed="false"
-                  onClick={() => toast("历史滚动锁定暂未开放。")}
-                >
-                  <PinIcon size={14} />
-                </button>
-                <button
-                  type="button"
-                  class="nai-rail-btn"
-                  title="打包下载"
-                  aria-label="下载全部图片"
-                  onClick={downloadAll}
-                >
-                  <Download size={14} />
-                </button>
-                <button
-                  type="button"
-                  class="nai-rail-btn"
-                  title={confirmClear ? "再点一次确认清空" : "清空历史"}
-                  aria-label="删除图片"
-                  data-danger={confirmClear ? "true" : "false"}
-                  onClick={clearHistory}
-                >
-                  <TrashIcon size={14} />
-                </button>
-              </div>
+              <div class="nai-rail-list">{railItems}</div>
+              {railFoot}
             </>
           )}
         </aside>
       </div>
+
+      {/* 移动端：设置抽屉遮罩 + 全屏历史（入口仅 ≤860 渲染） */}
+      {sheetOpen && (
+        <button
+          type="button"
+          class="nai-scrim"
+          aria-label="关闭设置抽屉"
+          onClick={() => setSheetOpen(false)}
+        />
+      )}
+      {histOpen && (
+        <div class="nai-hist" role="dialog" aria-modal="true" aria-label="历史图片">
+          <div class="nai-hist-head">
+            <span>History</span>
+            <button
+              type="button"
+              class="nai-hist-close"
+              aria-label="关闭历史"
+              onClick={() => setHistOpen(false)}
+            >
+              <CloseIcon size={18} />
+            </button>
+          </div>
+          <div class="nai-hist-list">{railItems}</div>
+          {railFoot}
+        </div>
+      )}
 
       {/* 欢迎弹窗（本站自己的引导，样式对齐官方模态规格） */}
       {welcome && (

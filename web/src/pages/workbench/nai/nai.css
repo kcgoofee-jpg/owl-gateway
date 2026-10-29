@@ -1429,6 +1429,24 @@ body.nai-page .toast {
   background: var(--nai-border);
 }
 
+/* ---------- 移动端专用元素（桌面一律隐藏） ---------- */
+.nai-quota-bar,
+.nai-mbar,
+.nai-foot-icon,
+.nai-scrim,
+.nai-hist {
+  display: none;
+}
+
+/* 桌面页脚：齿轮/时钟只在移动端出现 */
+.nai-generate-row {
+  display: flex;
+  gap: 8px;
+}
+.nai-generate-row .nai-generate {
+  width: 100%;
+}
+
 /* ---------- 响应式 ---------- */
 @media (max-width: 1180px) {
   .nai-frame {
@@ -1439,14 +1457,186 @@ body.nai-page .toast {
   }
 }
 @media (max-width: 860px) {
+  /* 官网同构单列：导航行/额度条 → 画布 → 折叠提示词条 → 页脚；设置收进底部抽屉 */
   .nai-frame {
-    grid-template-columns: minmax(0, 1fr);
+    display: flex;
+    flex-direction: column;
   }
   .nai-side {
+    display: contents;
+  }
+  .nai-nav-row {
+    order: 0;
+    height: 48px;
+    background: var(--nai-panel);
+  }
+  .nai-nav-ghost,
+  .nai-nav-btn {
+    width: 40px;
+    height: 28px;
+  }
+  .nai-anlas-pre {
     display: none;
+  }
+  .nai-quota-bar {
+    order: 1;
+    display: block;
+    background: var(--nai-panel);
+    padding: 2px 12px 10px;
+  }
+  .nai-canvas {
+    order: 2;
+    flex: 1 1 0;
+    min-height: 0;
+  }
+  .nai-quota-bar,
+  .nai-mbar,
+  .nai-side-foot {
+    flex: none;
+  }
+  .nai-gallery {
+    padding: 130px 10px 24px;
+  }
+  .nai-mbar {
+    order: 3;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 8px;
+    height: 44px;
+    padding: 0 12px;
+    background: var(--nai-panel);
+    border-top: 1px solid var(--nai-border);
+    text-align: left;
+  }
+  .nai-mbar-text {
+    flex: 1;
+    min-width: 0;
+    overflow: hidden;
+    white-space: nowrap;
+    text-overflow: ellipsis;
+    font-size: 14px;
+    line-height: 21px;
+    color: var(--nai-text);
+  }
+  .nai-mbar-text[data-empty] {
+    color: var(--nai-muted);
+  }
+  .nai-side-foot {
+    order: 4;
+    padding: 10px;
+    padding-bottom: calc(10px + env(safe-area-inset-bottom));
+    background: var(--nai-panel);
+  }
+  .nai-params,
+  .nai-side-foot > .nai-quota,
+  .nai-status {
+    display: none;
+  }
+  .nai-generate {
+    flex: 1;
+  }
+  .nai-foot-icon {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: 48px;
+    height: 40px;
+    flex: none;
+    border-radius: 4px;
+    background: var(--nai-border);
+    transition: background 0.08s ease-in-out;
+  }
+  .nai-foot-icon:hover {
+    background: var(--nai-hover);
+  }
+  /* 设置抽屉：滚动区滑入到提示词条上方 */
+  .nai-side-scroll {
+    position: fixed;
+    left: 0;
+    right: 0;
+    bottom: calc(104px + env(safe-area-inset-bottom));
+    z-index: 30;
+    max-height: 72vh;
+    padding: 12px 12px 16px;
+    background: var(--nai-panel);
+    border-top: 1px solid var(--nai-border);
+    border-radius: 12px 12px 0 0;
+    transform: translateY(110%);
+    visibility: hidden;
+    transition:
+      transform 0.22s ease,
+      visibility 0.22s ease;
+  }
+  .nai-side-scroll--open {
+    transform: translateY(0);
+    visibility: visible;
+  }
+  .nai-scrim {
+    display: block;
+    position: fixed;
+    inset: 0;
+    z-index: 25;
+    background: rgba(0, 0, 0, 0.5);
+  }
+  .nai-hist {
+    display: flex;
+    position: fixed;
+    inset: 0;
+    z-index: 50;
+    flex-direction: column;
+    background: var(--nai-base);
+  }
+  .nai-hist-head {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    height: 48px;
+    flex: none;
+    padding: 0 12px;
+    background: var(--nai-panel);
+    font-weight: 700;
+  }
+  .nai-hist-close {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: 32px;
+    height: 32px;
+    border-radius: 4px;
+  }
+  .nai-hist-close:hover {
+    background: var(--nai-hover);
+  }
+  .nai-hist-list {
+    flex: 1;
+    overflow-y: auto;
+    min-height: 0;
+    padding: 10px;
+    columns: 2;
+    column-gap: 4px;
+  }
+  .nai-hist-list .nai-rail-item {
+    width: 100%;
+    height: auto;
+    aspect-ratio: 3 / 4;
+    margin-bottom: 4px;
+  }
+  .nai-hist > .nai-rail-foot {
+    background: var(--nai-panel);
+    padding-bottom: calc(10px + env(safe-area-inset-bottom));
   }
   .nai-qs-masonry {
     columns: 2;
+  }
+  .nai-menu-panel {
+    position: fixed;
+    left: 10px;
+    right: 10px;
+    top: 54px;
+    z-index: 45;
+    max-height: min(70vh, 520px);
+    overflow-y: auto;
   }
 }
 @media (prefers-reduced-motion: reduce) {
