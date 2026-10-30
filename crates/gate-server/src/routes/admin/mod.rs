@@ -5,6 +5,7 @@
 mod abuse;
 mod auth;
 mod jobs;
+mod member_ops;
 mod member_rules;
 mod members;
 mod ops;

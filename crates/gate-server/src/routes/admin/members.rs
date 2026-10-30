@@ -4,10 +4,10 @@
 //! 3.0 已删除的功能不移植：`anlas_auto` 自动分配（含 `anlas_mode`）、`v5_pinned`（V5 基础值）、
 //! 防分享证据；对应的数据库列原样留着，这里不读不写，也不再出现在返回的 JSON 里。
 
-use super::mark_logged;
+pub(super) use super::mark_logged;
+use super::member_ops;
 use super::req::{AdminPath, AdminQuery, R, http, json_of, pstr, pstr_or};
 use crate::action_log::log_action;
-use crate::body::JsonObject;
 use crate::error::ApiError;
 use crate::error::ok_json;
 use crate::session::AdminSession;
@@ -56,7 +56,7 @@ pub fn router() -> Router<AppState> {
         .route("/admin/api/bans/{discord_id}", delete(delete_ban))
 }
 
-const NO_KEY: &str = "key 不存在";
+pub(super) const NO_KEY: &str = "key 不存在";
 // ----------------------------------------------------------------------------- 小工具
 
 fn jget(row: &Value, name: &str) -> Value {
@@ -128,12 +128,16 @@ fn key_json(
     })
 }
 
-async fn load_key(state: &AppState, key_id: i64) -> Result<Option<Value>, ApiError> {
+pub(super) async fn load_key(state: &AppState, key_id: i64) -> Result<Option<Value>, ApiError> {
     Ok(state.db.get_key(key_id).await?)
 }
 
 /// 一把 Key 的完整 JSON（今日计数 + 累计生成张数）。
-async fn full_key_json(state: &AppState, row: &Value, key_id: i64) -> Result<Value, ApiError> {
+pub(super) async fn full_key_json(
+    state: &AppState,
+    row: &Value,
+    key_id: i64,
+) -> Result<Value, ApiError> {
     let c = state.db.get_counter(key_id, &state.day()).await?;
     let totals = state.db.generated_image_totals(Some(key_id)).await?;
     let generated = totals
@@ -284,18 +288,6 @@ async fn patch_key(
     ))
 }
 
-fn reset_scope_of(body: &JsonObject) -> gate_db::repo::counters::ResetScope {
-    let has = |k: &str| {
-        body.get("scope")
-            .and_then(Value::as_array)
-            .is_some_and(|a| a.iter().any(|v| v.as_str() == Some(k)))
-    };
-    gate_db::repo::counters::ResetScope {
-        v5: has("v5"),
-        anlas: has("anlas"),
-    }
-}
-
 /// 重置指定 Key 今日的额度计数，保留审计日志。V4.5 一定重置，V5 / Anlas 看请求里的 `scope`（默认不重置）。
 async fn reset_daily_image_quota(
     State(state): State<AppState>,
@@ -306,17 +298,11 @@ async fn reset_daily_image_quota(
     // 请求体可以没有（旧前端 / 脚本）：没有就只重置 V4.5
     let scope = json_of(req)
         .await
-        .map(|(_, b)| reset_scope_of(&b))
+        .map(|(_, b)| member_ops::reset_scope_of(&b))
         .unwrap_or(gate_db::repo::counters::ResetScope::V45_ONLY);
-    let st = state.clone();
-    let Some(row) = load_key(&st, key_id).await? else {
-        return Err(http(404, NO_KEY));
-    };
-    st.db
-        .reset_daily_image_quota(key_id, &st.day(), scope)
-        .await?;
-    let key = full_key_json(&st, &row, key_id).await?;
-    Ok(ok_json(&json!({"ok": true, "key": key})))
+    Ok(ok_json(
+        &member_ops::reset_quota(&state, key_id, scope).await?,
+    ))
 }
 
 /// 管理员手动给指定 Key 绑定或换绑 Discord 账号。
@@ -331,31 +317,9 @@ async fn give_coupon(
     req: Request,
 ) -> R {
     let (_, body) = json_of(req).await?;
-    let kind = body.get("kind").cloned().unwrap_or_else(|| json!("reset"));
-    let days = body.get("days").cloned().unwrap_or_else(|| json!(7));
-    if kind.as_str() != Some("reset") {
-        return Err(http(422, "目前只有重置券（reset）"));
-    }
-    // `type(days) not in (int, float)`：布尔、字符串都不行
-    let days_f = match &days {
-        Value::Number(n) => n.as_f64(),
-        _ => None,
-    };
-    let Some(days_f) = days_f.filter(|d| 0.0 < *d && *d <= 30.0) else {
-        return Err(http(422, "有效期 days 必须在 1～30 天之间"));
-    };
-    let st = state.clone();
-    if load_key(&st, key_id).await?.is_none() {
-        return Err(http(404, NO_KEY));
-    }
-    let note = primitives::take_chars(&pstr(&body, "note"), 200).to_string();
-    let by = primitives::take_chars(&pstr_or(&body, "by", "站长"), 40).to_string();
-    let scope = reset_scope_of(&body).canonical();
-    let c = st
-        .db
-        .add_coupon(key_id, "reset", days_f, &note, &by, &scope, st.now())
-        .await?;
-    Ok(ok_json(&json!({"ok": true, "coupon": c})))
+    Ok(ok_json(
+        &member_ops::add_reset_coupon(&state, key_id, &body).await?,
+    ))
 }
 
 async fn list_key_coupons(
@@ -377,32 +341,10 @@ async fn delete_key(
     q: AdminQuery,
 ) -> R {
     let ban = q.flag("ban")?;
-    let st = state.clone();
-    if load_key(&st, key_id).await?.is_none() {
-        return Err(http(404, NO_KEY));
-    }
-    let registrar = st.registration.clone();
-    let discord_id = match &registrar {
-        Some(_) => st
-            .db
-            .registration_for_key(key_id)
-            .await?
-            .map(|r| r.discord_id),
-        None => None,
-    };
-    if let (Some(reg), Some(discord_id)) = (registrar, discord_id) {
-        let reason = q.get("reason").unwrap_or("站长手动删除并封禁").to_string();
-        if ban {
-            reg.ban(&discord_id, &reason, "站长").await?;
-        } else {
-            reg.revoke(&discord_id, true).await?;
-        }
-        return Ok(ok_json(
-            &json!({"ok": true, "discord_id": discord_id, "banned": ban}),
-        ));
-    }
-    st.db.delete_key(key_id, st.now()).await?;
-    Ok(ok_json(&json!({"ok": true})))
+    let reason = q.get("reason").unwrap_or("站长手动删除并封禁").to_string();
+    Ok(ok_json(
+        &member_ops::delete_member_key(&state, key_id, ban, &reason).await?,
+    ))
 }
 
 // ----------------------------------------------------------------------------- 黑名单
@@ -478,9 +420,6 @@ async fn delete_ban(
 
 // ----------------------------------------------------------------------------- 标签
 
-const TAG_MAX_LEN: usize = 12;
-const TAG_NOTE_MAX: usize = 200;
-
 /// 自动标签：近 24 小时因这些「成员自己能改」的原因被拒 / 失败（按 detail 识别；顺序即优先级）。
 const AUTO_TAG_PATTERNS: [(&str, &str); 2] = [
     ("角色超 6 个", "%角色太多%"),
@@ -494,36 +433,10 @@ async fn put_key_tag(
     AdminPath(key_id): AdminPath<i64>,
     req: Request,
 ) -> R {
-    let st = state.clone();
-    if load_key(&st, key_id).await?.is_none() {
-        return Err(http(404, NO_KEY));
-    }
     let (_, body) = json_of(req).await?;
-    // `" ".join(str(...).split())[:12]`：任何空白折成一个空格
-    let joined = pstr(&body, "tag")
-        .split(primitives::is_space)
-        .filter(|w| !w.is_empty())
-        .collect::<Vec<_>>()
-        .join(" ");
-    let tag = primitives::take_chars(&joined, TAG_MAX_LEN).to_string();
-    if tag.is_empty() {
-        return Err(http(422, "标签不能为空"));
-    }
-    let note =
-        primitives::take_chars(primitives::strip(&pstr(&body, "note")), TAG_NOTE_MAX).to_string();
-    let by = {
-        let b = primitives::take_chars(primitives::strip(&pstr_or(&body, "by", "站长")), 20)
-            .to_string();
-        if b.is_empty() {
-            "站长".to_string()
-        } else {
-            b
-        }
-    };
-    st.db
-        .upsert_key_tag(key_id, &tag, &note, &by, st.now())
-        .await?;
-    Ok(ok_json(&json!({"ok": true, "tag": tag})))
+    Ok(ok_json(
+        &member_ops::set_key_tag(&state, key_id, &body).await?,
+    ))
 }
 
 async fn delete_key_tag(
@@ -543,9 +456,7 @@ async fn key_share_clear(
     _s: AdminSession,
     AdminPath(key_id): AdminPath<i64>,
 ) -> R {
-    state.pauses.remove(key_id);
-    state.db.clear_pause(key_id).await?;
-    Ok(ok_json(&json!({"ok": true})))
+    Ok(ok_json(&member_ops::clear_pause(&state, key_id).await?))
 }
 
 // ----------------------------------------------------------------------------- 成员页
