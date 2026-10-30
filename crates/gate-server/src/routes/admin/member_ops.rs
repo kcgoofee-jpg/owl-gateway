@@ -281,3 +281,69 @@ pub(super) async fn patch_key(
         .ok_or_else(|| http(404, NO_KEY))?;
     Ok(json!({"key": full_key_json(state, &row, key_id).await?}))
 }
+
+/// 黑名单列表（支持按 ID / 用户名 / 原因搜索）。
+pub(super) async fn list_bans(state: &AppState, query: &str) -> Result<Value, ApiError> {
+    let bans = state.db.list_bans(query).await?;
+    Ok(json!({"bans": bans, "total": bans.len()}))
+}
+
+/// 手动把某个 Discord ID 加入黑名单：配了机器人走注册服务（顺带摘身份组），否则只写库。
+pub(super) async fn create_ban(
+    state: &AppState,
+    body: &crate::body::JsonObject,
+) -> Result<Value, ApiError> {
+    let discord_id = primitives::strip(&pstr(body, "discord_id")).to_string();
+    if !validation::is_decimal(&discord_id) {
+        return Err(http(422, "Discord ID 必须为纯数字"));
+    }
+    let reason = primitives::take_chars(
+        primitives::strip(&pstr_or(body, "reason", "站长手动封禁")),
+        100,
+    )
+    .to_string();
+    match state.registration.clone() {
+        Some(reg) => reg.ban(&discord_id, &reason, "站长").await?,
+        None => {
+            let info = gate_db::repo::discord::BanInfo {
+                reason: reason.clone(),
+                banned_by: "站长".into(),
+                ..Default::default()
+            };
+            state
+                .db
+                .ban_discord(&discord_id, &info, state.now())
+                .await?;
+        }
+    }
+    log_action(
+        &state.db,
+        "站长",
+        "添加黑名单",
+        &format!("Discord:{discord_id}"),
+        &reason,
+        true,
+        state.now(),
+    )
+    .await;
+    Ok(json!({"ok": true, "discord_id": discord_id}))
+}
+
+/// 解封：把 Discord ID 移出黑名单，允许重新领取 Key。
+pub(super) async fn delete_ban(state: &AppState, discord_id: &str) -> Result<Value, ApiError> {
+    let discord_id = primitives::strip(discord_id).to_string();
+    if !state.db.unban_discord(&discord_id).await? {
+        return Err(http(404, "该账号不在黑名单中"));
+    }
+    log_action(
+        &state.db,
+        "站长",
+        "移出黑名单",
+        &format!("Discord:{discord_id}"),
+        "已解除封禁，允许重新领取 Key",
+        true,
+        state.now(),
+    )
+    .await;
+    Ok(json!({"ok": true, "discord_id": discord_id}))
+}

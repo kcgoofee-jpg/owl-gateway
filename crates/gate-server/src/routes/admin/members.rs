@@ -6,8 +6,7 @@
 
 pub(super) use super::mark_logged;
 use super::member_ops;
-use super::req::{AdminPath, AdminQuery, R, http, json_of, pstr, pstr_or};
-use crate::action_log::log_action;
+use super::req::{AdminPath, AdminQuery, R, http, json_of};
 use crate::error::ApiError;
 use crate::error::ok_json;
 use crate::session::AdminSession;
@@ -249,45 +248,13 @@ async fn delete_key(
 
 /// 获取黑名单列表，支持按 ID、用户名、原因搜索。
 async fn list_bans(State(state): State<AppState>, _s: AdminSession, q: AdminQuery) -> R {
-    let bans = state.db.list_bans(q.text("q")).await?;
-    Ok(ok_json(&json!({"bans": bans, "total": bans.len()})))
+    Ok(ok_json(&member_ops::list_bans(&state, &q.text("q")).await?))
 }
 
 /// 手动将某个 Discord ID 加入黑名单。
 async fn create_ban(State(state): State<AppState>, _s: AdminSession, req: Request) -> R {
     let (_, body) = json_of(req).await?;
-    let st = state.clone();
-    let discord_id = primitives::strip(&pstr(&body, "discord_id")).to_string();
-    if !gate_core::validation::is_decimal(&discord_id) {
-        return Err(http(422, "Discord ID 必须为纯数字"));
-    }
-    let reason = primitives::take_chars(
-        primitives::strip(&pstr_or(&body, "reason", "站长手动封禁")),
-        100,
-    )
-    .to_string();
-    match st.registration.clone() {
-        Some(reg) => reg.ban(&discord_id, &reason, "站长").await?,
-        None => {
-            let info = gate_db::repo::discord::BanInfo {
-                reason: reason.clone(),
-                banned_by: "站长".into(),
-                ..Default::default()
-            };
-            st.db.ban_discord(&discord_id, &info, st.now()).await?;
-        }
-    }
-    log_action(
-        &st.db,
-        "站长",
-        "添加黑名单",
-        &format!("Discord:{discord_id}"),
-        &reason,
-        true,
-        st.now(),
-    )
-    .await;
-    let resp = ok_json(&json!({"ok": true, "discord_id": discord_id}));
+    let resp = ok_json(&member_ops::create_ban(&state, &body).await?);
     Ok(mark_logged(resp))
 }
 
@@ -297,22 +264,7 @@ async fn delete_ban(
     _s: AdminSession,
     AdminPath(discord_id): AdminPath<String>,
 ) -> R {
-    let st = state.clone();
-    let discord_id = primitives::strip(&discord_id).to_string();
-    if !st.db.unban_discord(&discord_id).await? {
-        return Err(http(404, "该账号不在黑名单中"));
-    }
-    log_action(
-        &st.db,
-        "站长",
-        "移出黑名单",
-        &format!("Discord:{discord_id}"),
-        "已解除封禁，允许重新领取 Key",
-        true,
-        st.now(),
-    )
-    .await;
-    let resp = ok_json(&json!({"ok": true, "discord_id": discord_id}));
+    let resp = ok_json(&member_ops::delete_ban(&state, &discord_id).await?);
     Ok(mark_logged(resp))
 }
 
