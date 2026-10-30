@@ -386,9 +386,7 @@ mod first_round_tests {
         let delays: Vec<f64> = super::JOBS.iter().map(first_round_delay).collect();
         assert_eq!(delays[0], 0.0);
         assert!(
-            delays
-                .windows(2)
-                .all(|w| (w[1] - w[0] - 1.2).abs() < 1e-9),
+            delays.windows(2).all(|w| (w[1] - w[0] - 1.2).abs() < 1e-9),
             "{delays:?}"
         );
         assert!(*delays.last().unwrap() <= 10.0, "{delays:?}");
