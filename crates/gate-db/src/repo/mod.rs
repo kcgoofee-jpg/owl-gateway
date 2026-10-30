@@ -26,9 +26,11 @@ pub mod public;
 pub mod reconciliation;
 pub mod registration;
 pub mod settings;
+pub mod settlement;
 pub mod share_state;
 pub mod upstream;
 pub mod usage;
+pub mod usage_stats;
 
 use rusqlite::types::Value as SqlValue;
 
