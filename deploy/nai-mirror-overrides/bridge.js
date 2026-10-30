@@ -145,6 +145,21 @@
   /* ---- 上传到 Explore：官网那个按钮只是 <a href="/explore/register">，我们镜像里没有 Explore 站。
      改成把画布上这张原图（webp/png 原始字节，官方元数据都在）交给网关，由机器人发到 Discord。 ---- */
 
+  // 画布上的图是 blob:，官网自己 createObjectURL 出来的就是**原图字节**（含元数据）。
+  // 记下来，上传时直接用，避免 fetch 之后被再次编码。
+  var BLOBS = new Map();
+  var OCO = URL.createObjectURL;
+  URL.createObjectURL = function (blob) {
+    var u = OCO.call(URL, blob);
+    try {
+      if (blob && /^image\//.test(blob.type || "")) {
+        BLOBS.set(u, blob);
+        if (BLOBS.size > 40) BLOBS.delete(BLOBS.keys().next().value);
+      }
+    } catch (e) {}
+    return u;
+  };
+
   function toast(text, bad) {
     var el = document.createElement("div");
     el.textContent = text;
@@ -207,7 +222,7 @@
   }
 
   function uploadToExplore(ev) {
-    var link = ev.target && ev.target.closest ? ev.target.closest('a[href^="/explore"]') : null;
+    var link = ev.target && ev.target.closest ? ev.target.closest('a[href="/explore/register"]') : null;
     if (!link) return;
     ev.preventDefault();
     ev.stopPropagation();
@@ -217,8 +232,9 @@
     var meta = metaFor(img);
     link.setAttribute("data-owl-busy", "1");
     toast("正在提交到 Discord…");
-    fetch(img.currentSrc || img.src)
-      .then(function (r) { return r.blob(); })
+    var src = img.currentSrc || img.src;
+    var reused = BLOBS.get(src);
+    (reused ? Promise.resolve(reused) : fetch(src).then(function (r) { return r.blob(); }))
       .then(function (blob) {
         var fd = new FormData();
         var ext = /png/.test(blob.type) ? "png" : "webp";

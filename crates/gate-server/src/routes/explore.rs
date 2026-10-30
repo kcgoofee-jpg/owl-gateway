@@ -117,7 +117,28 @@ async fn upload(State(st): State<AppState>, headers: HeaderMap, req: Request) ->
         file_name: clean_file_name(image.file_name.as_deref(), mime),
         mime,
     };
-    let message_id = post_to_discord(&st, &discord_id, &upload, &meta).await?;
+    let uploader = st
+        .db
+        .discord_profile_row(&discord_id)
+        .await
+        .ok()
+        .flatten()
+        .map(|(username, display_name, _)| {
+            display_name
+                .filter(|d| !d.trim().is_empty())
+                .or(username)
+                .unwrap_or_default()
+        })
+        .unwrap_or_default();
+    let message_id = post_to_discord(&st, &discord_id, &uploader, &upload, &meta).await?;
+    tracing::info!(
+        target: "explore",
+        "Explore 上传：{}（{}）{} 字节，msg={}",
+        &discord_id,
+        upload.mime,
+        upload.bytes.len(),
+        message_id
+    );
     Ok(ok_json(&json!({ "ok": true, "message_id": message_id })))
 }
 
@@ -216,6 +237,7 @@ fn beijing_now() -> String {
 async fn post_to_discord(
     st: &AppState,
     discord_id: &str,
+    uploader: &str,
     upload: &Upload,
     meta: &std::collections::HashMap<String, String>,
 ) -> Result<String, ApiError> {
@@ -229,11 +251,12 @@ async fn post_to_discord(
     let model = meta.get("model").map(String::as_str).unwrap_or_default();
     let seed = meta.get("seed").map(String::as_str).unwrap_or_default();
 
-    let mut fields = vec![json!({
-        "name": "提交者",
-        "value": format!("<@{discord_id}>（`{discord_id}`）"),
-        "inline": true
-    })];
+    let who = if uploader.trim().is_empty() {
+        format!("<@{discord_id}>（`{discord_id}`）")
+    } else {
+        format!("<@{discord_id}>（`{discord_id}` · {}）", clip(uploader, 40))
+    };
+    let mut fields = vec![json!({"name": "提交者", "value": who, "inline": true})];
     fields.push(json!({"name": "时间", "value": beijing_now(), "inline": true}));
     if !size.trim().is_empty() {
         fields.push(json!({"name": "尺寸", "value": clip(size, 40), "inline": true}));
