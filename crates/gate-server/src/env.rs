@@ -53,6 +53,8 @@ pub const AUTH_BLOCK_SECONDS: i64 = 900;
 /// 后台登录：每 IP 窗口内最多尝试次数。
 pub const LOGIN_MAX_ATTEMPTS: i64 = 5;
 pub const LOGIN_WINDOW_SECONDS: i64 = 300;
+/// 工作台「上传到 Explore」默认投递的 Discord 频道（可用 `EXPLORE_CHANNEL_ID` 覆盖）。
+pub const DEFAULT_EXPLORE_CHANNEL_ID: &str = "1558440483653558453";
 
 struct Reader<'a>(&'a dyn EnvSource);
 
@@ -139,6 +141,8 @@ pub struct EnvConfig {
     pub discord_guild_id: String,
     /// Discord REST 基地址（测试指向本地假服务）。
     pub discord_api_base: String,
+    /// 工作台「上传到 Explore」的转发频道（机器人把原图 + 提交者 ID + 时间发到这里）。
+    pub explore_channel_id: String,
     // 记录
     pub usage_log_retention_days: i64,
     pub registration: Option<RegistrationEnv>,
@@ -247,6 +251,7 @@ impl EnvConfig {
             discord_invite_url: r.str("DISCORD_INVITE_URL", ""),
             discord_guild_id: r.str("DISCORD_GUILD_ID", ""),
             discord_api_base: r.str("DISCORD_API_BASE", "https://discord.com/api/v10"),
+            explore_channel_id: r.str("EXPLORE_CHANNEL_ID", DEFAULT_EXPLORE_CHANNEL_ID),
             usage_log_retention_days: r.int("USAGE_LOG_RETENTION_DAYS", 0),
             forwarded_allow_ips: split_list("FORWARDED_ALLOW_IPS", "127.0.0.1"),
             registration,

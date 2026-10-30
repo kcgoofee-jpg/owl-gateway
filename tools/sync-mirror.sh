@@ -13,6 +13,10 @@ remote() { ssh "${KEY[@]}" "root@$OWL_IP" "$@" 2>&1 | mask; return "${PIPESTATUS
 
 [[ -f mirror/nai-app/image.html ]] || { echo "mirror/nai-app 缺失：先准备官网镜像资源" >&2; exit 1; }
 
+# 桥接层是我们自己写的（官网产物里没有），仓库里留一份，同步前覆盖到镜像目录：
+# mirror/ 整个目录不进仓库，改 bridge.js 只有这里能跟进版本。
+cp deploy/nai-mirror-overrides/bridge.js mirror/nai-app/bridge.js
+
 remote "mkdir -p /opt/owl/nai-mirror"
 say "syncing mirror ($(du -sh mirror/nai-app | cut -f1 | tr -d ' '))"
 rsync -a --delete -e "ssh ${KEY[*]}" mirror/nai-app/ "root@$OWL_IP:/opt/owl/nai-mirror/nai-app/" 2>&1 | mask

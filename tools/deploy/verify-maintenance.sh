@@ -29,6 +29,16 @@ print(" ".join(sorted(k for k,v in d["features"]["global"].items() if not v)))' 
   esac
 }
 run_smoke() { docker exec owl-gate nai-ops smoke http://127.0.0.1:8000 | tail -3; }
+# 工作台「上传到 Explore」：游客没会话，必须 401（顺便确认路由挂上了，没被 SPA fallback 吃掉）。
+check_explore() {
+  local code
+  code=$(curl -s -o /dev/null -w '%{http_code}' -X POST "$A/owl/explore" 2>/dev/null)
+  case $code in
+    401) echo "explore upload: 401 (游客，符合预期)" ;;
+    200 | 302 | 307) echo "explore upload: $code (意外：游客不该能提交)" ; return 1 ;;
+    *) echo "explore upload: $code" ; return 1 ;;
+  esac
+}
 # 游客没有成员会话时 /image 会 307 回首页（走登录/领 Key），所以 307 也算正常。
 check_image() {
   local code
@@ -82,6 +92,7 @@ fi
 status=0
 run_smoke || status=$?
 check_image || status=$?
+check_explore || status=$?
 check_features || true
 
 set_mode "$TARGET"
