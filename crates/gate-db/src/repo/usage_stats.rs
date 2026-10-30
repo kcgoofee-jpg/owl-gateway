@@ -110,6 +110,27 @@ impl Db {
         Ok(out)
     }
 
+    /// 统计窗内的出图汇总（`/self-register/bot/stats` 用：今日全站张数、平均/最长排队）。
+    pub async fn image_stats_since(&self, since: f64) -> Result<ImageStats> {
+        self.read(move |c| {
+            c.query_row(
+                "SELECT COALESCE(SUM(images),0), COUNT(*), AVG(wait_ms), MAX(wait_ms) \
+                 FROM usage_log \
+                 WHERE kind IN ('image', 'image_stream') AND status='ok' AND ts>=?",
+                [&since],
+                |r| {
+                    Ok(ImageStats {
+                        images: r.get(0)?,
+                        ok_count: r.get(1)?,
+                        avg_wait_ms: r.get(2)?,
+                        max_wait_ms: r.get(3)?,
+                    })
+                },
+            )
+        })
+        .await
+    }
+
     /// 出图请求的 (ts, model, status, images, wait_ms, dur_ms, up_status, detail)，供上游表现分析。
     pub async fn image_perf_rows(&self, since: f64) -> Result<Vec<ImagePerfRow>> {
         self.read(move |c| {
@@ -253,4 +274,16 @@ impl Db {
         })
         .await
     }
+}
+
+/// [`UsageRepo::image_stats_since`] 的返回：一个时间窗内的成功出图汇总。
+pub struct ImageStats {
+    /// 成功出图总张数（`SUM(images)`，通常每请求 1 张）。
+    pub images: i64,
+    /// 成功请求数。
+    pub ok_count: i64,
+    /// 排队等待均值（毫秒）；窗口内没有成功请求时为 `None`。
+    pub avg_wait_ms: Option<f64>,
+    /// 排队等待最长值（毫秒）；同上为 `None`。
+    pub max_wait_ms: Option<f64>,
 }
