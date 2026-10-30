@@ -1,7 +1,7 @@
 /* owl ⇄ NovelAI 生图页桥：把官网前端的 API 调用改到本站网关。
    只做三件事：改 base、带 Key、隐藏账号横幅。 */
 (function () {
-  window.__BRIDGE_VERSION__ = "2026-10-30-d";
+  window.__BRIDGE_VERSION__ = "2026-10-30-e";
   var CFG = window.__NAI_BRIDGE__ || {};
   var GATE = CFG.gate || "";
   var KEY = CFG.key || "";
@@ -134,9 +134,41 @@
       }
     }
   }
+  /* ---- 菜单里的「NovelAI Discord」改成我们自己的服务器（官方点击是 window.open("https://discord.gg/novelai")） ---- */
+  var OWL_DISCORD = CFG.discord || "";
+  var OLD_LABEL = "NovelAI Discord";
+  var NEW_LABEL = "OWL Discord";
+
+  function renameDiscord() {
+    if (!document.body) return;
+    var walker = document.createTreeWalker(document.body, NodeFilter.SHOW_TEXT);
+    var hit = [];
+    while (walker.nextNode()) {
+      var t = walker.currentNode.nodeValue || "";
+      if (t.indexOf(OLD_LABEL) >= 0) hit.push(walker.currentNode);
+    }
+    for (var i = 0; i < hit.length; i++) hit[i].nodeValue = hit[i].nodeValue.split(OLD_LABEL).join(NEW_LABEL);
+  }
+
+  function openOwlDiscord(ev) {
+    if (!OWL_DISCORD) return;
+    var el = ev.target;
+    while (el && el !== document.body) {
+      var text = (el.textContent || "").trim();
+      if (text === NEW_LABEL || text === OLD_LABEL) {
+        ev.preventDefault();
+        ev.stopPropagation();
+        window.open(OWL_DISCORD, "_blank", "noopener");
+        return;
+      }
+      el = el.parentElement;
+    }
+  }
+
   function watchBanners() {
     hideBanners();
-    var mo = new MutationObserver(function () { hideBanners(); });
+    renameDiscord();
+    var mo = new MutationObserver(function () { hideBanners(); renameDiscord(); });
     mo.observe(document.documentElement, { childList: true, subtree: true, characterData: true });
   }
   if (document.body) watchBanners();
@@ -257,4 +289,5 @@
       .then(function () { link.removeAttribute("data-owl-busy"); });
   }
   document.addEventListener("click", uploadToExplore, true);
+  document.addEventListener("click", openOwlDiscord, true);
 })();

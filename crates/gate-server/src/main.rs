@@ -72,7 +72,16 @@ fn serve(bind: SocketAddr) -> anyhow::Result<()> {
         .build()?;
     rt.block_on(async move {
         let env = EnvConfig::from_process();
-        let assets = Assets::new(std::env::var_os("STATIC_DIR").map(Into::into));
+        let invite = if env.discord_invite_url.trim().is_empty() {
+            format!(
+                "https://discord.com/channels/{}",
+                env.discord_guild_id.trim()
+            )
+        } else {
+            env.discord_invite_url.trim().to_string()
+        };
+        let assets =
+            Assets::new(std::env::var_os("STATIC_DIR").map(Into::into)).with_discord_invite(invite);
         let state = gate_server::AppState::build(env, assets).await?;
         // 读回定时任务的运行记录并拉起全部定时任务
         gate_server::jobs::startup(&state).await?;

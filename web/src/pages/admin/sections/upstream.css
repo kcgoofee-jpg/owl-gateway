@@ -203,3 +203,20 @@
     gap: var(--sp-1);
   }
 }
+
+/* 上游账号：不可用的沉底并弱化，点「展开」才看明细 */
+.up-row--muted td {
+  color: var(--muted);
+}
+.link-button {
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--accent, #8b93f0);
+  font: inherit;
+  font-variant-numeric: tabular-nums;
+  cursor: pointer;
+}
+.link-button:hover {
+  text-decoration: underline;
+}

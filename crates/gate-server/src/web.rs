@@ -57,13 +57,22 @@ impl Page {
 pub struct Assets {
     /// 磁盘覆盖目录（`STATIC_DIR`）。
     disk: Option<PathBuf>,
+    /// 菜单里「Discord」要跳的地址（站点的邀请链接，启动时定）。
+    discord_invite: String,
 }
 
 impl Assets {
     pub fn new(disk: Option<PathBuf>) -> Self {
         Self {
             disk: disk.filter(|p| p.is_dir()),
+            discord_invite: String::new(),
         }
+    }
+
+    /// 带上 Discord 邀请链接（`/image` 菜单里的那一项要跳我们自己的服务器）。
+    pub fn with_discord_invite(mut self, invite: String) -> Self {
+        self.discord_invite = invite;
+        self
     }
 
     fn read(&self, path: &str) -> Option<Vec<u8>> {
@@ -141,7 +150,8 @@ impl Assets {
                 .and_then(|m| m.get("key"))
                 .and_then(Value::as_str)
                 .unwrap_or_default();
-            let cfg = json!({"gate": "", "key": key});
+            // 菜单里的「NovelAI Discord」要改成我们自己的服务器：邀请链接由启动时注入
+            let cfg = json!({"gate": "", "key": key, "discord": self.discord_invite});
             let inject = format!(
                 r#"<script>window.__NAI_BRIDGE__={};</script><script src="/bridge.js"></script>"#,
                 json_for_html(&cfg)

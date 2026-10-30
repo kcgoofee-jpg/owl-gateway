@@ -171,6 +171,7 @@ function GuardCard() {
 
 /** 保护状态（/admin/api/guard）和电量记录（/admin/api/quota-records）按账号合成一张表。 */
 function AccountsCard() {
+  const [expanded, setExpanded] = useState<Set<number>>(() => new Set());
   const guard = useAdmin<Guard>("/admin/api/guard");
   const records = useAdmin<Records>("/admin/api/quota-records");
   if (!guard.data || !records.data)
@@ -182,7 +183,10 @@ function AccountsCard() {
       />
     );
   const rec = new Map(records.data.accounts.map((a) => [a.position, a]));
-  const rows = (guard.data.accounts ?? []).map((a) => ({ a, r: rec.get(a.position) }));
+  const rows = (guard.data.accounts ?? [])
+    .map((a) => ({ a, r: rec.get(a.position) }))
+    // 能用的排前面，不可用的沉到最后；同组内按账号编号
+    .sort((x, y) => Number(y.a.usable) - Number(x.a.usable) || x.a.position - y.a.position);
   const caps = records.data.manual.account_caps;
   const paid = records.data.manual.paid_v5;
   const now = Date.now();
@@ -205,8 +209,28 @@ function AccountsCard() {
           </thead>
           <tbody>
             {rows.map(({ a, r }) => (
-              <tr key={a.position}>
-                <td>#{a.position}</td>
+              <tr key={a.position} class={a.usable ? "" : "up-row--muted"}>
+                <td>
+                  {a.usable ? (
+                    `#${a.position}`
+                  ) : (
+                    <button
+                      type="button"
+                      class="link-button"
+                      aria-expanded={expanded.has(a.position)}
+                      onClick={() =>
+                        setExpanded((prev) => {
+                          const next = new Set(prev);
+                          if (next.has(a.position)) next.delete(a.position);
+                          else next.add(a.position);
+                          return next;
+                        })
+                      }
+                    >
+                      #{a.position} {expanded.has(a.position) ? "收起" : "展开"}
+                    </button>
+                  )}
+                </td>
                 <td>
                   {!a.usable ? (
                     <Badge tone="warn">不可用</Badge>
@@ -218,9 +242,17 @@ function AccountsCard() {
                   {(a.locked_today ?? 0) > 0 && <span class="muted small"> 锁 {a.locked_today} 次</span>}
                 </td>
                 <td>
-                  {withUnit(a.today, "张")} / {r ? r.today.v5 : "—"}
+                  {a.usable || expanded.has(a.position)
+                    ? `${withUnit(a.today, "张")} / ${r ? r.today.v5 : "—"}`
+                    : "—"}
                 </td>
-                <td>{r ? `${r.yesterday.images} / ${r.yesterday.v5}` : "—"}</td>
+                <td>
+                  {a.usable || expanded.has(a.position)
+                    ? r
+                      ? `${r.yesterday.images} / ${r.yesterday.v5}`
+                      : "—"
+                    : "—"}
+                </td>
                 <td>
                   {dash(r?.v5_percent, "%")}
                   {r?.quiet_rate && (
