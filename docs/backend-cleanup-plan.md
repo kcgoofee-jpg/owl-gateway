@@ -85,7 +85,7 @@ busy 重试、panic 后重开连接），但 `Db::write()` 在 async 函数里�
 
 **验收**：每个新文件 < 500 行；`policy.rs` 的公开 API 名字不变（外部只改 `use`）。
 
-### ⑤ Discord 注册 —— 待做（zcode 正在改 gate-discord / naimei，等他那批落地）
+### ⑤ Discord 注册 —— 已完成并上线（b2e4510）
 
 **现状**：`registration.rs` 1416 行，包含 Discord REST 客户端调用、注册流程（领 Key / 邀请 / 名额）、
 资料与身份组的同步、欢迎语拼装。
@@ -137,11 +137,16 @@ busy 重试、panic 后重开连接），但 `Db::write()` 在 async 函数里�
 | ③ | 已上线：`admission.rs` 649 → 22（`queue` 209 / `quota` 168 / `budget` 284），路由不再锁 `state.budget` | — |
 | ④ | 已上线：`policy.rs` 1982 → 124（`params` 376 / `references` 324 / `prompts` 529 / `pricing` 220 / `probe` 436） | — |
 | ⑥ | 已上线：`dispatch.rs` 1176 → 446（`outcome.rs` 317 结算守卫+状态码表 / `stream.rs` 54 / `v5.rs` 398 V5 计费确认） | — |
-| ⑦ | 已上线：`routes/admin/members.rs` 977 → 782，业务挪进 `member_ops.rs`(274)（重置额度 / 发券 / 删 Key+封禁 / 标签 / 解暂停 / 列表 / 邀请 Key / 换 Token / 改 Key） | — |
-| ⑤ | 待做 | — |
+| ⑦ | 已上线：`routes/admin/members.rs` 977 → **317**，`member_ops.rs` 349（重置额度 / 发券 / 删 Key+封禁 / 标签 / 解暂停 / 列表 / 邀请 Key / 换 Token / 改 Key / 黑名单），`members/view.rs` 442（成员页视图模型） | — |
+| ⑤ | 已上线：`registration.rs` 1416 → 602（`transport` 55 / `roles` 213 / `profiles` 62 / `web_login` 134 / `issue` 382），公开方法签名不变 | — |
 
-剩下的收尾：`members.rs`(782) 距离 700 还差一点（黑名单、成员页聚合、券列表还没挪），
-下一步把黑名单和成员页聚合也搬进 `member_ops.rs` / 新开 `member_view.rs`。
+七步全部完成，所有动过的文件都在 700 行以内（最大的 `view.rs` 442 行）。
+
+顺手修的两个线上问题：
+- **部署被判失败自动回滚**（10-31 04:37）：九个定时任务原本在启动瞬间同时跑第一轮，`abuse_scan` 读十几万行、
+  `maintenance` / `idle_recycle` 写库，把 `/healthz` 的 1 秒读写预算挤爆 → 503 → cutover 回滚。现在第一轮按 1.2 秒错开。
+- `gate-discord/src/kb.rs` 的 `manual_div_ceil` 在 CI 里是 error（本地只是 warning），一直在让 CI 失败、卡住部署闸门，
+  已改成 `div_ceil(5)`。
 
 ## 4. 每次落地的固定动作
 
