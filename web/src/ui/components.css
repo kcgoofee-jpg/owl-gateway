@@ -90,10 +90,11 @@
 
 /* ---------- Card ---------- */
 .card {
+  /* 站长 10-30：后台不要一层层描边，靠底色/留白分层就够了 */
   background: var(--surface);
-  border: 1px solid var(--border);
+  border: 0;
   border-radius: var(--radius-lg);
-  box-shadow: var(--shadow-1);
+  box-shadow: none;
   padding: var(--sp-5);
 }
 .card__head {
@@ -460,8 +461,12 @@
   word-break: keep-all;
   overflow-wrap: break-word;
   padding: var(--sp-2) var(--sp-3);
-  border-bottom: 1px solid var(--border);
+  /* 只留极细的行分隔，不要整张表套框 */
+  border-bottom: 1px solid color-mix(in oklab, var(--border) 55%, transparent);
   vertical-align: top;
+}
+.table tr:last-child td {
+  border-bottom: 0;
 }
 /* 行标题（每行第一格）和短值不折行；长文字列加 .wrap，给够最小宽度再折 */
 .table th[scope="row"] {
