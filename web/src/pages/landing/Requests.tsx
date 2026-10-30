@@ -6,20 +6,28 @@ import type { MyRequest, MyRequests } from "./types";
 
 type Status = "" | "ok" | "rejected" | "error";
 
-/** 模型 → 短名：V5 / V4.5 / 其他按请求类型。 */
+/** 工具类请求（不是出图）的名称：这类请求也要花 Anlas，光看模型名会以为是出图。 */
+const TOOL_KINDS: Record<string, string> = {
+  vibe_encode: "Vibe 编码",
+  upscale: "放大",
+  "augment-image": "导演工具",
+  tags: "标签补全",
+};
+
+/** 请求 → 短名：工具类优先显示工具名，出图才显示 V5 / V4.5 / V4 / V3。 */
 export function modelLabel(r: Pick<MyRequest, "model" | "kind">): string {
+  const tool = TOOL_KINDS[r.kind ?? ""];
+  if (tool) return tool;
   const m = r.model ?? "";
   if (/diffusion-5/.test(m)) return "V5";
   if (/diffusion-4-5/.test(m)) return "V4.5";
   if (/diffusion-4/.test(m)) return "V4";
   if (/diffusion-3|furry/.test(m)) return "V3";
-  if (r.kind === "tags") return "标签补全";
-  if (r.kind === "image") return "图片工具";
   return r.kind || "请求";
 }
 
 /** 成功的那条怎么算的：账号代付 / 扣 N Anlas / 用 V5 额度 / free；尺寸步数从说明里取。 */
-export function okLine(r: Pick<MyRequest, "message" | "anlas" | "site_paid">): string {
+export function okLine(r: Pick<MyRequest, "message" | "anlas" | "site_paid" | "kind">): string {
   // 832x1216/23step → 832 × 1216 / 23 步（数字与符号之间留空格，中英文混排都好看）
   const raw = /(\d+)x(\d+)\/(\d+)step/.exec(r.message);
   const size = raw ? `${raw[1]} × ${raw[2]} / ${raw[3]} 步` : "";
@@ -30,7 +38,10 @@ export function okLine(r: Pick<MyRequest, "message" | "anlas" | "site_paid">): s
       : r.message.includes("V5额度")
         ? "用 V5 额度"
         : "free";
-  return [size, cost].filter(Boolean).join("  ·  ");
+  // 工具类请求没有尺寸步数，把工具名也说清楚（「扣 2 Anlas」看不出是 Vibe 编码）
+  const tool = TOOL_KINDS[r.kind ?? ""] ?? "";
+  const lead = r.kind === "upscale" || r.kind === "augment-image" || r.kind === "vibe_encode" ? tool : "";
+  return [lead, size, cost].filter(Boolean).join("  ·  ");
 }
 
 const STATUS: Record<string, { text: string; tone: "ok" | "warn" | "danger" }> = {

@@ -435,8 +435,9 @@
 
 /* ---------- Table ---------- */
 .table-wrap {
+  /* 后台不要一层层描边：表格靠表头和行分隔区分就够了 */
   overflow: auto;
-  border: 1px solid var(--border);
+  border: 0;
   border-radius: var(--radius);
 }
 .table {
