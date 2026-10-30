@@ -316,7 +316,7 @@ pub(super) fn scan(
     keys_of: &HashMap<String, Vec<i64>>,
     did_of: &HashMap<i64, String>,
     official: &[String],
-) -> Vec<Signal> {
+) -> (Vec<Signal>, usize) {
     let mut out = Vec::new();
     let kids = |ids: &BTreeSet<String>| -> String {
         ids.iter()
@@ -353,23 +353,11 @@ pub(super) fn scan(
         .iter()
         .map(|(t, ip, k)| (*t, ip.clone(), did_of[k].clone()))
         .collect();
-    for ((a, b), h) in ip_switches(&by_account, |t| clock.day(t)) {
-        let score = (20.0 + 8.0 * (h.n as f64 - 1.0)).min(60.0);
-        push(
-            &mut out,
-            "ip_switch",
-            [a, b].into(),
-            score,
-            format!(
-                "近 24 小时同一个 IP 上 {} 次在 10 分钟内换了另一个账号的 Key",
-                h.n
-            ),
-            vec![
-                ev("次数", h.n),
-                ev("IP", samples(&h)),
-                ev("时间", when(clock, &h)),
-            ],
-        );
+    // 同 IP 换号（站长 10-31：NAT / 手机流量 / 机场会把几十个真人放在同一个出口，
+    // 这条纯粹是噪音，只统计数量写进摘要，不进待审队列）
+    let mut same_ip_switches = 0_usize;
+    for (_, h) in ip_switches(&by_account, |t| clock.day(t)) {
+        same_ip_switches += h.n;
     }
     let mut per_key: BTreeMap<i64, Vec<(f64, String)>> = BTreeMap::new();
     for (t, ip, k) in &recent {
@@ -644,7 +632,7 @@ pub(super) fn scan(
             });
         }
     }
-    out
+    (out, same_ip_switches)
 }
 
 #[cfg(test)]

@@ -58,7 +58,7 @@ async fn scan_writes_review_signals() {
     let summary = run_job(st, "abuse_scan").await.unwrap();
     assert!(summary.contains("behavior 1"), "{summary}");
 
-    // 关联扫描（10-23）里的「同 IP 换号」三人都会命中，另见 linkage_signals_are_written
+    // 设备线索从「同设备 / 同浏览器」两条合并成一条 device_cluster（10-31）
     let rows = query(
         &st.db,
         "SELECT kind, subject, key_ids, score FROM abuse_signals WHERE kind!='ip_switch' ORDER BY kind",
@@ -67,17 +67,17 @@ async fn scan_writes_review_signals() {
     let kinds: Vec<&str> = rows.iter().map(|r| r["kind"].as_str().unwrap()).collect();
     assert_eq!(
         kinds,
-        ["behavior", "device_exact", "fp_unknown", "same_browser"],
+        ["behavior", "device_cluster", "fp_unknown"],
         "{rows:?}"
     );
     let pair = format!("{da},{db_}");
     assert_eq!(rows[0]["subject"], pair);
     assert!(rows[0]["score"].as_f64().unwrap() >= 40.0);
-    assert_eq!(rows[1]["subject"], pair);
-    assert_eq!(rows[1]["key_ids"], format!("{a},{b}"));
+    // 三个人都在这台机器上：一条簇，账号和 Key 都列全
+    assert_eq!(rows[1]["subject"], format!("{da},{db_},{dc}"));
+    assert_eq!(rows[1]["key_ids"], format!("{a},{b},{c}"));
+    assert!(rows[1]["score"].as_f64().unwrap() >= 80.0);
     assert_eq!(rows[2]["subject"], dc);
-    assert_eq!(rows[3]["subject"], format!("{da},{dc}"));
-    assert_eq!(rows[3]["score"], 80.0);
 
     // 再跑一次：同一组证据只更新，不重复进队列；不再出现的待审信号标成过期（记录留着）
     st.db
@@ -97,38 +97,26 @@ async fn scan_writes_review_signals() {
     assert_eq!(n[0]["status"], "expired");
     assert_eq!(n[0]["n"], 1);
     assert_eq!(n[1]["status"], "open");
-    assert_eq!(n[1]["n"], 4);
+    // 行为 1 + 设备簇 1 + 指纹异常 1（以前是「同设备 / 同浏览器」两条）
+    assert_eq!(n[1]["n"], 3);
 }
 
-/// 同浏览器 / 同设备 / 同硬件的信号里只有一个账号持有 Key（其余没有）：分数减半并带「其余账号：无 Key」；
-/// 两个账号都持有 Key 的组合分数不变。
+/// 设备簇里只有一个账号持有 Key（其余没有）：分数减半并带「其余账号：无 Key」。
 #[tokio::test]
 async fn solo_key_holder_signals_are_scored_lower() {
     let e = setup(&[]).await;
     let st = &e.state;
-    let (keyed1, keyed2, bare) = (
-        "900000000000000911",
-        "900000000000000912",
-        "900000000000000913",
-    );
-    member_key(st, 1, &[("discord_id", json!(keyed1))]).await;
-    member_key(st, 2, &[("discord_id", json!(keyed2))]).await;
+    let (keyed, bare) = ("900000000000000911", "900000000000000913");
+    member_key(st, 1, &[("discord_id", json!(keyed))]).await;
     let now = st.now();
-    // 浏览器 b1：keyed1 + 没有 Key 的 bare；浏览器 b2：两个都有 Key
-    // 设备 dev1：keyed1 + bare（精确）；设备 dev2、dev3 硬件一致：keyed2 + bare（模糊）
-    let fp = "{\"gpuRenderer\":\"ANGLE (NVIDIA RTX 3060)\",\"canvas\":\"abc\"}";
-    let sql = vec![
-        format!(
-            "INSERT INTO browser_logins(discord_id, browser_id, ip, ts) VALUES ('{keyed1}', 'b1', '', {now}), ('{bare}', 'b1', '', {now}), ('{keyed1}', 'b2', '', {now}), ('{keyed2}', 'b2', '', {now})"
-        ),
-        format!(
-            "INSERT INTO device_logins(discord_id, device_id, ip, ts) VALUES ('{keyed1}', 'dev1', '', {now}), ('{bare}', 'dev1', '', {now}), ('{keyed2}', 'dev2', '', {now}), ('{bare}', 'dev3', '', {now})"
-        ),
-        format!(
-            "INSERT INTO device_fingerprints(device_id, data, ts) VALUES ('dev1', '{{\"gpuRenderer\":\"ANGLE (AMD Radeon)\"}}', 0), ('dev2', '{fp}', 0), ('dev3', '{fp}', 0)"
-        ),
-    ];
-    st.db.run_script(sql).await.unwrap();
+    st.db
+        .run_script(vec![
+            format!("INSERT INTO browser_logins(discord_id, browser_id, ip, ts) VALUES ('{keyed}', 'b1', '', {now}), ('{bare}', 'b1', '', {now})"),
+            format!("INSERT INTO device_logins(discord_id, device_id, ip, ts) VALUES ('{keyed}', 'dev1', '', {now}), ('{bare}', 'dev1', '', {now})"),
+            "INSERT INTO device_fingerprints(device_id, data, ts) VALUES ('dev1', '{\"gpuRenderer\":\"ANGLE (AMD Radeon)\"}', 0)".to_string(),
+        ])
+        .await
+        .unwrap();
     run_job(st, "abuse_scan").await.unwrap();
 
     let rows = query(
@@ -136,24 +124,16 @@ async fn solo_key_holder_signals_are_scored_lower() {
         "SELECT kind, subject, score, detail FROM abuse_signals ORDER BY kind, subject",
     )
     .await;
-    let find = |kind: &str, subject: &str| {
-        rows.iter()
-            .find(|r| r["kind"] == kind && r["subject"] == subject)
-            .unwrap_or_else(|| panic!("{kind} {subject} missing: {rows:?}"))
-    };
-    let chip = |r: &serde_json::Value| r["detail"].as_str().unwrap().contains("其余账号");
-    let solo = find("same_browser", &format!("{keyed1},{bare}"));
-    assert_eq!(solo["score"], 40.0);
-    assert!(chip(solo));
-    let both = find("same_browser", &format!("{keyed1},{keyed2}"));
-    assert_eq!(both["score"], 80.0);
-    assert!(!chip(both));
-    let exact = find("device_exact", &format!("{keyed1},{bare}"));
-    assert_eq!(exact["score"], 30.0);
-    assert!(chip(exact));
-    let fuzzy = find("device_fuzzy", &format!("{keyed2},{bare}"));
-    assert_eq!(fuzzy["score"], 22.5);
-    assert!(chip(fuzzy));
+    assert_eq!(rows.len(), 1, "{rows:?}");
+    let solo = &rows[0];
+    assert_eq!(solo["kind"], "device_cluster");
+    assert_eq!(solo["subject"], format!("{keyed},{bare}"));
+    // 同浏览器 80 + 同设备 60、两种关联 +10 → 90；只有一个人持有 Key → 减半
+    assert_eq!(solo["score"], 45.0);
+    assert!(
+        solo["detail"].as_str().unwrap().contains("其余账号"),
+        "{solo:?}"
+    );
 }
 
 /// 涉及的账号一个 Key 都没有：不写信号（「无 Key」卡片是噪音）。
@@ -241,7 +221,6 @@ async fn linkage_signals_are_written() {
         got,
         [
             ("guild_overlap".into(), pair.clone(), 50.0),
-            ("ip_switch".into(), pair.clone(), 20.0),
             ("key_concurrent".into(), format!("key:{a}"), 40.0),
             ("same_battery".into(), pair.clone(), 50.0),
             ("same_connection".into(), pair.clone(), 100.0),
@@ -249,8 +228,12 @@ async fn linkage_signals_are_written() {
         ],
         "{rows:?}"
     );
+    let ref_row = rows
+        .iter()
+        .find(|r| r["kind"] == "same_ref_image")
+        .expect("same_ref_image missing");
     let detail: serde_json::Value =
-        serde_json::from_str(rows[5]["detail"].as_str().unwrap()).unwrap();
+        serde_json::from_str(ref_row["detail"].as_str().unwrap()).unwrap();
     assert!(
         detail["summary"]
             .as_str()
@@ -284,7 +267,7 @@ async fn anonymous_usage_rows_do_not_break_the_scan() {
             now - f64::from(i) * 60.0
         ));
     }
-    // 有归属的行：同 IP 换号，照常出信号
+    // 有归属的行：两个账号同 IP（现在只统计、不出信号，验证匿名行不影响统计）
     sql.push(format!(
         "INSERT INTO usage_log(ts, key_id, key_name, kind, model, status, images, src, reason) \
          VALUES ({}, {a}, 'x', 'image', 'm', 'ok', 1, '198.51.100.5', '')",
@@ -305,9 +288,8 @@ async fn anonymous_usage_rows_do_not_break_the_scan() {
     )
     .await;
     assert!(
-        rows.iter()
-            .any(|r| r["kind"] == "ip_switch" && r["subject"] == format!("{da},{db_}")),
-        "{rows:?}"
+        rows.is_empty(),
+        "匿名行和纯网络线索都不该进待审队列：{rows:?}"
     );
     // 匿名行不进任何信号：foreign_origin 只会按 Key 记，匿名 origin 不产生行
     assert!(

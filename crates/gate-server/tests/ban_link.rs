@@ -264,8 +264,8 @@ async fn admin_list_carries_linked_members() {
         .as_array()
         .unwrap()
         .iter()
-        .find(|s| s["kind"] == "same_browser")
-        .expect("same_browser");
+        .find(|s| s["kind"] == "device_cluster")
+        .expect("device_cluster");
     let m = same["members"].as_array().unwrap();
     assert_eq!(m.len(), 3);
     let by = |id: &str| m.iter().find(|x| x["discord_id"] == id).unwrap().clone();

@@ -207,6 +207,115 @@ pub struct Signal {
     pub all_banned: bool,
 }
 
+/// 同一台机器上的多个账号：用并查集把「同浏览器 / 同设备 / 同硬件指纹」任意一种关系连起来的账号并成一组。
+#[derive(Default)]
+struct Groups {
+    parent: HashMap<String, String>,
+}
+
+impl Groups {
+    fn add(&mut self, x: &str) {
+        self.parent
+            .entry(x.to_string())
+            .or_insert_with(|| x.to_string());
+    }
+
+    fn find(&mut self, x: &str) -> String {
+        let mut root = x.to_string();
+        loop {
+            let next = self
+                .parent
+                .get(&root)
+                .cloned()
+                .unwrap_or_else(|| root.clone());
+            if next == root {
+                break;
+            }
+            root = next;
+        }
+        let mut node = x.to_string();
+        while node != root {
+            let next = self
+                .parent
+                .get(&node)
+                .cloned()
+                .unwrap_or_else(|| root.clone());
+            self.parent.insert(node.clone(), root.clone());
+            node = next;
+        }
+        root
+    }
+
+    fn union(&mut self, a: &str, b: &str) {
+        self.add(a);
+        self.add(b);
+        let (ra, rb) = (self.find(a), self.find(b));
+        if ra != rb {
+            self.parent.insert(rb, ra);
+        }
+    }
+
+    fn groups(&mut self) -> BTreeMap<String, BTreeSet<String>> {
+        let nodes: Vec<String> = self.parent.keys().cloned().collect();
+        let mut out: BTreeMap<String, BTreeSet<String>> = BTreeMap::new();
+        for node in nodes {
+            let root = self.find(&node);
+            out.entry(root).or_default().insert(node);
+        }
+        out
+    }
+}
+
+/// 账号之间的关联方式（设备簇用）。权重按可伪造难度：浏览器标记最难换，硬件指纹最易撞。
+#[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Debug)]
+enum Link {
+    Browser,
+    Device,
+    Hardware,
+}
+
+impl Link {
+    fn label(self) -> &'static str {
+        match self {
+            Link::Browser => "同浏览器",
+            Link::Device => "同设备",
+            Link::Hardware => "同硬件指纹",
+        }
+    }
+
+    /// 苹果的指纹（iPad / iPhone）撞得多，降到一半。
+    fn weight(self, apple: bool) -> f64 {
+        let base = match self {
+            Link::Browser => 80.0,
+            Link::Device => 60.0,
+            Link::Hardware => 45.0,
+        };
+        if apple && self != Link::Browser {
+            base / 2.0
+        } else {
+            base
+        }
+    }
+}
+
+/// 一轮扫描里「只记录、不提示」的东西：网络证据和链路健康度。写进 `job_last` 的摘要，
+/// 不进待审队列（站长 10-31：同 IP 多账号没有意义，别老是提示）。
+#[derive(Default, Debug, Clone)]
+pub struct Notes {
+    /// 同 IP 换号：NAT / 手机流量 / 机场会把一堆真人塞在同一个出口
+    pub same_ip_switches: usize,
+    /// 网页登录时没交设备指纹（链路健康度：我们自己没收到的也有）
+    pub fp_missing: usize,
+    /// 设备簇数、涉及账号数
+    pub device_clusters: usize,
+    pub device_cluster_accounts: usize,
+}
+
+pub struct Outcome {
+    pub signals: Vec<Signal>,
+    pub notes: Notes,
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -408,8 +517,11 @@ pub fn evaluate(
     clock: &Clock,
     official: &[String],
     lookup: Option<&NetworkLookup<'_>>,
-) -> Vec<Signal> {
+) -> Outcome {
     let mut out: Vec<Signal> = Vec::new();
+    let mut notes = Notes::default();
+    // 设备簇的边：(账号 a, 账号 b, 关联方式, 苹果?, 显卡)
+    let mut links: Vec<(String, String, Link, bool, Option<String>)> = Vec::new();
     // Discord 账号 → Key（启用）
     let mut keys_of: HashMap<String, Vec<i64>> = HashMap::new();
     let mut did_of: HashMap<i64, String> = HashMap::new();
@@ -549,34 +661,17 @@ pub fn evaluate(
             let gpu = parts
                 .get("gpuRenderer")
                 .and_then(Value::as_str)
-                .unwrap_or("未知");
-            let (score, chip) =
-                lower_if_solo_key_holder(if apple { 30.0 } else { 60.0 }, holders(ids), ids.len());
-            let mut evidence = vec![
-                ev("账号", ids.len()),
-                ev("显卡", gpu),
-                ev(
-                    "苹果",
-                    if apple {
-                        "是（易撞，降权）"
-                    } else {
-                        "否"
-                    },
-                ),
-            ];
-            evidence.extend(chip);
-            out.push(Signal {
-                alert: None,
-                all_banned: false,
-                kind: "device_exact",
-                subject: subject(ids),
-                key_ids: kids(ids),
-                score,
-                detail: json!({
-                    "summary": format!("{} 个账号在同一台设备上网页登录过", ids.len()),
-                    "evidence": evidence,
-                }),
-            });
+                .map(str::to_string);
+            let ids: Vec<&String> = ids.iter().collect();
+            for pair in ids.windows(2) {
+                links.push((
+                    pair[0].clone(),
+                    pair[1].clone(),
+                    Link::Device,
+                    apple,
+                    gpu.clone(),
+                ));
+            }
         }
         if let Some(fk) = fuzzy_key(&parts) {
             let e = by_fuzzy.entry(fk).or_default();
@@ -591,25 +686,17 @@ pub fn evaluate(
             continue;
         }
         let gpu = fk.split('|').next().unwrap_or("");
-        let (score, chip) =
-            lower_if_solo_key_holder(if *apple { 20.0 } else { 45.0 }, holders(ids), ids.len());
-        let mut evidence = vec![
-            ev("账号", ids.len()),
-            ev("指纹", devs.len()),
-            ev("显卡", if gpu.is_empty() { "未知" } else { gpu }),
-        ];
-        evidence.extend(chip);
-        out.push(Signal {
- alert: None, all_banned: false,
-                    kind: "device_fuzzy",
-                    subject: subject(ids),
-                    key_ids: kids(ids),
-                    score,
-                    detail: json!({
-                        "summary": format!("{} 个账号的设备硬件特征一致（指纹 ID 不同，可能换了浏览器）", ids.len()),
-                        "evidence": evidence,
-                    }),
-                });
+        let gpu = (!gpu.is_empty()).then(|| gpu.to_string());
+        let ids: Vec<&String> = ids.iter().collect();
+        for pair in ids.windows(2) {
+            links.push((
+                pair[0].clone(),
+                pair[1].clone(),
+                Link::Hardware,
+                *apple,
+                gpu.clone(),
+            ));
+        }
     }
 
     // ---------- 登录时的指纹状态 ----------
@@ -619,18 +706,23 @@ pub fn evaluate(
                 continue;
             }
             let ids: BTreeSet<String> = [d].into();
-            let unknown = fp == "unknown";
+            if fp != "unknown" {
+                // 没交指纹不是罪证：换官网镜像那段时间我们自己也收不到，只当链路健康度记一笔
+                notes.fp_missing += 1;
+                continue;
+            }
             out.push(Signal {
- alert: None, all_banned: false,
-                        kind: if unknown { "fp_unknown" } else { "fp_missing" },
-                        subject: subject(&ids),
-                        key_ids: kids(&ids),
-                        score: if unknown { 50.0 } else { 15.0 },
-                        detail: json!({
-                            "summary": if unknown { "网页登录时交了服务端不认得的设备指纹（疑似伪造）" } else { "网页登录时没交设备指纹（脚本被拦或直接打开登录链接）" },
-                            "evidence": [ev("指纹", if unknown { "对不上" } else { "没交" })],
-                        }),
-                    });
+                alert: None,
+                all_banned: false,
+                kind: "fp_unknown",
+                subject: subject(&ids),
+                key_ids: kids(&ids),
+                score: 50.0,
+                detail: json!({
+                    "summary": "网页登录时交了服务端不认得的设备指纹（疑似伪造）",
+                    "evidence": [ev("指纹", "对不上")],
+                }),
+            });
         }
     }
 
@@ -699,20 +791,68 @@ pub fn evaluate(
             by_bid.entry(b).or_default().insert(d);
         }
         for ids in by_bid.values().filter(|ids| ids.len() >= 2) {
-            let (score, chip) = lower_if_solo_key_holder(80.0, holders(ids), ids.len());
-            let mut evidence = vec![ev("账号", ids.len()), ev("浏览器", "同一个")];
+            let ids: Vec<&String> = ids.iter().collect();
+            for pair in ids.windows(2) {
+                links.push((pair[0].clone(), pair[1].clone(), Link::Browser, false, None));
+            }
+        }
+    }
+
+    // ---------- 设备簇：同一台机器上的多个账号合成一条 ----------
+    // 站长 10-31：一个人的三个号以前会分别出「同设备 / 设备相近 / 同浏览器」三条，翻起来像三个人；
+    // 现在并成一条，证据里写清是怎么连上的。网络证据（同 IP 换号）不再出信号，见 Notes。
+    if !links.is_empty() {
+        let mut groups = Groups::default();
+        for (a, b, _, _, _) in &links {
+            groups.union(a, b);
+        }
+        let mut kinds: HashMap<String, BTreeSet<Link>> = HashMap::new();
+        let mut apple: HashMap<String, bool> = HashMap::new();
+        let mut gpu: HashMap<String, String> = HashMap::new();
+        for (a, _, link, is_apple, card) in &links {
+            let root = groups.find(a);
+            kinds.entry(root.clone()).or_default().insert(*link);
+            *apple.entry(root.clone()).or_default() |= *is_apple;
+            if let Some(card) = card {
+                gpu.entry(root).or_insert_with(|| card.clone());
+            }
+        }
+        for (root, ids) in groups.groups() {
+            if ids.len() < 2 {
+                continue;
+            }
+            let kinds = kinds.remove(&root).unwrap_or_default();
+            let is_apple = apple.get(&root).copied().unwrap_or(false);
+            let labels: Vec<&str> = kinds.iter().map(|k| k.label()).collect();
+            let base = kinds
+                .iter()
+                .map(|k| k.weight(is_apple))
+                .fold(0.0_f64, f64::max);
+            // 两种关联同时成立（既同浏览器又同设备）比单一种更确定
+            let raw = if kinds.len() >= 2 { base + 10.0 } else { base };
+            let (score, chip) = lower_if_solo_key_holder(raw.min(100.0), holders(&ids), ids.len());
+            let mut evidence = vec![ev("账号", ids.len()), ev("关联", labels.join(" + "))];
+            if let Some(card) = gpu.get(&root) {
+                evidence.push(ev("显卡", card.clone()));
+            }
+            if is_apple {
+                evidence.push(ev("苹果", "是（易撞，降权）"));
+            }
             evidence.extend(chip);
+            notes.device_clusters += 1;
+            notes.device_cluster_accounts += ids.len();
             out.push(Signal {
- alert: None, all_banned: false,
-                        kind: "same_browser",
-                        subject: subject(ids),
-                        key_ids: kids(ids),
-                        score,
-                        detail: json!({
-                            "summary": format!("{} 个 Discord 账号在同一个浏览器里网页登录过（浏览器标记一模一样）", ids.len()),
-                            "evidence": evidence,
-                        }),
-                    });
+                alert: None,
+                all_banned: false,
+                kind: "device_cluster",
+                subject: subject(&ids),
+                key_ids: kids(&ids),
+                score,
+                detail: json!({
+                    "summary": format!("{} 个账号在同一台机器上（{}）", ids.len(), labels.join(" + ")),
+                    "evidence": evidence,
+                }),
+            });
         }
     }
 
@@ -825,14 +965,18 @@ pub fn evaluate(
         }
     }
     // ---------- 关联扫描（同 IP 换号 / 同时异地 / 同参考图 / 同外部账号 / 服务器重合 / 电量相同 / 第三方站点来源） ----------
-    out.extend(linkage::scan(
-        snapshot, now, clock, &keys_of, &did_of, official,
-    ));
+    let (linked, same_ip_switches) =
+        linkage::scan(snapshot, now, clock, &keys_of, &did_of, official);
+    notes.same_ip_switches = same_ip_switches;
+    out.extend(linked);
     for sig in &mut out {
         sig.all_banned = !sig.subject.starts_with("key:")
             && sig.subject.split(',').all(|d| bans.contains_key(d));
     }
     out.retain(|s| !s.key_ids.is_empty() || s.kind == banned_link::KIND);
 
-    out
+    Outcome {
+        signals: out,
+        notes,
+    }
 }

@@ -27,6 +27,7 @@ pub fn router() -> Router<AppState> {
 /// 信号类型 → 后台显示的短名。
 pub fn kind_label(kind: &str) -> &str {
     match kind {
+        "device_cluster" => "同一台机器",
         "device_exact" => "同设备",
         "device_fuzzy" => "设备相近",
         "fp_missing" => "没交指纹",
@@ -104,6 +105,7 @@ async fn members(
             .collect()
     };
     let scope = match kind {
+        "device_cluster" => LoginScope::Both,
         "same_browser" => LoginScope::Browser,
         "device_exact" => LoginScope::Device,
         "banned_link" => LoginScope::Both,

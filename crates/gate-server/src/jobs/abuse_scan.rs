@@ -29,7 +29,7 @@ pub async fn run(state: &AppState) -> Result<String, JobError> {
     if !site.is_empty() {
         official.push(site);
     }
-    let signals = tokio::task::spawn_blocking(move || {
+    let outcome = tokio::task::spawn_blocking(move || {
         let lookup = |ip: &str| {
             asn.as_ref()
                 .and_then(|db| db.lookup(ip))
@@ -45,6 +45,8 @@ pub async fn run(state: &AppState) -> Result<String, JobError> {
     })
     .await
     .map_err(|error| JobError::new("ScanTask", error.to_string()))?;
+    let notes = outcome.notes;
+    let signals = outcome.signals;
     let mut counts: HashMap<&str, usize> = HashMap::new();
     for s in &signals {
         *counts.entry(s.kind).or_default() += 1;
@@ -78,9 +80,18 @@ pub async fn run(state: &AppState) -> Result<String, JobError> {
     }
     let mut parts: Vec<String> = counts.iter().map(|(k, n)| format!("{k} {n}")).collect();
     parts.sort();
-    Ok(if parts.is_empty() {
+    let head = if parts.is_empty() {
         "没有新的可疑信号".to_string()
     } else {
         format!("可疑信号：{}", parts.join("，"))
-    })
+    };
+    // 只记录、不提示的那几项：设备簇规模 + 链路健康度（站长 10-31：同 IP 多账号没有意义）
+    let mut tail = format!(
+        "设备簇 {} 个（{} 个账号）、没交指纹 {}",
+        notes.device_clusters, notes.device_cluster_accounts, notes.fp_missing
+    );
+    if notes.same_ip_switches > 0 {
+        tail.push_str(&format!("、同网换号 {}（不提示）", notes.same_ip_switches));
+    }
+    Ok(format!("{head}｜{tail}"))
 }
