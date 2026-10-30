@@ -158,9 +158,9 @@
 }
 .stat {
   padding: var(--sp-5);
-  border: 1px solid var(--border);
+  border: 0;
   border-radius: var(--radius);
-  background: var(--surface);
+  background: var(--surface-2);
 }
 .stat__label {
   font-size: var(--fs-xs);
@@ -205,9 +205,9 @@
   padding: var(--sp-6);
   display: grid;
   gap: var(--sp-3);
-  border: 1px solid var(--border);
+  border: 0;
   border-radius: var(--radius);
-  background: var(--surface);
+  background: var(--surface-2);
 }
 .admin-fail h1 {
   font-size: var(--fs-xl);
