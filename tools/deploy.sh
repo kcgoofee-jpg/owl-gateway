@@ -115,11 +115,9 @@ tools/sync-mirror.sh
 
 # 前端产物（landing / admin）：网关 STATIC_DIR 优先读磁盘，镜像里那份是构建时的旧快照。
 # 不在这里同步的话，改了前端样式/文案部署完看不到变化（10-30 踩过两次），所以每次部署都顺手刷一遍。
-if [[ -f web/dist/landing.html ]]; then
-  tools/hot-web.sh --no-build
-else
-  say "web/dist 缺失，跳过前端同步（需要先 pnpm build）"
-fi
+# 一定要现场构建：web/dist 是 gitignore 的，谁的机器上只要有一份旧产物，`--no-build` 就会把旧 CSS
+# 推上去（10-31 05:18 就是这么把后台的框线「改回去了」——线上 CSS 的时间戳还停在一天前）。
+tools/hot-web.sh
 
 # cutover 自己的 smoke 也要求公共接口 200；维护模式开着时先临时切 off，部署完由 verify 脚本切回。
 # 这里把当前档位写到服务器上的一个小文件，verify 脚本读它恢复。
