@@ -1779,6 +1779,55 @@ async fn reconciliation_refuses_when_account_is_unusable() {
 }
 
 #[tokio::test]
+async fn reconciliation_skips_accounts_the_admin_turned_off() {
+    // 停用的备用 Token 订阅作废后官方读不出余额：不能因为它就整轮核对失败
+    // （线上被一把这样的 Token 卡了一整晚，快照停在 14:40）。
+    let e = setup(&[("NAI_TOKENS", "pst-synthetic-first,pst-synthetic-second")]).await;
+    let ids: Vec<String> = e
+        .state
+        .nai
+        .tokens()
+        .await
+        .iter()
+        .map(|t| t.token_id.clone())
+        .collect();
+    assert_eq!(ids.len(), 2);
+    let api = Admin::login_bare(&e.state).await;
+    let token = csrf(&api).await;
+    let h = [("x-nai-admin-csrf", token.as_str())];
+    let en = format!("/upstream-tokens/{}/enabled", ids[1]);
+    assert_eq!(
+        api.text("PUT", &en, Some(json!({"enabled": false})))
+            .await
+            .0,
+        200
+    );
+    e.mock.push(
+        SUBSCRIPTION_OK,
+        Reply::json(
+            200,
+            &json!({"active": true, "expiresAt": 1794830413,
+                    "trainingStepsLeft": {"fixedTrainingStepsLeft": 1234, "purchasedTrainingSteps": 6}}),
+        ),
+    );
+    let (s, _, body) = api
+        .raw("POST", "/reconciliation", Some(json!({})), &h)
+        .await
+        .parts();
+    assert_eq!(s, 200, "{body}");
+    assert_eq!(
+        e.mock.requests_to(SUBSCRIPTION_OK).len(),
+        1,
+        "停用的账号不该被查"
+    );
+    let snap = api.get_ok("/upstream").await["reconciliation"]["history"][0].clone();
+    assert_eq!(snap["balance"], json!(1240.0));
+    let rows = snap["accounts"].as_object().unwrap();
+    assert!(rows.contains_key(&ids[0]), "{snap}");
+    assert!(!rows.contains_key(&ids[1]), "停用的账号不进快照：{snap}");
+}
+
+#[tokio::test]
 async fn reconciliation_waits_for_inflight_reservations_and_blocks_admission() {
     use gate_server::state::Reservation;
     let e = setup(&[]).await;

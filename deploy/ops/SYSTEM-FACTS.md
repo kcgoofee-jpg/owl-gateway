@@ -39,7 +39,7 @@
 
 **按账号的最近 3 小时出图窗口**（安静时段每小时上限用）和启动时的补回随安静时段在 10-23 删除。
 
-**账号对比与 Anlas 推算**（后台「上游」页，`GET /admin/api/upstream-stats`，只读、仅管理员、不向上游发请求）：最近 1 小时 / 24 小时按账号统计成功 / 出错 / 选号后被拒、成功请求的平均与 p90 等待（`wait_ms`）、上游 429 / 403 / 401 次数，加今日张数、每小时计数（账号保护内存窗口）、请求与余额的分担占比。余额推算（`anlas_estimate.rs`）：该账号最近一份含它的对账快照里的固定 + 购买 Anlas，减去快照之后（`usage_log.id > last_log_id`）成功请求记下的 Anlas；先扣固定额度、不够再扣购买的（顺序是推测，未经官方核实）；日均用量 = 近 3 天账本 Anlas ÷ 3；到期预测 = 固定额度剩余 − 日均 × 剩余天数，小于 0 提示「到期前用完」，否则提示「到期预计浪费 N」。快照里 `expires_at` 已过 = 周期已滚动，不推算、提示重新核对；上次真实核对超过 3 天标「核对已过期」。2 个及以上账号时，没记账号的老行归不到任何账号，余额标「近似」并写出没算进去的 Anlas；1 个账号时老行都算给它。`unconfirmed_anlas`（未确认扣费）不计入。残留键 `anlas_pool_last` 仍无人更新，不要用。
+**账号对比与 Anlas 推算**（后台「上游」页，`GET /admin/api/upstream-stats`，只读、仅管理员、不向上游发请求）：最近 1 小时 / 24 小时按账号统计成功 / 出错 / 选号后被拒、成功请求的平均与 p90 等待（`wait_ms`）、上游 429 / 403 / 401 次数，加今日张数、每小时计数（账号保护内存窗口）、请求与余额的分担占比。余额推算（`anlas_estimate.rs`）：该账号最近一份含它的对账快照里的固定 + 购买 Anlas，减去快照之后（`usage_log.id > last_log_id`）成功请求记下的 Anlas；先扣固定额度、不够再扣购买的（顺序是推测，未经官方核实）；日均用量 = 近 3 天账本 Anlas ÷ 3；到期预测 = 固定额度剩余 − 日均 × 剩余天数，小于 0 提示「到期前用完」，否则提示「到期预计浪费 N」。快照里 `expires_at` 已过 = 周期已滚动，不推算、提示重新核对；上次真实核对超过 3 天标「核对已过期」。2 个及以上账号时，没记账号的老行归不到任何账号，余额标「近似」并写出没算进去的 Anlas；1 个账号时老行都算给它。`unconfirmed_anlas`（未确认扣费）不计入。残留键 `anlas_pool_last` 在 10-31 删除（代码从不读它）。
 
 **选号与排队中换号**（10-22 起，`gate-upstream` 的 `pool.rs` / `scheduler.rs` / `dispatch.rs`）：
 
@@ -117,12 +117,12 @@
 
 | 任务 | 周期 | 做什么 | 开关 |
 |---|---|---|---|
-| `quota` 额度同步 | 10 分钟 ±20% | §2：把手动的每人额度下发给 `quota_auto=1` 的 Key、更新首页文案；后台改了额度、把 Key 交回统一额度时立即同步一次（同样记进 `job_last`） | 没有开关 |
 | `upstream_snapshot` 上游 V5 快照 | 10 分钟 ±20%，距上次满 1 小时才记 | 主动读一次订阅，写一行 `upstream_snapshots`（`fresh=1` 才拿来做安静时段测速）；读不到也记一行无读数的 | — |
-| `hourly_cap` 每小时上限自动调整 | 10 分钟 ±20% | §1 的 AIMD 加窗：平稳一天且顶到过上限 +10，24 小时最多一次，只升不降 | `guard_hourly_step=0` 不上调 |
 | `breaker` 全站熔断 | 10 分钟 ±20% | §3 | — |
 | `key_guard` 单 Key 限流 | 10 分钟 ±20% | §3 | — |
 | `maintenance` 维护 | 5 分钟 ±20% | 清过期记录、状态码统计落库、原图保存期与容量上限、自动关闭不用处理的 Bug、注册服务的身份组同步、磁盘自检、官方状态；每一步各自出错、各自记 Bug（来源 `maintenance:<步骤>`） | — |
+| `abuse_scan` 小号扫描 | 6 小时 ±10% | 行为相似 / 同设备 / 设备相近 / 指纹异常 / 新号 / 共享 Key，以及关联扫描（同 IP 换号 / 同时异地 / 同参考图 / 同外部账号 / 服务器重合 / 电量相同）写进待审队列，不自动封号 | — |
+| `anlas_reconcile` Anlas 自动核对 | 1 小时 ±10% | 后台「Anlas 消耗核对」的自动版：等不到「没有进行中的出图」那一刻就跳过；只查后台**启用**的账号（停用的备用 Token 订阅作废后官方不再返回可读余额，不该让整轮失败，10-31 修）；差距偏大记一条「注意」Bug | — |
 | `idle_recycle` 闲置回收 | 1 小时（不抖动） | §8.2 | `KEY_INACTIVITY_DELETE_DAYS=0` 关闭 |
 
 2.x / 3.0 早期的「内核模块」（观测、容量、分配、自动驾驶、风险检查、领 Key）连同交叉自检、开关（`module_<名字>`）、运行条和后台「模块」页一起删除。原来线上核对的恒等式改由测试守住：生成记录条数 = 成功出图张数 = 今日计数、内存每小时计数 = 本小时日志张数、算法管理的 Key 都已同步。出站指纹的只读体检（风险检查）没有替代。
@@ -240,7 +240,7 @@
 | `bot_*` | `bot_status`（机器人心跳，奶妹每分钟经桥接接口写一次：账号 / 服务器 / 网关延迟 / 启动时间 / `seen_at`；3 分钟没更新算离线，后台 Discord 页的「机器人状态」读它） | 随机器人上报 |
 | 其他 | `features_global`（JSON，缺省全开）、`v5_alert_threshold`（后台叫「V5 余量低提示线」，默认 20，范围 1～100；决定官方余量缓存刷多勤、后台是否标「低」，以及 `v5_medium_mode=auto` 的切换线）、`v5_medium_mode`（`off` / `on` / `auto`，默认 `off`，见 §1）、`job_last`（定时任务每轮的结果，见 §4） | 线 `v5_alert_threshold` = 20 |
 
-线上库里还有一些代码已不再读取的残留键，看到不要当真：`anlas_pool_last`、`anlas_member_daily_cap`、`anlas_min_key_age_days`、`economy_mode`、`autopilot_economy`、`guard_daily_cap_fallback`、`guard_account_3h_cap`、`guard_account_10m_cap`、`ack_*`、`quota_shadow_*`、`guard_base_daily_images`、`quota_base` / `quota_base_min` / `quota_base_step` / `quota_base_now`、`quota_v5_min` / `quota_v5_max`、`runtime_key_image_min_interval`、`autopilot_slots` / `autopilot_breaker` / `autopilot_key_guard` / `autopilot_slots_at`、`autopilot_last` / `autopilot_history`、`kernel_last`、`module_*`（内核模块改成定时任务后不再读写）、`module_allocation`（3.0 额度精简删掉的），以及 `bot_gallery_*`（跑图分享设置）、`bot_events`（机器人最近动作）——后两者随功能一起删除。
+线上库里还有一些代码已不再读取的残留键，看到不要当真：`anlas_member_daily_cap`、`anlas_min_key_age_days`、`economy_mode`、`autopilot_economy`、`guard_daily_cap_fallback`、`guard_account_3h_cap`、`guard_account_10m_cap`、`ack_*`、`quota_shadow_*`、`guard_base_daily_images`、`quota_base` / `quota_base_min` / `quota_base_step` / `quota_base_now`、`quota_v5_min` / `quota_v5_max`、`runtime_key_image_min_interval`、`autopilot_slots` / `autopilot_breaker` / `autopilot_key_guard` / `autopilot_slots_at`、`autopilot_last` / `autopilot_history`、`kernel_last`、`module_*`（内核模块改成定时任务后不再读写）、`module_allocation`（3.0 额度精简删掉的），以及 `bot_gallery_*`（跑图分享设置）、`bot_events`（机器人最近动作）——后两者随功能一起删除。
 
 ## 10. 拒绝原因码（`usage_log.reason`，`reasons.rs`）
 

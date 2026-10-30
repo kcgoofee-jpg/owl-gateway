@@ -285,6 +285,17 @@ async fn accounts(state: &AppState) -> Vec<(String, Arc<Token>)> {
     out
 }
 
+/// 参与核对的账号：只算后台启用的。停用的账号（比如到期后留着的备用 Token）订阅作废以后，
+/// 官方不再返回可读余额，而核对原本是把每个账号都读一遍、有一个读不出来就整轮失败——线上就被
+/// 这么一把停用的 Token 卡住过。账本里它们的用量照旧按 token_id 记着，不受影响。
+async fn queryable(state: &AppState) -> Vec<(String, Arc<Token>)> {
+    accounts(state)
+        .await
+        .into_iter()
+        .filter(|(_, t)| t.fields().admin_enabled)
+        .collect()
+}
+
 /// 执行一次核对，成功返回 [`status`]。
 pub async fn run(state: &AppState) -> Result<Value, RunError> {
     run_with(state, WAIT_TIMEOUT).await
@@ -318,7 +329,7 @@ pub async fn run_with(state: &AppState, wait_timeout: Duration) -> Result<Value,
                 .await
                 .map_err(|_| busy())?;
         };
-        let pool = accounts(state).await;
+        let pool = queryable(state).await;
         if pool.is_empty() {
             return Err(ReconError::new("尚未配置可查询的上游账号", 503, 0).into());
         }
@@ -360,7 +371,7 @@ pub async fn run_with(state: &AppState, wait_timeout: Duration) -> Result<Value,
             Err(_) => return Err(ReconError::new("本次核对超时；上次结果已保留", 503, 0).into()),
             Ok(rows) => rows?,
         };
-        let now_ids: Vec<String> = accounts(state)
+        let now_ids: Vec<String> = queryable(state)
             .await
             .into_iter()
             .map(|(id, _)| id)
