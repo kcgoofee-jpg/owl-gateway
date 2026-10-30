@@ -5,6 +5,11 @@ use serde_json::{Value, json};
 #[derive(Debug, Clone, Copy)]
 pub struct SubscriptionData {
     pub month_anlas_used: f64,
+    /// 这把 Key 今天用掉的 Anlas（首页「个人剩余」用它算）。
+    pub daily_anlas_used: f64,
+    /// 全站今天的 Anlas 池上限和已用量：工作台显示的余额要和个人剩余取较小值。
+    pub global_anlas_limit: f64,
+    pub global_anlas_total: f64,
     pub daily_v5_used: i64,
     pub global_v5_limit: u32,
     pub global_v5_total: i64,
@@ -31,10 +36,11 @@ pub fn subscription_payload(
     } else {
         0
     };
+    // 工作台里那个「Anlas: N」就是成员今天还能用的量：个人日上限剩多少、全站池剩多少，取较小值。
     let anlas_left = if policy.paid_parameters {
-        (policy.monthly_anlas - data.month_anlas_used)
-            .max(0.0)
-            .trunc() as i64
+        let personal = (f64::from(policy.daily_anlas) - data.daily_anlas_used).max(0.0);
+        let site = (data.global_anlas_limit - data.global_anlas_total).max(0.0);
+        personal.min(site).trunc() as i64
     } else {
         0
     };
@@ -80,6 +86,9 @@ mod tests {
     fn data() -> SubscriptionData {
         SubscriptionData {
             month_anlas_used: 20.0,
+            daily_anlas_used: 8.0,
+            global_anlas_limit: 300.0,
+            global_anlas_total: 100.0,
             daily_v5_used: 2,
             global_v5_limit: 150,
             global_v5_total: 147,
@@ -91,7 +100,8 @@ mod tests {
         let value = subscription_payload(&policy(), None, 1000.0, &data());
         assert_eq!(value["naiGate"]["v5LeftToday"], 3);
         assert_eq!(value["naiGate"]["v5DailyLimit"], 10);
-        assert_eq!(value["naiGate"]["anlasLeft"], 80);
+        // 个人日上限 15 − 已用 8 = 7，全站池还剩 200，取较小值
+        assert_eq!(value["naiGate"]["anlasLeft"], 7);
         assert!(value["naiGate"]["account"].is_null());
         assert_eq!(value["expiresAt"], 1000 + 3650 * 86400);
     }
@@ -113,11 +123,24 @@ mod tests {
         }
     }
     #[test]
+    fn site_pool_exhaustion_zeroes_the_workbench_balance() {
+        let data = SubscriptionData {
+            daily_anlas_used: 0.0,
+            global_anlas_limit: 300.0,
+            global_anlas_total: 300.0,
+            ..data()
+        };
+        let value = subscription_payload(&policy(), None, 0.0, &data);
+        assert_eq!(value["naiGate"]["anlasLeft"], 0);
+    }
+
+    #[test]
     fn exhausted_budgets_clamp_to_zero() {
         let mut policy = policy();
         policy.daily_v5 = 0;
         let data = SubscriptionData {
             month_anlas_used: 120.0,
+            daily_anlas_used: 15.0,
             ..data()
         };
         let value = subscription_payload(&policy, None, 0.0, &data);

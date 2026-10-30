@@ -137,3 +137,19 @@ describe("mergeMeta", () => {
     expect(mergeMeta(null, null)).toEqual({});
   });
 });
+
+describe("anlas 圆环要和全站池取较小值", () => {
+  const base = { today: { daily_anlas: 300, anlas: 181, site_anlas_left: 200 } } as never;
+  it("全站还有余量时取较小值", () => {
+    const row = quotaRows(base).find((r) => r.id === "anlas")!;
+    expect(row.left).toBe(119);
+    expect(row.paused).toBeFalsy();
+  });
+  it("全站池用完时显示暂停", () => {
+    const me = { today: { daily_anlas: 300, anlas: 181, site_anlas_left: 0 } } as never;
+    const row = quotaRows(me).find((r) => r.id === "anlas")!;
+    expect(row.paused).toBe(true);
+    expect(row.left).toBe(0);
+    expect(row.hint).toContain("全站今天的 Anlas 额度用完了");
+  });
+});

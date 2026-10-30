@@ -78,6 +78,9 @@ export type MeMember = {
     v5_access_reason?: string;
     anlas?: number;
     daily_anlas?: number;
+    /** 全站今天还剩多少 Anlas（和个人剩余取较小值才是真正能用的）。 */
+    site_anlas_left?: number | null;
+    site_anlas_cap?: number | null;
     reset_hour?: number | null;
   };
   coupons?: Coupon[];

@@ -606,9 +606,13 @@ fn canonical_parts(data: &serde_json::Map<String, Value>) -> Option<(String, Str
 async fn subscription(state: &AppState, key: &Key) -> Result<Value, InternalError> {
     let (day, month) = (state.day(), state.month());
     let shared = state.db.shared_budgets().await?;
+    let day_counter = state.db.get_counter(key.id(), &day).await?;
     let data = gate_core::client_views::SubscriptionData {
         month_anlas_used: state.db.month_anlas(key.id(), &month).await?,
-        daily_v5_used: state.db.get_counter(key.id(), &day).await?.v5,
+        daily_anlas_used: day_counter.anlas,
+        global_anlas_limit: f64::from(shared.daily_anlas),
+        global_anlas_total: state.db.day_anlas_total(&day).await?,
+        daily_v5_used: day_counter.v5,
         global_v5_limit: shared.daily_v5,
         global_v5_total: state.db.day_v5_total(&day).await?,
         v5_paused: crate::ops::v5_paused(&state.db).await?,
@@ -1016,6 +1020,10 @@ pub(super) async fn me_payload(
     } else {
         (g - used).max(0)
     };
+    // 全站今天的 Anlas 池还剩多少：和「全站今日 Anlas 额度已用完」的拒绝口径一致，
+    // 首页的 Anlas 圆环要拿它和「个人剩余」取较小值，用完时显示暂停。
+    let anlas_budget = f64::from(state.db.shared_budgets().await?.daily_anlas);
+    let site_anlas_left = (anlas_budget - state.db.day_anlas_total(&state.day()).await?).max(0.0);
     let now = state.now();
     out.insert("has_key".into(), json!(true));
     out.insert("key".into(), json!(key.token()));
@@ -1034,6 +1042,8 @@ pub(super) async fn me_payload(
             "v5_access_reason": if allowed { "" } else { "此成员未开放 V5" },
             "anlas": gate_core::primitives::round0(c.anlas),
             "daily_anlas": live::member_anlas_cap(state, key).await?,
+            "site_anlas_left": site_anlas_left.trunc() as i64,
+            "site_anlas_cap": anlas_budget.trunc() as i64,
             "reset_hour": state.guard.with(|g| g.reset_hour),
         }),
     );

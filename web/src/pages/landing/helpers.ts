@@ -79,7 +79,19 @@ export function quotaRows(me: MeMember): QuotaRow[] {
     rows.push(row);
   }
   if ((t.daily_anlas ?? 0) > 0) {
-    rows.push({ id: "anlas", label: "Anlas", used: t.anlas ?? 0, cap: t.daily_anlas ?? 0 });
+    const row: QuotaRow = { id: "anlas", label: "Anlas", used: t.anlas ?? 0, cap: t.daily_anlas ?? 0 };
+    // 全站池也会先用完（站长每天给全站的 Anlas 是有上限的）：能用的是「个人剩余」和「全站剩余」的较小值
+    const site = t.site_anlas_left;
+    if (site != null && site <= 0) {
+      Object.assign(row, {
+        paused: true,
+        left: 0,
+        hint: `全站今天的 Anlas 额度用完了，${resetHour(me)} 点重置后恢复`,
+      });
+    } else if (site != null) {
+      row.left = Math.min(Math.max(0, row.cap - row.used), site);
+    }
+    rows.push(row);
   }
   return rows;
 }

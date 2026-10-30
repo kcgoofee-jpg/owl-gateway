@@ -320,31 +320,26 @@ fn sampler_label(raw: &str) -> String {
     }
 }
 
-/// 元数据里的 `software` 形如 `NovelAI Diffusion V4.5 4BDE2A90`，去掉尾部哈希；
-/// 再和前端报上来的界面标签（`V4.5 Full`）拼出「具体模型」。
+/// 卡片上的模型名用短名：优先前端报的界面标签（`V4.5 Full`），拿不到就从元数据里认出世代。
 fn model_label(meta: &std::collections::HashMap<String, String>) -> String {
-    let software = meta.get("software").map(|s| s.trim()).unwrap_or_default();
     let ui = meta.get("model").map(|s| s.trim()).unwrap_or_default();
-    let base = {
-        let mut parts: Vec<&str> = software.split_whitespace().collect();
-        if parts
-            .last()
-            .is_some_and(|last| last.len() >= 8 && last.chars().all(|c| c.is_ascii_alphanumeric()))
-        {
-            parts.pop();
-        }
-        parts.join(" ")
-    };
-    let variant = ui
-        .split_whitespace()
-        .filter(|w| !base.to_lowercase().contains(&w.to_lowercase()))
-        .collect::<Vec<_>>()
-        .join(" ");
-    match (base.is_empty(), variant.is_empty()) {
-        (true, true) => String::new(),
-        (true, false) => ui.to_string(),
-        (false, true) => base,
-        (false, false) => format!("{base} {variant}"),
+    if !ui.is_empty() {
+        return ui.to_string();
+    }
+    let software = meta
+        .get("software")
+        .map(|s| s.to_lowercase())
+        .unwrap_or_default();
+    if software.contains("v4.5") {
+        "V4.5".into()
+    } else if software.contains("v5") {
+        "V5".into()
+    } else if software.contains("v4") {
+        "V4".into()
+    } else if software.contains("v3") {
+        "V3".into()
+    } else {
+        String::new()
     }
 }
 
@@ -377,14 +372,13 @@ async fn post_to_discord(
             .unwrap_or_default()
     };
 
-    // 只显示名字（拿不到名字才退回 id），不 @ 人、不展示 id
+    // 提交者：@名字（拿不到名字才退回 id），单独占一行
     let who = if uploader.trim().is_empty() {
-        format!("`{discord_id}`")
+        format!("@{discord_id}")
     } else {
-        clip(uploader, 40)
+        format!("@{}", clip(uploader, 40))
     };
-
-    let mut fields = vec![json!({"name": "提交者", "value": who, "inline": true})];
+    let mut fields = vec![json!({"name": "提交者", "value": who, "inline": false})];
 
     let model = model_label(meta);
     if !model.is_empty() {
@@ -436,19 +430,17 @@ async fn post_to_discord(
         "inline": true
     }));
 
-    // 今天全站出到第几张（读不到就不显示，不影响发图）
-    if let Ok(total) = st.db.day_images_total(&st.day()).await
-        && total > 0
-    {
-        fields.push(json!({"name": "今日全站", "value": format!("第 {total} 张"), "inline": true}));
-    }
+    // 今天全站出到第几张：收进底部那行小字（读不到就只留站名）
+    let footer = match st.db.day_images_total(&st.day()).await {
+        Ok(total) if total > 0 => format!("猫头鹰公益站 · 今日全站第 {total} 张"),
+        _ => "猫头鹰公益站".to_string(),
+    };
 
     let embed = json!({
-        "title": "生图工作台 · 新作品",
         "color": 0x6b4bd1u32,
         "fields": fields,
         "image": {"url": format!("attachment://{}", upload.file_name)},
-        "footer": {"text": "猫头鹰公益站 · 生图工作台"},
+        "footer": {"text": footer},
     });
     let payload = json!({
         "embeds": [embed],
@@ -511,18 +503,23 @@ mod tests {
     }
 
     #[test]
-    fn model_label_combines_metadata_and_ui_variant() {
+    fn model_label_stays_short() {
         let mut meta = std::collections::HashMap::new();
         meta.insert("software".into(), "NovelAI Diffusion V4.5 4BDE2A90".into());
         meta.insert("model".into(), "V4.5 Full".into());
-        assert_eq!(model_label(&meta), "NovelAI Diffusion V4.5 Full");
+        // 前端报了标签就用标签
+        assert_eq!(model_label(&meta), "V4.5 Full");
 
-        meta.insert("model".into(), String::new());
-        assert_eq!(model_label(&meta), "NovelAI Diffusion V4.5");
+        // 只有元数据时按世代取短名，不把哈希带上
+        meta.remove("model");
+        assert_eq!(model_label(&meta), "V4.5");
 
         meta.clear();
-        meta.insert("model".into(), "V5 Full".into());
-        assert_eq!(model_label(&meta), "V5 Full");
+        meta.insert("software".into(), "NovelAI Diffusion V5 0ADF9AB7".into());
+        assert_eq!(model_label(&meta), "V5");
+
+        meta.clear();
+        assert_eq!(model_label(&meta), "");
     }
 
     #[test]
