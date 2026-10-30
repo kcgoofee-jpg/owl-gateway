@@ -28,7 +28,8 @@ test.describe("官网镜像页", () => {
   test.skip(!hasMember, "需要成员会话（cargo xtask dev 的 cookies.json）");
   test.beforeAll(async ({ request }) => {
     const mirror = await request.get(`${BASE}/image`);
-    test.skip(mirror.status() !== 200, "镜像资源未就绪（需要 STATIC_DIR 指向 mirror/）");
+    // 游客会被 307 回首页，302/307 同样说明镜像页已经挂在网关上
+    test.skip(![200, 302, 307].includes(mirror.status()), "镜像资源未就绪（需要 STATIC_DIR 指向 mirror/）");
   });
 
   test("/workbench 跳到 /image，并且是登录态", async ({ page, context }) => {

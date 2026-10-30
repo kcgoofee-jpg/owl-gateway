@@ -29,7 +29,16 @@ print(" ".join(sorted(k for k,v in d["features"]["global"].items() if not v)))' 
   esac
 }
 run_smoke() { docker exec owl-gate nai-ops smoke http://127.0.0.1:8000 | tail -3; }
-check_image() { curl -s -o /dev/null -w 'image: %{http_code}\n' "$A/image" 2>/dev/null || true; }
+# 游客没有成员会话时 /image 会 307 回首页（走登录/领 Key），所以 307 也算正常。
+check_image() {
+  local code
+  code=$(curl -s -o /dev/null -w '%{http_code}' "$A/image" 2>/dev/null)
+  case $code in
+    200) echo "image: 200" ;;
+    307 | 302 | 303) echo "image: $code (游客跳首页，符合预期)" ;;
+    *) echo "image: $code"; return 1 ;;
+  esac
+}
 
 # cutover 之前 suspend-maintenance.sh 记录了原档位；优先用它恢复
 STATE=${MAINTENANCE_STATE:-/var/tmp/owl-maintenance-mode}

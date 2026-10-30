@@ -103,9 +103,27 @@ async fn asset(State(st): State<AppState>, Path(path): Path<String>) -> Response
 }
 
 /// 官网生图页：官方构建产物 + 桥接层配置（成员 Key 由首屏数据带入）。
+/// 没有成员会话（或还没领到 Key）时回首页走登录/领 Key，别让游客落在半残的官网壳上。
 async fn image(State(st): State<AppState>, headers: HeaderMap) -> Response {
     let boot = super::public::landing_boot(&st, &headers).await;
+    if !workbench_ready(boot.as_ref()) {
+        return axum::response::Redirect::temporary("/").into_response();
+    }
     st.assets.page(Page::Image, boot.as_ref())
+}
+
+/// 首屏 `me` 里同时有登录态和可用 Key 才能进工作台。
+fn workbench_ready(boot: Option<&serde_json::Value>) -> bool {
+    let me = boot.and_then(|b| b.get("me"));
+    let logged_in = me
+        .and_then(|m| m.get("logged_in"))
+        .and_then(serde_json::Value::as_bool)
+        .unwrap_or(false);
+    let has_key = me
+        .and_then(|m| m.get("key"))
+        .and_then(serde_json::Value::as_str)
+        .is_some_and(|k| !k.is_empty());
+    logged_in && has_key
 }
 
 /// 镜像静态资源：`/xxx` → `dist/nai-app/xxx`。
