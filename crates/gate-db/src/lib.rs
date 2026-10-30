@@ -43,6 +43,9 @@ pub type Result<T> = std::result::Result<T, DbError>;
 
 type Job = Box<dyn FnOnce(&mut Connection) + Send>;
 
+/// 写队列上限。满了以后调用方在异步信号量上排队等，**不占阻塞线程**，也不阻塞 tokio worker。
+const WRITE_QUEUE: usize = 1024;
+
 /// 数据库句柄；克隆成本很低（内部是 Arc）。
 #[derive(Clone)]
 pub struct Db {
@@ -52,6 +55,8 @@ pub struct Db {
 struct Inner {
     path: PathBuf,
     writer: std::sync::mpsc::SyncSender<Job>,
+    /// 许可数 = 写队列长度：拿到许可才入队，任务跑完才还，因此队列永远不会满
+    write_slots: Arc<tokio::sync::Semaphore>,
     readers: Mutex<Vec<Connection>>,
     /// 许可数 = 读连接数：拿到许可才进阻塞线程，所以进去时池子里一定有空闲连接。
     read_slots: Arc<tokio::sync::Semaphore>,
@@ -90,6 +95,16 @@ impl Db {
     }
 
     fn open_inner(path: &Path, member_migration: Option<(f64, i64)>) -> Result<Self> {
+        Self::open_with_queue(path, member_migration, WRITE_QUEUE)
+    }
+
+    /// 同 [`Db::open`]，但写队列长度可调（只给测试压满队列用）。
+    #[doc(hidden)]
+    pub fn open_with_queue(
+        path: &Path,
+        member_migration: Option<(f64, i64)>,
+        queue: usize,
+    ) -> Result<Self> {
         const READERS: usize = 2;
         let path = path.to_path_buf();
         let mut writer_conn = Connection::open(&path)?;
@@ -121,7 +136,7 @@ impl Db {
         }
 
         // 有界队列：写线程卡住时调用方会等待而不是无限堆积内存
-        let (tx, rx) = std::sync::mpsc::sync_channel::<Job>(1024);
+        let (tx, rx) = std::sync::mpsc::sync_channel::<Job>(queue);
         let writer_path = path.clone();
         std::thread::Builder::new()
             .name("gate-db-writer".into())
@@ -152,6 +167,7 @@ impl Db {
             inner: Arc::new(Inner {
                 path,
                 writer: tx,
+                write_slots: Arc::new(tokio::sync::Semaphore::new(queue)),
                 read_slots: Arc::new(tokio::sync::Semaphore::new(pool.len())),
                 readers: Mutex::new(pool),
             }),
@@ -162,14 +178,39 @@ impl Db {
         &self.inner.path
     }
 
+    /// 等一个写队列位置：满了就在异步信号量上排队，不阻塞 tokio worker，也不无限堆积内存。
+    async fn acquire_write(&self) -> Result<tokio::sync::OwnedSemaphorePermit> {
+        self.inner
+            .write_slots
+            .clone()
+            .acquire_owned()
+            .await
+            .map_err(|_| DbError::WriterGone)
+    }
+
+    /// 入队（许可已拿到，所以这里一定不会阻塞）。
+    fn enqueue(&self, job: Job) -> Result<()> {
+        use std::sync::mpsc::TrySendError;
+        match self.inner.writer.try_send(job) {
+            Ok(()) => Ok(()),
+            Err(TrySendError::Full(_)) => {
+                Err(DbError::Invalid("写队列已满：许可与队列长度不一致".into()))
+            }
+            Err(TrySendError::Disconnected(_)) => Err(DbError::WriterGone),
+        }
+    }
+
     /// 在写线程上执行一个事务；闭包返回 Err 或 panic 时整个事务回滚。
     pub async fn write<R, F>(&self, f: F) -> Result<R>
     where
         R: Send + 'static,
         F: Fn(&Transaction<'_>) -> rusqlite::Result<R> + Send + 'static,
     {
+        let permit = self.acquire_write().await?;
         let (tx, rx) = oneshot::channel();
         let job: Job = Box::new(move |conn: &mut Connection| {
+            // 事务跑完（或 panic 展开）才还许可，队列因此永远不会满
+            let _permit = permit;
             let mut attempt = 0;
             let result = loop {
                 attempt += 1;
@@ -188,10 +229,7 @@ impl Db {
             };
             let _ = tx.send(result);
         });
-        self.inner
-            .writer
-            .send(job)
-            .map_err(|_| DbError::WriterGone)?;
+        self.enqueue(job)?;
         rx.await
             .map_err(|_| DbError::WriterGone)?
             .map_err(DbError::from)
@@ -204,14 +242,13 @@ impl Db {
         R: Send + 'static,
         F: FnOnce(&mut Connection) -> rusqlite::Result<R> + Send + 'static,
     {
+        let permit = self.acquire_write().await?;
         let (tx, rx) = oneshot::channel();
         let job: Job = Box::new(move |conn: &mut Connection| {
+            let _permit = permit;
             let _ = tx.send(f(conn));
         });
-        self.inner
-            .writer
-            .send(job)
-            .map_err(|_| DbError::WriterGone)?;
+        self.enqueue(job)?;
         rx.await
             .map_err(|_| DbError::WriterGone)?
             .map_err(DbError::from)
