@@ -64,6 +64,11 @@ pub fn router() -> Router<AppState> {
         r = r.route(p, get(user_settings).put(user_settings_put));
     }
     r = r.route("/ai/trial-status", get(trial_status));
+    // 账单 / 礼包：本站没有付费和礼包体系，官网前端仍会探这两个接口，回空数组/空对象避免 404。
+    r = r.route("/user/giftkeys", get(empty_list));
+    for p in ["/user/cb/get-customer", "/ai/user/cb/get-customer"] {
+        r = r.route(p, get(empty_object));
+    }
     // 官网镜像页会探这些账号/对象接口：本站没有对应能力，回空结构而不是 404（404 会在页面里报错）
     r = r.route("/user/self", get(empty_object));
     for p in ["/usage/link", "/usage/event"] {
@@ -753,6 +758,11 @@ async fn user_settings_put(State(state): State<AppState>, req: Request) -> ApiRe
 /// 空对象：官网镜像页会探测、但本站没有对应能力的接口（/user/self、/usage/link）。
 async fn empty_object() -> ApiResult {
     Ok(ok_json(&json!({})))
+}
+
+/// 官网前端把礼包当成数组直接 `.json()` 用，回 `[]` 比 `{}` 安全。
+async fn empty_list() -> ApiResult {
+    Ok(ok_json(&json!([])))
 }
 
 /// 官网对象库（提示词宏、预设、脚本…）：本站不存远端对象，回空列表。
