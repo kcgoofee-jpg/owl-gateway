@@ -6,6 +6,7 @@ export type WbTheme = "dark" | "sand" | "slate";
 
 export type WbPrefs = {
   theme: WbTheme;
+  sidebarWidth: number;
   autoDownload: boolean;
   persistHistory: boolean;
   hideHistory: boolean;
@@ -40,6 +41,7 @@ export const THEMES: Array<{ id: WbTheme; label: string; blurb: string; swatch: 
 
 export const DEFAULT_PREFS: WbPrefs = {
   theme: "dark",
+  sidebarWidth: 400,
   autoDownload: false,
   persistHistory: false,
   hideHistory: false,
@@ -63,6 +65,10 @@ export function loadPrefs(): WbPrefs {
     const parsed = JSON.parse(raw) as Partial<WbPrefs> & { v?: number };
     return {
       theme: storedTheme(parsed),
+      sidebarWidth:
+        typeof parsed.sidebarWidth === "number" && Number.isFinite(parsed.sidebarWidth)
+          ? Math.min(700, Math.max(300, Math.round(parsed.sidebarWidth)))
+          : DEFAULT_PREFS.sidebarWidth,
       autoDownload: parsed.autoDownload === true,
       persistHistory: parsed.persistHistory === true,
       hideHistory: parsed.hideHistory === true,

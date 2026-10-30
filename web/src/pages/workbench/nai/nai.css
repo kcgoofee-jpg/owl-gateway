@@ -136,8 +136,35 @@ body.nai-page .toast {
 /* ---------- 三栏骨架：400 / 自适应 / 140 ---------- */
 .nai-frame {
   display: grid;
-  grid-template-columns: 400px minmax(0, 1fr) 140px;
+  grid-template-columns: var(--nai-side-width, 400px) 8px minmax(0, 1fr) 140px;
   height: 100%;
+}
+.nai-resizer {
+  position: relative;
+  z-index: 5;
+  width: 8px;
+  cursor: col-resize;
+  touch-action: none;
+  outline: none;
+}
+.nai-resizer::after {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: 3px;
+  width: 1px;
+  background: transparent;
+  content: "";
+  transition: background-color 0.12s ease;
+}
+.nai-resizer:hover::after,
+.nai-resizer:focus-visible::after,
+.nai-root[data-resizing-sidebar="true"] .nai-resizer::after {
+  background: var(--nai-border);
+}
+.nai-root[data-resizing-sidebar="true"] {
+  cursor: col-resize;
+  user-select: none;
 }
 
 /* 官方 7px 细滚动条 */
@@ -1470,7 +1497,7 @@ body.nai-page .toast {
 /* ---------- 响应式 ---------- */
 @media (max-width: 1180px) {
   .nai-frame {
-    grid-template-columns: 400px minmax(0, 1fr);
+    grid-template-columns: var(--nai-side-width, 400px) 8px minmax(0, 1fr);
   }
   .nai-rail {
     display: none;
@@ -1481,6 +1508,9 @@ body.nai-page .toast {
   .nai-frame {
     display: flex;
     flex-direction: column;
+  }
+  .nai-resizer {
+    display: none;
   }
   .nai-side {
     display: contents;

@@ -212,6 +212,8 @@ export function NaiApp() {
     member?.today?.site_v5_left !== 0;
 
   const [theme, setTheme] = useState<WbTheme>(() => loadPrefs().theme);
+  const [sidebarWidth, setSidebarWidth] = useState(() => loadPrefs().sidebarWidth);
+  const [resizingSidebar, setResizingSidebar] = useState(false);
   const [model, setModel] = useState<string>("nai-diffusion-4-5-full");
   const [mode, setMode] = useState<"anime" | "text">("anime");
   const [prompt, setPrompt] = useState("");
@@ -253,6 +255,7 @@ export function NaiApp() {
   const generatedBeforeHistoryLoaded = useRef(false);
   const sourceInputRef = useRef<HTMLInputElement>(null);
   const referenceInputRef = useRef<HTMLInputElement>(null);
+  const sidebarDrag = useRef<{ pointerId: number; startX: number; startWidth: number } | null>(null);
   useEffect(() => () => abortRef.current?.abort(), []);
   useEffect(() => {
     let active = true;
@@ -281,6 +284,12 @@ export function NaiApp() {
     const next = order[(order.indexOf(theme) + 1) % order.length] ?? "dark";
     setTheme(next);
     savePrefs({ ...loadPrefs(), theme: next });
+  };
+
+  const persistSidebarWidth = (width: number) => {
+    const next = Math.min(700, Math.max(300, Math.round(width)));
+    setSidebarWidth(next);
+    savePrefs({ ...loadPrefs(), sidebarWidth: next });
   };
 
   const pickModel = (id: string) => {
@@ -721,8 +730,8 @@ export function NaiApp() {
   );
 
   return (
-    <div class="nai-root" data-theme={theme}>
-      <div class="nai-frame">
+    <div class="nai-root" data-theme={theme} data-resizing-sidebar={resizingSidebar ? "true" : undefined}>
+      <div class="nai-frame" style={`--nai-side-width: ${sidebarWidth}px`}>
         {/* ============ 侧栏 ============ */}
         <aside class="nai-side">
           {/* 导航行：取消选择 / Anlas / 汉堡菜单 */}
@@ -1548,6 +1557,55 @@ export function NaiApp() {
             </div>
           </div>
         </aside>
+
+        {/* biome-ignore lint/a11y/useSemanticElements: a focusable ARIA separator exposes this adjustable split pane */}
+        <div
+          class="nai-resizer"
+          role="separator"
+          aria-label="调整侧栏宽度"
+          aria-orientation="vertical"
+          aria-valuemin={300}
+          aria-valuemax={700}
+          aria-valuenow={sidebarWidth}
+          tabIndex={0}
+          onPointerDown={(event) => {
+            event.preventDefault();
+            sidebarDrag.current = {
+              pointerId: event.pointerId,
+              startX: event.clientX,
+              startWidth: sidebarWidth,
+            };
+            setResizingSidebar(true);
+            (event.currentTarget as HTMLElement).setPointerCapture(event.pointerId);
+          }}
+          onPointerMove={(event) => {
+            const drag = sidebarDrag.current;
+            if (!drag || drag.pointerId !== event.pointerId) return;
+            setSidebarWidth(Math.min(700, Math.max(300, drag.startWidth + event.clientX - drag.startX)));
+          }}
+          onPointerUp={(event) => {
+            const drag = sidebarDrag.current;
+            if (!drag || drag.pointerId !== event.pointerId) return;
+            sidebarDrag.current = null;
+            setResizingSidebar(false);
+            persistSidebarWidth(drag.startWidth + event.clientX - drag.startX);
+          }}
+          onPointerCancel={() => {
+            const drag = sidebarDrag.current;
+            sidebarDrag.current = null;
+            setResizingSidebar(false);
+            if (drag) setSidebarWidth(drag.startWidth);
+          }}
+          onKeyDown={(event) => {
+            const key = event.key;
+            if (key === "ArrowLeft" || key === "ArrowRight" || key === "Home" || key === "End") {
+              event.preventDefault();
+              const next =
+                key === "Home" ? 300 : key === "End" ? 700 : sidebarWidth + (key === "ArrowRight" ? 16 : -16);
+              persistSidebarWidth(next);
+            }
+          }}
+        />
 
         {/* ============ 画布 ============ */}
         <main class="nai-canvas">

@@ -85,6 +85,17 @@ test("V4.5 reference and image-to-image uploads reach the generation request", a
   await page.reload();
   await expect(page.locator(".nai-rail-item img")).toHaveCount(1);
   await expect(page.locator(".nai-view-img")).toBeVisible();
+  const separator = page.getByRole("separator", { name: "调整侧栏宽度" });
+  const separatorBox = await separator.boundingBox();
+  expect(separatorBox).not.toBeNull();
+  if (!separatorBox) throw new Error("sidebar resize handle is not visible");
+  await page.mouse.move(separatorBox.x + separatorBox.width / 2, separatorBox.y + 80);
+  await page.mouse.down();
+  await page.mouse.move(separatorBox.x + separatorBox.width / 2 + 80, separatorBox.y + 80, { steps: 5 });
+  await page.mouse.up();
+  await expect(page.locator(".nai-side")).toHaveCSS("width", "480px");
+  await page.reload();
+  await expect(page.locator(".nai-side")).toHaveCSS("width", "480px");
 });
 
 test("admin login loads member management", async ({ page, context, browser, baseURL }) => {
