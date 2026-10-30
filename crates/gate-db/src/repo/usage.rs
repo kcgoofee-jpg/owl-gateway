@@ -682,7 +682,7 @@ impl Db {
         let limit = limit.clamp(1, 200);
         self.read(move |c| {
             let mut stmt = c.prepare(
-                "SELECT l.id, l.rid, l.ts, l.kind, l.model, l.status, l.images, l.anlas, l.wait_ms, l.dur_ms, l.reason, l.detail, \
+                "SELECT l.id, l.rid, l.ts, l.kind, l.model, l.status, l.images, l.anlas, l.wait_ms, l.dur_ms, l.reason, l.detail, l.client, \
                  COALESCE(s.delivery_state,'unknown') AS delivery_state, s.status AS settlement_status, \
                  COALESCE(s.anlas,0) AS remaining_anlas, COALESCE(s.v5,0) AS remaining_v5, COALESCE(s.legacy,0) AS remaining_legacy, u.request_id, COALESCE(s.correlation_id,'') AS correlation_id \
                  FROM usage_log l LEFT JOIN usage_request_links u ON u.usage_log_id=l.id LEFT JOIN request_settlements s ON s.request_id=u.request_id \
