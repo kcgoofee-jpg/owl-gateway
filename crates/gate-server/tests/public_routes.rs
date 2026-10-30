@@ -6,7 +6,6 @@ use axum::body::{Body, BodyDataStream};
 use axum::http::{HeaderMap, Request, StatusCode};
 use common::*;
 use futures::StreamExt;
-use gate_db::repo::usage::LogFilter;
 use gate_server::AppState;
 use gate_server::key::Key;
 use gate_server::session;

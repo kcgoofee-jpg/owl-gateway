@@ -63,9 +63,7 @@ pub fn router() -> Router<AppState> {
     for p in ["/user/clientsettings", "/ai/user/clientsettings"] {
         r = r.route(p, get(user_settings).put(user_settings_put));
     }
-    for p in ["/ai/trial-status"] {
-        r = r.route(p, get(trial_status));
-    }
+    r = r.route("/ai/trial-status", get(trial_status));
     // 官网镜像页会探这些账号/对象接口：本站没有对应能力，回空结构而不是 404（404 会在页面里报错）
     r = r.route("/user/self", get(empty_object));
     for p in ["/usage/link", "/usage/event"] {
