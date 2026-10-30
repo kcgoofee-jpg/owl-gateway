@@ -342,9 +342,14 @@ pub async fn run_once(state: &AppState, job: &Job) -> Result<String, JobError> {
 
 /// 拉起一个任务的循环（挂在 `state.tasks` 上）：先跑一轮，再睡一个周期；睡觉时收到关停就退出。
 /// 一轮工作做到底才响应关停：额度重算这类多步写入不能被拦腰切断。
+/// 启动后先让开一小段时间再跑第一轮（见 [`first_round_delay`]）。
 pub fn spawn_job(state: &AppState, job: &'static Job) {
     let st = state.clone();
     state.tasks.spawn(async move {
+        let delay = first_round_delay(job);
+        if delay > 0.0 && !sleep_or_shutdown(&st, delay).await {
+            return;
+        }
         loop {
             let _ = run_once(&st, job).await;
             let secs = if job.jitter > 0.0 {
@@ -358,4 +363,34 @@ pub fn spawn_job(state: &AppState, job: &'static Job) {
         }
         tracing::info!(task = job.name, "定时任务已停止");
     });
+}
+
+/// 每个任务启动后的第一轮错开几秒。
+///
+/// 为什么：部署时 `cutover.sh` 起来后 1 秒内就打 `/healthz`（读写各 1 秒上限），而九个任务原本会在同一瞬间
+/// 各跑一轮——`abuse_scan` 要读十几万行、`maintenance` 和 `idle_recycle` 要写库，读写连接被占满，健康检查
+/// 就回 503，部署被判失败自动回滚（10-31 04:37 那次）。错开之后第一轮分散在十秒内，健康检查不再和它们抢；
+/// 间隔不能太大：等待锁释放的测试与运维脚本都以 10 秒为界看「任务起来没有」。
+pub fn first_round_delay(job: &'static Job) -> f64 {
+    let index = JOBS.iter().position(|j| j.name == job.name).unwrap_or(0);
+    (index as f64) * 1.2
+}
+
+#[cfg(test)]
+mod first_round_tests {
+    use super::first_round_delay;
+
+    #[test]
+    fn the_first_round_is_staggered_across_jobs() {
+        // 第一个任务不延迟，后面的依次错开；全部在 10 秒内起来，不会被误当成「没在跑」
+        let delays: Vec<f64> = super::JOBS.iter().map(first_round_delay).collect();
+        assert_eq!(delays[0], 0.0);
+        assert!(
+            delays
+                .windows(2)
+                .all(|w| (w[1] - w[0] - 1.2).abs() < 1e-9),
+            "{delays:?}"
+        );
+        assert!(*delays.last().unwrap() <= 10.0, "{delays:?}");
+    }
 }
