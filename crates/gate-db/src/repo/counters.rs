@@ -227,6 +227,19 @@ impl Db {
     }
 
     /// 所有成员当日 V5 消耗，均计入共享预算。
+    /// 全站当日出图张数（不含已删除 Key 的账号真实消耗，和后台总览同一个口径）。
+    pub async fn day_images_total(&self, day: &str) -> Result<i64> {
+        let day = day.to_string();
+        self.read(move |c| {
+            c.query_row(
+                "SELECT COALESCE(SUM(images),0) AS c FROM counters WHERE day=?",
+                [day],
+                |r| value::i64_or(r, "c", 0),
+            )
+        })
+        .await
+    }
+
     pub async fn day_v5_total(&self, day: &str) -> Result<i64> {
         let day = day.to_string();
         self.read(move |c| c.query_row(&day_v5_total_sql(), [day], |r| value::i64_or(r, "c", 0)))

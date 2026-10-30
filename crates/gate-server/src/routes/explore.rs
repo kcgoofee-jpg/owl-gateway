@@ -307,28 +307,54 @@ fn clip(value: &str, max: usize) -> String {
     out
 }
 
-/// 北京时间（站点时区固定 UTC+8，和后台日志一致）。
-fn beijing_now() -> String {
-    use std::time::{SystemTime, UNIX_EPOCH};
-    let secs = SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .map(|d| d.as_secs() as i64)
-        .unwrap_or_default();
-    let local = secs + 8 * 3600;
-    let (days, rem) = (local.div_euclid(86_400), local.rem_euclid(86_400));
-    let (h, m, s) = (rem / 3600, (rem % 3600) / 60, rem % 60);
-    // 1970-01-01 起的天数 → 年月日（Howard Hinnant 的 civil_from_days）
-    let z = days + 719_468;
-    let era = z.div_euclid(146_097);
-    let doe = z.rem_euclid(146_097);
-    let yoe = (doe - doe / 1460 + doe / 36_524 - doe / 146_096) / 365;
-    let y = yoe + era * 400;
-    let doy = doe - (365 * yoe + yoe / 4 - yoe / 100);
-    let mp = (5 * doy + 2) / 153;
-    let d = doy - (153 * mp + 2) / 5 + 1;
-    let m2 = if mp < 10 { mp + 3 } else { mp - 9 };
-    let y = if m2 <= 2 { y + 1 } else { y };
-    format!("{y:04}-{m2:02}-{d:02} {h:02}:{m:02}:{s:02}（北京时间）")
+/// 采样器内部名 → 界面上的叫法（只覆盖常见的，其余原样显示）。
+fn sampler_label(raw: &str) -> String {
+    match raw.trim() {
+        "k_euler_ancestral" => "Euler Ancestral".into(),
+        "k_euler" => "Euler".into(),
+        "k_dpmpp_2m" => "DPM++ 2M".into(),
+        "k_dpmpp_2s_ancestral" => "DPM++ 2S Ancestral".into(),
+        "k_dpmpp_sde" => "DPM++ SDE".into(),
+        "ddim" => "DDIM".into(),
+        other => other.to_string(),
+    }
+}
+
+/// 元数据里的 `software` 形如 `NovelAI Diffusion V4.5 4BDE2A90`，去掉尾部哈希；
+/// 再和前端报上来的界面标签（`V4.5 Full`）拼出「具体模型」。
+fn model_label(meta: &std::collections::HashMap<String, String>) -> String {
+    let software = meta.get("software").map(|s| s.trim()).unwrap_or_default();
+    let ui = meta.get("model").map(|s| s.trim()).unwrap_or_default();
+    let base = {
+        let mut parts: Vec<&str> = software.split_whitespace().collect();
+        if parts
+            .last()
+            .is_some_and(|last| last.len() >= 8 && last.chars().all(|c| c.is_ascii_alphanumeric()))
+        {
+            parts.pop();
+        }
+        parts.join(" ")
+    };
+    let variant = ui
+        .split_whitespace()
+        .filter(|w| !base.to_lowercase().contains(&w.to_lowercase()))
+        .collect::<Vec<_>>()
+        .join(" ");
+    match (base.is_empty(), variant.is_empty()) {
+        (true, true) => String::new(),
+        (true, false) => ui.to_string(),
+        (false, true) => base,
+        (false, false) => format!("{base} {variant}"),
+    }
+}
+
+fn human_size(bytes: usize) -> String {
+    let mb = bytes as f64 / (1024.0 * 1024.0);
+    if mb >= 1.0 {
+        format!("{mb:.1} MB")
+    } else {
+        format!("{:.0} KB", bytes as f64 / 1024.0)
+    }
 }
 
 async fn post_to_discord(
@@ -343,41 +369,84 @@ async fn post_to_discord(
         "{}/channels/{channel}/messages",
         st.env.discord_api_base.trim_end_matches('/')
     );
-    let prompt = meta.get("prompt").map(String::as_str).unwrap_or_default();
-    let size = meta.get("size").map(String::as_str).unwrap_or_default();
-    let model = meta.get("model").map(String::as_str).unwrap_or_default();
-    let seed = meta.get("seed").map(String::as_str).unwrap_or_default();
-
-    let who = if uploader.trim().is_empty() {
-        format!("<@{discord_id}>（`{discord_id}`）")
-    } else {
-        format!("<@{discord_id}>（`{discord_id}` · {}）", clip(uploader, 40))
+    let get = |key: &str| {
+        meta.get(key)
+            .map(|s| s.trim().to_string())
+            .unwrap_or_default()
     };
+
+    // 只显示名字（拿不到名字才退回 id），不 @ 人、不展示 id
+    let who = if uploader.trim().is_empty() {
+        format!("`{discord_id}`")
+    } else {
+        clip(uploader, 40)
+    };
+
     let mut fields = vec![json!({"name": "提交者", "value": who, "inline": true})];
-    fields.push(json!({"name": "时间", "value": beijing_now(), "inline": true}));
-    if !size.trim().is_empty() {
-        fields.push(json!({"name": "尺寸", "value": clip(size, 40), "inline": true}));
+
+    let model = model_label(meta);
+    if !model.is_empty() {
+        fields.push(json!({"name": "模型", "value": clip(&model, 60), "inline": true}));
     }
-    if !model.trim().is_empty() || !seed.trim().is_empty() {
-        let value = [clip(model, 40), seed.trim().to_string()]
-            .into_iter()
-            .filter(|s| !s.is_empty())
-            .collect::<Vec<_>>()
-            .join(" · seed ");
-        fields.push(json!({"name": "模型 / 种子", "value": value, "inline": true}));
+
+    let size = get("size");
+    if !size.is_empty() {
+        fields.push(json!({"name": "尺寸", "value": clip(&size, 40), "inline": true}));
+    }
+
+    // 生成参数：步数 · 采样器 · 引导 · 噪声表
+    let mut params: Vec<String> = Vec::new();
+    let steps = get("steps");
+    if !steps.is_empty() {
+        params.push(format!("{steps} 步"));
+    }
+    let sampler = get("sampler");
+    if !sampler.is_empty() {
+        params.push(sampler_label(&sampler));
+    }
+    let scale = get("scale");
+    if !scale.is_empty() {
+        params.push(format!("Guidance {scale}"));
+    }
+    let noise = get("noise_schedule");
+    if !noise.is_empty() {
+        params.push(noise);
+    }
+    if !params.is_empty() {
+        fields.push(
+            json!({"name": "参数", "value": clip(&params.join(" · "), 200), "inline": false}),
+        );
+    }
+
+    let seed = get("seed");
+    if !seed.is_empty() {
+        fields.push(json!({"name": "种子", "value": format!("`{seed}`"), "inline": true}));
+    }
+
+    let format = match upload.mime {
+        "image/png" => "PNG",
+        "image/jpeg" => "JPG",
+        _ => "WebP",
+    };
+    fields.push(json!({
+        "name": "原图",
+        "value": format!("{format} · {}", human_size(upload.bytes.len())),
+        "inline": true
+    }));
+
+    // 今天全站出到第几张（读不到就不显示，不影响发图）
+    if let Ok(total) = st.db.day_images_total(&st.day()).await
+        && total > 0
+    {
+        fields.push(json!({"name": "今日全站", "value": format!("第 {total} 张"), "inline": true}));
     }
 
     let embed = json!({
         "title": "生图工作台 · 新作品",
-        "description": if prompt.trim().is_empty() {
-            "（没有取到提示词，原图元数据里还有）".to_string()
-        } else {
-            clip(prompt, 1500)
-        },
         "color": 0x6b4bd1u32,
         "fields": fields,
         "image": {"url": format!("attachment://{}", upload.file_name)},
-        "footer": {"text": "猫头鹰公益站 · 上传到 Explore"},
+        "footer": {"text": "猫头鹰公益站 · 生图工作台"},
     });
     let payload = json!({
         "embeds": [embed],
@@ -440,6 +509,28 @@ mod tests {
     }
 
     #[test]
+    fn model_label_combines_metadata_and_ui_variant() {
+        let mut meta = std::collections::HashMap::new();
+        meta.insert("software".into(), "NovelAI Diffusion V4.5 4BDE2A90".into());
+        meta.insert("model".into(), "V4.5 Full".into());
+        assert_eq!(model_label(&meta), "NovelAI Diffusion V4.5 Full");
+
+        meta.insert("model".into(), String::new());
+        assert_eq!(model_label(&meta), "NovelAI Diffusion V4.5");
+
+        meta.clear();
+        meta.insert("model".into(), "V5 Full".into());
+        assert_eq!(model_label(&meta), "V5 Full");
+    }
+
+    #[test]
+    fn sampler_names_are_pretty_printed() {
+        assert_eq!(sampler_label("k_euler_ancestral"), "Euler Ancestral");
+        assert_eq!(sampler_label("k_dpmpp_2m"), "DPM++ 2M");
+        assert_eq!(sampler_label("something_new"), "something_new");
+    }
+
+    #[test]
     fn file_names_keep_extensions_and_drop_paths() {
         assert_eq!(clean_file_name(None, "image/webp"), "owl-explore.webp");
         assert_eq!(clean_file_name(Some("a/b.webp"), "image/webp"), "ab.webp");
@@ -484,12 +575,5 @@ mod tests {
     fn ignores_images_without_metadata() {
         assert!(png_meta(b"RIFF    WEBP").is_none());
         assert!(png_meta(&png_with_text(&[("Author", "someone")])).is_none());
-    }
-
-    #[test]
-    fn beijing_timestamp_is_formatted() {
-        let now = beijing_now();
-        assert!(now.contains("北京时间"), "{now}");
-        assert_eq!(now.chars().filter(|c| *c == '-').count(), 2, "{now}");
     }
 }
