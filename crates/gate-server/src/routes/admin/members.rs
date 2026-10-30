@@ -20,7 +20,6 @@ use gate_db::repo::counters::Counter;
 use gate_db::repo::{
     INVITE_TAG,
     admin_members::{RegistrationRow, TagRow},
-    keys::NewKey,
 };
 use serde_json::{Map, Value, json};
 use std::collections::HashMap;
@@ -67,7 +66,7 @@ fn jflag(row: &Value, name: &str) -> bool {
     row.get(name).is_some_and(values::enabled)
 }
 
-fn gen_key() -> String {
+pub(super) fn gen_key() -> String {
     gate_core::policy::gen_key("nai", &rand::random::<[u8; 24]>())
 }
 
@@ -99,7 +98,7 @@ fn discord_profile(row: &RegistrationRow) -> Value {
 }
 
 /// 后台凭据视图；邀请来源仅作标签，不参与权限计算。
-fn key_json(
+pub(super) fn key_json(
     row: &Value,
     c: &Counter,
     generated: i64,
@@ -158,71 +157,13 @@ pub(super) async fn full_key_json(
 // ----------------------------------------------------------------------------- Key 列表 / 新建
 
 async fn list_keys(State(state): State<AppState>, _s: AdminSession) -> R {
-    let st = &state;
-    let rows = st.db.list_keys().await?;
-    let policies = st.db.member_policy_directory().await?;
-    let today = st.day();
-    // 一次批量取回今日计数（以前逐把 get_counter：370 把 = 370 次串行读库）
-    let counters = st.db.counter_map(&today).await?;
-    let zero = Counter::default();
-    let totals: HashMap<i64, i64> = st
-        .db
-        .generated_image_totals(None)
-        .await?
-        .into_iter()
-        .collect();
-    let invite: std::collections::HashSet<i64> =
-        st.db.invite_key_ids().await?.into_iter().collect();
-    let mut out = Vec::with_capacity(rows.len());
-    for r in &rows {
-        let id = r.get("id").and_then(Value::as_i64).unwrap_or(0);
-        let c = counters.get(&id).unwrap_or(&zero);
-        out.push(key_json(
-            r,
-            c,
-            totals.get(&id).copied().unwrap_or(0),
-            invite.contains(&id),
-            &policies.for_subject(r.get("discord_id").and_then(Value::as_str))?,
-        ));
-    }
-    Ok(ok_json(&json!({"keys": out})))
+    Ok(ok_json(&member_ops::list_keys_with_counters(&state).await?))
 }
 
 /// 一键新建邀请 Key（10-11 站长）：自动编号「邀请-N」、打「邀请」标签、额度交给算法，其余和 /register 发的一样。
 /// 成员拿到后在 Discord 用 /register 填这把 Key 完成绑定，后台自动认出是谁。
 async fn create_invite_key(State(state): State<AppState>, _s: AdminSession) -> R {
-    let st = &state;
-    // 和 /register 一样读「新成员默认」（后台「领 Key」的设置，没设过用 defaults 里的常量）
-    // 「邀请-N」编号：只看名字开头，数字可以是任何 Unicode 十进制数字
-    let max_no = st
-        .db
-        .key_names()
-        .await?
-        .iter()
-        .filter_map(|n| {
-            let rest = n.strip_prefix("邀请-")?;
-            let digits: String = rest.chars().take_while(|c| validation::is_nd(*c)).collect();
-            primitives::parse_int(&digits)
-        })
-        .max()
-        .unwrap_or(0);
-    let name = format!("邀请-{}", max_no + 1);
-    let now = st.now();
-    let new = NewKey {
-        name: name.clone(),
-        token: gen_key(),
-        enabled: true,
-        expires_at: None,
-        discord_id: None,
-    };
-    let row = st.db.create_key(&new, now).await?;
-    let id = row.get("id").and_then(Value::as_i64).unwrap_or(0);
-    st.db
-        .upsert_key_tag(id, INVITE_TAG, "邀请领取", "站长", now)
-        .await?;
-    log_action(&st.db, "站长", "新建邀请 Key", &name, "", true, st.now()).await;
-    let row = st.db.get_key(id).await?.unwrap_or(Value::Null);
-    let resp = ok_json(&json!({"key": full_key_json(st,&row,id).await?}));
+    let resp = ok_json(&member_ops::create_invite_key(&state).await?);
     Ok(mark_logged(resp))
 }
 
@@ -231,11 +172,7 @@ async fn regenerate_key(
     _s: AdminSession,
     AdminPath(key_id): AdminPath<i64>,
 ) -> R {
-    let token = gen_key();
-    if !state.db.rotate_key_token(key_id, &token).await? {
-        return Err(http(404, NO_KEY));
-    }
-    let mut resp = ok_json(&json!({"token": token}));
+    let mut resp = ok_json(&member_ops::regenerate_key(&state, key_id).await?);
     resp.headers_mut().insert(
         "cache-control",
         axum::http::HeaderValue::from_static("no-store"),
@@ -250,42 +187,7 @@ async fn patch_key(
     request: Request,
 ) -> R {
     let (_, body) = json_of(request).await?;
-    if body
-        .keys()
-        .any(|name| !["name", "enabled", "expires_at"].contains(&name.as_str()))
-    {
-        return Err(http(
-            422,
-            "Key 只允许修改名称、启用状态和到期时间；权限请修改成员规则",
-        ));
-    }
-    if load_key(&state, key_id).await?.is_none() {
-        return Err(http(404, NO_KEY));
-    }
-    let mut fields = Map::new();
-    for (name, value) in body {
-        let valid = match name.as_str() {
-            "name" => value
-                .as_str()
-                .is_some_and(|text| !text.trim().is_empty() && text.chars().count() <= 60),
-            "enabled" => value.is_boolean(),
-            "expires_at" => {
-                value.is_null() || value.as_f64().is_some_and(|n| n.is_finite() && n >= 0.0)
-            }
-            _ => false,
-        };
-        if !valid {
-            return Err(http(422, format!("{name} 格式无效")));
-        }
-        fields.insert(name, value);
-    }
-    state.db.update_key(key_id, &fields).await?;
-    let row = load_key(&state, key_id)
-        .await?
-        .ok_or_else(|| http(404, NO_KEY))?;
-    Ok(ok_json(
-        &json!({"key":full_key_json(&state,&row,key_id).await?}),
-    ))
+    Ok(ok_json(&member_ops::patch_key(&state, key_id, body).await?))
 }
 
 /// 重置指定 Key 今日的额度计数，保留审计日志。V4.5 一定重置，V5 / Anlas 看请求里的 `scope`（默认不重置）。
@@ -305,11 +207,7 @@ async fn reset_daily_image_quota(
     ))
 }
 
-/// 管理员手动给指定 Key 绑定或换绑 Discord 账号。
-///
-/// 只需要 Discord ID：配了机器人就用它读这个账号的公开资料（和后台补全资料同一条 `GET /users/{id}`），
-/// 用户名 / 显示名（global_name，没有就用用户名）/ 头像都以 Discord 为准，Key 名改成「显示名 (@用户名)」。
-/// 读不到（没配机器人、网络错误、超时、查无此人）就退回请求里填的 `username` / `display_name`，Key 名不动。
+/// 发一张重置券（目前只有 reset，有效期 1～30 天）。
 async fn give_coupon(
     State(state): State<AppState>,
     _s: AdminSession,

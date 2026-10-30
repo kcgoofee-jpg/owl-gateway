@@ -3,14 +3,19 @@
 //! 路由只负责鉴权、解析输入和拼响应；业务流程（校验、写库、操作日志、通知注册服务）都在这里，
 //! 这样同一套动作既能被 HTTP 路由调用，也能被 `nai-ops` 之类的运维命令复用。
 
-use super::members::{NO_KEY, full_key_json, load_key};
+use super::members::{NO_KEY, full_key_json, gen_key, key_json, load_key};
 use super::req::{http, pstr, pstr_or};
+use crate::action_log::log_action;
 use crate::body::JsonObject;
 use crate::error::ApiError;
 use crate::state::AppState;
 use gate_core::primitives;
-use gate_db::repo::counters::ResetScope;
+use gate_core::validation;
+use gate_db::repo::INVITE_TAG;
+use gate_db::repo::counters::{Counter, ResetScope};
+use gate_db::repo::keys::NewKey;
 use serde_json::{Value, json};
+use std::collections::HashMap;
 
 /// 请求体里的 `scope: ["v5", "anlas"]` → 重置范围。
 pub(super) fn reset_scope_of(body: &JsonObject) -> ResetScope {
@@ -149,4 +154,130 @@ pub(super) async fn clear_pause(state: &AppState, key_id: i64) -> Result<Value, 
     state.pauses.remove(key_id);
     state.db.clear_pause(key_id).await?;
     Ok(json!({"ok": true}))
+}
+
+/// 后台成员列表：一次批量取今日计数 / 累计张数 / 邀请 Key 集合 / 每人的生效规则。
+pub(super) async fn list_keys_with_counters(state: &AppState) -> Result<Value, ApiError> {
+    let rows = state.db.list_keys().await?;
+    let policies = state.db.member_policy_directory().await?;
+    let today = state.day();
+    // 一次批量取回今日计数（以前逐把 get_counter：370 把 = 370 次串行读库）
+    let counters = state.db.counter_map(&today).await?;
+    let zero = Counter::default();
+    let totals: HashMap<i64, i64> = state
+        .db
+        .generated_image_totals(None)
+        .await?
+        .into_iter()
+        .collect();
+    let invite: std::collections::HashSet<i64> =
+        state.db.invite_key_ids().await?.into_iter().collect();
+    let mut out = Vec::with_capacity(rows.len());
+    for r in &rows {
+        let id = r.get("id").and_then(Value::as_i64).unwrap_or(0);
+        let c = counters.get(&id).unwrap_or(&zero);
+        out.push(key_json(
+            r,
+            c,
+            totals.get(&id).copied().unwrap_or(0),
+            invite.contains(&id),
+            &policies.for_subject(r.get("discord_id").and_then(Value::as_str))?,
+        ));
+    }
+    Ok(json!({"keys": out}))
+}
+
+/// 一键新建邀请 Key（10-11 站长）：自动编号「邀请-N」、打「邀请」标签，其余和 /register 发的一样。
+pub(super) async fn create_invite_key(state: &AppState) -> Result<Value, ApiError> {
+    // 「邀请-N」编号：只看名字开头，数字可以是任何 Unicode 十进制数字
+    let max_no = state
+        .db
+        .key_names()
+        .await?
+        .iter()
+        .filter_map(|n| {
+            let rest = n.strip_prefix("邀请-")?;
+            let digits: String = rest.chars().take_while(|c| validation::is_nd(*c)).collect();
+            primitives::parse_int(&digits)
+        })
+        .max()
+        .unwrap_or(0);
+    let name = format!("邀请-{}", max_no + 1);
+    let now = state.now();
+    let new = NewKey {
+        name: name.clone(),
+        token: gen_key(),
+        enabled: true,
+        expires_at: None,
+        discord_id: None,
+    };
+    let row = state.db.create_key(&new, now).await?;
+    let id = row.get("id").and_then(Value::as_i64).unwrap_or(0);
+    state
+        .db
+        .upsert_key_tag(id, INVITE_TAG, "邀请领取", "站长", now)
+        .await?;
+    log_action(
+        &state.db,
+        "站长",
+        "新建邀请 Key",
+        &name,
+        "",
+        true,
+        state.now(),
+    )
+    .await;
+    let row = state.db.get_key(id).await?.unwrap_or(Value::Null);
+    Ok(json!({"key": full_key_json(state, &row, id).await?}))
+}
+
+/// 换一把新 Token（旧 Token 立即失效）。
+pub(super) async fn regenerate_key(state: &AppState, key_id: i64) -> Result<Value, ApiError> {
+    let token = gen_key();
+    if !state.db.rotate_key_token(key_id, &token).await? {
+        return Err(http(404, NO_KEY));
+    }
+    Ok(json!({"token": token}))
+}
+
+/// 改名称 / 启用状态 / 到期时间（权限走成员规则，不在这里改）。
+pub(super) async fn patch_key(
+    state: &AppState,
+    key_id: i64,
+    body: crate::body::JsonObject,
+) -> Result<Value, ApiError> {
+    if body
+        .keys()
+        .any(|name| !["name", "enabled", "expires_at"].contains(&name.as_str()))
+    {
+        return Err(http(
+            422,
+            "Key 只允许修改名称、启用状态和到期时间；权限请修改成员规则",
+        ));
+    }
+    if load_key(state, key_id).await?.is_none() {
+        return Err(http(404, NO_KEY));
+    }
+    let mut fields = serde_json::Map::new();
+    for (name, value) in body {
+        let valid = match name.as_str() {
+            "name" => value
+                .as_str()
+                .is_some_and(|text| !text.trim().is_empty() && text.chars().count() <= 60),
+            "enabled" => value.is_boolean(),
+            "expires_at" => {
+                value.is_null() || value.as_f64().is_some_and(|n| n.is_finite() && n >= 0.0)
+            }
+            _ => false,
+        };
+        if !valid {
+            return Err(http(422, format!("{name} 格式无效")));
+        }
+        fields.insert(name, value);
+    }
+    state.db.update_key(key_id, &fields).await?;
+    let row = load_key(state, key_id)
+        .await?
+        .ok_or_else(|| http(404, NO_KEY))?;
+    Ok(json!({"key": full_key_json(state, &row, key_id).await?}))
 }
