@@ -15,6 +15,19 @@ mode() { api "$A/admin/api/ops" | python3 -c 'import sys,json;print(json.load(sy
 set_mode() { api -X PUT "$A/admin/api/ops/maintenance" -d "{\"mode\":\"$1\"}" >/dev/null 2>&1; }
 
 probe_public() { curl -s -o /dev/null -w '%{http_code}' "$A/public/live" 2>/dev/null || true; }
+# 被关掉的全站功能：upscale/augment 关掉后工作台的「放大」直接 403，和官网界面不一致。
+# 每次部署都把结果打出来提醒（不判失败，关掉可能是站长的主动决定）。
+check_features() {
+  local off
+  off=$(api "$A/admin/api/ops" 2>/dev/null | python3 -c 'import sys,json
+d=json.load(sys.stdin)
+print(" ".join(sorted(k for k,v in d["features"]["global"].items() if not v)))' 2>/dev/null)
+  case ${off:-} in
+    "") echo "features: all enabled" ;;
+    *upscale*|*augment*) echo "WARN features disabled: $off (工作台放大/导演工具会回 403)" ;;
+    *) echo "features disabled: $off" ;;
+  esac
+}
 run_smoke() { docker exec owl-gate nai-ops smoke http://127.0.0.1:8000 | tail -3; }
 check_image() { curl -s -o /dev/null -w 'image: %{http_code}\n' "$A/image" 2>/dev/null || true; }
 
@@ -60,6 +73,7 @@ fi
 status=0
 run_smoke || status=$?
 check_image || status=$?
+check_features || true
 
 set_mode "$TARGET"
 rm -f "$STATE"
