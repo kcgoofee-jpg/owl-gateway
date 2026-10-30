@@ -349,11 +349,13 @@ fn model_label(meta: &std::collections::HashMap<String, String>) -> String {
 }
 
 fn human_size(bytes: usize) -> String {
-    let mb = bytes as f64 / (1024.0 * 1024.0);
-    if mb >= 1.0 {
-        format!("{mb:.1} MB")
+    let kb = bytes as f64 / 1024.0;
+    if kb >= 1024.0 {
+        format!("{:.1} MB", kb / 1024.0)
+    } else if kb >= 10.0 {
+        format!("{kb:.0} KB")
     } else {
-        format!("{:.0} KB", bytes as f64 / 1024.0)
+        format!("{kb:.1} KB")
     }
 }
 
@@ -521,6 +523,13 @@ mod tests {
         meta.clear();
         meta.insert("model".into(), "V5 Full".into());
         assert_eq!(model_label(&meta), "V5 Full");
+    }
+
+    #[test]
+    fn file_sizes_read_naturally() {
+        assert_eq!(human_size(486), "0.5 KB");
+        assert_eq!(human_size(51_200), "50 KB");
+        assert_eq!(human_size(1_600_000), "1.5 MB");
     }
 
     #[test]
