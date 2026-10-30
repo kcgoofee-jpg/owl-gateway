@@ -2,38 +2,8 @@
 
 use crate::{Db, Result};
 use rusqlite::{OptionalExtension, params};
-use std::collections::HashMap;
 
 impl Db {
-    /// Read several runtime settings from one SQLite read snapshot.
-    pub async fn get_settings_bulk(&self, keys: &[&str]) -> Result<HashMap<String, String>> {
-        let keys = keys.iter().map(|key| key.to_string()).collect::<Vec<_>>();
-        self.read(move |c| {
-            if keys.is_empty() {
-                return Ok(HashMap::new());
-            }
-            let placeholders = (1..=keys.len())
-                .map(|n| format!("?{n}"))
-                .collect::<Vec<_>>()
-                .join(",");
-            let sql = format!("SELECT key, value FROM site_settings WHERE key IN ({placeholders})");
-            let mut stmt = c.prepare(&sql)?;
-            let mut out = HashMap::new();
-            let rows = stmt.query_map(rusqlite::params_from_iter(keys.iter()), |r| {
-                Ok((
-                    crate::value::text_or(r, 0, "")?,
-                    crate::value::text_or(r, 1, "")?,
-                ))
-            })?;
-            for row in rows {
-                let (key, value) = row?;
-                out.insert(key, value);
-            }
-            Ok(out)
-        })
-        .await
-    }
-
     /// 读设置；没有这一行返回 None。
     pub async fn get_setting(&self, key: &str) -> Result<Option<String>> {
         let key = key.to_string();

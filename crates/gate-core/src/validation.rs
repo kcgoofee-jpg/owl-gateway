@@ -74,9 +74,6 @@ pub fn is_nd(c: char) -> bool {
 pub fn is_decimal(s: &str) -> bool {
     !s.is_empty() && s.bytes().all(|b| b.is_ascii_digit())
 }
-pub fn nd_value(c: char) -> Option<u32> {
-    c.to_digit(10)
-}
 pub fn is_digit(c: char) -> bool {
     c.is_ascii_digit()
 }
@@ -85,12 +82,6 @@ pub fn nd_class() -> &'static str {
 }
 pub fn space_class() -> &'static str {
     r"\s"
-}
-pub fn quoted(s: &str) -> String {
-    serde_json::to_string(s).expect("valid string")
-}
-pub fn format_value(v: &Value) -> String {
-    v.to_string()
 }
 pub fn text(v: &Value) -> String {
     crate::values::text(v)

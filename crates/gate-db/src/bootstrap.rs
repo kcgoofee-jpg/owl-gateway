@@ -125,14 +125,6 @@ pub const RUST_ADDED_TABLES: &[&str] = &[
      discord_id TEXT NOT NULL, browser_id TEXT NOT NULL, ip TEXT NOT NULL DEFAULT '', ts REAL NOT NULL, \
      PRIMARY KEY (discord_id, browser_id))",
     "CREATE INDEX IF NOT EXISTS idx_browser_logins_bid ON browser_logins (browser_id)",
-    // 专项问卷（已下线，表只为保留旧数据，代码不再读写；删 Key 时顺带清掉这位成员的行）：站长对某一位成员单独发的几道问题。
-    // questions = JSON [{label, hint, required}]；answers = JSON 字符串数组（与 questions 一一对应），未回答为空串；
-    // answered_ts 为 NULL = 待回答。一次性：回答后不能再改。
-    "CREATE TABLE IF NOT EXISTS member_inquiries (\
-     id INTEGER PRIMARY KEY AUTOINCREMENT, key_id INTEGER NOT NULL, title TEXT NOT NULL, \
-     intro TEXT NOT NULL DEFAULT '', questions TEXT NOT NULL, answers TEXT NOT NULL DEFAULT '', \
-     created_ts REAL NOT NULL, answered_ts REAL, by TEXT NOT NULL DEFAULT '')",
-    "CREATE INDEX IF NOT EXISTS idx_member_inquiries_key ON member_inquiries (key_id, answered_ts)",
     // 请求日志按来源 IP 精确筛（看同一个 IP 用过哪些 Key）。部分索引：保留期外的行 src 是空串，不进索引。
     "CREATE INDEX IF NOT EXISTS idx_log_src ON usage_log (src) WHERE src!=''",
     // 网页登录时（OAuth scope `guilds`）读到的成员所在服务器列表（站长 10-23：防一人多号 / 共用 Key）。

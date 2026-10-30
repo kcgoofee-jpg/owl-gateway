@@ -94,22 +94,6 @@ impl GateError {
         self.retryable = yes && !self.billing_uncertain;
         self
     }
-
-    /// 带前缀的成员可见文案。
-    pub fn display_message(&self) -> String {
-        let base = if self.message.starts_with(NOTICE_PREFIX) {
-            self.message.clone()
-        } else {
-            format!("{NOTICE_PREFIX}{}", self.message)
-        };
-        if self.billing_uncertain {
-            let base = base.replace("未扣费", "尚未确认记账");
-            format!("{base} 执行结果未知，请勿自动重发；请先在“我的请求”中核对。")
-        } else {
-            base
-        }
-    }
-
     pub fn response_body(&self) -> Value {
         let rid = crate::reqctx::current_rid();
         member_error_body(

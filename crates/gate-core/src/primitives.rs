@@ -13,12 +13,6 @@ pub fn sum<I: IntoIterator<Item = f64>>(items: I) -> f64 {
 pub fn int_of(x: f64) -> Option<i64> {
     (x.is_finite() && x >= i64::MIN as f64 && x < i64::MAX as f64).then_some(x.trunc() as i64)
 }
-pub fn floordiv_f(a: f64, b: f64) -> f64 {
-    (a / b).floor()
-}
-pub fn minimum(a: f64, b: f64) -> f64 {
-    a.min(b)
-}
 pub fn maximum(a: f64, b: f64) -> f64 {
     a.max(b)
 }
@@ -48,17 +42,11 @@ pub fn last_chars(s: &str, n: usize) -> &str {
 pub fn len_chars(s: &str) -> usize {
     s.chars().count()
 }
-pub fn decimal_value(c: char) -> Option<u32> {
-    c.to_digit(10)
-}
 pub fn parse_int(s: &str) -> Option<i64> {
     s.trim().parse().ok()
 }
 pub fn parse_float(s: &str) -> Option<f64> {
     s.trim().parse::<f64>().ok().filter(|f| f.is_finite())
-}
-pub fn parse_int_via_float(s: &str) -> Option<i64> {
-    parse_float(s).and_then(int_of)
 }
 pub fn bool_text(v: bool) -> &'static str {
     if v { "true" } else { "false" }

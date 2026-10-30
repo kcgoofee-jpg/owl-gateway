@@ -13,7 +13,6 @@ pub mod abuse_scan;
 pub mod account_stats;
 pub mod admin_actions;
 pub mod admin_members;
-pub mod admin_ops;
 pub mod admin_records;
 pub mod counters;
 pub mod coupons;

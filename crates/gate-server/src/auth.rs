@@ -333,12 +333,6 @@ pub fn record_auth_failure(state: &AppState, ip: &str, now: f64) {
 pub async fn site_flag(state: &AppState, spec: &Spec) -> Result<Value, gate_db::DbError> {
     crate::settings::site_value(&state.db, spec).await
 }
-
-/// 数值型站点设置。
-pub async fn site_flag_f64(state: &AppState, spec: &Spec) -> Result<f64, gate_db::DbError> {
-    crate::settings::site_f64(&state.db, spec).await
-}
-
 /// 功能开关（站长全局开关 + 这把 Key 的功能列表）。
 pub async fn require_feature(state: &AppState, key: &Key, name: &str) -> Result<(), ApiError> {
     let global = state

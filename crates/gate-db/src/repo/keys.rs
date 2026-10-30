@@ -203,7 +203,6 @@ impl Db {
                 params![now, key_id],
             )?;
             tx.execute("DELETE FROM key_tags WHERE key_id=?", [key_id])?;
-            tx.execute("DELETE FROM member_inquiries WHERE key_id=?", [key_id])?;
             tx.execute("DELETE FROM discord_registrations WHERE key_id=?", [key_id])?;
             tx.execute("DELETE FROM api_keys WHERE id=?", [key_id])?;
             Ok(())

@@ -150,17 +150,6 @@ pub static GLOBAL_MONTHLY_ANLAS: Spec = bounded(
     0,
     99999,
 );
-pub static MEMBER_DAILY_ANLAS: Spec = bounded(
-    spec(
-        "member_daily_anlas",
-        Kind::Int,
-        SpecDefault::Int(50),
-        "额度 / Anlas 池",
-        "每人每日 Anlas 上限（仅对未手动设置 Anlas 日额度的 Key 生效；0 = 停用）。Vibe 编码一张参考图约 2 点，50 点 ≈ 25 次/天，防单人吃光全站 PVP 池",
-    ),
-    0,
-    9999,
-);
 /// V4.5 每人每天张数（手动，站长 10-23：新号老号一样，算法不改；新号爬坡 `newbie_ramp_*` 已删除）。
 /// 额度同步任务把它下发给 `quota_auto=1` 的成员 Key，新领的 Key 也用它。没设过按 150，0 = 停用。
 pub static REGISTER_DAILY_IMAGES: Spec = bounded(

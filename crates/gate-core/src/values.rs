@@ -22,9 +22,6 @@ pub fn number(v: &Value) -> Option<f64> {
 pub fn strict_number(v: &Value) -> Option<f64> {
     v.as_f64()
 }
-pub fn is_float(v: &Value) -> bool {
-    v.is_f64()
-}
 pub fn equal(a: &Value, b: &Value) -> bool {
     a == b
 }

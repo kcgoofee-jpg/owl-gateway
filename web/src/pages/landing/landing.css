@@ -757,9 +757,3 @@
 .lp-use-rules li {
   text-wrap: pretty;
 }
-/* 生图工作台入口卡：说明一行 + 主按钮一行（按钮不能放进 <p>，见 WorkbenchEntry 注释） */
-.wb-entry__row {
-  display: grid;
-  justify-items: start;
-  gap: var(--sp-2);
-}

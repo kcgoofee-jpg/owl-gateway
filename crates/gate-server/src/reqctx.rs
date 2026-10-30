@@ -255,12 +255,6 @@ impl ReqCtx {
     pub fn set_share(&self, images_today: i64) {
         self.with(|i| i.share = images_today.max(0));
     }
-
-    /// 本请求遇到上游「并发锁」的次数。
-    pub fn locked_count(&self) -> u32 {
-        self.with(|i| i.locked)
-    }
-
     pub fn was_sent(&self) -> bool {
         self.with(|i| i.sent.is_some())
     }
