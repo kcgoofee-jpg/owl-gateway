@@ -37,7 +37,7 @@
 
 ## 2. 七步（重新排序、标注现状）
 
-### ① 数据库写队列 —— 已完成（2026-10-31）
+### ① 数据库写队列 —— 已完成并上线（2026-10-31，72de2c0）
 
 **原来的问题**：`crates/gate-db/src/lib.rs` 里写线程和事务模型都是对的（单写线程、`BEGIN IMMEDIATE`、
 busy 重试、panic 后重开连接），但 `Db::write()` 在 async 函数里直接 `SyncSender::send`：
@@ -50,7 +50,7 @@ busy 重试、panic 后重开连接），但 `Db::write()` 在 async 函数里�
 **验收**：`crates/gate-db/tests/write_queue.rs`，单 worker 运行时 + 长度 1 的队列，
 慢写任务占住时心跳任务仍按时完成（以前这条会超时）。
 
-### ② 结算与用量日志
+### ② 结算与用量日志 —— 已完成并上线（cf047b6）
 
 **现状**：`repo/usage.rs`（1009 行）同时管三件事：写 `usage_log`、维护 `request_settlements` 状态机
 （预留 → 落账 / 释放 / 恢复）、以及各种统计查询（`LogSummary`、按 Key / 时间聚合）。
@@ -63,7 +63,7 @@ busy 重试、panic 后重开连接），但 `Db::write()` 在 async 函数里�
 **验收**：`grep -rn "request_settlements" crates/ --include=*.rs` 只出现在 `repo/settlement.rs` 和迁移文件里；
 `repo/usage.rs` < 400 行。
 
-### ③ 准入与预算
+### ③ 准入与预算 —— 已完成并上线（4a6c791）
 
 **现状**：`admission.rs`（649 行）把排队、预算预留、派发确认、配额检查塞在一个文件里，
 `state.budget.lock()` 在路由里也直接出现。
@@ -75,7 +75,7 @@ busy 重试、panic 后重开连接），但 `Db::write()` 在 async 函数里�
 
 **验收**：`grep -rn "budget\.lock()" crates/gate-server/src/routes/` 为空；`admission.rs` 只剩 re-export。
 
-### ④ 图片策略
+### ④ 图片策略 —— 已完成并上线（64a2ee2）
 
 **现状**：`gate-core/src/policy.rs` 1973 行，混着参数规范化、参考图与 Vibe 校验、提示词处理、
 模型选择与费用规则。
@@ -85,7 +85,7 @@ busy 重试、panic 后重开连接），但 `Db::write()` 在 async 函数里�
 
 **验收**：每个新文件 < 500 行；`policy.rs` 的公开 API 名字不变（外部只改 `use`）。
 
-### ⑤ Discord 注册
+### ⑤ Discord 注册 —— 待做（zcode 正在改 gate-discord / naimei，等他那批落地）
 
 **现状**：`registration.rs` 1416 行，包含 Discord REST 客户端调用、注册流程（领 Key / 邀请 / 名额）、
 资料与身份组的同步、欢迎语拼装。
@@ -96,7 +96,7 @@ busy 重试、panic 后重开连接），但 `Db::write()` 在 async 函数里�
 
 **验收**：`RegistrationService` 的公开方法数 ≤ 12；`client.rs` 是唯一直接打 Discord REST 的地方。
 
-### ⑥ 上游派发
+### ⑥ 上游派发 —— 已完成并上线（380c999）
 
 **现状**：`gate-upstream/src/dispatch.rs` 1176 行，普通请求与流式请求各写一遍「准备 + 派发 + 收尾」，
 429 / 403 / 402 的处理分散。
@@ -107,7 +107,7 @@ busy 重试、panic 后重开连接），但 `Db::write()` 在 async 函数里�
 **验收**：`dispatch.rs` < 500 行；新增一条测试：同一份 `Hooks` 下，普通与流式在 429 / 403 上的
 冷却与隔离行为一致。
 
-### ⑦ 后台成员操作
+### ⑦ 后台成员操作 —— 已完成并上线（8a2d728）
 
 **现状**：`routes/admin/members.rs` 977 行，路由里直接做业务流程（建邀请 Key、重置额度、发券、
 打标签、封禁），`admin_members.rs` 只是薄薄一层 SQL。
@@ -127,6 +127,22 @@ busy 重试、panic 后重开连接），但 `Db::write()` 在 async 函数里�
 ⑥ 上游派发 ┘
 ⑦ 后台成员操作（最后，复用 ②③ 的服务层）
 ```
+
+## 3.1 进度（2026-10-31 03:25）
+
+| 步 | 结果 | 行数 |
+|---|---|---|
+| ① | 已上线：`Db::write` 改信号量背压，`tests/write_queue.rs` 守住 | — |
+| ② | 已上线：`repo/usage.rs` 1009 → 406，拆出 `settlement.rs`(371) / `usage_stats.rs`(256) | — |
+| ③ | 已上线：`admission.rs` 649 → 22（`queue` 209 / `quota` 168 / `budget` 284），路由不再锁 `state.budget` | — |
+| ④ | 已上线：`policy.rs` 1982 → 124（`params` 376 / `references` 324 / `prompts` 529 / `pricing` 220 / `probe` 436） | — |
+| ⑥ | 已上线：`dispatch.rs` 1176 → 829（`outcome.rs` 308 结算守卫+状态码表 / `stream.rs` 54） | — |
+| ⑦ | 已上线：`routes/admin/members.rs` 977 → 888，业务挪进 `member_ops.rs`(148)；还有一批路由待继续瘦身 | — |
+| ⑤ | 待做 | — |
+
+未达「单文件 < 700 行」的还有 `members.rs`(888)、`dispatch.rs`(829)、`prompts.rs`(529 已达标)：
+⑦ 的第二批（`list_keys` / `create_invite_key` / `patch_key` 等）和 ⑥ 的 `confirm_v5*` / `wait_slot`
+还需要各挪一次。这两块继续按本计划推进。
 
 ## 4. 每次落地的固定动作
 
