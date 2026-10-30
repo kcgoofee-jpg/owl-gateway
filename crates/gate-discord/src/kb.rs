@@ -76,7 +76,7 @@ pub fn retrieve(query: &str, top: usize) -> String {
     if q.is_empty() {
         return String::new();
     }
-    let threshold = ((q.len() + 4) / 5).max(2);
+    let threshold = q.len().div_ceil(5).max(2);
     let mut scored: Vec<(usize, &Chunk)> = chunks()
         .iter()
         .map(|c| {
