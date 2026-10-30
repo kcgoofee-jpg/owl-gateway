@@ -205,14 +205,29 @@ async fn upload(State(st): State<AppState>, headers: HeaderMap, req: Request) ->
         if let Some(seed) = inner.get("seed").and_then(Value::as_u64) {
             put("seed", seed.to_string());
         }
+        // software 单独存：`model` 留给前端报的界面标签（V4.5 Full），拼短名时才不会带上哈希
         put(
-            "model",
+            "software",
             inner
                 .get("software")
                 .and_then(Value::as_str)
                 .unwrap_or_default()
                 .to_string(),
         );
+        // 生成参数也从原图元数据里读，图上没有才保留前端值
+        for (key, field) in [
+            ("steps", "steps"),
+            ("sampler", "sampler"),
+            ("scale", "scale"),
+            ("noise_schedule", "noise_schedule"),
+        ] {
+            let value = match inner.get(field) {
+                Some(Value::String(text)) => text.clone(),
+                Some(other) if other.is_number() => other.to_string(),
+                _ => String::new(),
+            };
+            put(key, value);
+        }
     }
     let uploader = st
         .db
@@ -500,6 +515,15 @@ mod tests {
         );
         assert_eq!(sniff(&[0xff, 0xd8, 0xff, 0xe0]), Some("image/jpeg"));
         assert_eq!(sniff(b"GIF89a"), None);
+    }
+
+    /// 元数据里的 software 不能覆盖前端报的 model，否则卡片上会显示带哈希的全名。
+    #[test]
+    fn software_stays_in_its_own_field() {
+        let mut meta = std::collections::HashMap::new();
+        meta.insert("model".into(), "V4.5 Full".into());
+        meta.insert("software".into(), "NovelAI Diffusion V4.5 4BDE2A90".into());
+        assert_eq!(model_label(&meta), "V4.5 Full");
     }
 
     #[test]
