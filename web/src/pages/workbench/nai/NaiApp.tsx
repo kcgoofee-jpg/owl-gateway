@@ -8,9 +8,9 @@
 
 import { ArrowRight, Clock, Download, LayoutGrid, LogIn, Pencil, Settings, User, Wand2 } from "lucide-preact";
 import { useEffect, useRef, useState } from "preact/hooks";
+import { appendHistory, clearHistory as clearStoredHistory, loadHistory } from "../../../lib/history-store";
 import {
   BASE_MODELS,
-  buildRequest,
   clampForm,
   entryProblem,
   type GenAttrs,
@@ -23,7 +23,8 @@ import {
   V5_MODELS,
 } from "../../../lib/nai-config";
 import { toast } from "../../../ui";
-import { fetchSuggestions, makeShot, postImages, type Shot } from "../api";
+import { encodeVibe, fetchSuggestions, makeShot, postImages, type Shot } from "../api";
+import { readImageFile } from "../files";
 import {
   AnlasIcon,
   CheckIcon,
@@ -48,13 +49,20 @@ import { QUICKSTART } from "../quickstart";
 import { me as meSignal, reloadMe, start } from "../store";
 import { tokenizeText } from "../tokenizer";
 import {
+  buildTaskRequest,
   composeNegative,
   composePositive,
+  MAX_REFS,
   MODEL_BLURBS,
+  prepareVibeRefs,
   type QualityPreset,
   qualityPresetList,
+  type RefImage,
+  type SourceImage,
   type UcPreset,
   ucPresetList,
+  vibeEncodeBody,
+  vibeWire,
 } from "../workbench-config";
 import "./nai.css";
 
@@ -212,6 +220,10 @@ export function NaiApp() {
   const [qualityPreset, setQualityPreset] = useState<QualityPreset>("standard");
   const [ucPreset, setUcPreset] = useState<UcPreset>("heavy");
   const [transparent, setTransparent] = useState(false);
+  const [sourceImage, setSourceImage] = useState<SourceImage | null>(null);
+  const [referenceImages, setReferenceImages] = useState<RefImage[]>([]);
+  const [imageStrength, setImageStrength] = useState(0.65);
+  const [imageNoise, setImageNoise] = useState(0);
   const [width, setWidth] = useState(832);
   const [height, setHeight] = useState(1216);
   const [presetId, setPresetId] = useState("portrait");
@@ -238,7 +250,25 @@ export function NaiApp() {
   const menuTimer = useRef<number | null>(null);
 
   const abortRef = useRef<AbortController | null>(null);
+  const generatedBeforeHistoryLoaded = useRef(false);
+  const sourceInputRef = useRef<HTMLInputElement>(null);
+  const referenceInputRef = useRef<HTMLInputElement>(null);
   useEffect(() => () => abortRef.current?.abort(), []);
+  useEffect(() => {
+    let active = true;
+    void loadHistory()
+      .then((saved) => {
+        if (!active || generatedBeforeHistoryLoaded.current) return;
+        setShots(saved);
+        setViewing(saved.length ? 0 : null);
+      })
+      .catch(() => {
+        // IndexedDB may be unavailable or full; current session images remain usable.
+      });
+    return () => {
+      active = false;
+    };
+  }, []);
   useEffect(() => {
     if (!v5Available && isV5(model)) {
       setModel("nai-diffusion-4-5-full");
@@ -273,6 +303,50 @@ export function NaiApp() {
     if (p?.w && p?.h) {
       setWidth(p.w);
       setHeight(p.h);
+    }
+  };
+
+  const loadSourceImage = async (file?: File) => {
+    if (!file) return;
+    if (!file.type.startsWith("image/")) {
+      toast("请选择 PNG、JPEG 或 WebP 图片。", { error: true });
+      return;
+    }
+    try {
+      setSourceImage(await readImageFile(file));
+    } catch (e) {
+      toast(e instanceof Error ? e.message : "图片读取失败。", { error: true });
+    }
+  };
+
+  const loadReferenceImages = async (files?: FileList | null) => {
+    if (!files?.length) return;
+    const remaining = MAX_REFS - referenceImages.length;
+    if (remaining <= 0) {
+      toast(`最多添加 ${MAX_REFS} 张参考图。`, { error: true });
+      return;
+    }
+    const selected = Array.from(files).slice(0, remaining);
+    if (files.length > remaining) toast(`一次最多保留 ${MAX_REFS} 张参考图。`);
+    try {
+      const loaded = await Promise.all(
+        selected.map(async (file) => {
+          if (!file.type.startsWith("image/")) throw new Error(`「${file.name}」不是图片。`);
+          const source = await readImageFile(file);
+          return {
+            id: crypto.randomUUID(),
+            name: source.name,
+            dataUrl: source.dataUrl,
+            b64: source.b64,
+            strength: 0.6,
+            extracted: 0.6,
+            enabled: true,
+          } satisfies RefImage;
+        }),
+      );
+      setReferenceImages((previous) => [...previous, ...loaded].slice(0, MAX_REFS));
+    } catch (e) {
+      toast(e instanceof Error ? e.message : "参考图读取失败。", { error: true });
     }
   };
   const orientOf = (): "portrait" | "landscape" | "square" =>
@@ -367,6 +441,14 @@ export function NaiApp() {
       toast(entry, { error: true });
       return;
     }
+    if (sourceImage && member.policy?.img2img === false) {
+      toast("你的 Key 暂未开放图生图。", { error: true });
+      return;
+    }
+    if (referenceImages.length > 0 && member.policy?.vibe === false) {
+      toast("你的 Key 暂未开放参考图。", { error: true });
+      return;
+    }
     const form = composeForm();
     /* 校验用户原始输入：composePositive 会拼上质量词，composed 结果永远非空，不能用它判空。 */
     if (!prompt.trim()) {
@@ -383,10 +465,44 @@ export function NaiApp() {
     const made: Shot[] = [];
     const baseIndex = shots.length;
     try {
+      const enabledReferences = referenceImages.filter((image) => image.enabled !== false);
+      const vibeRefs = await prepareVibeRefs(
+        model,
+        enabledReferences.map((image) => ({
+          image: image.dataUrl,
+          strength: image.strength,
+          extracted: image.extracted,
+          ...(image.encoded && image.encodedAt !== undefined
+            ? { encoded: image.encoded, encodedAt: image.encodedAt }
+            : {}),
+        })),
+        (image, extracted) => encodeVibe(vibeEncodeBody(image, model, extracted), key, ctrl.signal),
+      );
+      if (vibeRefs.length) {
+        setReferenceImages((previous) =>
+          previous.map((reference) => {
+            const index = enabledReferences.findIndex((image) => image.id === reference.id);
+            const encoded = index >= 0 ? vibeRefs[index] : undefined;
+            return encoded
+              ? { ...reference, encoded: encoded.image, encodedAt: encoded.extracted ?? reference.extracted }
+              : reference;
+          }),
+        );
+      }
       for (let i = 0; i < count; i++) {
         const used = count > 1 ? (resolveSeed(seed) + i) >>> 0 : resolveSeed(seed);
         setGenSeed(used);
-        const req = buildRequest({ ...clamped.form, seed: String(used) }, used);
+        const req = buildTaskRequest(
+          {
+            form: { ...clamped.form, seed: String(used) },
+            mode: sourceImage ? "img2img" : "generate",
+            source: sourceImage,
+            strength: imageStrength,
+            noise: imageNoise,
+            refs: vibeRefs,
+          },
+          used,
+        );
         if (transparent) (req.parameters as Record<string, unknown>).transparent_background = true;
         const startedAt = Date.now();
         const imgs = await postImages(req, key, ctrl.signal);
@@ -406,7 +522,13 @@ export function NaiApp() {
         const fresh = imgs.map((img) => makeShot(img, attrs, count > 1 ? `${i + 1}/${count}` : undefined));
         made.push(...fresh);
         /* 出一张亮一张，和官方的增量出图一致 */
+        generatedBeforeHistoryLoaded.current = true;
         setShots((prev) => [...prev, ...fresh]);
+        try {
+          await appendHistory(fresh);
+        } catch {
+          toast("图片已加入当前历史，但浏览器没有保存到本机。", { error: true });
+        }
       }
       setViewing((prev) => (prev === null ? baseIndex : prev));
       toast(count > 1 ? `完成了 ${made.length} 张。` : "完成了。");
@@ -463,10 +585,18 @@ export function NaiApp() {
     })();
   };
 
-  const clearHistory = () => {
+  const clearHistory = async () => {
     if (!confirmClear) {
       setConfirmClear(true);
       window.setTimeout(() => setConfirmClear(false), 2500);
+      return;
+    }
+    generatedBeforeHistoryLoaded.current = true;
+    try {
+      await clearStoredHistory();
+    } catch (e) {
+      setConfirmClear(false);
+      toast(e instanceof Error ? e.message : "图片历史清空失败。", { error: true });
       return;
     }
     setShots([]);
@@ -529,15 +659,6 @@ export function NaiApp() {
         <div class="nai-quota-track" aria-hidden="true">
           <i style={{ width: `${quotaPct}%` }} />
         </div>
-        <button
-          type="button"
-          class="nai-quota-plus"
-          title="充值"
-          aria-label="充值"
-          onClick={() => toast("充值暂未开放，出图额度由站长按日发放。", { error: true })}
-        >
-          <PlusIcon size={10} />
-        </button>
       </div>
     </div>
   );
@@ -621,15 +742,6 @@ export function NaiApp() {
                 {anlas}
                 <AnlasIcon size={11} />
               </span>
-              <button
-                type="button"
-                class="nai-anlas-plus"
-                title="充值"
-                aria-label="充值"
-                onClick={() => toast("充值暂未开放，出图额度由站长按日发放。", { error: true })}
-              >
-                <PlusIcon size={14} />
-              </button>
             </div>
             <div class="nai-menu-wrap">
               <button
@@ -986,35 +1098,187 @@ export function NaiApp() {
               </div>
             </div>
 
-            {/* Reference Images / Image2Image（未开放） */}
-            <div class="nai-group-label">Reference Images</div>
-            <div class="nai-i2i">
-              <span class="nai-i2i-icon">
-                <UploadIcon size={16} />
-              </span>
-              <div class="nai-i2i-text">
-                <div class="nai-char-title">Image2Image</div>
-                <div class="nai-char-sub">以参考图为基础变换画面。</div>
-              </div>
+            {vibeWire(model) !== "none" ? (
+              <>
+                <div class="nai-group-label">Reference Images</div>
+                <fieldset
+                  class="nai-reference-images"
+                  aria-label="参考图"
+                  onDragOver={(event) => event.preventDefault()}
+                  onDrop={(event) => {
+                    event.preventDefault();
+                    void loadReferenceImages(event.dataTransfer?.files);
+                  }}
+                >
+                  <input
+                    ref={referenceInputRef}
+                    class="nai-i2i-file"
+                    type="file"
+                    multiple
+                    accept="image/png,image/jpeg,image/webp"
+                    aria-label="选择参考图"
+                    onChange={(event) => {
+                      void loadReferenceImages((event.currentTarget as HTMLInputElement).files);
+                      (event.currentTarget as HTMLInputElement).value = "";
+                    }}
+                  />
+                  {referenceImages.length ? (
+                    <div class="nai-reference-list">
+                      {referenceImages.map((reference) => (
+                        <div class="nai-reference-item" key={reference.id}>
+                          <img src={reference.dataUrl} alt={reference.name} />
+                          <div class="nai-reference-item-main">
+                            <div class="nai-reference-name" title={reference.name}>
+                              {reference.name}
+                            </div>
+                            <label>
+                              <span>Strength</span>
+                              <input
+                                aria-label={`${reference.name} 影响度`}
+                                type="range"
+                                min="0.05"
+                                max="1"
+                                step="0.05"
+                                value={reference.strength}
+                                onInput={(event) => {
+                                  const strength = Number((event.currentTarget as HTMLInputElement).value);
+                                  setReferenceImages((previous) =>
+                                    previous.map((item) =>
+                                      item.id === reference.id ? { ...item, strength } : item,
+                                    ),
+                                  );
+                                }}
+                              />
+                              <output>{reference.strength.toFixed(2)}</output>
+                            </label>
+                          </div>
+                          <button
+                            type="button"
+                            class="nai-sq-btn"
+                            title="移除参考图"
+                            aria-label={`移除参考图 ${reference.name}`}
+                            onClick={() =>
+                              setReferenceImages((previous) =>
+                                previous.filter((item) => item.id !== reference.id),
+                              )
+                            }
+                          >
+                            <CloseIcon size={16} />
+                          </button>
+                        </div>
+                      ))}
+                    </div>
+                  ) : (
+                    <div class="nai-reference-empty">拖入参考图，或选择图片添加（最多 {MAX_REFS} 张）</div>
+                  )}
+                  <button
+                    type="button"
+                    class="nai-reference-add"
+                    disabled={member?.policy?.vibe === false || referenceImages.length >= MAX_REFS}
+                    onClick={() => referenceInputRef.current?.click()}
+                  >
+                    <PlusIcon size={14} />
+                    Add Reference Image
+                  </button>
+                </fieldset>
+              </>
+            ) : null}
+
+            <div class="nai-group-label">Image2Image</div>
+            <fieldset
+              class={`nai-i2i${sourceImage ? " nai-i2i--active" : ""}`}
+              aria-label="参考图"
+              onDragOver={(event) => event.preventDefault()}
+              onDrop={(event) => {
+                event.preventDefault();
+                void loadSourceImage(event.dataTransfer?.files.item(0) ?? undefined);
+              }}
+            >
+              <input
+                ref={sourceInputRef}
+                class="nai-i2i-file"
+                type="file"
+                accept="image/png,image/jpeg,image/webp"
+                aria-label="选择参考图片"
+                onChange={(event) => {
+                  void loadSourceImage((event.currentTarget as HTMLInputElement).files?.[0]);
+                  (event.currentTarget as HTMLInputElement).value = "";
+                }}
+              />
+              {sourceImage ? (
+                <img class="nai-i2i-thumb" src={sourceImage.dataUrl} alt={sourceImage.name} />
+              ) : (
+                <span class="nai-i2i-icon">
+                  <UploadIcon size={16} />
+                </span>
+              )}
               <button
                 type="button"
-                class="nai-sq-btn nai-sq-btn--dim"
-                title="上传参考图"
-                aria-label="上传参考图"
-                onClick={() => toast("图生图暂未开放。", { error: true })}
+                class="nai-i2i-text nai-i2i-pick"
+                aria-label={sourceImage ? "更换参考图片" : "上传参考图片"}
+                onClick={() => sourceInputRef.current?.click()}
               >
-                <UploadIcon size={16} />
+                <span class="nai-char-title">{sourceImage ? sourceImage.name : "Image2Image"}</span>
+                <span class="nai-char-sub">
+                  {sourceImage ? "图片已载入；生成时会用作初始图。" : "上传或拖入 PNG、JPEG、WebP。"}
+                </span>
               </button>
               <button
                 type="button"
-                class="nai-sq-btn nai-sq-btn--dim"
-                title="编辑参考图"
-                aria-label="编辑参考图"
-                onClick={() => toast("图生图暂未开放。", { error: true })}
+                class="nai-sq-btn"
+                title={sourceImage ? "更换参考图" : "上传参考图"}
+                aria-label={sourceImage ? "更换参考图" : "上传参考图"}
+                disabled={member?.policy?.img2img === false}
+                onClick={() => sourceInputRef.current?.click()}
               >
-                <Pencil size={16} />
+                <UploadIcon size={16} />
               </button>
-            </div>
+              {sourceImage ? (
+                <button
+                  type="button"
+                  class="nai-sq-btn"
+                  title="移除参考图"
+                  aria-label="移除参考图"
+                  onClick={() => setSourceImage(null)}
+                >
+                  <CloseIcon size={16} />
+                </button>
+              ) : null}
+              {sourceImage ? (
+                <div class="nai-i2i-controls">
+                  <label>
+                    <span>Strength</span>
+                    <input
+                      aria-label="图生图影响度"
+                      type="range"
+                      min="0.05"
+                      max="0.95"
+                      step="0.05"
+                      value={imageStrength}
+                      onInput={(event) =>
+                        setImageStrength(Number((event.currentTarget as HTMLInputElement).value))
+                      }
+                    />
+                    <output>{imageStrength.toFixed(2)}</output>
+                  </label>
+                  <label>
+                    <span>Noise</span>
+                    <input
+                      aria-label="图生图噪声"
+                      type="range"
+                      min="0"
+                      max="0.5"
+                      step="0.05"
+                      value={imageNoise}
+                      onInput={(event) =>
+                        setImageNoise(Number((event.currentTarget as HTMLInputElement).value))
+                      }
+                    />
+                    <output>{imageNoise.toFixed(2)}</output>
+                  </label>
+                </div>
+              ) : null}
+            </fieldset>
 
             {/* Image Settings */}
             <div class="nai-group-label">Image Settings</div>
@@ -1329,7 +1593,18 @@ export function NaiApp() {
                   class="nai-tool"
                   title="用作初始图"
                   aria-label="用作初始图"
-                  onClick={() => toast("图生图暂未开放，无法把这张图作为初始图。", { error: true })}
+                  onClick={() => {
+                    if (!shot) return;
+                    setSourceImage({
+                      name: `seed-${shot.attrs.seed}.${shot.ext}`,
+                      dataUrl: shot.url,
+                      b64: shot.b64,
+                    });
+                    document
+                      .querySelector(".nai-i2i")
+                      ?.scrollIntoView({ behavior: "smooth", block: "nearest" });
+                    toast("已将当前图片设为图生图初始图。");
+                  }}
                 >
                   <UploadIcon size={17} />
                 </button>

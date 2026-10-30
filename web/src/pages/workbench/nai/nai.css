@@ -196,24 +196,12 @@ body.nai-page .toast {
   align-items: center;
   gap: 5px;
   background: var(--nai-border);
-  border-radius: 8px 0 0 8px;
+  border-radius: 8px;
   padding: 10px 10px 10px 14px;
   font-size: 14px;
   line-height: 21px;
   font-weight: 600;
   white-space: nowrap;
-}
-.nai-anlas-plus {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  width: 42px;
-  background: var(--nai-border);
-  border-radius: 0 8px 8px 0;
-  transition: background 0.08s ease-in-out;
-}
-.nai-anlas-plus:hover {
-  background: var(--nai-hover);
 }
 .nai-nav-btn {
   display: flex;
@@ -604,7 +592,7 @@ body.nai-page .toast {
   gap: 10px;
   padding: 8px 12px 12px;
 }
-/* --- 组标签 + Image2Image（未开放） --- */
+/* --- 组标签 + Image2Image --- */
 .nai-group-label {
   font-size: 14px;
   line-height: 21px;
@@ -615,6 +603,8 @@ body.nai-page .toast {
   display: flex;
   align-items: center;
   gap: 10px;
+  min-width: 0;
+  margin: 0;
   border: 1px solid var(--nai-border);
   border-radius: 8px;
   background: var(--nai-panel);
@@ -633,6 +623,146 @@ body.nai-page .toast {
 .nai-i2i-text {
   flex: 1;
   min-width: 0;
+}
+.nai-i2i-file {
+  display: none;
+}
+.nai-i2i-pick {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+.nai-i2i-thumb {
+  width: 56px;
+  height: 56px;
+  object-fit: cover;
+  border-radius: 5px;
+  background: var(--nai-border);
+  flex: none;
+}
+.nai-i2i-controls {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  gap: 12px;
+  width: 100%;
+  padding-top: 8px;
+  border-top: 1px solid var(--nai-border);
+}
+.nai-i2i-controls label {
+  display: grid;
+  grid-template-columns: auto 1fr auto;
+  align-items: center;
+  gap: 7px;
+  min-width: 0;
+  color: var(--nai-muted);
+  font-size: 12px;
+}
+.nai-i2i-controls input {
+  min-width: 0;
+  width: 100%;
+  accent-color: var(--nai-accent);
+}
+.nai-i2i-controls output {
+  min-width: 30px;
+  color: var(--nai-text);
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+.nai-i2i--active {
+  flex-wrap: wrap;
+}
+.nai-reference-images {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  min-width: 0;
+  margin: 0;
+  border: 1px solid var(--nai-border);
+  border-radius: 8px;
+  background: var(--nai-panel);
+  padding: 10px;
+}
+.nai-reference-empty {
+  color: var(--nai-muted);
+  font-size: 12px;
+  line-height: 18px;
+}
+.nai-reference-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.nai-reference-item {
+  display: grid;
+  grid-template-columns: 48px minmax(0, 1fr) 32px;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+.nai-reference-item > img {
+  width: 48px;
+  height: 48px;
+  object-fit: cover;
+  border-radius: 5px;
+  background: var(--nai-border);
+}
+.nai-reference-item-main {
+  min-width: 0;
+}
+.nai-reference-name {
+  overflow: hidden;
+  margin-bottom: 3px;
+  color: var(--nai-text);
+  font-size: 12px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.nai-reference-item label {
+  display: grid;
+  grid-template-columns: 48px minmax(0, 1fr) 34px;
+  align-items: center;
+  gap: 5px;
+  color: var(--nai-muted);
+  font-size: 11px;
+}
+.nai-reference-item label input {
+  min-width: 0;
+  width: 100%;
+  accent-color: var(--nai-accent);
+}
+.nai-reference-item output {
+  color: var(--nai-text);
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+.nai-reference-add {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  min-height: 32px;
+  padding: 0 8px;
+  border: 1px dashed var(--nai-border);
+  border-radius: 6px;
+  background: transparent;
+  color: var(--nai-muted);
+  font: inherit;
+  font-size: 12px;
+  cursor: pointer;
+}
+.nai-reference-add:hover:not(:disabled) {
+  border-color: var(--nai-accent);
+  color: var(--nai-text);
+}
+.nai-reference-add:disabled {
+  cursor: not-allowed;
+  opacity: 0.5;
 }
 
 /* --- Image Settings --- */
@@ -859,20 +989,6 @@ body.nai-page .toast {
   height: 100%;
   background: var(--nai-accent);
   transition: width 0.4s ease;
-}
-.nai-quota-plus {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  width: 18px;
-  height: 18px;
-  border-radius: 3px;
-  background: var(--nai-border);
-  flex: none;
-  transition: background 0.08s ease-in-out;
-}
-.nai-quota-plus:hover {
-  background: var(--nai-hover);
 }
 
 .nai-status {
