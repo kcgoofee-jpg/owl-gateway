@@ -36,6 +36,8 @@ pub const SYNC_INTERVAL: Duration = Duration::from_secs(60);
 
 /// 同一频道两次对话至少隔 3 秒（防连点刷屏）。
 const CHAT_COOLDOWN: f64 = 3.0;
+/// 「正在输入…」续发间隔（Discord 指示 ~10 秒过期）。
+const TYPING_REFRESH: Duration = Duration::from_secs(8);
 /// 每个频道保留的最近对话轮数（作为上下文）。
 const CHAT_HISTORY_TURNS: usize = 6;
 /// 最多记住多少个频道的对话；超出就整表清空（防内存无限涨）。
@@ -356,7 +358,36 @@ impl Naimei {
         text: &str,
         is_owner: bool,
     ) -> Result<(), ChatError> {
-        let _ = self.api.create_typing_trigger(channel_id).await;
+        // Discord 的「正在输入…」只显示 ~10 秒，而一次生成要 25-60 秒；
+        // 期间每 8 秒续发一次，回复发完（或失败）就停，成员不会以为奶妹掉线。
+        let typing_done = Arc::new(AtomicBool::new(false));
+        let typing_task = {
+            let app = self.clone();
+            let done = typing_done.clone();
+            tokio::spawn(async move {
+                while !done.load(Ordering::Relaxed) {
+                    let _ = app.api.create_typing_trigger(channel_id).await;
+                    tokio::time::sleep(TYPING_REFRESH).await;
+                }
+            })
+        };
+        let result = self
+            .chat_reply(chat, channel_id, message_id, text, is_owner)
+            .await;
+        typing_done.store(true, Ordering::Relaxed);
+        typing_task.abort();
+        result
+    }
+
+    /// chat_once 的实际执行体（typing 保活由外层负责）。
+    async fn chat_reply(
+        self: &Arc<Self>,
+        chat: &Chat,
+        channel_id: u64,
+        message_id: &str,
+        text: &str,
+        is_owner: bool,
+    ) -> Result<(), ChatError> {
         let history: Vec<Turn> = self
             .lock()
             .histories
@@ -395,7 +426,7 @@ impl Naimei {
                 body["message_reference"] = json!({"message_id": message_id, "type": 0});
             }
             if let Err(e) = self.api.create_message(channel_id, &body).await {
-                debug!("[chat] 回复第 {} 片发送失败：{e}", i + 1);
+                warn!("[chat] 回复第 {} 片发送失败：{e}", i + 1);
             }
         }
         Ok(())
@@ -409,7 +440,7 @@ impl Naimei {
             "message_reference": {"message_id": reply_to, "type": 0},
         });
         if let Err(e) = self.api.create_message(channel_id, &body).await {
-            debug!("[chat] 兜底消息发送失败：{e}");
+            warn!("[chat] 兜底消息发送失败：{e}");
         }
     }
 
