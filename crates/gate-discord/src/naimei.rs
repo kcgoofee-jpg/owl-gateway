@@ -823,7 +823,8 @@ fn string_option_opt(it: &Interaction, name: &str) -> Option<String> {
         .map(str::to_owned)
 }
 
-/// 是否触发 AI 对话：被 @ 或回复的对象是奶妹本人。其余消息（哪怕内容里提到奶妹）不触发。
+/// 是否触发 AI 对话：被 @、回复的对象是奶妹本人，或正文里喊了「奶妹」。
+/// 喊名字触发是 10-31 加的自然唤起方式（不用学 @ 语法）；其余消息不触发。
 fn is_chat_trigger(m: &MessageInfo, bot_id: &str) -> bool {
     let mentioned = m.mentions.iter().any(|u| u.id == bot_id);
     let reply_to_bot = m
@@ -831,7 +832,8 @@ fn is_chat_trigger(m: &MessageInfo, bot_id: &str) -> bool {
         .as_ref()
         .and_then(|r| r.author.as_ref())
         .is_some_and(|a| a.id == bot_id);
-    mentioned || reply_to_bot
+    let named = strip_mention(&m.content, bot_id).contains("奶妹");
+    mentioned || reply_to_bot || named
 }
 
 /// 把消息文本里的 `<@id>` / `<@!id>` 提及标记去掉（@奶妹 本身不算提问内容）。
@@ -1005,8 +1007,11 @@ mod tests {
         );
         assert!(is_chat_trigger(&m, BOT_ID));
 
-        // 只有内容里提到奶妹、没有 @ 也不是回复奶妹：不触发
-        let m = message("奶妹真可爱", json!([]), Value::Null);
+        // 喊名字触发：正文含「奶妹」即响应（10-31 加的自然唤起）
+        let m = message("奶妹帮我看看", json!([]), Value::Null);
+        assert!(is_chat_trigger(&m, BOT_ID));
+        // 完全无关的消息：不触发
+        let m = message("大家好呀", json!([]), Value::Null);
         assert!(!is_chat_trigger(&m, BOT_ID));
         // 回复的是别人的消息：不触发
         let m = message(
