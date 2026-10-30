@@ -33,15 +33,25 @@ mask() { sed -E 's/[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}/x.x.x.x/g'; }
 remote() { ssh "${KEY[@]}" "root@$OWL_IP" "$@" 2>&1 | mask; return "${PIPESTATUS[0]}"; }
 say() { printf '\033[1m==> %s\033[0m\n' "$*"; }
 die() { printf '\033[31mxx %s\033[0m\n' "$*" >&2; exit 1; }
-run_id="" wait=0 notify=1
+run_id="" wait=0 notify=1 mirror_only=0
 for a in "$@"; do
   case $a in
     --wait) wait=1 ;;
     --no-notify) notify=0 ;;
+    --mirror-only) mirror_only=1 ;;
     [0-9]*) run_id=$a ;;
     *) die "unknown argument: $a" ;;
   esac
 done
+
+if [[ $mirror_only == 1 ]]; then
+  # 只同步镜像资源（改 bridge.js、换静态资源时用），不动镜像、不重启容器
+  tools/sync-mirror.sh
+  ssh "${KEY[@]}" "root@$OWL_IP" "bash -s -- $(printf %q "$DOMAIN")" < tools/deploy/verify-maintenance.sh 2>&1 | mask \
+    || die "mirror verification failed"
+  say "mirror synced and verified"
+  exit 0
+fi
 
 if [[ -z $run_id && $wait == 1 ]]; then
   sha=$(gh api "repos/$REPO/commits/main" -q .sha)
@@ -77,7 +87,8 @@ say "run $run_id = ${sha:0:7}: $(git log -1 --format=%s "$sha" 2>/dev/null || ec
 
 live=$(remote "a=\$(docker image inspect -f '{{.Id}}' owl-gate:$sha 2>/dev/null); b=\$(docker inspect -f '{{.Image}}' owl-gate 2>/dev/null); [ -n \"\$a\" ] && [ \"\$a\" = \"\$b\" ] && echo running" || true)
 if [[ $live == running ]]; then
-  say "owl-gate:${sha:0:7} is already running; nothing to do"
+  say "owl-gate:${sha:0:7} is already running; syncing mirror resources only"
+  tools/sync-mirror.sh
   exit 0
 fi
 
@@ -99,15 +110,8 @@ files=("$tmp/nai-ops-linux-musl/nai-ops" deploy/v3/cutover.sh deploy/v3/caddy-re
 [[ $have_image == yes ]] || files=("$tmp/owl-gate-image/owl-gate.tar.gz" "${files[@]}")
 scp -q "${KEY[@]}" "${files[@]}" "root@$OWL_IP:/opt/owl/" 2>&1 | mask
 
-# 官网生图页镜像：59MB 静态资源不进仓库也不进镜像，从本地 mirror/ 同步到宿主机只读挂载点。
-# 缺这个目录时只警告不失败（本机没有镜像时仍可完成代码部署，线上 /image 会 404）。
-if [[ -d mirror/nai-app ]]; then
-  say "syncing nai mirror ($(du -sh mirror/nai-app | cut -f1))"
-  remote "mkdir -p /opt/owl/nai-mirror"
-  rsync -a --delete -e "ssh ${KEY[*]}" mirror/nai-app/ "root@$OWL_IP:/opt/owl/nai-mirror/nai-app/" 2>&1 | mask
-else
-  say "warning: mirror/nai-app missing; /image will 404 until it is synced"
-fi
+# 官网生图页镜像：59MB 静态资源不进仓库也不进镜像，cutover 之前同步到宿主机只读挂载点。
+tools/sync-mirror.sh
 
 say "cutover"
 remote "set -e; cd /opt/owl; chmod +x cutover.sh caddy-reload.sh
