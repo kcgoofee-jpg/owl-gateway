@@ -425,7 +425,7 @@ impl Naimei {
                 &json!({
                     "content": "…",
                     "allowed_mentions": {"parse": ["users"]},
-                    "message_reference": {"req.message_id": req.message_id, "type": 0},
+                    "message_reference": {"message_id": req.message_id, "type": 0},
                 }),
             )
             .await
@@ -539,7 +539,7 @@ impl Naimei {
                             });
                             if i == 0 {
                                 body["message_reference"] =
-                                    json!({"req.message_id": req.message_id, "type": 0});
+                                    json!({"message_id": req.message_id, "type": 0});
                             }
                             if let Err(e) = self.api.create_message(req.channel_id, &body).await {
                                 warn!("[chat] 回复第 {} 片发送失败：{e}", i + 1);

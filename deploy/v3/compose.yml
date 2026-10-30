@@ -75,8 +75,8 @@ services:
       - TZ=Asia/Shanghai
     # host.docker.internal 在 Linux 上需要 host-gateway 映射
     volumes:
-      # 对话留档（JSONL）：训练语料 / 纪念册，落在宿主机 /opt/owl/naimei-chat
-      - /opt/owl/naimei-chat:/app/data/chat
+      # 对话留档（JSONL）：训练语料 / 纪念册，落在宿主机 /opt/naimei-chat
+      - /opt/naimei-chat:/app/data/chat
     extra_hosts:
       - "host.docker.internal:host-gateway"
     mem_limit: 256m
