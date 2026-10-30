@@ -127,7 +127,7 @@ async fn maintenance_switch_pauses_public_routes_and_keeps_admin_and_health_avai
             .put("/ops/maintenance", json!({"enabled": true}))
             .await
             .json(),
-        json!({"enabled": true})
+        json!({"enabled": true, "mode": "all"})
     );
     assert_eq!(
         common::setting(&e.state, "maintenance_mode")
@@ -182,7 +182,7 @@ async fn maintenance_switch_pauses_public_routes_and_keeps_admin_and_health_avai
             .put("/ops/maintenance", json!({"enabled": false}))
             .await
             .json(),
-        json!({"enabled": false})
+        json!({"enabled": false, "mode": "off"})
     );
     assert_eq!(
         common::send(&restarted, "GET", "/public/live", None, None, &[])

@@ -28,6 +28,11 @@ async fn maintenance_put(
     let (parts, body) = req.into_parts();
     let body = read_json_body(&parts.headers, body, super::super::BODY_LIMIT).await?;
     use crate::ops::Maintenance;
+    // 只接受 {mode} 或旧的 {enabled}，多带字段一律 422（后台表单不会这么发，挡住手滑/试探）
+    let exact = body.len() == 1 && (body.contains_key("mode") || body.contains_key("enabled"));
+    if !exact {
+        return Err(HttpError::new(422, "只接受 {mode} 或 {enabled} 单字段").into());
+    }
     let mode = match (
         body.get("mode").and_then(serde_json::Value::as_str),
         body.get("enabled").and_then(serde_json::Value::as_bool),
