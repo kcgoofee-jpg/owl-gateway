@@ -141,6 +141,24 @@ impl ServerAllowance {
         if status == Some(401) {
             nai.isolate_unauthorized(token).await;
         }
+        // 订阅过期（tier 0 / active=false）的号不再接活：非 Opus 没有 V4.5 无限额度，
+        // 继续用它只会按 Anlas 计费，余额见底后整批请求 402。这里直接隔离并告警。
+        if status == Some(200)
+            && let Some(body) = body.as_deref()
+            && let Ok(sub) = serde_json::from_slice::<serde_json::Value>(body)
+        {
+            let active = sub.get("active").and_then(serde_json::Value::as_bool);
+            let tier = sub.get("tier").and_then(serde_json::Value::as_i64);
+            if active == Some(false) || tier == Some(0) {
+                tracing::error!(
+                    account = %token.token_id,
+                    tier = tier.unwrap_or(-1),
+                    "上游账号订阅已过期（tier 0 / inactive），自动停用该账号",
+                );
+                // 复用 401 的隔离通道：运行期立刻从调度里摘掉，并持久化到库
+                nai.isolate_unauthorized(token).await;
+            }
+        }
         let f = match status {
             None => Fetched::Failed,
             Some(s) => Fetched::Response {
