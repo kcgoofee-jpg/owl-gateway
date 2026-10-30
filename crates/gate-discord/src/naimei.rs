@@ -37,6 +37,8 @@ pub const SYNC_INTERVAL: Duration = Duration::from_secs(60);
 
 /// 同一频道两次对话至少隔 3 秒（防连点刷屏）。
 const CHAT_COOLDOWN: f64 = 3.0;
+/// 「正在输入…」续发间隔（Discord 指示 ~10 秒过期）。
+const TYPING_REFRESH: Duration = Duration::from_secs(8);
 /// 流式渐进编辑的最小间隔（Discord 编辑限流 5 次/5 秒每频道，2 秒很安全）。
 const EDIT_INTERVAL: tokio::time::Duration = tokio::time::Duration::from_secs(2);
 /// 每个频道保留的最近对话轮数（作为上下文）。
@@ -504,6 +506,10 @@ impl Naimei {
             &channel_ctx,
             avatar_url.as_deref(),
         );
+        // 非流式（默认）：typing 循环保活 + 一次性完整回复（观感干净）
+        if !chat.stream_enabled() {
+            return self.chat_once_nonstream(chat, req, system, history).await;
+        }
         // 占位消息：流式生成的画布；发不出去就退回一次性整段发送
         let placeholder = match self
             .api
@@ -667,6 +673,88 @@ impl Naimei {
                 Err(e)
             }
         }
+    }
+
+    /// 非流式完整一轮：typing 循环保活 → 调 LLM（一次性）→ 出口过滤 → 分片发送 → 记历史。
+    async fn chat_once_nonstream(
+        self: &Arc<Self>,
+        chat: &Chat,
+        req: ChatRequest<'_>,
+        system: String,
+        history: Vec<Turn>,
+    ) -> Result<(), ChatError> {
+        let channel_id = req.channel_id;
+        // typing 每 8s 续发，回复发出即停
+        let typing_done = Arc::new(AtomicBool::new(false));
+        let typing_task = {
+            let app = self.clone();
+            let done = typing_done.clone();
+            tokio::spawn(async move {
+                while !done.load(Ordering::Relaxed) {
+                    let _ = app.api.create_typing_trigger(channel_id).await;
+                    tokio::time::sleep(TYPING_REFRESH).await;
+                }
+            })
+        };
+        let started = std::time::Instant::now();
+        let reply = chat.reply(&system, &history, req.text).await;
+        typing_done.store(true, Ordering::Relaxed);
+        typing_task.abort();
+        let record = |assistant: &str, status: &str| {
+            if let Some(log) = self.chat_log.as_ref() {
+                log.record(
+                    self.cfg.guild_id,
+                    channel_id,
+                    req.author_id,
+                    req.author_name,
+                    req.is_owner,
+                    req.text,
+                    assistant,
+                    chat.model(),
+                    started.elapsed().as_millis(),
+                    status,
+                );
+            }
+        };
+        let answer = match reply {
+            Ok(a) => chat::scrub(&a),
+            Err(e) => {
+                record(
+                    "",
+                    if matches!(e, ChatError::Quota) {
+                        "quota"
+                    } else {
+                        "failed"
+                    },
+                );
+                return Err(e);
+            }
+        };
+        {
+            let mut inner = self.lock();
+            let h = inner.histories.entry(channel_id).or_default();
+            h.push_back((req.text.to_owned(), answer.clone()));
+            while h.len() > CHAT_HISTORY_TURNS {
+                h.pop_front();
+            }
+        }
+        record(&answer, "ok");
+        for (i, part) in chat::split_for_discord(&answer, DISCORD_MESSAGE_LIMIT)
+            .into_iter()
+            .enumerate()
+        {
+            let mut body = json!({
+                "content": part,
+                "allowed_mentions": {"parse": ["users"]},
+            });
+            if i == 0 {
+                body["message_reference"] = json!({"message_id": req.message_id, "type": 0});
+            }
+            if let Err(e) = self.api.create_message(channel_id, &body).await {
+                warn!("[chat] 回复第 {} 片发送失败：{e}", i + 1);
+            }
+        }
+        Ok(())
     }
 
     /// 对话的兜底回复（额度用完 / 其他失败），不带知识库，直接以回复消息发出。

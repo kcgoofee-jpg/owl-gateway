@@ -10,6 +10,7 @@
 //! | `NAIMEI_LLM_BASE_URL` | 空：AI 对话关闭（OpenAI 兼容接口根地址，去尾 `/`） |
 //! | `NAIMEI_LLM_API_KEY` | 空：AI 对话关闭（与 BASE_URL 同时配置才开启） |
 //! | `NAIMEI_LLM_MODEL` | `glm-5.3-flash` |
+//! | `NAIMEI_STREAM` | 关：流式渐进编辑默认关闭（Discord 编辑观感生硬），置 1/true 开启 |
 //! | `NAIMEI_OWNER_IDS` | 空：逗号分隔的 Discord 用户 ID，认作主人（对话区别对待） |
 //! | `NAIMEI_CHAT_LOG` | 空：对话留档关闭（JSONL 路径，须落在挂载卷上） |
 //!
@@ -104,6 +105,7 @@ fn chat_cfg(get: &impl Fn(&str) -> Option<String>) -> Option<ChatCfg> {
     Some(ChatCfg {
         base_url: base_url.trim().trim_end_matches('/').to_owned(),
         api_key: api_key.trim().to_owned(),
+        stream: get("NAIMEI_STREAM").is_some_and(|v| matches!(v.trim(), "1" | "true" | "on")),
         model: if model.is_empty() {
             "glm-5.3-flash".to_owned()
         } else {
@@ -191,6 +193,7 @@ mod tests {
         assert_eq!(chat.base_url, "http://proxy.test:8080");
         assert_eq!(chat.api_key, "k");
         assert_eq!(chat.model, "glm-5.3-flash");
+        assert!(!chat.stream, "缺省不开流式");
 
         // 显式指定模型
         let cfg = NaimeiConfig::from_lookup(env(&[

@@ -24,6 +24,8 @@ pub struct ChatCfg {
     pub base_url: String,
     pub api_key: String,
     pub model: String,
+    /// 流式渐进编辑；默认关（观感原因），`NAIMEI_STREAM=1` 开启。
+    pub stream: bool,
 }
 
 /// 一轮历史：(成员说的话, 奶妹答的话)。
@@ -60,6 +62,11 @@ impl Chat {
     /// 模型名（留档用）。
     pub fn model(&self) -> &str {
         &self.cfg.model
+    }
+
+    /// 是否走流式渐进编辑。
+    pub fn stream_enabled(&self) -> bool {
+        self.cfg.stream
     }
 
     /// 调一次对话。`system` 来自 `system_prompt`；`history` 是本频道最近几轮。
