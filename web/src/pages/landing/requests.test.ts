@@ -10,7 +10,9 @@ describe("我的请求", () => {
 
   it("成功的一条写清尺寸和怎么计的", () => {
     const base = { anlas: 0, site_paid: false };
-    expect(okLine({ ...base, message: "832x1216/28step V5额度+1" })).toBe("832 × 1216 / 28 步  ·  用 V5 额度");
+    expect(okLine({ ...base, message: "832x1216/28step V5额度+1" })).toBe(
+      "832 × 1216 / 28 步  ·  用 V5 额度",
+    );
     expect(okLine({ ...base, message: "832x1216/28step 免费" })).toBe("832 × 1216 / 28 步  ·  free");
     expect(okLine({ ...base, anlas: 30, message: "832x1216/28step est=30A" })).toBe(
       "832 × 1216 / 28 步  ·  扣 30 Anlas",
