@@ -657,12 +657,13 @@ async fn user_data(State(state): State<AppState>, req: Request) -> ApiResult {
         .get_key_keystore(key.id())
         .await?
         .map(|(blob, change_index)| json!({"keystore": blob, "changeIndex": change_index}));
-    // 官网页面按 settings.defaultModel 选默认模型；本站默认用 V4.5（V5 可能没给这把 Key 开）
+    // 官网页面按 settings.defaultModel 选默认模型；本站默认用 V4.5（V5 可能没给这把 Key 开）。
+    // 界面语言默认中文：官网自带 zh-CN 翻译，uiLanguage 是客户端设置，改这里不用动前端。
     let settings = state
         .db
         .get_key_settings(key.id())
         .await?
-        .or_else(|| Some(r#"{"defaultModel":"nai-diffusion-4-5-curated"}"#.to_string()));
+        .or_else(|| Some(DEFAULT_CLIENT_SETTINGS.to_string()));
     Ok(ok_json(&json!({
         "subscription": public_sub,
         "priority": virtual_priority(state.now()),
@@ -673,6 +674,10 @@ async fn user_data(State(state): State<AppState>, req: Request) -> ApiResult {
         "settings": settings,
     })))
 }
+
+/// 新成员的首屏客户端设置：默认模型 V4.5 + 中文界面（官网自带 `zh-CN` 翻译）。
+pub const DEFAULT_CLIENT_SETTINGS: &str =
+    r#"{"defaultModel":"nai-diffusion-4-5-curated","uiLanguage":"zh-CN"}"#;
 
 /// 原生客户端会探这个端点；404 会被当成「渠道不支持」。官方是 200，我们也回同样的形状。
 async fn user_priority(State(state): State<AppState>, req: Request) -> ApiResult {

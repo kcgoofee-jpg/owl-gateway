@@ -47,11 +47,15 @@ smoke() {
 # 结束时按实测结果说有没有停站，而不是按流程推断
 probe_start() {
   PROBE_OUT=$(mktemp)
+  PROBE_PARENT=$$
   (
     # 子 shell 会继承脚本的 set -e：curl 一超时（退出码 28，正好是停站的时候）整个循环就退出，
     # 结果「实测」只剩停站前的几条、报成全部正常（10-21 22:14 停了 17 秒却报「探测 2 次，全部正常」）
     set +e
-    while :; do
+    # 父脚本要是被中断（Ctrl-C、ssh 断开、CI 杀进程），probe_report 就没机会 kill 这个循环，
+    # 子 shell 会变成孤儿一直探测下去：10-30 就有一个挂了两天的，把 Caddy 访问日志刷到 10 分钟一轮转。
+    # 每轮确认父进程还活着，父进程没了就自己退出。
+    while kill -0 "$PROBE_PARENT" 2>/dev/null; do
       for path in /healthz /; do
         r=$(curl -sk -m 3 --connect-to ::127.0.0.1: -o /dev/null -w '%{http_code} %{time_total}' "$PROBE_URL$path" 2>/dev/null || true)
         echo "$(date +%s.%N | cut -c1-14) $path ${r:-000 3}" >>"$PROBE_OUT"
@@ -60,6 +64,7 @@ probe_start() {
     done
   ) &
   PROBE_PID=$!
+  trap 'kill "$PROBE_PID" 2>/dev/null || true' EXIT INT TERM
 }
 
 # 打印实测结果；有失败返回 1
