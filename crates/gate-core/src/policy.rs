@@ -866,6 +866,15 @@ pub fn upstream_parameter_problem(body: &Value) -> Option<String> {
         Some(Value::String(a)) => a == "generate",
         Some(_) => false,
     };
+    // 10-31：V4 / V4.5 同时打开 SMEA 和 sm_dyn 时，官方直接回 500（线上 7 天 60 次上游 5xx 里
+    // 有相当一部分是这个组合）。网关先挡下来，给一句能照做的提示，不要让用户以为是我们挂了。
+    let flag = |k: &str| p.get(k).map(values::enabled).unwrap_or(false);
+    if flag("sm") && flag("sm_dyn") {
+        return Some(
+            "SMEA 和 sm_dyn 不能同时打开（官方会直接报内部错误），未扣费。请关掉其中一个再试。"
+                .to_string(),
+        );
+    }
     if generate {
         for key in ["width", "height"] {
             let Some(value) = p.get(key).and_then(int_like) else {

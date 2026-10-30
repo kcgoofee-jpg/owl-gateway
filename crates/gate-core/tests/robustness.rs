@@ -138,3 +138,25 @@ proptest! {
         prop_assert_eq!(&whole, &run_tracker(wire, &stream, &all));
     }
 }
+
+#[test]
+fn smea_with_dynamic_sigma_is_refused_before_upstream() {
+    // 10-31：线上 7 天 60 次上游 500 里有一部分是 sm + sm_dyn 同时打开（官方直接 500）。
+    let both = serde_json::json!({
+        "model": "nai-diffusion-4-5-full",
+        "action": "generate",
+        "parameters": {"sm": true, "sm_dyn": true, "width": 832, "height": 1216}
+    });
+    let msg = gate_core::policy::upstream_parameter_problem(&both).expect("应当拦下");
+    assert!(msg.contains("SMEA"), "{msg}");
+    assert!(msg.contains("未扣费"), "{msg}");
+
+    for (sm, dyn_) in [(true, false), (false, true), (false, false)] {
+        let ok = serde_json::json!({
+            "model": "nai-diffusion-4-5-full",
+            "action": "generate",
+            "parameters": {"sm": sm, "sm_dyn": dyn_, "width": 832, "height": 1216}
+        });
+        assert_eq!(gate_core::policy::upstream_parameter_problem(&ok), None);
+    }
+}
