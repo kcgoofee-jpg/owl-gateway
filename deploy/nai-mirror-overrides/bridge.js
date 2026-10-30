@@ -1,7 +1,7 @@
 /* owl ⇄ NovelAI 生图页桥：把官网前端的 API 调用改到本站网关。
    只做三件事：改 base、带 Key、隐藏账号横幅。 */
 (function () {
-  window.__BRIDGE_VERSION__ = "2026-10-30-e";
+  window.__BRIDGE_VERSION__ = "2026-10-31-a";
   var CFG = window.__NAI_BRIDGE__ || {};
   var GATE = CFG.gate || "";
   var KEY = CFG.key || "";
@@ -173,6 +173,103 @@
   }
   if (document.body) watchBanners();
   else document.addEventListener("DOMContentLoaded", watchBanners);
+
+  /* ---- 设备指纹 + 浏览器标记：官网页面不会调 /public/device-fp，
+     于是日志里的「浏览器标记 / 浏览器标识」一直是空的，反滥用少掉最重要的一条线索。
+     这里用和旧工作台完全相同的分项（ua/屏幕/时区/硬件/GPU/Canvas/WebGL/字体）上报，
+     服务端据此算设备指纹，并种下长期 owl_bid Cookie（清 Cookie 也还有 localStorage 兜底）。 ---- */
+  function sha16(text) {
+    if (!text || !window.crypto || !crypto.subtle) return Promise.resolve("");
+    return crypto.subtle.digest("SHA-256", new TextEncoder().encode(text)).then(function (buf) {
+      return Array.prototype.map
+        .call(new Uint8Array(buf).slice(0, 8), function (b) {
+          return ("0" + b.toString(16)).slice(-2);
+        })
+        .join("");
+    }).catch(function () { return ""; });
+  }
+
+  function webglRaw() {
+    try {
+      var c = document.createElement("canvas");
+      var gl = c.getContext("webgl") || c.getContext("experimental-webgl");
+      if (!gl) return "";
+      var dbg = gl.getExtension("WEBGL_debug_renderer_info");
+      var vendor = dbg ? gl.getParameter(dbg.UNMASKED_VENDOR_WEBGL) : "";
+      var renderer = dbg ? gl.getParameter(dbg.UNMASKED_RENDERER_WEBGL) : "";
+      var params = [
+        gl.getParameter(gl.MAX_TEXTURE_SIZE),
+        gl.getParameter(gl.MAX_RENDERBUFFER_SIZE),
+        gl.getParameter(gl.MAX_VERTEX_ATTRIBS),
+        (gl.getSupportedExtensions() || []).join(","),
+      ].join("~");
+      return vendor + "~" + renderer + "~" + params;
+    } catch (e) { return ""; }
+  }
+
+  function canvasRaw() {
+    try {
+      var c = document.createElement("canvas");
+      c.width = 240; c.height = 60;
+      var ctx = c.getContext("2d");
+      ctx.textBaseline = "top";
+      ctx.font = "16px Arial";
+      ctx.fillStyle = "#f60"; ctx.fillRect(0, 0, 100, 20);
+      ctx.fillStyle = "#069"; ctx.fillText("猫头鹰 owl 0123456789", 2, 15);
+      ctx.fillStyle = "rgba(102,204,0,0.7)"; ctx.fillText("猫头鹰 owl 0123456789", 4, 30);
+      ctx.beginPath(); ctx.arc(200, 30, 18, 0, Math.PI * 1.5); ctx.fill();
+      return c.toDataURL();
+    } catch (e) { return ""; }
+  }
+
+  function readBid() {
+    try {
+      var v = localStorage.getItem("owl_bid") || "";
+      return /^[0-9a-f]{32}$/.test(v) ? v : "";
+    } catch (e) { return ""; }
+  }
+
+  function sendDeviceFp() {
+    var nav = navigator;
+    var glRaw = webglRaw();
+    var glParts = glRaw.split("~");
+    var data = {
+      ua: nav.userAgent,
+      lang: nav.language,
+      langs: (nav.languages || []).join(","),
+      screen: screen.width + "x" + screen.height + "x" + screen.colorDepth,
+      tz: new Date().getTimezoneOffset(),
+      hw: nav.hardwareConcurrency || "",
+      mem: nav.deviceMemory || "",
+      platform: nav.platform || "",
+      touch: nav.maxTouchPoints || "",
+      gpuVendor: glParts[0] || "",
+      gpuRenderer: glParts[1] || "",
+    };
+    Promise.all([sha16(canvasRaw()), sha16(glRaw)]).then(function (h) {
+      data.canvas = h[0];
+      data.webgl = h[1];
+      var body = { data: data };
+      var bid = readBid();
+      if (bid) body.bid = bid;
+      return fetch("/public/device-fp", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify(body),
+        credentials: "same-origin",
+      });
+    }).then(function (r) {
+      return r.ok ? r.json() : null;
+    }).then(function (res) {
+      if (res && typeof res.bid === "string" && /^[0-9a-f]{32}$/.test(res.bid)) {
+        try { localStorage.setItem("owl_bid", res.bid); } catch (e) {}
+      }
+    }).catch(function () {});
+  }
+  try {
+    if (window.requestIdleCallback) requestIdleCallback(sendDeviceFp);
+    else setTimeout(sendDeviceFp, 800);
+  } catch (e) {}
 
   /* ---- 上传到 Explore：官网那个按钮只是 <a href="/explore/register">，我们镜像里没有 Explore 站。
      改成把画布上这张原图（webp/png 原始字节，官方元数据都在）交给网关，由机器人发到 Discord。 ---- */

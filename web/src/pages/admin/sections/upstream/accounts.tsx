@@ -102,6 +102,8 @@ export function AccountCard(props: {
   const st = tokenState(a);
   const form = useForm(TOKEN_SPECS, a as unknown as Record<string, unknown>);
   const [saving, setSaving] = useState(false);
+  // 停用的账号默认收起明细，只留标题行和关键指标，避免一屏全是死账号的细节
+  const [open, setOpen] = useState(a.admin_enabled && !a.disabled);
   const base = `/admin/api/upstream-tokens/${encodeURIComponent(a.token_id)}`;
   const save = async () => {
     const ch = form.changes();
@@ -171,7 +173,17 @@ export function AccountCard(props: {
           </small>
         </div>
       </div>
-      <div class="up-sections">
+      {!(a.admin_enabled && !a.disabled) && (
+        <button
+          type="button"
+          class="link-button up-account__fold"
+          aria-expanded={open}
+          onClick={() => setOpen((v) => !v)}
+        >
+          {open ? "收起明细" : "展开明细"}
+        </button>
+      )}
+      <div class="up-sections" hidden={!(a.admin_enabled && !a.disabled) && !open}>
         <Block title="订阅与账号" updated={fullTime(info?.last_success)}>
           <Facts
             rows={[

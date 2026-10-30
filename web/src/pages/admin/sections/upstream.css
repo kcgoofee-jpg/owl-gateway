@@ -220,3 +220,25 @@
 .link-button:hover {
   text-decoration: underline;
 }
+
+/* 站长 10-31：上游页不要再有这么多横线，靠留白和列宽区分行就够（原来每行都描一条底线，像报表） */
+.up-highlights,
+.up-facts > div,
+.up-stats th,
+.up-stats td,
+.up-detail__fields > div {
+  border-bottom: 0;
+}
+.up-highlights {
+  padding-bottom: var(--sp-2);
+}
+.up-facts > div,
+.up-stats th,
+.up-stats td,
+.up-detail__fields > div {
+  padding-block: var(--sp-2);
+}
+/* 停用账号的「展开明细」按钮 */
+.up-account__fold {
+  margin: var(--sp-3) 0 var(--sp-2);
+}
