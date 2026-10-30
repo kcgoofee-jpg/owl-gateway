@@ -113,6 +113,14 @@ scp -q "${KEY[@]}" "${files[@]}" "root@$OWL_IP:/opt/owl/" 2>&1 | mask
 # 官网生图页镜像：59MB 静态资源不进仓库也不进镜像，cutover 之前同步到宿主机只读挂载点。
 tools/sync-mirror.sh
 
+# 前端产物（landing / admin）：网关 STATIC_DIR 优先读磁盘，镜像里那份是构建时的旧快照。
+# 不在这里同步的话，改了前端样式/文案部署完看不到变化（10-30 踩过两次），所以每次部署都顺手刷一遍。
+if [[ -f web/dist/landing.html ]]; then
+  tools/hot-web.sh --no-build
+else
+  say "web/dist 缺失，跳过前端同步（需要先 pnpm build）"
+fi
+
 # cutover 自己的 smoke 也要求公共接口 200；维护模式开着时先临时切 off，部署完由 verify 脚本切回。
 # 这里把当前档位写到服务器上的一个小文件，verify 脚本读它恢复。
 say "suspending maintenance for the cutover"
