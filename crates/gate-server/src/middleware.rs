@@ -48,7 +48,13 @@ pub async fn request_context(mut req: Request, next: Next) -> Response {
         .map(|c| c.0.ip().to_string())
         .unwrap_or_default();
     let xff = header_text(req.headers(), "x-forwarded-for");
-    let ua = header_text(req.headers(), "user-agent");
+    let mut ua = header_text(req.headers(), "user-agent");
+    // 本站生图页（官网镜像）会在桥接层带上这个头：日志里直接标成 workbench，方便成员和站长辨认来源
+    if let Ok(kind) = header_text(req.headers(), "x-owl-client").parse::<String>()
+        && !kind.trim().is_empty()
+    {
+        ua = format!("{} ({})", kind.trim(), ua);
+    }
     ctx.set_origin(&peer, &xff, &ua);
     ctx.set_hints(crate::client_hints::from_headers(req.headers()));
     req.extensions_mut().insert(ctx.clone());

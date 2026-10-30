@@ -330,12 +330,39 @@
   padding: 0;
   list-style: none;
 }
+/* 请求卡：官网 Source Sans Pro + 更松的行距（原来太挤） */
+@font-face {
+  font-family: "Source Sans Pro";
+  font-style: normal;
+  font-weight: 400;
+  font-display: swap;
+  src: url("/cf-fonts/s/source-sans-pro/5.2.4/latin/400/normal.woff2") format("woff2");
+}
+@font-face {
+  font-family: "Source Sans Pro";
+  font-style: normal;
+  font-weight: 600;
+  font-display: swap;
+  src: url("/cf-fonts/s/source-sans-pro/5.2.4/latin/600/normal.woff2") format("woff2");
+}
+@font-face {
+  font-family: "Source Sans Pro";
+  font-style: normal;
+  font-weight: 700;
+  font-display: swap;
+  src: url("/cf-fonts/s/source-sans-pro/5.2.4/latin/700/normal.woff2") format("woff2");
+}
+.lp-reqs,
+.lp-req {
+  font-family: "Source Sans Pro", var(--font);
+}
 .lp-req {
   display: grid;
   grid-template-columns: minmax(0, 1fr);
   min-width: 0;
-  gap: 2px;
-  padding: var(--sp-2) var(--sp-3);
+  gap: 6px;
+  line-height: 1.55;
+  padding: 14px 16px;
   border: 1px solid var(--border);
   border-radius: var(--radius);
   background: var(--surface-2);
@@ -356,9 +383,24 @@
 .lp-req__model {
   font-weight: 600;
 }
+/* 来源标签：workbench = 本站生图页，其余按第三方客户端 */
+.lp-req__app {
+  padding: 1px 7px;
+  border-radius: 999px;
+  font-size: 11px;
+  letter-spacing: 0.02em;
+  border: 1px solid var(--border);
+  color: var(--text-2);
+}
+.lp-req__app[data-app="workbench"] {
+  border-color: color-mix(in oklab, var(--accent) 55%, transparent);
+  color: var(--accent);
+}
 .lp-req__line {
   margin: 0;
   overflow-wrap: anywhere;
+  font-size: 14px;
+  color: var(--text-1);
 }
 .lp-req__code {
   margin-right: var(--sp-2);

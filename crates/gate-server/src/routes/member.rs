@@ -362,6 +362,13 @@ fn my_request_item(r: &serde_json::Value) -> serde_json::Value {
     } else {
         r["anlas"].as_f64().unwrap_or(0.0)
     };
+    // 来源：桥接层标过的 workbench 优先，其余按第三方客户端显示
+    let client = r["client"].as_str().unwrap_or("");
+    let app = if client.starts_with("workbench") {
+        "workbench"
+    } else {
+        "client"
+    };
     let secs = |k: &str| {
         r[k].as_i64()
             .filter(|ms| *ms > 0)
@@ -388,6 +395,7 @@ fn my_request_item(r: &serde_json::Value) -> serde_json::Value {
         "remaining_v5": r["remaining_v5"],
         "remaining_legacy": r["remaining_legacy"],
         "correlation_id": r["correlation_id"],
+        "app": app,
     })
 }
 

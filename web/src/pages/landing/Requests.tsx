@@ -18,17 +18,19 @@ export function modelLabel(r: Pick<MyRequest, "model" | "kind">): string {
   return r.kind || "请求";
 }
 
-/** 成功的那条怎么算的：账号代付 / 扣 N Anlas / 用 V5 额度 / 免费；尺寸步数从说明里取。 */
+/** 成功的那条怎么算的：账号代付 / 扣 N Anlas / 用 V5 额度 / free；尺寸步数从说明里取。 */
 export function okLine(r: Pick<MyRequest, "message" | "anlas" | "site_paid">): string {
-  const size = /\d+x\d+\/\d+step/.exec(r.message)?.[0]?.replace("step", " 步");
+  // 832x1216/23step → 832 × 1216 / 23 步（数字与符号之间留空格，中英文混排都好看）
+  const raw = /(\d+)x(\d+)\/(\d+)step/.exec(r.message);
+  const size = raw ? `${raw[1]} × ${raw[2]} / ${raw[3]} 步` : "";
   const cost = r.site_paid
     ? "本站账号代付，不扣你的 Anlas"
     : r.anlas > 0
       ? `扣 ${Math.round(r.anlas)} Anlas`
       : r.message.includes("V5额度")
         ? "用 V5 额度"
-        : "免费";
-  return [size, cost].filter(Boolean).join(" · ");
+        : "free";
+  return [size, cost].filter(Boolean).join("  ·  ");
 }
 
 const STATUS: Record<string, { text: string; tone: "ok" | "warn" | "danger" }> = {
@@ -83,6 +85,9 @@ export function RequestRow({ r }: { r: MyRequest }) {
       <div class="lp-req__head">
         <time class="lp-req__time">{secTime(r.ts)}</time>
         <span class="lp-req__model">{modelLabel(r)}</span>
+        <span class="lp-req__app" data-app={r.app === "workbench" ? "workbench" : "client"}>
+          {r.app === "workbench" ? "workbench" : "客户端"}
+        </span>
         <span class="spacer" />
         <Badge tone={s.tone}>{s.text}</Badge>
         {r.status === "ok" && pendingSettlement && (
