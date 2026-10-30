@@ -126,7 +126,19 @@ mod tests {
 
     #[test]
     fn nailong_doc_has_only_verified_links() {
-        assert!(NAILONG.contains("raw.githubusercontent.com/lin-alg/NaiLoong/main/"));
+        // 10-31 起贴纸源换成 mmexile/nailong-pet（每张都人工看过内容，7 张全为真奶龙）
+        assert!(
+            NAILONG.contains("raw.githubusercontent.com/mmexile/nailong-pet/main/assets/"),
+            "贴纸必须来自已验证的图库"
+        );
+        assert!(
+            !NAILONG.contains("lin-alg/NaiLoong"),
+            "旧教程截图源必须清干净"
+        );
         assert!(NAILONG.contains("偶尔"), "必须带使用规则");
+        assert!(
+            NAILONG.matches("![奶龙").count() >= 7,
+            "至少 7 张已验证贴纸"
+        );
     }
 }
