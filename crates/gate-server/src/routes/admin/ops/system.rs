@@ -27,12 +27,35 @@ async fn maintenance_put(
 ) -> ApiResult {
     let (parts, body) = req.into_parts();
     let body = read_json_body(&parts.headers, body, super::super::BODY_LIMIT).await?;
-    let enabled = match body.get("enabled").and_then(serde_json::Value::as_bool) {
-        Some(enabled) if body.len() == 1 => enabled,
-        _ => return Err(HttpError::new(422, "enabled 必须是布尔值").into()),
+    use crate::ops::Maintenance;
+    let mode = match (
+        body.get("mode").and_then(serde_json::Value::as_str),
+        body.get("enabled").and_then(serde_json::Value::as_bool),
+    ) {
+        (Some("off"), None) => Maintenance::Off,
+        (Some("all"), None) => Maintenance::All,
+        (Some("owner"), None) => Maintenance::OwnerOnly,
+        (None, Some(true)) => Maintenance::All,
+        (None, Some(false)) => Maintenance::Off,
+        _ => {
+            return Err(HttpError::new(
+                422,
+                "mode 必须是 off / all / owner（兼容旧的 enabled 布尔）",
+            )
+            .into());
+        }
     };
-    crate::ops::set_maintenance_mode(&state, enabled).await?;
-    Ok(ok_json(&json!({"enabled": enabled})))
+    if mode == Maintenance::OwnerOnly && state.env.maintenance_owner_ids.is_empty() {
+        return Err(HttpError::new(
+            422,
+            "先设置 MAINTENANCE_OWNER_IDS，否则「只有站长可用」等于全站关闭",
+        )
+        .into());
+    }
+    crate::ops::set_maintenance_mode(&state, mode).await?;
+    Ok(ok_json(
+        &json!({"enabled": mode != Maintenance::Off, "mode": mode.as_str()}),
+    ))
 }
 
 // ------------------------------------------------------------------ 测试告警

@@ -59,6 +59,21 @@
   部署后用 `rsync -a mirror/nai-app/ host:/opt/owl/nai-mirror/nai-app/` 同步
 - `Assets::read()` 先查磁盘再查内嵌，所以热修和整包都走同一条路
 
+## 4.2 维护模式（三档）
+
+`maintenance_mode` 现在有三种取值，后台「全站维护」卡片是三选一：
+
+| 值 | 含义 |
+| --- | --- |
+| `0` / `off` | 正常开放 |
+| `1` / `all` | 全部关闭（访客看维护页，接口 503，后台仍可用） |
+| `2` / `owner` | 只有站长可用：只有网页登录且 Discord ID 在 `MAINTENANCE_OWNER_IDS` 里的请求放行 |
+
+`MAINTENANCE_OWNER_IDS`（逗号分隔）放在服务器 `.env`，compose 透传；留空时 `owner` 档等同全关，防止误配置。
+
+另：`/user/data` 对还没存过客户端设置的 Key 会返回
+`{"defaultModel":"nai-diffusion-4-5-curated"}`，让官网页面默认落在 V4.5（V5 没开时不会先撞墙）。
+
 ## 5. 待办
 
 - [ ] 镜像资源瘦身：`dist/nai-app` 现在 51MB（418 个 chunk + media），可只保留 /image 用得到的部分。

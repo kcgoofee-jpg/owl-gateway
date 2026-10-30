@@ -128,6 +128,11 @@ fn gateway_env(
             "https://discord.gg/owl-dev-example".into(),
         ),
         ("SITE_URL", args.site_url.clone()),
+        // 本地验证「只有站长可用」维护档：直接用合成成员 ID
+        (
+            "MAINTENANCE_OWNER_IDS",
+            std::env::var("MAINTENANCE_OWNER_IDS").unwrap_or_default(),
+        ),
         (
             "REGISTRATION_BRIDGE_SECRET",
             "dev-bridge-secret-0123456789abcdefghij".into(),

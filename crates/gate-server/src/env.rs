@@ -129,6 +129,8 @@ pub struct EnvConfig {
     pub login_window_seconds: i64,
     /// 连续这么多天没成功出过图的 Key 自动回收（0 = 关）。只在这里解析一次，机器人、后台、定时任务共用。
     pub key_inactivity_delete_days: i64,
+    /// 「只有站长可用」维护模式下放行的 Discord 成员 ID（逗号分隔）。空 = 该模式等同全站关闭。
+    pub maintenance_owner_ids: Vec<String>,
     // Discord / 告警
     pub discord_bot_token: String,
     pub site_url: String,
@@ -238,6 +240,7 @@ impl EnvConfig {
             login_max_attempts: LOGIN_MAX_ATTEMPTS,
             login_window_seconds: LOGIN_WINDOW_SECONDS,
             key_inactivity_delete_days: r.nonneg("KEY_INACTIVITY_DELETE_DAYS", 3),
+            maintenance_owner_ids: split_list("MAINTENANCE_OWNER_IDS", ""),
             discord_bot_token: r.str("DISCORD_BOT_TOKEN", ""),
             site_url: r.str("SITE_URL", ""),
             alert_user_id: r.str("ALERT_USER_ID", ""),

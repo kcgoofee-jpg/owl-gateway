@@ -51,6 +51,18 @@ fn maintenance_bypass(path: &str) -> bool {
         )
 }
 
+/// 「只有站长可用」维护模式下判断当前请求是不是站长本人（看网页登录的成员会话）。
+async fn is_maintenance_owner(state: &AppState, headers: &axum::http::HeaderMap) -> bool {
+    let owners = &state.env.maintenance_owner_ids;
+    if owners.is_empty() {
+        return false;
+    }
+    match crate::session::member_state(state, headers).await {
+        Ok(Some((discord_id, _))) => owners.iter().any(|id| id == &discord_id),
+        _ => false,
+    }
+}
+
 async fn maintenance_gate(
     State(state): State<AppState>,
     request: Request<Body>,
@@ -60,8 +72,18 @@ async fn maintenance_gate(
         return next.run(request).await;
     }
     // 维护开关读取失败时 fail closed：避免数据库异常时继续接受新请求。
-    if !crate::ops::maintenance_mode(&state).await.unwrap_or(true) {
-        return next.run(request).await;
+    let mode = crate::ops::maintenance_mode(&state)
+        .await
+        .unwrap_or(crate::ops::Maintenance::All);
+    match mode {
+        crate::ops::Maintenance::Off => return next.run(request).await,
+        crate::ops::Maintenance::All => {}
+        crate::ops::Maintenance::OwnerOnly => {
+            // 站长名单为空时等同于全关，避免误配置把站打开。
+            if is_maintenance_owner(&state, request.headers()).await {
+                return next.run(request).await;
+            }
+        }
     }
     if (request.method() == Method::GET || request.method() == Method::HEAD)
         && wants_html(request.headers())

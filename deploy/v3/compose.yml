@@ -24,6 +24,8 @@ x-gate: &gate
     - DATA_DIR=/app/data
     # 官网生图页镜像（/image）的静态资源：不进镜像，由部署脚本 rsync 到宿主机
     - STATIC_DIR=/app/static
+    # 「只有站长可用」维护模式放行的成员；站点 .env 里配，不写进仓库
+    - MAINTENANCE_OWNER_IDS=${MAINTENANCE_OWNER_IDS:-}
     - TZ=Asia/Shanghai
     # 只信任本机和 Docker 网桥上的 Caddy 带来的 X-Forwarded-For
     - FORWARDED_ALLOW_IPS=127.0.0.1,172.30.0.1

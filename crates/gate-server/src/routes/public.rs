@@ -652,7 +652,12 @@ async fn user_data(State(state): State<AppState>, req: Request) -> ApiResult {
         .get_key_keystore(key.id())
         .await?
         .map(|(blob, change_index)| json!({"keystore": blob, "changeIndex": change_index}));
-    let settings = state.db.get_key_settings(key.id()).await?;
+    // 官网页面按 settings.defaultModel 选默认模型；本站默认用 V4.5（V5 可能没给这把 Key 开）
+    let settings = state
+        .db
+        .get_key_settings(key.id())
+        .await?
+        .or_else(|| Some(r#"{"defaultModel":"nai-diffusion-4-5-curated"}"#.to_string()));
     Ok(ok_json(&json!({
         "subscription": public_sub,
         "priority": virtual_priority(state.now()),

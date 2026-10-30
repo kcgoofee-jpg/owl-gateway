@@ -68,27 +68,52 @@ pub async fn v5_paused(db: &Db) -> Result<bool, DbError> {
     crate::settings::site_bool(db, &site_flags::V5_PAUSED).await
 }
 
-/// 全站手动维护开关。维护期间公共路由由 `routes` 中间件统一拦截。
-pub async fn maintenance_mode(state: &AppState) -> Result<bool, DbError> {
+/// 全站维护档位：关闭 / 全部关闭（站长可进后台） / 只有站长账号能出图。
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Maintenance {
+    Off,
+    All,
+    OwnerOnly,
+}
+
+impl Maintenance {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Off => "off",
+            Self::All => "all",
+            Self::OwnerOnly => "owner",
+        }
+    }
+
+    pub fn from_setting(raw: Option<&str>) -> Self {
+        match raw {
+            None | Some("0") | Some("off") => Self::Off,
+            Some("1") | Some("all") => Self::All,
+            Some("2") | Some("owner") => Self::OwnerOnly,
+            // 认不出来的历史值不能把站悄悄打开，按全关处理。
+            Some(_) => Self::All,
+        }
+    }
+}
+
+/// 全站手动维护档位。维护期间公共路由由 `routes` 中间件统一拦截。
+pub async fn maintenance_mode(state: &AppState) -> Result<Maintenance, DbError> {
     let raw = state
         .db
         .get_setting(site_flags::MAINTENANCE_MODE.key)
         .await?;
-    Ok(match raw.as_deref() {
-        None | Some("0") => false,
-        Some("1") => true,
-        // An unrecognized persisted value must not silently reopen public traffic.
-        Some(_) => true,
-    })
+    Ok(Maintenance::from_setting(raw.as_deref()))
 }
 
-pub async fn set_maintenance_mode(state: &AppState, enabled: bool) -> Result<(), DbError> {
+pub async fn set_maintenance_mode(state: &AppState, mode: Maintenance) -> Result<(), DbError> {
+    let raw = match mode {
+        Maintenance::Off => "0",
+        Maintenance::All => "1",
+        Maintenance::OwnerOnly => "2",
+    };
     state
         .db
-        .set_setting(
-            site_flags::MAINTENANCE_MODE.key,
-            if enabled { "1" } else { "0" },
-        )
+        .set_setting(site_flags::MAINTENANCE_MODE.key, raw)
         .await
 }
 
