@@ -50,3 +50,32 @@
 ## 待站长定
 
 - 要不要做第 2、3 步。
+
+## 后台管理页的框线规则（2026-10-31 定）
+
+站长连着提了三次「这些线条太丑」，原因是我只改了看得见的那几处，没立规矩。现在定下来：
+
+1. **装饰性的框线一律不要**：卡片外框、区块之间的横线、表格行线、分节标题上下的线、磁贴外框，
+   全部去掉，分组只靠留白（`--sp-4` / `--sp-5` / `--sp-6`）和背景层次（`--surface` / `--surface-2`）。
+2. **只有「可交互」的东西保留边**：`input` / `select` / `textarea` / `.btn` / `.switch` / `.dot`。
+   这些边是「这里能点、这里能填」的提示，不是装饰。
+3. **状态色只做语义，不做装饰**：风险卡片保留左侧 3px 语义条（红 / 黄 / 蓝），因为它是「这条属于哪种风险」的
+   唯一信息；除此之外不再有彩色边框。
+4. **假边线也要查**：`box-shadow: inset 0 -1px 0` 画出来的表和 `border-bottom` 一样刺眼（成员表头就是这么来的）。
+   排查时用计算样式扫，不要只 grep `border`：
+
+   ```js
+   // 在后台任一页面的控制台里跑，列出所有还在画线的元素（跳过控件）
+   for (const el of document.querySelectorAll('*')) {
+     const cs = getComputedStyle(el), r = el.getBoundingClientRect();
+     if (r.width < 60 || r.height < 6) continue;
+     if (/^(BUTTON|INPUT|SELECT|TEXTAREA)$/.test(el.tagName)) continue;
+     if (/\b(btn|input|chip|switch|seg|badge)\b/.test(String(el.className))) continue;
+     const b = ['Top','Right','Bottom','Left'].filter(s => parseFloat(cs['border'+s+'Width']) > 0);
+     const hair = cs.boxShadow !== 'none' && /inset 0 -?1px/.test(cs.boxShadow);
+     if (b.length || hair) console.log(el.className || el.tagName, b.join(','), cs.boxShadow);
+   }
+   ```
+
+5. **验收口径**：`/admin/members`、`/admin/upstream`、`/admin/logs`、`/admin/system`、`/admin/onboarding`、
+   `/admin/limits` 和成员详情，上面那段脚本除了控件以外必须**零输出**。2026-10-31 实测全部为零。
