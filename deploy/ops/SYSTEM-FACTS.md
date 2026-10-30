@@ -25,7 +25,7 @@
 | 每日上限 `guard_account_daily_cap` | 2400（0～20000，手动） | 未核对 | 每个上游账号每个服务日的出图总量（V4.5 + V5 合计）；用完等次日 07:00。10-23 起只有这个手动值（加上 `nai-ops manual` 的临时值 `guard_token_daily_caps`）；按最近 7 天自动定的 `quota_account_caps` / `quota_account_cap_auto` 删除 |
 | 每人排队 `guard_queue_per_member` | 2（1～5，手动） | 未部署 | 10-22 取代 `guard_key_image_queue`（旧键留在库里也不再读）。每个成员最多同时 2 张**还没发往上游**的图（正在生成的不算），再发当场回 429（`member_queue_full`，「你已有 2 张在排队，等前面的出完再发」），不占账号、不扣 Anlas。同一把 Key 仍然一次只生成 1 张：排着的那张等前一张出完（或被拒 / 取消）才往上游发；等待超过排队超时回 429（`queue_timeout`）。首页 / `/public/status` 里的字段名仍是 `key_image_queue`（兼容），值是这一项 |
 | 全站排队 `guard_queue_per_account` | 5（0～100） | 5 | 每个上游账号最多同时 5 张（含正在生成的），再收紧到排队超时内这个账号真能开始的张数（见下面「选号与排队中换号」）；满了回 429（`queue_full`） |
-| 每把 Key 每分钟请求数 | 成员 Key 5；后台手建 Key 10（代码常量，`defaults.rs`；手建时可在弹窗里改） | 未核对 | 生图 / 放大 / 导演工具 / Vibe 请求都计数，被拒的也计；标签补全不计。超出回 429（`key_rate`） |
+| 每把 Key 每分钟请求数 | 成员 Key 5；后台手建 Key 10（代码常量，`defaults.rs`；手建时可在弹窗里改） | 未核对 | 生图 / 放大 / 导演工具 / Vibe / 标签补全都计数（10-31 起标签补全也计入，以前不计导致客户端可以无节制灌），被拒的也计。超出回 429（`key_rate`） |
 | 排队超时 `runtime_queue_timeout` | 90 秒（代码常量；后台可改，范围 15～300） | 90 | 超时回 429（`queue_timeout`） |
 | 上游 429 后的全站冷却 `runtime_image_429_cooldown_seconds` | 60 秒（代码常量；后台可改，范围 60～3600） | 180 | 实际冷却 = max(此值, 上游 Retry-After)，Retry-After 先夹到 5～3600 秒。冷却期内所有图片请求回 429（`cooldown`）；冷却状态跨重启保留（`image_cooldown_until`，超过 1 小时的值视为无效） |
 | 上游连续 403（图片通道） | — | — | 连续 3 次 → 该 Token 冷却 5 → 15 → 45 → 60 分钟（`min(60, 5×3ⁿ)`），24 小时内没有 403 档位归零；私信站长。每个 Token 的 429 / 403 冷却和档位跨重启保留（设置 `upstream_token_cooldowns`，超过 1 小时的冷却、24 小时前的 403 视为无效） |

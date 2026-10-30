@@ -3,7 +3,7 @@
 use super::{binary, up_to_gate};
 use crate::accounting::Entry;
 use crate::admission::acquire_slots;
-use crate::auth::{authenticate, check_image_cooldown, ctx_of, require_feature};
+use crate::auth::{authenticate, check_image_cooldown, check_rpm, ctx_of, require_feature};
 use crate::body::read_json;
 use crate::error::{ApiError, GateError, InternalError, upstream_transport};
 use crate::key::Key;
@@ -25,6 +25,9 @@ pub(super) async fn tags(state: AppState, req: Request) -> Result<Response, ApiE
     let (parts, body) = req.into_parts();
     let ctx = ctx_of(&parts);
     let key = authenticate(&state, &parts, false).await?;
+    // 10-31：标签补全以前完全不计数，客户端可以无节制地灌（线上 24 小时 120 次里 40 次等到 90 秒超时）。
+    // 它仍然是轻请求，所以只按每把 Key 的每分钟次数算，不占图片队列、不占出图额度。
+    check_rpm(&state, &key)?;
     check_image_cooldown(&state)?;
     require_feature(&state, &key, "tags").await?;
     struct Finish<'a>(&'a AppState, i64, bool);

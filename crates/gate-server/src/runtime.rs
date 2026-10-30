@@ -237,10 +237,11 @@ struct TagState {
     latest: HashMap<i64, u64>,
 }
 
-/// 标签补全同时打向 NovelAI 的全站并发数（单账号建议保持 1，太高会触发 429 甚至风控）。
-/// 出图不受它影响：出图由每把上游 Token 的出图槽位和最小间隔控制。
+/// 标签补全同时打向 NovelAI 的全站并发数。出图不受它影响：出图由每把上游 Token 的出图槽位和最小间隔控制。
 /// 原来是环境变量 `GLOBAL_CONCURRENCY`（旧说明写成了「全站并发」，其实一直只管标签补全），现在是常量。
-pub const TAG_CONCURRENCY: i64 = 1;
+/// 10-31：从 1 提到 4。标签补全是 300 毫秒的轻请求，1 个槽位让所有人排队，线上实测平均等 26 秒、
+/// 最长顶到 90 秒排队超时（`usage_log` 里 tags 的 wait_ms），而那些请求上游只用 0.2–0.5 秒。
+pub const TAG_CONCURRENCY: i64 = 4;
 
 /// 排队结果：放行 / 全站排队已满 / 被同一 Key 更新的查询取代。
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -269,7 +270,7 @@ impl TagQueue {
         }
         let ticket = {
             let mut s = self.inner.lock().expect("tags");
-            if s.waiting as i64 >= (global_concurrency * 16).max(16) {
+            if s.waiting as i64 >= (global_concurrency * 16).max(64) {
                 return TagAdmit::Full;
             }
             let t = s.latest.get(&key_id).copied().unwrap_or(0) + 1;
