@@ -449,6 +449,43 @@ mod tests {
         );
     }
 
+    /// 拼一个只带 tEXt 的最小 PNG（不追求能解码，只验证元数据解析）。
+    fn png_with_text(chunks: &[(&str, &str)]) -> Vec<u8> {
+        let mut out = vec![0x89, b'P', b'N', b'G', 0x0d, 0x0a, 0x1a, 0x0a];
+        for (key, value) in chunks {
+            let mut data = Vec::new();
+            data.extend_from_slice(key.as_bytes());
+            data.push(0);
+            data.extend_from_slice(value.as_bytes());
+            out.extend_from_slice(&(data.len() as u32).to_be_bytes());
+            out.extend_from_slice(b"tEXt");
+            out.extend_from_slice(&data);
+            out.extend_from_slice(&[0, 0, 0, 0]);
+        }
+        out.extend_from_slice(&0u32.to_be_bytes());
+        out.extend_from_slice(b"IEND");
+        out.extend_from_slice(&[0, 0, 0, 0]);
+        out
+    }
+
+    #[test]
+    fn reads_generation_params_from_png_metadata() {
+        let comment = r#"{"prompt":"1girl, bakery","width":832,"height":1216,"seed":4048844816}"#;
+        let png = png_with_text(&[("Comment", comment), ("Software", "NovelAI")]);
+        let meta = png_meta(&png).expect("metadata");
+        assert_eq!(meta["prompt"], "1girl, bakery");
+        assert_eq!(meta["width"], 832);
+        assert_eq!(meta["height"], 1216);
+        assert_eq!(meta["seed"], 4048844816u64);
+        assert_eq!(meta["software"], "NovelAI");
+    }
+
+    #[test]
+    fn ignores_images_without_metadata() {
+        assert!(png_meta(b"RIFF    WEBP").is_none());
+        assert!(png_meta(&png_with_text(&[("Author", "someone")])).is_none());
+    }
+
     #[test]
     fn beijing_timestamp_is_formatted() {
         let now = beijing_now();
