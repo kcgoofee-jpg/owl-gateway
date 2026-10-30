@@ -138,7 +138,14 @@
 }
 .lp-dot--busy,
 .lp-dot--mine {
-  color: var(--accent);
+  /* 有排队但还有空位：黄灯（站长 10-31） */
+  color: var(--warn);
+}
+.lp-dot--full {
+  /* 排队满：红灯，呼吸快一点让人注意到。
+     用实红而不是 --danger（暗色下是浅鲑红 #ff977d，10px 圆点看着像粉色，站长要的是「红」）。 */
+  color: #ff4d3d;
+  animation-duration: 1.1s;
 }
 .lp-dot--warn {
   color: var(--warn);

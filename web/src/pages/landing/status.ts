@@ -8,7 +8,7 @@
 import { bjHour } from "../../lib/format";
 import type { Live } from "./types";
 
-export type Tone = "ok" | "busy" | "mine" | "warn" | "bad" | "paced";
+export type Tone = "ok" | "busy" | "full" | "mine" | "warn" | "bad" | "paced";
 
 export type StatusView = {
   tone: Tone;
@@ -102,12 +102,14 @@ export function deriveStatus(live: Live | null, opts: DeriveOpts = {}): StatusVi
     // 网关在 live.queue.full 里直接给出「现在会不会以排队满拒绝」（与 guard.admit_image 同一判断）
     live.queue?.full === true
   ) {
-    out = view("warn", "排队已满", `最多 ${queueCap} 张，稍后再试`);
+    // 站长 10-31：排队满 = 红灯；有排队但还有空位 = 黄灯；空位 = 绿灯
+    out = view("full", "排队已满", `最多 ${queueCap} 张，稍后再试`);
   } else if (waiting > 0) {
     // 站长 10-27：排队状态只说一个数——当前排队张数
     out = view("busy", `排队 ${waiting} 张`);
   } else if (running > 0) {
-    out = view("busy", "正在出图");
+    // 有人在出图但没人排队 = 还有空位，仍然算「能马上开始」
+    out = view("ok", "正在出图");
   } else {
     out = view("ok", "马上开始", "通道空闲");
   }

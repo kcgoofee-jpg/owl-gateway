@@ -49,15 +49,15 @@ describe("deriveStatus：正常与排队", () => {
     expect(v?.sentence).not.toMatch(/秒|分钟|后开始/);
   });
 
-  it("只有人在出图、没人排队：正在出图", () => {
+  it("只有人在出图、没人排队：正在出图（还有空位，绿灯）", () => {
     const v = deriveStatus(idle({ queue: { waiting: 0, running: 2 } }));
-    expect(v?.tone).toBe("busy");
+    expect(v?.tone).toBe("ok");
     expect(v?.sentence).toBe("正在出图");
   });
 
   it("排队已满", () => {
     const v = deriveStatus(idle({ queue: { waiting: 5, running: 1, full: true } }));
-    expect(v?.tone).toBe("warn");
+    expect(v?.tone).toBe("full");
     expect(v?.headline).toBe("排队已满");
     expect(v?.detail).toContain("最多 5 张");
     expect(API.queueFull).toContain("最多同时排 5 张");
