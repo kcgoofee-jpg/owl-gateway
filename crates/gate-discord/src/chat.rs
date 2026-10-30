@@ -64,18 +64,7 @@ impl Chat {
         history: &[Turn],
         user: &str,
     ) -> Result<String, ChatError> {
-        let mut messages = vec![json!({"role": "system", "content": system})];
-        for (u, a) in history {
-            messages.push(json!({"role": "user", "content": u}));
-            messages.push(json!({"role": "assistant", "content": a}));
-        }
-        messages.push(json!({"role": "user", "content": user}));
-        let body = json!({
-            "model": self.cfg.model,
-            "messages": messages,
-            "max_tokens": 4096,
-            "temperature": 0.8,
-        });
+        let body = self.request_body(system, history, user, false);
         let url = format!("{}/v1/chat/completions", self.cfg.base_url);
         let resp = self
             .http
@@ -103,6 +92,104 @@ impl Chat {
             _ => Err(classify(status, &v)),
         }
     }
+
+    /// 组请求体（流式与非流式共用）。
+    fn request_body(&self, system: &str, history: &[Turn], user: &str, stream: bool) -> Value {
+        let mut messages = vec![json!({"role": "system", "content": system})];
+        for (u, a) in history {
+            messages.push(json!({"role": "user", "content": u}));
+            messages.push(json!({"role": "assistant", "content": a}));
+        }
+        messages.push(json!({"role": "user", "content": user}));
+        json!({
+            "model": self.cfg.model,
+            "messages": messages,
+            "max_tokens": 4096,
+            "temperature": 0.8,
+            "stream": stream,
+        })
+    }
+
+    /// 流式对话：上游 SSE 增量通过 `on_text(累计文本)` 回调（每次给全量累计值，方便编辑消息），
+    /// 返回最终全文。上游失败（含 200 + 错误体、流中错误对象）与非流式同一套分类。
+    pub async fn reply_stream<F>(
+        &self,
+        system: &str,
+        history: &[Turn],
+        user: &str,
+        mut on_text: F,
+    ) -> Result<String, ChatError>
+    where
+        F: FnMut(String) + Send,
+    {
+        use futures::StreamExt as _;
+        let body = self.request_body(system, history, user, true);
+        let url = format!("{}/v1/chat/completions", self.cfg.base_url);
+        let resp = self
+            .http
+            .post(&url)
+            .bearer_auth(&self.cfg.api_key)
+            .json(&body)
+            .send()
+            .await
+            .map_err(|e| {
+                if e.is_timeout() {
+                    ChatError::Timeout
+                } else {
+                    ChatError::Upstream(format!("请求没发出去：{e}"))
+                }
+            })?;
+        let status = resp.status().as_u16();
+        let mut stream = resp.bytes_stream();
+        let mut buf: Vec<u8> = Vec::new();
+        let mut acc = String::new();
+        while let Some(chunk) = stream.next().await {
+            let bytes = chunk.map_err(|e| ChatError::Upstream(format!("读流失败：{e}")))?;
+            buf.extend_from_slice(&bytes);
+            while let Some(pos) = buf.iter().position(|&b| b == b'\n') {
+                let line: Vec<u8> = buf.drain(..=pos).collect();
+                if let Some(delta) = sse_delta(&String::from_utf8_lossy(&line)) {
+                    acc.push_str(&delta);
+                    on_text(acc.clone());
+                }
+            }
+        }
+        // 流正常结束但一个增量都没有：多半是 200 + 错误体（非 SSE）
+        if acc.trim().is_empty() {
+            let raw = String::from_utf8_lossy(&buf);
+            let v: Value = serde_json::from_str(raw.trim())
+                .unwrap_or_else(|_| json!({"error": {"message": clip(raw.trim(), 160)}}));
+            return Err(classify(status, &v));
+        }
+        Ok(acc)
+    }
+}
+
+/// 从一行 SSE 里取出本帧的文本增量；非 data 行 / [DONE] / 无内容的帧返回 None。
+fn sse_delta(line: &str) -> Option<String> {
+    let data = line.trim().strip_prefix("data:")?.trim();
+    if data == "[DONE]" {
+        return None;
+    }
+    let v: Value = serde_json::from_str(data).ok()?;
+    if v["error"].is_object() {
+        return None; // 流中错误由调用方在空结果时统一分类
+    }
+    v["choices"][0]["delta"]["content"]
+        .as_str()
+        .map(str::to_owned)
+}
+
+/// 预览截断：限长；被截断处若落在未闭合的 ``` 围栏里，补一个闭合让预览不花屏。
+pub fn preview_cut(text: &str, limit: usize) -> String {
+    let mut out: String = text.chars().take(limit).collect();
+    if text.chars().count() > limit {
+        out.push_str("\n…");
+    }
+    if out.matches("```").count() % 2 == 1 {
+        out.push_str("\n```");
+    }
+    out
 }
 
 /// 把上游的失败响应归类。上游偶尔 200 + 错误体，所以以响应体为准。
@@ -414,6 +501,36 @@ mod tests {
         assert!(owner.contains("主人"));
         assert!(owner.contains("尽量满足"));
         assert!(owner.contains("仍然不说"), "主人也不能拿到密钥");
+    }
+
+    #[test]
+    fn sse_lines_yield_deltas() {
+        assert_eq!(
+            sse_delta(r#"data: {"choices":[{"delta":{"content":"你"}}]}"#),
+            Some("你".into())
+        );
+        assert_eq!(sse_delta("data: [DONE]"), None);
+        assert_eq!(sse_delta(": ping"), None);
+        assert_eq!(sse_delta(r#"data: {"choices":[{"delta":{}}]}"#), None);
+        // 流中错误对象：不给增量（空结果时由 classify 统一定性）
+        assert_eq!(
+            sse_delta(r#"data: {"error":{"code":1005,"msg":"exceed quota limit"}}"#),
+            None
+        );
+    }
+
+    #[test]
+    fn preview_cut_repairs_open_fence() {
+        let text = "看代码：\n```rust\nfn main() { let x = 1;\n还能更多内容".repeat(60);
+        let cut = preview_cut(&text, 200);
+        assert!(
+            cut.chars().count() <= 210,
+            "限长 + 收尾，实际 {}",
+            cut.chars().count()
+        );
+        assert_eq!(cut.matches("```").count() % 2, 0, "围栏必须成对：{cut}");
+        let short = preview_cut("hello", 200);
+        assert_eq!(short, "hello");
     }
 
     #[test]

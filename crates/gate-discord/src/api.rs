@@ -18,6 +18,8 @@ pub enum ApiError {
     BadId(String),
     #[error("Discord 请求失败：{0}")]
     Http(#[from] twilight_http::Error),
+    #[error("响应体读取失败：{0}")]
+    Body(#[from] twilight_http::response::DeserializeBodyError),
 }
 
 fn id(s: &str) -> Result<u64, ApiError> {
@@ -129,6 +131,38 @@ impl DiscordApi {
     /// `POST /channels/{id}/messages`（频道里发消息；body 由调用方拼，须带 `allowed_mentions`）。
     pub async fn create_message(&self, channel_id: u64, body: &Value) -> Result<(), ApiError> {
         let route = Route::CreateMessage { channel_id };
+        self.send(Request::builder(&route).json(body).build()).await
+    }
+
+    /// 同上，但取回新消息的 ID（流式回复要先发占位、再反复编辑）。
+    pub async fn create_message_get_id(
+        &self,
+        channel_id: u64,
+        body: &Value,
+    ) -> Result<String, ApiError> {
+        let route = Route::CreateMessage { channel_id };
+        let response = self
+            .client
+            .request::<Value>(Request::builder(&route).json(body).build()?)
+            .await?;
+        let v = response.model().await.map_err(ApiError::Body)?;
+        v["id"]
+            .as_str()
+            .map(str::to_owned)
+            .ok_or_else(|| ApiError::BadId("新建消息没有 id".into()))
+    }
+
+    /// `PATCH /channels/{id}/messages/{msg}`（流式回复的渐进编辑）。
+    pub async fn edit_message(
+        &self,
+        channel_id: u64,
+        message_id: &str,
+        body: &Value,
+    ) -> Result<(), ApiError> {
+        let route = Route::UpdateMessage {
+            channel_id,
+            message_id: id(message_id)?,
+        };
         self.send(Request::builder(&route).json(body).build()).await
     }
 

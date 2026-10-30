@@ -36,8 +36,8 @@ pub const SYNC_INTERVAL: Duration = Duration::from_secs(60);
 
 /// 同一频道两次对话至少隔 3 秒（防连点刷屏）。
 const CHAT_COOLDOWN: f64 = 3.0;
-/// 「正在输入…」续发间隔（Discord 指示 ~10 秒过期）。
-const TYPING_REFRESH: Duration = Duration::from_secs(8);
+/// 流式渐进编辑的最小间隔（Discord 编辑限流 5 次/5 秒每频道，2 秒很安全）。
+const EDIT_INTERVAL: tokio::time::Duration = tokio::time::Duration::from_secs(2);
 /// 每个频道保留的最近对话轮数（作为上下文）。
 const CHAT_HISTORY_TURNS: usize = 6;
 /// 最多记住多少个频道的对话；超出就整表清空（防内存无限涨）。
@@ -349,38 +349,9 @@ impl Naimei {
         }
     }
 
-    /// 完整一轮对话：报「正在输入」→ 组上下文（历史 + 知识库检索）→ 调 LLM → 出口过滤 → 分片发送 → 记历史。
+    /// 完整一轮对话：发占位 → 流式生成（渐进编辑占位）→ 终稿（超长则首片编辑、其余分片发送）→ 记历史。
+    /// 失败时把占位改成兜底文案（或直接发兜底），返回 Err 只用于日志。
     async fn chat_once(
-        self: &Arc<Self>,
-        chat: &Chat,
-        channel_id: u64,
-        message_id: &str,
-        text: &str,
-        is_owner: bool,
-    ) -> Result<(), ChatError> {
-        // Discord 的「正在输入…」只显示 ~10 秒，而一次生成要 25-60 秒；
-        // 期间每 8 秒续发一次，回复发完（或失败）就停，成员不会以为奶妹掉线。
-        let typing_done = Arc::new(AtomicBool::new(false));
-        let typing_task = {
-            let app = self.clone();
-            let done = typing_done.clone();
-            tokio::spawn(async move {
-                while !done.load(Ordering::Relaxed) {
-                    let _ = app.api.create_typing_trigger(channel_id).await;
-                    tokio::time::sleep(TYPING_REFRESH).await;
-                }
-            })
-        };
-        let result = self
-            .chat_reply(chat, channel_id, message_id, text, is_owner)
-            .await;
-        typing_done.store(true, Ordering::Relaxed);
-        typing_task.abort();
-        result
-    }
-
-    /// chat_once 的实际执行体（typing 保活由外层负责）。
-    async fn chat_reply(
         self: &Arc<Self>,
         chat: &Chat,
         channel_id: u64,
@@ -403,33 +374,149 @@ impl Naimei {
             .unwrap_or_default();
         let stickers = chat::wants_stickers(text).then(kb::nailong);
         let system = chat::system_prompt(&kb::retrieve(text, 2), stickers, is_owner);
-        let answer = chat.reply(&system, &history, text).await?;
-        let answer = chat::scrub(&answer);
+        // 占位消息：流式生成的画布；发不出去就退回一次性整段发送
+        let placeholder = match self
+            .api
+            .create_message_get_id(
+                channel_id,
+                &json!({
+                    "content": "…",
+                    "allowed_mentions": {"parse": ["users"]},
+                    "message_reference": {"message_id": message_id, "type": 0},
+                }),
+            )
+            .await
         {
-            let mut inner = self.lock();
-            let h = inner.histories.entry(channel_id).or_default();
-            h.push_back((text.to_owned(), answer.clone()));
-            while h.len() > CHAT_HISTORY_TURNS {
-                h.pop_front();
+            Ok(id) => Some(id),
+            Err(e) => {
+                debug!("[chat] 占位消息发送失败，退回整段发送：{e}");
+                None
+            }
+        };
+        // 渐进编辑器：上游增量 → 限频（EDIT_INTERVAL）编辑占位；scrub 之后的预览才允许上屏
+        let (tx, mut rx) = tokio::sync::mpsc::channel::<String>(16);
+        let editor = placeholder.as_ref().map(|pid| {
+            let api = self.api.clone();
+            let pid = pid.clone();
+            tokio::spawn(async move {
+                let mut last = tokio::time::Instant::now() - EDIT_INTERVAL;
+                let mut shown_last = String::new();
+                while let Some(acc) = rx.recv().await {
+                    if last.elapsed() < EDIT_INTERVAL {
+                        continue;
+                    }
+                    last = tokio::time::Instant::now();
+                    let shown = chat::preview_cut(&chat::scrub(&acc), DISCORD_MESSAGE_LIMIT);
+                    if shown == shown_last {
+                        continue;
+                    }
+                    shown_last = shown.clone();
+                    let _ = api
+                        .edit_message(channel_id, &pid, &json!({"content": shown}))
+                        .await;
+                }
+            })
+        });
+        let reply = chat
+            .reply_stream(&system, &history, text, move |acc| {
+                let _ = tx.try_send(acc);
+            })
+            .await;
+        drop(editor);
+        match reply {
+            Ok(answer) => {
+                let answer = chat::scrub(&answer);
+                {
+                    let mut inner = self.lock();
+                    let h = inner.histories.entry(channel_id).or_default();
+                    h.push_back((text.to_owned(), answer.clone()));
+                    while h.len() > CHAT_HISTORY_TURNS {
+                        h.pop_front();
+                    }
+                }
+                let parts = chat::split_for_discord(&answer, DISCORD_MESSAGE_LIMIT);
+                match &placeholder {
+                    Some(pid) => {
+                        // 首片编辑进占位（保留对原消息的回复关系），其余分片发新消息
+                        if let Err(e) = self
+                            .api
+                            .edit_message(
+                                channel_id,
+                                pid,
+                                &json!({
+                                    "content": &parts[0],
+                                    "allowed_mentions": {"parse": ["users"]},
+                                }),
+                            )
+                            .await
+                        {
+                            warn!("[chat] 终稿编辑失败：{e}");
+                        }
+                        for part in &parts[1..] {
+                            if let Err(e) = self
+                                .api
+                                .create_message(
+                                    channel_id,
+                                    &json!({
+                                        "content": part,
+                                        "allowed_mentions": {"parse": ["users"]},
+                                    }),
+                                )
+                                .await
+                            {
+                                warn!("[chat] 续片发送失败：{e}");
+                            }
+                        }
+                    }
+                    None => {
+                        for (i, part) in parts.iter().enumerate() {
+                            let mut body = json!({
+                                "content": part,
+                                "allowed_mentions": {"parse": ["users"]},
+                            });
+                            if i == 0 {
+                                body["message_reference"] =
+                                    json!({"message_id": message_id, "type": 0});
+                            }
+                            if let Err(e) = self.api.create_message(channel_id, &body).await {
+                                warn!("[chat] 回复第 {} 片发送失败：{e}", i + 1);
+                            }
+                        }
+                    }
+                }
+                Ok(())
+            }
+            Err(e) => {
+                // 占位还在生成态：把它改成兜底文案，成员看到的是同一条消息的最终状态
+                let fallback = match e {
+                    ChatError::Quota => CHAT_QUOTA,
+                    _ => CHAT_FAILED,
+                };
+                match &placeholder {
+                    Some(pid) => {
+                        if let Err(e) = self
+                            .api
+                            .edit_message(
+                                channel_id,
+                                pid,
+                                &json!({
+                                    "content": fallback,
+                                    "allowed_mentions": {"parse": ["users"]},
+                                }),
+                            )
+                            .await
+                        {
+                            warn!("[chat] 兜底编辑失败：{e}");
+                        }
+                    }
+                    None => {
+                        self.send_chat_message(channel_id, message_id, fallback)
+                            .await
+                    }
+                }
+                Err(e)
             }
         }
-        for (i, part) in chat::split_for_discord(&answer, DISCORD_MESSAGE_LIMIT)
-            .into_iter()
-            .enumerate()
-        {
-            let mut body = json!({
-                "content": part,
-                // 历史（应用曾被误标记 680009）：只允许 @ 成员，不允许 here / everyone
-                "allowed_mentions": {"parse": ["users"]},
-            });
-            if i == 0 {
-                body["message_reference"] = json!({"message_id": message_id, "type": 0});
-            }
-            if let Err(e) = self.api.create_message(channel_id, &body).await {
-                warn!("[chat] 回复第 {} 片发送失败：{e}", i + 1);
-            }
-        }
-        Ok(())
     }
 
     /// 对话的兜底回复（额度用完 / 其他失败），不带知识库，直接以回复消息发出。
