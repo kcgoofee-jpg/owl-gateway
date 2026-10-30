@@ -71,8 +71,12 @@ services:
       - NAIMEI_LLM_API_KEY=${NAIMEI_LLM_API_KEY:-}
       - NAIMEI_LLM_MODEL=${NAIMEI_LLM_MODEL:-glm-5.3-flash}
       - NAIMEI_OWNER_IDS=${NAIMEI_OWNER_IDS:-}
+      - NAIMEI_CHAT_LOG=/app/data/chat/chatlog.jsonl
       - TZ=Asia/Shanghai
     # host.docker.internal 在 Linux 上需要 host-gateway 映射
+    volumes:
+      # 对话留档（JSONL）：训练语料 / 纪念册，落在宿主机 /opt/owl/naimei-chat
+      - /opt/owl/naimei-chat:/app/data/chat
     extra_hosts:
       - "host.docker.internal:host-gateway"
     mem_limit: 256m

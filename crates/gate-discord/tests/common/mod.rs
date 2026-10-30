@@ -35,6 +35,7 @@ pub fn naimei(server: &MockServer) -> Arc<Naimei> {
         secret: SECRET.into(),
         chat: None,
         owner_ids: Vec::new(),
+        chat_log: None,
     };
     let app = Naimei::with_clock(cfg, Some(server.discord_proxy()), Box::new(|| NOW));
     app.set_bot_user(User {

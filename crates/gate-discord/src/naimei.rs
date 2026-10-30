@@ -22,6 +22,7 @@ use twilight_model::gateway::CloseFrame;
 use crate::api::{self, ApiError, DiscordApi};
 use crate::bridge::{Bridge, who_payload};
 use crate::chat::{self, Chat, ChatError, Turn};
+use crate::chatlog::ChatLog;
 use crate::commands::{self, Command, NAIMEI_INTENTS};
 use crate::config::NaimeiConfig;
 use crate::events::{
@@ -100,6 +101,8 @@ pub struct Naimei {
     pub bridge: Bridge,
     /// AI 对话客户端；未配置 `NAIMEI_LLM_*` 时为 `None`，对话功能整体关闭。
     chat: Option<Chat>,
+    /// 对话留档；未配置 `NAIMEI_CHAT_LOG` 时为 `None`。
+    chat_log: Option<ChatLog>,
     clock: Clock,
     /// 最近一次心跳延迟（毫秒）；`u64::MAX` = 还没有数据。
     latency_ms: AtomicU64,
@@ -123,11 +126,13 @@ impl Naimei {
         let api = DiscordApi::new(&cfg.token, discord_proxy);
         let bridge = Bridge::new(cfg.backend.clone(), cfg.secret.clone());
         let chat = cfg.chat.as_ref().map(|c| Chat::new(c.clone()));
+        let chat_log = cfg.chat_log.as_ref().map(|p| ChatLog::new(p));
         Arc::new(Naimei {
             cfg,
             api,
             bridge,
             chat,
+            chat_log,
             clock,
             latency_ms: AtomicU64::new(u64::MAX),
             inner: Mutex::new(Inner::default()),
@@ -332,9 +337,15 @@ impl Naimei {
             .id
             .parse::<u64>()
             .is_ok_and(|id| self.cfg.owner_ids.contains(&id));
-        let result = self
-            .chat_once(chat, channel_id, &m.id, &text, is_owner)
-            .await;
+        let req = ChatRequest {
+            channel_id,
+            message_id: &m.id,
+            text: &text,
+            is_owner,
+            author_id: &author.id,
+            author_name: &author.display_tag(),
+        };
+        let result = self.chat_once(chat, req).await;
         self.lock().busy.remove(&channel_id);
         match result {
             Ok(()) => {}
@@ -354,15 +365,12 @@ impl Naimei {
     async fn chat_once(
         self: &Arc<Self>,
         chat: &Chat,
-        channel_id: u64,
-        message_id: &str,
-        text: &str,
-        is_owner: bool,
+        req: ChatRequest<'_>,
     ) -> Result<(), ChatError> {
         let history: Vec<Turn> = self
             .lock()
             .histories
-            .get(&channel_id)
+            .get(&req.channel_id)
             .map(|h| {
                 h.iter()
                     .rev()
@@ -372,17 +380,17 @@ impl Naimei {
                     .collect()
             })
             .unwrap_or_default();
-        let stickers = chat::wants_stickers(text).then(kb::nailong);
-        let system = chat::system_prompt(&kb::retrieve(text, 2), stickers, is_owner);
+        let stickers = chat::wants_stickers(req.text).then(kb::nailong);
+        let system = chat::system_prompt(&kb::retrieve(req.text, 2), stickers, req.is_owner);
         // 占位消息：流式生成的画布；发不出去就退回一次性整段发送
         let placeholder = match self
             .api
             .create_message_get_id(
-                channel_id,
+                req.channel_id,
                 &json!({
                     "content": "…",
                     "allowed_mentions": {"parse": ["users"]},
-                    "message_reference": {"message_id": message_id, "type": 0},
+                    "message_reference": {"req.message_id": req.message_id, "type": 0},
                 }),
             )
             .await
@@ -412,13 +420,14 @@ impl Naimei {
                     }
                     shown_last = shown.clone();
                     let _ = api
-                        .edit_message(channel_id, &pid, &json!({"content": shown}))
+                        .edit_message(req.channel_id, &pid, &json!({"content": shown}))
                         .await;
                 }
             })
         });
+        let started = std::time::Instant::now();
         let reply = chat
-            .reply_stream(&system, &history, text, move |acc| {
+            .reply_stream(&system, &history, req.text, move |acc| {
                 let _ = tx.try_send(acc);
             })
             .await;
@@ -428,11 +437,25 @@ impl Naimei {
                 let answer = chat::scrub(&answer);
                 {
                     let mut inner = self.lock();
-                    let h = inner.histories.entry(channel_id).or_default();
-                    h.push_back((text.to_owned(), answer.clone()));
+                    let h = inner.histories.entry(req.channel_id).or_default();
+                    h.push_back((req.text.to_owned(), answer.clone()));
                     while h.len() > CHAT_HISTORY_TURNS {
                         h.pop_front();
                     }
+                }
+                if let Some(log) = self.chat_log.as_ref() {
+                    log.record(
+                        self.cfg.guild_id,
+                        req.channel_id,
+                        req.author_id,
+                        req.author_name,
+                        req.is_owner,
+                        req.text,
+                        &answer,
+                        chat.model(),
+                        started.elapsed().as_millis(),
+                        "ok",
+                    );
                 }
                 let parts = chat::split_for_discord(&answer, DISCORD_MESSAGE_LIMIT);
                 match &placeholder {
@@ -441,7 +464,7 @@ impl Naimei {
                         if let Err(e) = self
                             .api
                             .edit_message(
-                                channel_id,
+                                req.channel_id,
                                 pid,
                                 &json!({
                                     "content": &parts[0],
@@ -456,7 +479,7 @@ impl Naimei {
                             if let Err(e) = self
                                 .api
                                 .create_message(
-                                    channel_id,
+                                    req.channel_id,
                                     &json!({
                                         "content": part,
                                         "allowed_mentions": {"parse": ["users"]},
@@ -476,9 +499,9 @@ impl Naimei {
                             });
                             if i == 0 {
                                 body["message_reference"] =
-                                    json!({"message_id": message_id, "type": 0});
+                                    json!({"req.message_id": req.message_id, "type": 0});
                             }
-                            if let Err(e) = self.api.create_message(channel_id, &body).await {
+                            if let Err(e) = self.api.create_message(req.channel_id, &body).await {
                                 warn!("[chat] 回复第 {} 片发送失败：{e}", i + 1);
                             }
                         }
@@ -497,7 +520,7 @@ impl Naimei {
                         if let Err(e) = self
                             .api
                             .edit_message(
-                                channel_id,
+                                req.channel_id,
                                 pid,
                                 &json!({
                                     "content": fallback,
@@ -510,7 +533,7 @@ impl Naimei {
                         }
                     }
                     None => {
-                        self.send_chat_message(channel_id, message_id, fallback)
+                        self.send_chat_message(req.channel_id, req.message_id, fallback)
                             .await
                     }
                 }
@@ -597,6 +620,16 @@ impl Naimei {
             "ready_at": ready_at,
         })
     }
+}
+
+/// 一轮对话的上下文：handle_message 收集，chat_once 消费。
+struct ChatRequest<'a> {
+    channel_id: u64,
+    message_id: &'a str,
+    text: &'a str,
+    is_owner: bool,
+    author_id: &'a str,
+    author_name: &'a str,
 }
 
 /// 一次交互的回复器：记录是否已经响应过。
@@ -773,6 +806,7 @@ mod tests {
             secret: "s".into(),
             chat: None,
             owner_ids: Vec::new(),
+            chat_log: None,
         };
         Naimei::new(cfg, None)
     }

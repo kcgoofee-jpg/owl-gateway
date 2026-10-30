@@ -11,6 +11,7 @@
 //! | `NAIMEI_LLM_API_KEY` | 空：AI 对话关闭（与 BASE_URL 同时配置才开启） |
 //! | `NAIMEI_LLM_MODEL` | `glm-5.3-flash` |
 //! | `NAIMEI_OWNER_IDS` | 空：逗号分隔的 Discord 用户 ID，认作主人（对话区别对待） |
+//! | `NAIMEI_CHAT_LOG` | 空：对话留档关闭（JSONL 路径，须落在挂载卷上） |
 //!
 //! AI 对话是整段可缺省的功能：三项没有同时配齐就保持关闭，其余功能不受影响。
 
@@ -32,6 +33,8 @@ pub struct NaimeiConfig {
     pub chat: Option<ChatCfg>,
     /// 站长（主人）的 Discord 用户 ID：对话里区别对待，要求尽量满足。
     pub owner_ids: Vec<u64>,
+    /// 对话留档 JSONL 路径；`None` = 不留档。
+    pub chat_log: Option<String>,
 }
 
 pub const DEFAULT_BACKEND: &str = "http://127.0.0.1:3003";
@@ -71,6 +74,9 @@ impl NaimeiConfig {
             secret,
             chat: chat_cfg(&get),
             owner_ids: owner_ids(&get),
+            chat_log: get("NAIMEI_CHAT_LOG")
+                .filter(|p| !p.trim().is_empty())
+                .map(|p| p.trim().to_owned()),
         })
     }
 }

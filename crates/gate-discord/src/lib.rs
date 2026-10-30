@@ -17,6 +17,7 @@
 pub mod api;
 pub mod bridge;
 pub mod chat;
+pub mod chatlog;
 pub mod commands;
 pub mod config;
 pub mod events;

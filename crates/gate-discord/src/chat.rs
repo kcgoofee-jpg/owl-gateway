@@ -57,6 +57,11 @@ impl Chat {
         Chat { cfg, http }
     }
 
+    /// 模型名（留档用）。
+    pub fn model(&self) -> &str {
+        &self.cfg.model
+    }
+
     /// 调一次对话。`system` 来自 `system_prompt`；`history` 是本频道最近几轮。
     pub async fn reply(
         &self,
