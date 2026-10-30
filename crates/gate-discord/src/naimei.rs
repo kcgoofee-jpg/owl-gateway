@@ -84,6 +84,8 @@ struct Inner {
     // ---------- AI 对话状态 ----------
     /// 奶妹自己的用户 ID（READY 里来），对话触发判断用。
     bot_id: Option<String>,
+    /// 奶妹头像的 CDN 链接（READY 里拼出来），成员问长相时发给他。
+    avatar_url: Option<String>,
     /// 每个频道的最近对话：频道 ID → (成员说的, 奶妹答的) 队列。
     histories: HashMap<u64, VecDeque<Turn>>,
     /// 正在生成回复的频道：一个频道同时只处理一条，多出来的直接忽略。
@@ -156,8 +158,13 @@ impl Naimei {
     }
 
     pub fn set_bot_user(&self, user: User) {
+        let avatar_url = user.avatar.as_ref().map(|h| {
+            let ext = if h.starts_with("a_") { "gif" } else { "png" };
+            format!("https://cdn.discordapp.com/avatars/{}/{h}.{ext}", user.id)
+        });
         let mut inner = self.lock();
         inner.bot_id = Some(user.id.clone());
+        inner.avatar_url = avatar_url;
         inner.bot = Some(user);
     }
 
@@ -321,6 +328,28 @@ impl Naimei {
                 .collect()
         };
         let mut images = image_urls(&m.attachments);
+        // 文本附件（txt/md/json/csv/log，≤128KB）：抓内容进上下文
+        let mut text_files: Vec<(String, String)> = Vec::new();
+        for a in m.attachments.iter().take(3) {
+            if text_files.len() >= 2 {
+                break;
+            }
+            let ct = a.content_type.as_deref().unwrap_or("");
+            let name = a.filename.to_lowercase();
+            let is_text = ct.starts_with("text/")
+                || name.ends_with(".txt")
+                || name.ends_with(".md")
+                || name.ends_with(".json")
+                || name.ends_with(".csv")
+                || name.ends_with(".log");
+            if !is_text {
+                continue;
+            }
+            if let Some(content) = chat::fetch_text_file(&a.url).await {
+                let cut: String = content.chars().take(2500).collect();
+                text_files.push((a.filename.clone(), cut));
+            }
+        }
         // 引用上下文：被回复消息的内容（和它的图）对模型可见，不然「fix it」没法修
         let mut text = strip_mention(&m.content, &bot_id).trim().to_owned();
         if let Some(r) = m.referenced_message.as_ref() {
@@ -376,6 +405,7 @@ impl Naimei {
             message_id: &m.id,
             text: &text,
             images,
+            text_files,
             is_owner,
             author_id: &author.id,
             author_name: &author.display_tag(),
@@ -393,6 +423,52 @@ impl Naimei {
                 self.send_chat_message(channel_id, &m.id, CHAT_FAILED).await;
             }
         }
+    }
+
+    /// 频道上下文：帖子首楼（若在帖子里）+ 最近几条消息。任何失败都静默降级。
+    async fn channel_context(&self, channel_id: u64, exclude_id: &str) -> String {
+        let mut out = String::new();
+        if let Ok(info) = self.api.channel_info(channel_id).await {
+            let ctype = info["type"].as_u64().unwrap_or(0);
+            if ctype == 11 || ctype == 12 {
+                // 帖子的频道 id 即首楼消息 id
+                if let Ok(first) = self.api.message_by_id(channel_id, channel_id).await {
+                    let who = first["author"]["global_name"]
+                        .as_str()
+                        .or_else(|| first["author"]["username"].as_str())
+                        .unwrap_or("楼主");
+                    let content = first["content"].as_str().unwrap_or("").trim();
+                    let cut: String = content.chars().take(400).collect();
+                    if !cut.is_empty() {
+                        out.push_str(&format!("[帖子首楼 {who}：{cut}]\n"));
+                    }
+                }
+            }
+        }
+        if let Ok(msgs) = self.api.recent_messages(channel_id).await {
+            let lines: Vec<String> = msgs
+                .iter()
+                .filter(|m| m["id"].as_str() != Some(exclude_id))
+                .filter_map(|m| {
+                    let who = m["author"]["global_name"]
+                        .as_str()
+                        .or_else(|| m["author"]["username"].as_str())
+                        .unwrap_or("?");
+                    let content = m["content"].as_str()?.trim();
+                    if content.is_empty() {
+                        return None;
+                    }
+                    let cut: String = content.chars().take(160).collect();
+                    Some(format!("- {who}：{cut}"))
+                })
+                .take(6)
+                .collect();
+            if !lines.is_empty() {
+                out.push_str("频道最近消息（新→旧）：\n");
+                out.push_str(&lines.join("\n"));
+            }
+        }
+        out
     }
 
     /// 完整一轮对话：发占位 → 流式生成（渐进编辑占位）→ 终稿（超长则首片编辑、其余分片发送）→ 记历史。
@@ -416,7 +492,18 @@ impl Naimei {
             })
             .unwrap_or_default();
         let stickers = chat::wants_stickers(req.text).then(kb::nailong);
-        let system = chat::system_prompt(&kb::retrieve(req.text, 2), stickers, req.is_owner);
+        let mut channel_ctx = self.channel_context(req.channel_id, req.message_id).await;
+        for (name, content) in &req.text_files {
+            channel_ctx.push_str(&format!("\n成员附带的文本文件 [{name}]:\n{content}\n"));
+        }
+        let avatar_url = self.lock().avatar_url.clone();
+        let system = chat::system_prompt(
+            &kb::retrieve(req.text, 2),
+            stickers,
+            req.is_owner,
+            &channel_ctx,
+            avatar_url.as_deref(),
+        );
         // 占位消息：流式生成的画布；发不出去就退回一次性整段发送
         let placeholder = match self
             .api
@@ -668,6 +755,8 @@ struct ChatRequest<'a> {
     message_id: &'a str,
     text: &'a str,
     images: Vec<String>,
+    /// 文本类附件（filename, 内容已抓取截断）
+    text_files: Vec<(String, String)>,
     is_owner: bool,
     author_id: &'a str,
     author_name: &'a str,

@@ -152,6 +152,46 @@ impl DiscordApi {
             .ok_or_else(|| ApiError::BadId("新建消息没有 id".into()))
     }
 
+    /// `GET /channels/{id}/messages` —— 最近消息（新→旧，Discord 默认 50 条），宽容解析为原始 JSON。
+    pub async fn recent_messages(&self, channel_id: u64) -> Result<Vec<Value>, ApiError> {
+        let route = Route::GetMessages {
+            after: None,
+            around: None,
+            before: None,
+            channel_id,
+            limit: None,
+        };
+        let response = self
+            .client
+            .request::<Value>(Request::builder(&route).build()?)
+            .await?;
+        let v = response.model().await.map_err(ApiError::Body)?;
+        Ok(v.as_array().cloned().unwrap_or_default())
+    }
+
+    /// `GET /channels/{id}` —— 频道信息（type 11/12 = 帖子/子区）。
+    pub async fn channel_info(&self, channel_id: u64) -> Result<Value, ApiError> {
+        let route = Route::GetChannel { channel_id };
+        let response = self
+            .client
+            .request::<Value>(Request::builder(&route).build()?)
+            .await?;
+        response.model().await.map_err(ApiError::Body)
+    }
+
+    /// `GET /channels/{cid}/messages/{mid}` —— 单条消息（帖子首楼：帖子的频道 id 即首楼 id）。
+    pub async fn message_by_id(&self, channel_id: u64, message_id: u64) -> Result<Value, ApiError> {
+        let route = Route::GetMessage {
+            channel_id,
+            message_id,
+        };
+        let response = self
+            .client
+            .request::<Value>(Request::builder(&route).build()?)
+            .await?;
+        response.model().await.map_err(ApiError::Body)
+    }
+
     /// `PATCH /channels/{id}/messages/{msg}`（流式回复的渐进编辑）。
     pub async fn edit_message(
         &self,

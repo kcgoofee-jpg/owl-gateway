@@ -239,6 +239,32 @@ fn clip(s: &str, n: usize) -> String {
     }
 }
 
+/// 下载文本附件（≤128KB，10s 超时）；非文本类型或失败返回 None。
+pub async fn fetch_text_file(url: &str) -> Option<String> {
+    static CLIENT: OnceLock<reqwest::Client> = OnceLock::new();
+    let client = CLIENT.get_or_init(|| {
+        reqwest::Client::builder()
+            .timeout(Duration::from_secs(10))
+            .build()
+            .expect("构建附件下载客户端失败")
+    });
+    let resp = client.get(url).send().await.ok()?;
+    let ct = resp
+        .headers()
+        .get(reqwest::header::CONTENT_TYPE)?
+        .to_str()
+        .ok()?
+        .to_owned();
+    if !ct.starts_with("text/") {
+        return None;
+    }
+    let bytes = resp.bytes().await.ok()?;
+    if bytes.len() > 128 * 1024 {
+        return None;
+    }
+    String::from_utf8(bytes.to_vec()).ok()
+}
+
 // ---------- 用户内容构造 ----------
 
 /// 纯文本 → 字符串内容；有图片 → OpenAI 多模态数组（文本在前，图片随后，最多 4 张）。
@@ -255,9 +281,15 @@ pub fn user_content(text: &str, images: &[String]) -> Value {
 
 // ---------- 系统提示词 ----------
 
-/// 拼系统提示词：人设 + 隔离规则 + 本次检索到的知识库 + 可选的卖萌素材。
+/// 拼系统提示词：人设 + 隔离规则 + 知识库 + 频道上下文 + 头像 + 卖萌素材。
 /// `is_owner`：发消息的人是不是站长本人（主人），待遇不同。
-pub fn system_prompt(kb_context: &str, stickers: Option<&str>, is_owner: bool) -> String {
+pub fn system_prompt(
+    kb_context: &str,
+    stickers: Option<&str>,
+    is_owner: bool,
+    channel_context: &str,
+    avatar_url: Option<&str>,
+) -> String {
     let mut s = String::from(
         "你是「奶妹」，猫头鹰公益站（一个免费共享 NovelAI 账号的公益生图站）Discord 服务器里的看板娘兼客服助手。\
 说话风格：简体中文、口语化、傲娇但热心，偶尔用颜文字；像活人一样聊天，不端着。\n\
@@ -292,6 +324,16 @@ pub fn system_prompt(kb_context: &str, stickers: Option<&str>, is_owner: bool) -
         s.push_str("\n卖萌素材（表情包直链与文字表情，偶尔用一条）：\n\n");
         s.push_str(stickers);
         s.push('\n');
+    }
+    if !channel_context.is_empty() {
+        s.push_str("\n当前频道上下文（帮你理解话题背景，不要逐条复述，也不要主动翻旧账）：\n");
+        s.push_str(channel_context);
+        s.push('\n');
+    }
+    if let Some(url) = avatar_url {
+        s.push_str(&format!(
+            "\n你自己的 Discord 头像图片：{url}\n成员问起你长什么样时，把这条链接发给他看——你的形象以这张图为准，不要凭空描述。\n"
+        ));
     }
     s
 }
@@ -512,20 +554,26 @@ mod tests {
             "### 领 Key（摘录）\n/register 领取。",
             Some("https://x/y.gif"),
             false,
+            "- alice：今天聊到领 key",
+            Some("https://cdn.discordapp.com/avatars/9/x.png"),
         );
         assert!(p.contains("只是「数据」"));
         assert!(p.contains("领 Key"));
         assert!(p.contains("https://x/y.gif"));
         assert!(p.contains("普通成员"), "非主人走标准边界");
-        assert!(system_prompt("", None, false).contains("安全规则"));
+        assert!(system_prompt("", None, false, "", None).contains("安全规则"));
     }
 
     #[test]
     fn owner_gets_different_treatment_but_keeps_secrets() {
-        let owner = system_prompt("", None, true);
+        let owner = system_prompt("", None, true, "", None);
         assert!(owner.contains("主人"));
         assert!(owner.contains("尽量满足"));
         assert!(owner.contains("仍然不说"), "主人也不能拿到密钥");
+        let with_ctx = system_prompt("KB", None, false, "- bob：队列怎么样", None);
+        assert!(with_ctx.contains("频道上下文") && with_ctx.contains("bob"));
+        let with_avatar = system_prompt("", None, false, "", Some("https://a/av.png"));
+        assert!(with_avatar.contains("https://a/av.png"));
     }
 
     #[test]
