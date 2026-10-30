@@ -2,6 +2,7 @@
 
 ## 2026-10-30
 
+- Command Code Studio 反代实测结论：换域名的反代**登录不可用**——登录前置的 Turnstile 校验站点域名，`cc.davidzhao.top` 拿 token 直接报 `110200`（官方域名 794 字符 token 正常）；要「走本机」只能用隧道代理（gost，`18443` + Basic 认证），浏览器仍在官方域名下，Token 与登录态才成立。详见 [说明](docs/newapi-and-cc-proxy.md)。
 - 修掉一个挂了两天的孤儿探测循环：`cutover.sh` 的实测子进程在父脚本被中断后继续每 0.5 秒打 `/healthz` 和 `/`，把 Caddy 访问日志刷到 10 分钟一轮转。现在父进程退出探测自己就停，`EXIT/INT/TERM` 也会 kill。
 - 工作台界面语言：官网构建自带 `zh-CN` 翻译，但语言存在客户端加密的 keystore 里、切换入口在未镜像的设置页，所以只把 `uiLanguage: zh-CN` 作为新成员默认值 + 老成员缺失时补上，实际界面语言仍由客户端决定。
 - 同机新增 New API（`newapi.davidzhao.top`）与 Command Code Studio 反代（`cc.davidzhao.top`），见 [说明](docs/newapi-and-cc-proxy.md)。
