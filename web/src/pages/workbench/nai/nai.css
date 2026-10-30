@@ -35,6 +35,11 @@
 }
 
 /* nai 页的 toast 对齐官方：右上角、深底、小圆角。legacy 页不受影响。 */
+body.nai-page {
+  background: #13152c;
+  color-scheme: dark;
+  overscroll-behavior: none;
+}
 body.nai-page .toasts {
   left: auto;
   right: 24px;
