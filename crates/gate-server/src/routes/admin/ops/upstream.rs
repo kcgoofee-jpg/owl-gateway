@@ -170,18 +170,7 @@ async fn release_request_settlement(
     if !released {
         return Err(HttpError::new(409, "请求不处于待核对状态").into());
     }
-    let mut budget = state.budget.lock().await;
-    let ids: Vec<u64> = budget
-        .reservations
-        .iter()
-        .filter_map(|(id, r)| (r.request_id == request_id).then_some(*id))
-        .collect();
-    for id in ids {
-        budget.reservations.remove(&id);
-    }
-    if !budget.reservations.values().any(|r| r.active) {
-        state.budget_idle.notify_waiters();
-    }
+    crate::admission::release_reservations(&state, &request_id).await;
     Ok(ok_json(
         &json!({"ok":true,"status":"released_manual","csrf_token":expected}),
     ))

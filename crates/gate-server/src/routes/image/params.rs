@@ -224,7 +224,7 @@ pub(super) async fn prepare(
     // 入口预检对所有请求都做（含 V5）：用快照、算上别的请求已拿到的预留，额度不够就立即 403，
     // 不让成员先排队 / 先在按时段放行里等位，轮到了才被拒（10-21：同 Key 第二张 V5 排了 47 秒才拿到 402）。
     // 以前只对非 V5 请求做（给已删除的「V5 续杯」留的口子），现在 V5 也一视同仁。
-    let snapshot = state.budget.lock().await.clone();
+    let snapshot = admission::budget_snapshot(state).await;
     admission::quota_image_check(state, &snapshot, &key, &est, legacy_free_images, None).await?;
     let cost: Vec<String> = [
         (est.anlas > 0.0).then(|| format!("est={}A", est.anlas as i64)),
