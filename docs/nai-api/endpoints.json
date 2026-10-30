@@ -1,0 +1,500 @@
+{
+ "Register": [
+  {
+   "base": "ImageBackendUrl",
+   "path": "/user/register"
+  }
+ ],
+ "Login": [
+  {
+   "base": "ImageBackendUrl",
+   "path": "/user/login"
+  }
+ ],
+ "GoogleSSO": [
+  {
+   "base": "ImageBackendUrl",
+   "path": "/user/sso/google"
+  }
+ ],
+ "UserData": [
+  {
+   "base": "ImageBackendUrl",
+   "path": "/user/data"
+  }
+ ],
+ "Subscriptions": [
+  {
+   "base": "ImageBackendUrl",
+   "path": "/user/subscription"
+  }
+ ],
+ "SubscriptionBind": [
+  {
+   "base": "ImageBackendUrl",
+   "path": "/user/subscription/bind"
+  }
+ ],
+ "UserGiftKeys": [
+  {
+   "base": "ImageBackendUrl",
+   "path": "/user/giftkeys"
+  }
+ ],
+ "Inventory": [
+  {
+   "base": "ImageBackendUrl",
+   "path": "/user/inventory"
+  }
+ ],
+ "Priority": [
+  {
+   "base": "ImageBackendUrl",
+   "path": "/user/priority"
+  }
+ ],
+ "Keystore": [
+  {
+   "base": "ImageBackendUrl",
+   "path": "/user/keystore"
+  }
+ ],
+ "Objects": [
+  {
+   "base": "ImageBackendUrl",
+   "path": "/user/objects"
+  }
+ ],
+ "Stories": [
+  {
+   "base": "ImageBackendUrl",
+   "path": "/user/objects/stories"
+  }
+ ],
+ "StoryContent": [
+  {
+   "base": "ImageBackendUrl",
+   "path": "/user/objects/storycontent"
+  }
+ ],
+ "Presets": [
+  {
+   "base": "ImageBackendUrl",
+   "path": "/user/objects/presets"
+  }
+ ],
+ "AIModules": [
+  {
+   "base": "ImageBackendUrl",
+   "path": "/user/objects/aimodules"
+  }
+ ],
+ "AccountUserScripts": [
+  {
+   "base": "ImageBackendUrl",
+   "path": "/user/objects/userscripts"
+  }
+ ],
+ "ImagePromptMacros": [
+  {
+   "base": "ImageBackendUrl",
+   "path": "/user/objects/promptmacros"
+  }
+ ],
+ "ClientSettings": [
+  {
+   "base": "ImageBackendUrl",
+   "path": "/user/clientsettings"
+  }
+ ],
+ "Generate": [
+  {
+   "base": "BackendUrl",
+   "path": "/ai/generate"
+  }
+ ],
+ "GenerateStream": [
+  {
+   "base": "BackendUrl",
+   "path": "/ai/generate-stream"
+  }
+ ],
+ "TextGenerate": [
+  {
+   "base": "TextBackendUrl",
+   "path": "/ai/generate"
+  }
+ ],
+ "TextGenerateStream": [
+  {
+   "base": "TextBackendUrl",
+   "path": "/ai/generate-stream"
+  }
+ ],
+ "GenerateImage": [
+  {
+   "base": "ImageBackendUrl",
+   "path": "/ai/generate-image"
+  }
+ ],
+ "GenerateImagePrice": [
+  {
+   "base": "BackendUrl",
+   "path": "/ai/generate-image/request-price"
+  }
+ ],
+ "UpscaleImage": [
+  {
+   "base": "ImageBackendUrl",
+   "path": "/ai/upscale"
+  }
+ ],
+ "RecoveryInitiation": [
+  {
+   "base": "ImageBackendUrl",
+   "path": "/user/recovery/request"
+  }
+ ],
+ "RecoverySubmit": [
+  {
+   "base": "ImageBackendUrl",
+   "path": "/user/recovery/recover"
+  }
+ ],
+ "PrefixSubmit": [
+  {
+   "base": "BackendUrl",
+   "path": "/ai/module/train"
+  }
+ ],
+ "Prefix": [
+  {
+   "base": "BackendUrl",
+   "path": "/ai/module"
+  }
+ ],
+ "PrefixAll": [
+  {
+   "base": "BackendUrl",
+   "path": "/ai/module/all"
+  }
+ ],
+ "PrefixDelete": [
+  {
+   "base": "BackendUrl",
+   "path": "/ai/module/delete"
+  }
+ ],
+ "PurchaseSteps": [
+  {
+   "base": "BackendUrl",
+   "path": "/ai/module/buy-training-steps"
+  }
+ ],
+ "ChangeAuth": [
+  {
+   "base": "ImageBackendUrl",
+   "path": "/user/change-access-key"
+  }
+ ],
+ "StoryShelves": [
+  {
+   "base": "ImageBackendUrl",
+   "path": "/user/objects/shelf"
+  }
+ ],
+ "VerifyEmail": [
+  {
+   "base": "ImageBackendUrl",
+   "path": "/user/verify-email"
+  }
+ ],
+ "Information": [
+  {
+   "base": "ImageBackendUrl",
+   "path": "/user/information"
+  }
+ ],
+ "ResendVerifyEmail": [
+  {
+   "base": "ImageBackendUrl",
+   "path": "/user/resend-email-verification"
+  }
+ ],
+ "RequestDeleteAccount": [
+  {
+   "base": "ImageBackendUrl",
+   "path": "/user/deletion/request"
+  }
+ ],
+ "VerifyDeleteAccount": [
+  {
+   "base": "ImageBackendUrl",
+   "path": "/user/deletion/delete"
+  }
+ ],
+ "SubmitContest": [
+  {
+   "base": "BackendUrl",
+   "path": "/user/submission"
+  }
+ ],
+ "VoteContest": [
+  {
+   "base": "BackendUrl",
+   "path": "/user/vote-submission"
+  }
+ ],
+ "TTS": [
+  {
+   "base": "TextBackendUrl",
+   "path": "/ai/generate-voice"
+  }
+ ],
+ "TagSearch": [
+  {
+   "base": "ImageBackendUrl",
+   "path": "/ai/generate-image/suggest-tags"
+  }
+ ],
+ "CreatePersistentToken": [
+  {
+   "base": "ImageBackendUrl",
+   "path": "/user/create-persistent-token"
+  }
+ ],
+ "ChangeMailingListConsent": [
+  {
+   "base": "ImageBackendUrl",
+   "path": "/user/change-mailing-list-consent"
+  }
+ ],
+ "UpdateConsent": [
+  {
+   "base": "ImageBackendUrl",
+   "path": "/user/consent"
+  }
+ ],
+ "ImageTool": [
+  {
+   "base": "ImageBackendUrl",
+   "path": "/ai/augment-image"
+  }
+ ],
+ "CreateSubscription": [
+  {
+   "base": "ImageBackendUrl",
+   "path": "/user/cb/create-subscription"
+  }
+ ],
+ "UpdateSubscription": [
+  {
+   "base": "ImageBackendUrl",
+   "path": "/user/cb/update-subscription"
+  }
+ ],
+ "ChangePaymentMethod": [
+  {
+   "base": "ImageBackendUrl",
+   "path": "/user/cb/change-payment-method"
+  }
+ ],
+ "CancelSubscription": [
+  {
+   "base": "ImageBackendUrl",
+   "path": "/user/cb/cancel-subscription"
+  }
+ ],
+ "ReactivateSubscription": [
+  {
+   "base": "ImageBackendUrl",
+   "path": "/user/cb/reactivate-subscription"
+  }
+ ],
+ "OneTimePurchase": [
+  {
+   "base": "ImageBackendUrl",
+   "path": "/user/cb/one-time-purchase"
+  }
+ ],
+ "MigrateSubscription": [
+  {
+   "base": "ImageBackendUrl",
+   "path": "/user/cb/migrate-subscription"
+  }
+ ],
+ "UpdateSusbcriptionPrice": [
+  {
+   "base": "ImageBackendUrl",
+   "path": "/user/cb/estimate/update-subscription"
+  }
+ ],
+ "EncodeVibe": [
+  {
+   "base": "ImageBackendUrl",
+   "path": "/ai/encode-vibe"
+  }
+ ],
+ "SelfServePortalLink": [
+  {
+   "base": "ImageBackendUrl",
+   "path": "/user/cb/self-serve-portal-link"
+  }
+ ],
+ "GetCustomer": [
+  {
+   "base": "ImageBackendUrl",
+   "path": "/user/cb/get-customer"
+  }
+ ],
+ "CreateCustomer": [
+  {
+   "base": "ImageBackendUrl",
+   "path": "/user/cb/create-customer"
+  }
+ ],
+ "UpdateCustomerBilling": [
+  {
+   "base": "ImageBackendUrl",
+   "path": "/user/cb/update-customer-billing-data"
+  }
+ ],
+ "CreatePaymentIntent": [
+  {
+   "base": "ImageBackendUrl",
+   "path": "/user/cb/create-payment-intent"
+  }
+ ],
+ "CreateSubscriptionV2": [
+  {
+   "base": "ImageBackendUrl",
+   "path": "/user/cb/create-subscription-v2"
+  }
+ ],
+ "CreatePaymentSource": [
+  {
+   "base": "ImageBackendUrl",
+   "path": "/user/cb/create-payment-source"
+  }
+ ],
+ "ListPaymentSources": [
+  {
+   "base": "ImageBackendUrl",
+   "path": "/user/cb/list-payment-sources"
+  }
+ ],
+ "CBInvoices": [
+  {
+   "base": "ImageBackendUrl",
+   "path": "/user/cb/invoices"
+  }
+ ],
+ "DeletePaymentSource": [
+  {
+   "base": "ImageBackendUrl",
+   "path": "/user/cb/delete-payment-source"
+  }
+ ],
+ "ErrtrackTrack": [
+  {
+   "base": "ImageBackendUrl",
+   "path": "/errtrack/track"
+  }
+ ],
+ "PaymentIntents": [
+  {
+   "base": "ImageBackendUrl",
+   "path": "/user/cb/payment-intents"
+  }
+ ],
+ "GenerateImageStream": [
+  {
+   "base": "ImageBackendUrl",
+   "path": "/ai/generate-image-stream"
+  }
+ ],
+ "ClearPaymentPII": [
+  {
+   "base": "ImageBackendUrl",
+   "path": "/user/cb/clear-payment-pii"
+  }
+ ],
+ "PaymentGatewayGenerateContext": [
+  {
+   "base": "ImageBackendUrl",
+   "path": "/payment-gateway/generate-payment-context"
+  }
+ ],
+ "PaymentGatewaySetupPayerAuth": [
+  {
+   "base": "ImageBackendUrl",
+   "path": "/payment-gateway/setup-payer-auth"
+  }
+ ],
+ "PaymentGatewayCheckEnrollment": [
+  {
+   "base": "ImageBackendUrl",
+   "path": "/payment-gateway/check-enrollment"
+  }
+ ],
+ "PaymentGatewayAuthorizeCard": [
+  {
+   "base": "ImageBackendUrl",
+   "path": "/payment-gateway/authorize-card"
+  }
+ ],
+ "PaymentGatewayCreatePaymentInstrument": [
+  {
+   "base": "ImageBackendUrl",
+   "path": "/payment-gateway/create-payment-instrument"
+  }
+ ],
+ "PaymentGatewayReport3dsOutcome": [
+  {
+   "base": "ImageBackendUrl",
+   "path": "/payment-gateway/report-3ds-outcome"
+  }
+ ],
+ "ImageTrialStatus": [
+  {
+   "base": "ImageBackendUrl",
+   "path": "/ai/trial-status"
+  }
+ ],
+ "TextTrialStatus": [
+  {
+   "base": "TextBackendUrl",
+   "path": "/ai/trial-status"
+  }
+ ],
+ "UserObjectsBatch": [
+  {
+   "base": "ImageBackendUrl",
+   "path": "/user/objects/batch"
+  }
+ ],
+ "OpenAICompletion": [
+  {
+   "base": "TextBackendUrl",
+   "path": "/oa/v1/completions"
+  }
+ ],
+ "OpenAIChatCompletion": [
+  {
+   "base": "TextBackendUrl",
+   "path": "/oa/v1/chat/completions"
+  }
+ ],
+ "AnalyticsEvent": [
+  {
+   "base": "TextBackendUrl",
+   "path": "/usage/event"
+  }
+ ],
+ "AnalyticsIdentify": [
+  {
+   "base": "TextBackendUrl",
+   "path": "/usage/link"
+  }
+ ]
+}

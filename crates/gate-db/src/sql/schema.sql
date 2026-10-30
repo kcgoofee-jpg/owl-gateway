@@ -169,3 +169,16 @@ WHEN NOT EXISTS (SELECT 1 FROM api_keys WHERE id=NEW.key_id)
 BEGIN
     SELECT RAISE(IGNORE);
 END;
+
+CREATE TABLE IF NOT EXISTS key_keystores (   -- 官网生图页的本地历史加密密钥库（客户端加密后的不透明密文）
+    key_id INTEGER PRIMARY KEY,
+    blob TEXT NOT NULL,
+    change_index INTEGER NOT NULL DEFAULT 0,
+    updated_at REAL NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS key_settings (    -- 官网生图页的客户端设置（主题/模型/许可标记等，整块 JSON）
+    key_id INTEGER PRIMARY KEY,
+    json TEXT NOT NULL,
+    updated_at REAL NOT NULL
+);

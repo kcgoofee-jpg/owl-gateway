@@ -74,6 +74,64 @@ impl Db {
     }
 
     /// 换 token 但保留 id（在途请求、用量和限速仍归属于它）。token 撞了 UNIQUE 约束时返回 Err。
+    /// 官网生图页的客户端设置（整块 JSON，原样存取）。
+    pub async fn get_key_settings(&self, key_id: i64) -> Result<Option<String>> {
+        self.read(move |c| {
+            c.query_row(
+                "SELECT json FROM key_settings WHERE key_id=?",
+                [key_id],
+                |row| row.get::<_, String>(0),
+            )
+            .optional()
+        })
+        .await
+    }
+
+    pub async fn set_key_settings(&self, key_id: i64, json: &str, now: f64) -> Result<()> {
+        let json = json.to_string();
+        self.write(move |tx| {
+            tx.execute(
+                "INSERT INTO key_settings (key_id, json, updated_at) VALUES (?, ?, ?)
+                 ON CONFLICT(key_id) DO UPDATE SET json=excluded.json, updated_at=excluded.updated_at",
+                params![key_id, json, now],
+            )?;
+            Ok(())
+        })
+        .await
+    }
+
+    /// 官网生图页的密钥库密文（客户端加密，服务端只做不透明存取）。
+    pub async fn get_key_keystore(&self, key_id: i64) -> Result<Option<(String, i64)>> {
+        self.read(move |c| {
+            c.query_row(
+                "SELECT blob, change_index FROM key_keystores WHERE key_id=?",
+                [key_id],
+                |row| Ok((row.get::<_, String>(0)?, row.get::<_, i64>(1)?)),
+            )
+            .optional()
+        })
+        .await
+    }
+
+    pub async fn set_key_keystore(
+        &self,
+        key_id: i64,
+        blob: &str,
+        change_index: i64,
+        now: f64,
+    ) -> Result<()> {
+        let blob = blob.to_string();
+        self.write(move |tx| {
+            tx.execute(
+                "INSERT INTO key_keystores (key_id, blob, change_index, updated_at) VALUES (?, ?, ?, ?)
+                 ON CONFLICT(key_id) DO UPDATE SET blob=excluded.blob, change_index=excluded.change_index, updated_at=excluded.updated_at",
+                params![key_id, blob, change_index, now],
+            )?;
+            Ok(())
+        })
+        .await
+    }
+
     pub async fn rotate_key_token(&self, key_id: i64, token: &str) -> Result<bool> {
         let token = token.to_string();
         self.write(move |tx| {

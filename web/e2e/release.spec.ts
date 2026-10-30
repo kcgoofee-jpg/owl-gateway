@@ -18,84 +18,13 @@ test("guest landing renders and member APIs require credentials", async ({ page,
   expect(errors).toEqual([]);
 });
 
-test("member generates an image through the gateway", async ({ page, context }) => {
+test("member entry lands on the mirrored image page", async ({ page, context }) => {
   await asMember(context);
   await page.goto("/workbench");
-  await page.locator('textarea[aria-label="提示词"]').fill("an owl, night sky");
-  await page.locator(".nai-generate").click();
-  await expect(page.locator(".nai-view-img")).toBeVisible({ timeout: 30_000 });
-  expect(
-    await page.locator(".nai-view-img").evaluate((image) => (image as HTMLImageElement).naturalWidth),
-  ).toBeGreaterThan(0);
-});
-
-test("V4.5 reference and image-to-image uploads reach the generation request", async ({ page }) => {
-  const png = Buffer.from(
-    "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+/qz8AAAAASUVORK5CYII=",
-    "base64",
-  );
-  let generation: Record<string, unknown> | null = null;
-  await page.route("**/ai/encode-vibe", (route) =>
-    route.fulfill({ status: 200, body: Buffer.from("vibe-encoded-data") }),
-  );
-  await page.route("**/ai/generate-image", (route) =>
-    route.fulfill({ status: 200, contentType: "image/png", body: png }),
-  );
-  page.on("request", (request) => {
-    if (request.url().endsWith("/ai/generate-image")) {
-      generation = JSON.parse(request.postData() ?? "{}") as Record<string, unknown>;
-    }
-  });
-
-  await page.goto("/workbench?preview=1");
-  await expect(page.getByRole("button", { name: "V4.5 Full", exact: true })).toBeVisible();
-  await page.locator('input[aria-label="选择参考图"]').setInputFiles({
-    name: "reference.png",
-    mimeType: "image/png",
-    buffer: png,
-  });
-  await page.locator('input[aria-label="选择参考图片"]').setInputFiles({
-    name: "initial.png",
-    mimeType: "image/png",
-    buffer: png,
-  });
-  await expect(page.locator(".nai-reference-item img")).toBeVisible();
-  await expect(page.locator(".nai-i2i-thumb")).toBeVisible();
-  await page.locator('textarea[aria-label="提示词"]').fill("portrait, soft light");
-  await page.locator(".nai-generate").click();
-  await expect(page.locator(".nai-view-img")).toBeVisible();
-
-  const request = generation as {
-    action?: string;
-    model?: string;
-    parameters?: Record<string, unknown>;
-  } | null;
-  expect(request?.model).toBe("nai-diffusion-4-5-full");
-  expect(request?.action).toBe("img2img");
-  expect(request?.parameters?.image).toBe(png.toString("base64"));
-  expect(request?.parameters?.strength).toBe(0.65);
-  expect(request?.parameters?.noise).toBe(0);
-  expect(request?.parameters?.reference_image_multiple).toEqual([
-    Buffer.from("vibe-encoded-data").toString("base64"),
-  ]);
-  expect(request?.parameters?.reference_strength_multiple).toEqual([0.6]);
-  await expect(page.getByRole("button", { name: "充值" })).toHaveCount(0);
-  await page.getByRole("button", { name: "用作初始图" }).click();
-  await expect(page.locator(".nai-i2i-pick")).toContainText(/seed-\d+\.png/);
-  await page.reload();
-  await expect(page.locator(".nai-rail-item img")).toHaveCount(1);
-  await expect(page.locator(".nai-view-img")).toBeVisible();
-  const separator = page.getByRole("separator", { name: "调整侧栏宽度" });
-  const separatorBox = await separator.boundingBox();
-  expect(separatorBox).not.toBeNull();
-  if (!separatorBox) throw new Error("sidebar resize handle is not visible");
-  await page.mouse.move(separatorBox.x + separatorBox.width / 2, separatorBox.y + 80);
-  await page.mouse.down();
-  await page.mouse.move(separatorBox.x + separatorBox.width / 2 + 80, separatorBox.y + 80, { steps: 5 });
-  await page.mouse.up();
-  await expect(page.locator(".nai-side")).toHaveCSS("width", "480px");
-  await page.reload();
-  await expect(page.locator(".nai-side")).toHaveCSS("width", "480px");
+  await expect(page).toHaveURL(/\/image$/);
+  // 官网镜像页的最小信号：模型行 + 生成按钮
+  await expect(page.getByText("Model", { exact: true })).toBeVisible({ timeout: 20_000 });
+  await expect(page.locator("button", { hasText: /Generate \d+ Image/ })).toBeVisible();
 });
 
 test("admin login loads member management", async ({ page, context, browser, baseURL }) => {

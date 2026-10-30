@@ -13,7 +13,6 @@ function pageRoutes(): Plugin {
         const path = url.split("?")[0] ?? "/";
         const qs = url.slice(path.length);
         if (path === "/") req.url = `/_owl/landing.html${qs}`;
-        else if (path === "/workbench") req.url = `/_owl/workbench.html${qs}`;
         else if ((path === "/admin" || path.startsWith("/admin/")) && !path.startsWith("/admin/api/"))
           req.url = `/_owl/admin.html${qs}`;
         next();
@@ -22,51 +21,11 @@ function pageRoutes(): Plugin {
   };
 }
 
-/** 仅本地 `?preview=1`：不登录也能看工作台皮。生产构建不注入。 */
-function workbenchPreview(): Plugin {
-  const boot = JSON.stringify({
-    me: {
-      logged_in: true,
-      has_key: true,
-      key: "preview",
-      policy: {
-        daily_images: 100,
-        daily_v5: 20,
-        daily_anlas: 0,
-        monthly_anlas: 0,
-        rpm: 10,
-        image: true,
-        v5: true,
-        vibe: true,
-        tags: true,
-        upscale: true,
-        augment: true,
-        img2img: true,
-        paid_parameters: true,
-      },
-      discord: { username: "preview", display_name: "预览" },
-      today: { images: 0, daily_images: 100, v5: 0, daily_v5: 20, anlas: 12 },
-    },
-  });
-  return {
-    name: "owl-workbench-preview",
-    transformIndexHtml(html, ctx) {
-      if (!ctx.server) return html;
-      const url = ctx.originalUrl ?? "";
-      if (!url.includes("preview=1") || html.includes('id="owl-boot"')) return html;
-      return html.replace(
-        "<!--owl-boot-->",
-        `<script type="application/json" id="owl-boot">${boot}</script>`,
-      );
-    },
-  };
-}
-
 // 产物放在 /_owl/ 下：Caddy 把 /assets/* /api/* /fonts/* 路由给 workbench 容器，不能撞路径。
 // 多页：首页 / 生图工作台 / 后台各一个入口，网关按路径返回对应的 HTML（并注入首屏数据）。
 export default defineConfig({
   base: "/_owl/",
-  plugins: [pageRoutes(), workbenchPreview(), preact()],
+  plugins: [pageRoutes(), preact()],
   build: {
     outDir: "dist",
     assetsDir: ".",
@@ -78,7 +37,6 @@ export default defineConfig({
     rollupOptions: {
       input: {
         landing: resolve(import.meta.dirname, "landing.html"),
-        workbench: resolve(import.meta.dirname, "workbench.html"),
         admin: resolve(import.meta.dirname, "admin.html"),
       },
     },

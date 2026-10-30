@@ -42,3 +42,10 @@ __pycache__/
 *.profraw
 
 web/tsconfig.tsbuildinfo
+
+# 官网镜像静态资源（59MB，只放在服务器 STATIC_DIR，不进仓库）
+/mirror/
+
+# 官网前端抓取与早期重建尝试（只读证据，不进仓库）
+/novelai-image-snapshot/
+/novelai-rebuild/

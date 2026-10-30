@@ -63,9 +63,13 @@ export async function patch(
 }
 
 /** 带上演示数据里的成员会话 Cookie（owl_member）。 */
-export async function asMember(context: BrowserContext) {
+export async function asMember(
+  context: BrowserContext,
+  base = process.env.E2E_BASE ?? "http://localhost:5174",
+) {
+  const host = new URL(base).hostname;
   await context.addCookies([
-    { name: "owl_member", value: readCreds().member ?? "", domain: "localhost", path: "/" },
+    { name: "owl_member", value: readCreds().member ?? "", domain: host, path: "/" },
   ]);
 }
 
@@ -89,7 +93,7 @@ export async function adminSession(
 export async function misalignedControls(page: Page): Promise<string[]> {
   return page.evaluate(() => {
     const sel =
-      "button:not(.switch):not(.tabs__tab):not(.lp-gallery__copy):not(.nai-shotbtn), select, input:not([type=checkbox]):not([type=radio]):not([type=hidden]), .xa-seg, .copy, .field-inline";
+      "button:not(.switch):not(.tabs__tab):not(.lp-gallery__copy), select, input:not([type=checkbox]):not([type=radio]):not([type=hidden]), .xa-seg, .copy, .field-inline";
     // Native modal dialogs make the background inert; compare controls in the active layer.
     const root = document.querySelector("dialog[open]") ?? document;
     const els = [...root.querySelectorAll<HTMLElement>(sel)].filter((el) => {
@@ -98,7 +102,6 @@ export async function misalignedControls(page: Page): Promise<string[]> {
       // 复合控件只看外框
       if (el.parentElement?.closest(".xa-seg, .copy, .field-inline")) return false;
       // nai 选中态底栏：官网同款混高布局（胶囊/齿轮/种子居中对齐），不适用等高探针
-      if (el.closest(".nai-view-bottom")) return false;
       // 收起的 <details> 里的控件看不见（Chrome 仍算出位置），标题行除外
       const d = el.closest("details:not([open])");
       if (d && !el.closest("summary")) return false;

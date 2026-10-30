@@ -647,7 +647,9 @@ async fn user_compat_routes_require_key_and_keep_panel_schema() {
                 "priority",
                 "trainingStepsLeft",
                 "anlas",
-                "v5Access"
+                "v5Access",
+                "keystore",
+                "settings"
             ]
         );
         assert_eq!(
@@ -692,32 +694,15 @@ async fn user_compat_routes_require_key_and_keep_panel_schema() {
         assert!(v["expiresAt"].is_i64());
     }
 
-    // 密钥库：照官方对持久令牌的说法回 403
+    // 密钥库：官网生图页靠它维持登录态，服务端只存客户端加密后的密文
     for path in ["/user/keystore", "/ai/user/keystore"] {
         let (status, body) = get(path).await;
-        assert_eq!(status, 403, "{path}");
+        assert_eq!(status, 200, "{path}");
         let v = json_of(&body);
-        assert_eq!(v["statusCode"], 403);
-        assert_eq!(
-            v["message"],
-            "猫头鹰公益站提醒：该功能仅限 NovelAI 官网使用，本站不提供，未扣费。开发者参考：NovelAI 官方对持久令牌同样返回 403"
-        );
-        assert_eq!(v["error"]["status"], 403);
-        assert_eq!(v["error"]["message"], v["message"]);
+        assert_eq!(keys(&v), ["keystore", "changeIndex"]);
+        assert!(v["keystore"].is_null());
+        assert_eq!(v["changeIndex"], 0);
     }
-    // 403 被记成一条「rejected」（旧版 GateError 处理器的统一记账）
-    settle().await;
-    let rows = e
-        .state
-        .db
-        .list_logs(50, 0, &LogFilter::default())
-        .await
-        .unwrap();
-    assert!(
-        rows.iter()
-            .any(|r| r["status"] == "rejected" && r["kind"] == "account"),
-        "{rows:?}"
-    );
 }
 
 #[tokio::test]

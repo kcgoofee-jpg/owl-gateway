@@ -52,7 +52,27 @@ pub fn router() -> Router<AppState> {
         r = r.route(p, get(user_priority));
     }
     for p in ["/user/keystore", "/ai/user/keystore"] {
-        r = r.route(p, get(user_keystore));
+        r = r.route(p, get(user_keystore).put(user_keystore_put));
+    }
+    for p in ["/user/inventory", "/ai/user/inventory"] {
+        r = r.route(p, get(user_inventory));
+    }
+    for p in ["/user/login", "/ai/user/login"] {
+        r = r.route(p, post(user_login));
+    }
+    for p in ["/user/clientsettings", "/ai/user/clientsettings"] {
+        r = r.route(p, get(user_settings).put(user_settings_put));
+    }
+    for p in ["/ai/trial-status"] {
+        r = r.route(p, get(trial_status));
+    }
+    // 官网镜像页会探这些账号/对象接口：本站没有对应能力，回空结构而不是 404（404 会在页面里报错）
+    r = r.route("/user/self", get(empty_object));
+    for p in ["/usage/link", "/usage/event"] {
+        r = r.route(p, post(empty_object)).route(p, get(empty_object));
+    }
+    for p in ["/user/objects", "/user/objects/{kind}"] {
+        r = r.route(p, get(empty_objects));
     }
     for p in ["/user/information", "/ai/user/information"] {
         r = r.route(p, get(user_information));
@@ -628,12 +648,21 @@ async fn user_data(State(state): State<AppState>, req: Request) -> ApiResult {
         })
         .unwrap_or_default();
     let steps = sub["trainingStepsLeft"].clone();
+    // 官网生图页登录后必须拿到 keystore 才能进登录态（客户端自己加密，服务端只存密文）。
+    let keystore = state
+        .db
+        .get_key_keystore(key.id())
+        .await?
+        .map(|(blob, change_index)| json!({"keystore": blob, "changeIndex": change_index}));
+    let settings = state.db.get_key_settings(key.id()).await?;
     Ok(ok_json(&json!({
         "subscription": public_sub,
         "priority": virtual_priority(state.now()),
         "trainingStepsLeft": steps,
         "anlas": steps["fixedTrainingStepsLeft"],
         "v5Access": {"allowed": key.policy.allows("v5"), "paused": paused},
+        "keystore": keystore,
+        "settings": settings,
     })))
 }
 
@@ -644,15 +673,151 @@ async fn user_priority(State(state): State<AppState>, req: Request) -> ApiResult
     Ok(ok_json(&virtual_priority(state.now())))
 }
 
-/// 官方这个端点只允许浏览器会话（2026-10-13 实测：api.novelai.net → 403「Persistent access token is not
-/// allowed to access this endpoint.」）。照官方的说法回 403，客户端就知道这是「令牌无权访问」而不是「网关坏了」。
+/// 官网生图页的密钥库：客户端用本地钥匙加密后存这里，服务端只做不透明存取。
 async fn user_keystore(State(state): State<AppState>, req: Request) -> ApiResult {
     let (parts, _) = req.into_parts();
+    let key = authenticate(&state, &parts, false).await?;
+    let stored = state.db.get_key_keystore(key.id()).await?;
+    Ok(ok_json(&match stored {
+        Some((blob, change_index)) => json!({"keystore": blob, "changeIndex": change_index}),
+        None => json!({"keystore": null, "changeIndex": 0}),
+    }))
+}
+
+#[derive(Deserialize)]
+struct KeystoreBody {
+    #[serde(default)]
+    keystore: Option<String>,
+    #[serde(default, rename = "changeIndex")]
+    change_index: Option<i64>,
+}
+
+async fn user_keystore_put(State(state): State<AppState>, req: Request) -> ApiResult {
+    let (parts, body) = req.into_parts();
+    let key = authenticate(&state, &parts, false).await?;
+    let bytes = axum::body::to_bytes(body, 1 << 20).await.map_err(|_| {
+        crate::error::GateError::with_code(413, "密钥库太大", gate_core::reasons::PARAM)
+    })?;
+    let parsed: KeystoreBody = serde_json::from_slice(&bytes).map_err(|_| {
+        crate::error::GateError::with_code(400, "密钥库格式无效", gate_core::reasons::PARAM)
+    })?;
+    let blob = parsed.keystore.unwrap_or_default();
+    state
+        .db
+        .set_key_keystore(
+            key.id(),
+            &blob,
+            parsed.change_index.unwrap_or(0),
+            state.now(),
+        )
+        .await?;
+    Ok(ok_json(&json!({"ok": true})))
+}
+
+/// 官网客户端设置：主题、默认模型、许可标记等整块 JSON。
+async fn user_settings(State(state): State<AppState>, req: Request) -> ApiResult {
+    let (parts, _) = req.into_parts();
+    let key = authenticate(&state, &parts, false).await?;
+    let stored = state.db.get_key_settings(key.id()).await?;
+    Ok(ok_json(&match stored {
+        Some(json) => serde_json::from_str::<Value>(&json).unwrap_or_else(|_| json!({})),
+        None => json!({}),
+    }))
+}
+
+async fn user_settings_put(State(state): State<AppState>, req: Request) -> ApiResult {
+    let (parts, body) = req.into_parts();
+    let key = authenticate(&state, &parts, false).await?;
+    let bytes = axum::body::to_bytes(body, 1 << 20).await.map_err(|_| {
+        crate::error::GateError::with_code(413, "设置太大", gate_core::reasons::PARAM)
+    })?;
+    let text = String::from_utf8_lossy(&bytes).to_string();
+    if serde_json::from_str::<Value>(&text).is_err() {
+        return Err(crate::error::GateError::with_code(
+            400,
+            "设置格式无效",
+            gate_core::reasons::PARAM,
+        )
+        .into());
+    }
+    state
+        .db
+        .set_key_settings(key.id(), &text, state.now())
+        .await?;
+    Ok(ok_json(&json!({"ok": true})))
+}
+
+/// 空对象：官网镜像页会探测、但本站没有对应能力的接口（/user/self、/usage/link）。
+async fn empty_object() -> ApiResult {
+    Ok(ok_json(&json!({})))
+}
+
+/// 官网对象库（提示词宏、预设、脚本…）：本站不存远端对象，回空列表。
+async fn empty_objects(State(state): State<AppState>, req: Request) -> ApiResult {
+    let (parts, _) = req.into_parts();
     authenticate(&state, &parts, false).await?;
-    Err(crate::error::GateError::with_code(
-        403,
-        "该功能仅限 NovelAI 官网使用，本站不提供，未扣费。开发者参考：NovelAI 官方对持久令牌同样返回 403", gate_core::reasons::FEATURE_OFF)
-    .into())
+    Ok(ok_json(&json!({"objects": []})))
+}
+
+/// 官网文本后端的试用额度：本站没有试用，回 0（前端不再提示试用次数）。
+async fn trial_status(State(state): State<AppState>, req: Request) -> ApiResult {
+    let (parts, _) = req.into_parts();
+    authenticate(&state, &parts, false).await?;
+    Ok(ok_json(&json!({
+        "remaining_image_actions": 0,
+        "remaining_text_actions": 0,
+    })))
+}
+
+/// 官网背包：本站没有道具系统，回空列表（前端按空背包渲染）。
+async fn user_inventory(State(state): State<AppState>, req: Request) -> ApiResult {
+    let (parts, _) = req.into_parts();
+    authenticate(&state, &parts, false).await?;
+    Ok(ok_json(&json!({"items": []})))
+}
+
+#[derive(Deserialize)]
+struct LoginBody {
+    #[serde(default)]
+    key: Option<String>,
+    #[serde(default)]
+    access_key: Option<String>,
+}
+
+/// 官网登录入口：body `{key, recaptcha}`，成功返回 `{accessToken}`；本站的 Key 本身就是令牌。
+async fn user_login(State(state): State<AppState>, req: Request) -> ApiResult {
+    let (_parts, body) = req.into_parts();
+    let bytes = axum::body::to_bytes(body, 64 * 1024).await.map_err(|_| {
+        crate::error::GateError::with_code(413, "登录请求太大", gate_core::reasons::PARAM)
+    })?;
+    let parsed: LoginBody = serde_json::from_slice(&bytes).map_err(|_| {
+        crate::error::GateError::with_code(400, "登录请求格式无效", gate_core::reasons::PARAM)
+    })?;
+    let token = parsed
+        .key
+        .or(parsed.access_key)
+        .map(|v| v.trim().to_string())
+        .filter(|v| !v.is_empty())
+        .ok_or_else(|| {
+            crate::error::GateError::with_code(400, "缺少 Key", gate_core::reasons::PARAM)
+        })?;
+    let Some(row) = state.db.get_key_by_token(&token).await? else {
+        return Err(crate::error::GateError::with_code(
+            401,
+            "API Key 无效。请检查客户端中的 Key 是否完整，或在 Discord 用 /resetkey 重新获取。",
+            gate_core::reasons::KEY_INVALID,
+        )
+        .into());
+    };
+    if row["enabled"].as_i64().unwrap_or(1) != 1 {
+        return Err(crate::error::GateError::with_code(
+            403,
+            "这个 Key 已停用。",
+            gate_core::reasons::KEY_INVALID,
+        )
+        .into());
+    }
+    Ok(ok_json(&json!({"accessToken": token})))
 }
 
 async fn user_information(State(state): State<AppState>, req: Request) -> ApiResult {

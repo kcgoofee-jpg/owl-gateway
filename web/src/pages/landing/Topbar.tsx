@@ -121,7 +121,7 @@ export function Topbar(props: {
   user?: TopbarUser | undefined;
   /** 顶栏右侧是否显示游客登录入口 */
   loginOpen: boolean;
-  /** 已登录且有 Key 时，顶栏放「生图工作台」按钮，点进去就是 /workbench。 */
+  /** 已登录且有 Key 时，顶栏放「生图工作台」按钮，点进去就是 /image。 */
   workbench?: boolean;
   /** Homepage brand links directly to the inspiration gallery. */
   brandHref?: string;
@@ -139,7 +139,7 @@ export function Topbar(props: {
         </a>
         <div class="site-top__right">
           {props.workbench && (
-            <a id="workbench-entry" class="btn btn--primary btn--sm site-top__wb" href="/workbench">
+            <a id="workbench-entry" class="btn btn--primary btn--sm site-top__wb" href="/image">
               生图工作台
               <span class="site-top__beta">Beta</span>
             </a>

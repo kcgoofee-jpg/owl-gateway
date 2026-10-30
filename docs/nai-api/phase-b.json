@@ -1,0 +1,16 @@
+[
+ {
+  "step": "generate",
+  "url": "https://text.novelai.net/usage/link",
+  "method": "POST",
+  "postData": "{\"anonymous_user_id\":\"anon-92679f84-a840-43c7-9fe9-89d9f775c387\"}",
+  "status": 200
+ },
+ {
+  "step": "generate",
+  "url": "https://image.novelai.net/ai/generate-image-stream",
+  "method": "POST",
+  "status": 200,
+  "body": "AAAQu4aqZXZlbnRfdHlwZaxpbnRlcm1lZGlhdGWnc2FtcF9peAGnc3RlcF9peACmZ2VuX2lkzgBzR16lc2lnbWHLQNOIAAAAAAClaW1hZ2XFEGz/2P/gABBKRklGAAEBAAABAAEAAP/bAEMANSUoLyghNS8rLzw5NT9QhVdQSUlQo3V7YYXBqsvIvqq6t9Xw///V4v/mt7r////////////O///////////////bAEMBOTw8UEZQnVdXnf/cutz////////////////////////////////////////////////////////////////////AABEIAQABgAMBEQACEQEDEQH/xAAfAAABBQEBAQEBAQAAAAAAAAAAAQIDBAUGBwgJCgv/xAC1EAACAQMDAgQDBQUEBAAAAX0BAgMABBEFEiExQQYTUWEHInEUMoGRoQgjQrHBFVLR8CQzYnKCCQoWFxgZGiUmJygpKjQ1Njc4OTpDREVGR0hJSlNUVVZXWFlaY2RlZmdoaWpzdHV2d3h5eoOEhYaHiImKkpOUlZaXmJmaoqOkpaanqKmqsrO0tba3uLm6wsPExcbHyMnK0tPU1dbX2Nna4eLj5OXm5+jp6vHy8/T19vf4+fr/xAAfAQADAQEBAQEBAQEBAAAAAAAAAQIDBAUGBwgJCgv/xAC1EQACAQIEBAMEBwUEBAABAncAAQIDEQQFITEGEkFRB2FxEyIygQgUQpGhscEJIzNS8BVictEKFiQ04SXxFxgZGiYnKCkqNTY3ODk6Q0RFRkdISUpTVFVW"
+ }
+]

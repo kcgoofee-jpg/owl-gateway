@@ -99,6 +99,16 @@ files=("$tmp/nai-ops-linux-musl/nai-ops" deploy/v3/cutover.sh deploy/v3/caddy-re
 [[ $have_image == yes ]] || files=("$tmp/owl-gate-image/owl-gate.tar.gz" "${files[@]}")
 scp -q "${KEY[@]}" "${files[@]}" "root@$OWL_IP:/opt/owl/" 2>&1 | mask
 
+# 官网生图页镜像：59MB 静态资源不进仓库也不进镜像，从本地 mirror/ 同步到宿主机只读挂载点。
+# 缺这个目录时只警告不失败（本机没有镜像时仍可完成代码部署，线上 /image 会 404）。
+if [[ -d mirror/nai-app ]]; then
+  say "syncing nai mirror ($(du -sh mirror/nai-app | cut -f1))"
+  remote "mkdir -p /opt/owl/nai-mirror"
+  rsync -a --delete -e "ssh ${KEY[*]}" mirror/nai-app/ "root@$OWL_IP:/opt/owl/nai-mirror/nai-app/" 2>&1 | mask
+else
+  say "warning: mirror/nai-app missing; /image will 404 until it is synced"
+fi
+
 say "cutover"
 remote "set -e; cd /opt/owl; chmod +x cutover.sh caddy-reload.sh
   ./cutover.sh load owl-gate.tar.gz

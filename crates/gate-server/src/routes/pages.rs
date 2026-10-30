@@ -16,7 +16,8 @@ pub fn router() -> Router<AppState> {
         .route("/readyz", get(readyz))
         .route("/healthz", get(healthz))
         .route("/", get(landing))
-        .route("/workbench", get(workbench))
+        .route("/workbench", get(workbench_redirect))
+        .route("/image", get(image))
         .route("/admin", get(admin))
         .route(
             "/admin/",
@@ -24,6 +25,15 @@ pub fn router() -> Router<AppState> {
         )
         .route("/admin/{*rest}", get(admin_spa))
         .route("/_owl/{*path}", get(asset))
+        // 官网构建产物的绝对路径：全部映射到 dist/nai-app 下
+        .route("/bridge.js", get(mirror_file))
+        .route("/manifest.json", get(mirror_file))
+        .route("/updateReload.json", get(mirror_file))
+        .route("/_next/{*path}", get(mirror_file))
+        .route("/js/{*path}", get(mirror_file))
+        .route("/icons/{*path}", get(mirror_file))
+        .route("/cf-fonts/{*path}", get(mirror_file))
+        .route("/tokenizer/{*path}", get(mirror_file))
         .route("/favicon.svg", get(favicon))
         .route("/favicon.ico", get(favicon))
 }
@@ -68,11 +78,9 @@ async fn landing(State(st): State<AppState>, headers: HeaderMap) -> Response {
     st.assets.page(Page::Landing, boot.as_ref())
 }
 
-/// 生图工作台：整页出图界面（成员专用，鉴权在 /public/me 与出图接口里做）。
-/// 首屏数据复用首页的 landing_boot（我 / 实时看板 / 站点状态），页面自己按登录态渲染。
-async fn workbench(State(st): State<AppState>, headers: HeaderMap) -> Response {
-    let boot = super::public::landing_boot(&st, &headers).await;
-    st.assets.page(Page::Workbench, boot.as_ref())
+/// 旧工作台地址：整页出图已换成官网镜像页 `/image`，这里做永久跳转。
+async fn workbench_redirect() -> Response {
+    axum::response::Redirect::permanent("/image").into_response()
 }
 
 async fn admin(State(st): State<AppState>) -> Response {
@@ -92,6 +100,24 @@ async fn admin_spa(State(st): State<AppState>, Path(rest): Path<String>) -> Resp
 
 async fn asset(State(st): State<AppState>, Path(path): Path<String>) -> Response {
     st.assets.asset(&path)
+}
+
+/// 官网生图页：官方构建产物 + 桥接层配置（成员 Key 由首屏数据带入）。
+async fn image(State(st): State<AppState>, headers: HeaderMap) -> Response {
+    let boot = super::public::landing_boot(&st, &headers).await;
+    st.assets.page(Page::Image, boot.as_ref())
+}
+
+/// 镜像静态资源：`/xxx` → `dist/nai-app/xxx`。
+async fn mirror_file(State(st): State<AppState>, uri: axum::http::Uri) -> Response {
+    let path = uri.path().trim_start_matches('/');
+    let mut resp = st.assets.asset(&format!("nai-app/{path}"));
+    // 桥接层会随版本变，不能吃 1 小时缓存
+    if path == "bridge.js" {
+        resp.headers_mut()
+            .insert(header::CACHE_CONTROL, HeaderValue::from_static("no-store"));
+    }
+    resp
 }
 
 async fn favicon(State(st): State<AppState>) -> Response {

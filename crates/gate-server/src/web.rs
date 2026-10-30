@@ -9,7 +9,7 @@ use axum::body::Body;
 use axum::http::{HeaderMap, HeaderValue, StatusCode, header};
 use axum::response::{IntoResponse, Response};
 use rust_embed::Embed;
-use serde_json::Value;
+use serde_json::{Value, json};
 use std::path::PathBuf;
 
 #[derive(Embed)]
@@ -21,6 +21,15 @@ struct Dist;
 /// 字体只允许同源：开屏标题的 Newsreader 子集是 `/_owl/` 下的文件，不从 Google Fonts 加载。
 pub const PUBLIC_CSP: &str = "default-src 'none'; script-src 'self'; style-src 'self'; font-src 'self'; connect-src 'self'; \
     img-src 'self' data: https://cdn.discordapp.com https://static.novelai.net; frame-src 'self'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'";
+/// 官网生图页镜像的安全头：官方产物里有内联脚本与 styled-components 注入的 <style>，
+/// 只能放开 inline；外部只放行官网静态图与字体。
+pub const IMAGE_CSP: &str = "default-src 'none'; script-src 'self' 'unsafe-inline' 'wasm-unsafe-eval'; \
+    worker-src 'self' blob:; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; \
+    font-src 'self' https://fonts.gstatic.com data:; manifest-src 'self'; \
+    connect-src 'self' data: blob: https://static.novelai.net; \
+    img-src 'self' data: blob: https://static.novelai.net https://cdn.discordapp.com; \
+    frame-src 'self' https://accounts.google.com; base-uri 'none'; form-action 'none'; frame-ancestors 'none'";
+
 /// 后台的安全头。头像同样来自 Discord CDN（img-src 与 PUBLIC_CSP 保持一致）。
 pub const ADMIN_CSP: &str = "default-src 'self'; script-src 'self'; style-src 'self'; \
     img-src 'self' data: blob: https://cdn.discordapp.com; \
@@ -29,8 +38,8 @@ pub const ADMIN_CSP: &str = "default-src 'self'; script-src 'self'; style-src 's
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Page {
     Landing,
-    /// 生图工作台（/workbench）：整页出图界面，首屏数据与首页同一套注入。
-    Workbench,
+    /// 官网生图页镜像（/image）：NovelAI 官方构建产物 + 本站桥接层。
+    Image,
     Admin,
 }
 
@@ -38,7 +47,7 @@ impl Page {
     fn file(self) -> &'static str {
         match self {
             Page::Landing => "landing.html",
-            Page::Workbench => "workbench.html",
+            Page::Image => "nai-app/image.html",
             Page::Admin => "admin.html",
         }
     }
@@ -125,6 +134,28 @@ impl Assets {
             ),
             None => String::new(),
         };
+        if page == Page::Image {
+            // 官网产物自己处理登录态，这里只把「本站网关 + 成员 Key」交给桥接层
+            let key = boot
+                .and_then(|b| b.get("me"))
+                .and_then(|m| m.get("key"))
+                .and_then(Value::as_str)
+                .unwrap_or_default();
+            let cfg = json!({"gate": "", "key": key});
+            let inject = format!(
+                r#"<script>window.__NAI_BRIDGE__={};</script><script src="/bridge.js"></script>"#,
+                json_for_html(&cfg)
+            );
+            html = html.replacen("<!--owl-nai-boot-->", &inject, 1);
+            let mut resp = Response::new(Body::from(html));
+            let h = resp.headers_mut();
+            h.insert(
+                header::CONTENT_TYPE,
+                HeaderValue::from_static("text/html; charset=utf-8"),
+            );
+            apply_page_headers(h, page);
+            return resp;
+        }
         html = html.replacen("<!--owl-boot-->", &tag, 1);
         let mut resp = Response::new(Body::from(html));
         let h = resp.headers_mut();
@@ -152,7 +183,15 @@ pub fn apply_page_headers(h: &mut HeaderMap, page: Page) {
             h.insert("x-frame-options", HeaderValue::from_static("DENY"));
             h.insert(header::CACHE_CONTROL, HeaderValue::from_static("no-store"));
         }
-        Page::Landing | Page::Workbench => {
+        Page::Image => {
+            h.insert(
+                "content-security-policy",
+                HeaderValue::from_static(IMAGE_CSP),
+            );
+            h.insert(header::CACHE_CONTROL, HeaderValue::from_static("no-cache"));
+            h.insert(header::VARY, HeaderValue::from_static("Cookie"));
+        }
+        Page::Landing => {
             h.insert(
                 "content-security-policy",
                 HeaderValue::from_static(PUBLIC_CSP),

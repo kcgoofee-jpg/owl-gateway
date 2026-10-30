@@ -1,0 +1,78 @@
+[
+ {
+  "step": "boot",
+  "url": "https://image.novelai.net/user/data",
+  "method": "OPTIONS",
+  "status": 200,
+  "mime": ""
+ },
+ {
+  "step": "boot",
+  "url": "https://image.novelai.net/user/data",
+  "method": "GET",
+  "status": 200,
+  "mime": "application/json",
+  "body": "{\"priority\":{\"maxPriorityActions\":0,\"nextRefillAt\":-62135596800,\"taskPriority\":0},\"subscription\":{\"tier\":3,\"active\":true,\"paymentProcessor\":\"chargebee\",\"expiresAt\":1794830413,\"perks\":{\"maxPriorityActions\":1000,\"startPriority\":10,\"contextTokens\":8192,\"unlimitedMaxPriority\":true,\"moduleTrainingSteps\":10000},\"paymentProcessorData\":{\"r\":\"\",\"s\":\"active\",\"t\":3,\"plan_id\":\"Opus-USD-Monthly\",\"next_billing_at\":1794830413},\"trainingStepsLeft\":{\"fixedTrainingStepsLeft\":5913,\"purchasedTrainingSteps\":0},\"accountType\":0,\"isGracePeriod\":false,\"isPaypal\":false,\"usage\":{\"percent\":17,\"purchasedPercent\":0,\"isNegative\":false,\"timeUntilNextPercent\":7888},\"isNewCustomer\":false},\"keystore\":{\"keystore\":\"eyJ2ZXJzaW9uIjoyLCJub25jZSI6WzExNSw0MSwyMywxNzgsMTI3LDMwLDI0MSwyMjIsMTQwLDE5NCwyMTAsMSw0NiwxOTksOTEsMzQsNTMsMTU4LDI0OCwyMDMsMTYxLDEyNiwxOCw4OV0sInNkYXRhIjpbNDQsNjAsMTUxLDM3LDIwNiw1OSw5MywxMTQsMTUsMjIwLDE2MywxNTgsMjQyLDIzNCwxMzYsMjI0LDI5LDEwMSwwLDE2Miw3MCwxMCwxOSwxMjYsMjQ3LDg1LDE1LDIzOSwyMTcsMjAxLDE5MSw3Miw4NSw3OCwxMDAsMTk1LDE5OSwzNCwyMzQsMzUsNzksMTExLDIyOSwyNDQsMzQsNzIsOTMsMjU0LDIyMSwxMzcsMzYsMjEyLDY4LDY0LDI1NCw2MiwyMjMsMjAwLDEzMSwxMjksNjUsMTg2LDI1LDE5MSwyNTAsMzIsMzIsODQsNzgsMjQyLDQ1LDEyMywxMDgsMTA5LDEzMiw2"
+ },
+ {
+  "step": "boot",
+  "url": "https://image.novelai.net/user/objects/promptmacros",
+  "method": "OPTIONS",
+  "status": 200,
+  "mime": ""
+ },
+ {
+  "step": "boot",
+  "url": "https://image.novelai.net/user/inventory",
+  "method": "OPTIONS",
+  "status": 200,
+  "mime": ""
+ },
+ {
+  "step": "boot",
+  "url": "https://explore.novelai.net/user/self",
+  "method": "GET",
+  "status": 403,
+  "mime": "application/json",
+  "body": "{\"statusCode\":403,\"message\":\"User not registered\"}\n"
+ },
+ {
+  "step": "boot",
+  "url": "https://text.novelai.net/ai/trial-status",
+  "method": "OPTIONS",
+  "status": 200,
+  "mime": ""
+ },
+ {
+  "step": "boot",
+  "url": "https://text.novelai.net/usage/link",
+  "method": "POST",
+  "postData": "{\"anonymous_user_id\":\"anon-92679f84-a840-43c7-9fe9-89d9f775c387\"}",
+  "status": 200,
+  "mime": ""
+ },
+ {
+  "step": "boot",
+  "url": "https://image.novelai.net/user/inventory",
+  "method": "GET",
+  "status": 200,
+  "mime": "application/json",
+  "body": "{\"items\":[]}\n"
+ },
+ {
+  "step": "boot",
+  "url": "https://image.novelai.net/user/objects/promptmacros",
+  "method": "GET",
+  "status": 200,
+  "mime": "application/json",
+  "body": "{\"objects\":[]}\n"
+ },
+ {
+  "step": "boot",
+  "url": "https://text.novelai.net/ai/trial-status",
+  "method": "GET",
+  "status": 200,
+  "mime": "text/plain",
+  "body": "{\"used_text_actions\":0,\"remaining_text_actions\":50,\"used_image_actions\":0,\"remaining_image_actions\":30,\"eligible_for_text_gens\":false,\"eligible_for_image_gens\":false,\"trial_activated\":false}"
+ }
+]
