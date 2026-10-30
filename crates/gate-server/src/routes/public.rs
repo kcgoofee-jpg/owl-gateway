@@ -659,10 +659,12 @@ async fn user_data(State(state): State<AppState>, req: Request) -> ApiResult {
         .map(|(blob, change_index)| json!({"keystore": blob, "changeIndex": change_index}));
     // 官网页面按 settings.defaultModel 选默认模型；本站默认用 V4.5（V5 可能没给这把 Key 开）。
     // 界面语言默认中文：官网自带 zh-CN 翻译，uiLanguage 是客户端设置，改这里不用动前端。
+    // 已经存过设置的成员也要吃到「界面语言默认中文」：只在缺 uiLanguage 时补，不覆盖人家自己选过的。
     let settings = state
         .db
         .get_key_settings(key.id())
         .await?
+        .map(|raw| with_default_language(&raw))
         .or_else(|| Some(DEFAULT_CLIENT_SETTINGS.to_string()));
     Ok(ok_json(&json!({
         "subscription": public_sub,
@@ -678,6 +680,21 @@ async fn user_data(State(state): State<AppState>, req: Request) -> ApiResult {
 /// 新成员的首屏客户端设置：默认模型 V4.5 + 中文界面（官网自带 `zh-CN` 翻译）。
 pub const DEFAULT_CLIENT_SETTINGS: &str =
     r#"{"defaultModel":"nai-diffusion-4-5-curated","uiLanguage":"zh-CN"}"#;
+
+/// 存档里的客户端设置没有 `uiLanguage` 时补上 `zh-CN`；解析不了就原样返回，一个字都不改。
+fn with_default_language(raw: &str) -> String {
+    let Ok(mut value) = serde_json::from_str::<Value>(raw) else {
+        return raw.to_string();
+    };
+    let Some(obj) = value.as_object_mut() else {
+        return raw.to_string();
+    };
+    if obj.contains_key("uiLanguage") {
+        return raw.to_string();
+    }
+    obj.insert("uiLanguage".into(), json!("zh-CN"));
+    value.to_string()
+}
 
 /// 原生客户端会探这个端点；404 会被当成「渠道不支持」。官方是 200，我们也回同样的形状。
 async fn user_priority(State(state): State<AppState>, req: Request) -> ApiResult {
@@ -1098,5 +1115,30 @@ mod tests {
         assert_eq!(netloc("//h.test/x"), "h.test");
         assert_eq!(netloc("h.test/x"), "");
         assert_eq!(netloc(" \thttps://h.te\nst/x"), "h.test");
+    }
+}
+
+#[cfg(test)]
+mod client_settings_tests {
+    use super::with_default_language;
+
+    #[test]
+    fn adds_chinese_language_when_missing() {
+        let out = with_default_language(r#"{"defaultModel":"nai-diffusion-4-5-curated"}"#);
+        let v: serde_json::Value = serde_json::from_str(&out).unwrap();
+        assert_eq!(v["uiLanguage"], "zh-CN");
+        assert_eq!(v["defaultModel"], "nai-diffusion-4-5-curated");
+    }
+
+    #[test]
+    fn keeps_explicit_language() {
+        let raw = r#"{"uiLanguage":"en-US"}"#;
+        assert_eq!(with_default_language(raw), raw);
+    }
+
+    #[test]
+    fn leaves_broken_json_alone() {
+        assert_eq!(with_default_language("not json"), "not json");
+        assert_eq!(with_default_language("[1,2]"), "[1,2]");
     }
 }
