@@ -14,6 +14,7 @@ import { AccountCard } from "./upstream/accounts";
 import type { UpstreamAccount, UpstreamPage } from "./upstream/core";
 import { AccountDetails } from "./upstream/details";
 import ReconcileCard from "./upstream/reconcile";
+import { UpstreamStatus } from "./upstream/status";
 import { TokenDialog } from "./upstream/tokens";
 import "./upstream.css";
 
@@ -88,6 +89,8 @@ export default function Upstream() {
       {loading && !data && <Loading rows={3} />}
       {!data && error && <LoadError error={error} />}
       {data && !data.pool_configured && <Notice tone="danger">尚未配置上游 Token。</Notice>}
+      {/* 账号现状：原来在「运行保护」页，10-31 并到上游（账号状态和账号放一起看） */}
+      <UpstreamStatus />
       <div class="stack">
         {(data?.accounts ?? [])
           // 能用的排前面，已停用 / 被上游禁用的沉到最后（同类里按编号）

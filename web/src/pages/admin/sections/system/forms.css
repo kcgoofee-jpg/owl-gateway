@@ -43,14 +43,11 @@
 .form-section {
   display: grid;
   gap: var(--sp-3);
-  margin-top: var(--sp-5);
-  padding-top: var(--sp-4);
-  border-top: 1px solid var(--border);
+  margin-top: var(--sp-6);
+  padding-top: 0;
 }
 .form-section:first-child {
   margin-top: 0;
-  padding-top: 0;
-  border-top: 0;
 }
 .form-section__title {
   font-size: var(--fs-md);
@@ -162,10 +159,6 @@
   align-items: center;
   gap: var(--sp-4);
   padding: var(--sp-3) 0;
-  border-bottom: 1px solid var(--border);
-}
-.switch-row:last-child {
-  border-bottom: 0;
 }
 .switch-row__body {
   flex: 1;

@@ -8,7 +8,7 @@
   font-size: 12px;
 }
 .mr-feature {
-  border-bottom: 1px solid var(--border);
+  padding-block: 2px;
 }
 .mr-feature > .switch-row {
   border: 0;
@@ -19,7 +19,6 @@
   gap: 12px;
   align-items: end;
   padding-block: 12px;
-  border-bottom: 1px solid var(--border);
 }
 .mr-role .field {
   min-width: 0;

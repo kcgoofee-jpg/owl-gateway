@@ -135,3 +135,9 @@ pre {
     transition: none;
   }
 }
+
+/* 带 display 的容器（如 .up-sections 的 grid）会盖掉 hidden 属性的默认 display:none，
+   折叠功能就变成「点了没反应」。统一兜住。 */
+[hidden] {
+  display: none !important;
+}

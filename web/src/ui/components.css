@@ -462,12 +462,8 @@
   word-break: keep-all;
   overflow-wrap: break-word;
   padding: var(--sp-2) var(--sp-3);
-  /* 只留极细的行分隔，不要整张表套框 */
-  border-bottom: 1px solid color-mix(in oklab, var(--border) 55%, transparent);
+  /* 不要框也不要行间横线：靠留白分行 */
   vertical-align: top;
-}
-.table tr:last-child td {
-  border-bottom: 0;
 }
 /* 行标题（每行第一格）和短值不折行；长文字列加 .wrap，给够最小宽度再折 */
 .table th[scope="row"] {

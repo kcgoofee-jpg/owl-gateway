@@ -4,7 +4,6 @@
 .lg-tabs {
   display: flex;
   gap: var(--sp-1);
-  border-bottom: 1px solid var(--border);
   overflow-x: auto;
   scrollbar-width: none;
 }
@@ -141,7 +140,6 @@
 }
 .lg-listcard > .xa-pager {
   padding: var(--sp-3) var(--sp-4);
-  border-top: 1px solid var(--border);
 }
 .lg-listcard .table-wrap {
   border: 0;
@@ -151,7 +149,6 @@
   display: flex;
   justify-content: center;
   padding: var(--sp-3);
-  border-top: 1px solid var(--border);
 }
 .lg-note {
   max-width: 360px;
