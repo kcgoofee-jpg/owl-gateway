@@ -5,7 +5,7 @@
 //! |---|---|---|
 //! | `ip_switch` | 近 24 小时同一个 IP 上 10 分钟内换了另一个账号的 Key（当天 ≥5 把 Key 用过的 IP 是公共出口，不算） | 20 起，每多一次 +8，最高 60 |
 //! | `key_concurrent` | 一把 Key 近 24 小时里 ≥3 次在 60 秒内出现在两个不同网段（IPv4 /16，IPv6 前两组） | 40 起，最高 70 |
-//! | `same_ref_image` | 近 14 天不同账号的 Key 上传了同一张参考图（sha256 相同），或几乎一样（dHash 汉明距离 ≤6）；≥5 把 Key 用过的图不算 | 完全相同 70 / 相近 55 起，最高 90 |
+//! | `same_ref_image` | 近 14 天不同账号的 Key 上传了同一张参考图（sha256 相同），或几乎一样（dHash 汉明距离 ≤6）；≥5 把 Key 用过的图不算；3 把以上 Key 都用过的图，还要有一台共同的登录设备才算（素材在群里流传不算） | 完全相同 70 / 相近 55 起，最高 90 |
 //! | `same_connection` | 同一个外部账号（Steam / GitHub …）绑在多个 Discord 账号上 | 100 |
 //! | `guild_overlap` | 两个账号所在服务器的 Jaccard ≥0.6，且共同的冷门服务器（本站记录里不到 5 个账号在）≥2 个 | 50 起，最高 80 |
 //! | `same_battery` | 两个账号 30 分钟内网页登录时电量和充电状态一模一样（满电 100% 太常见，不算） | 50 起，最高 80 |
@@ -402,6 +402,21 @@ pub(super) fn scan(
         for (sha, _, k, _) in &rows {
             keys_by_sha.entry(sha.as_str()).or_default().insert(*k);
         }
+        // 账号 → 网页登录过的设备 id：一张图被 3 把以上 Key 上传过时，还要有共同的机器才算一个人
+        // （10-31：线上 3 张图被 4 个账号各传了几百上千次，全是同一批素材在群里流传，没有一台设备重合）
+        let mut devices_of: HashMap<&str, HashSet<&str>> = HashMap::new();
+        for (did, dev) in &snapshot.device_logins {
+            devices_of
+                .entry(did.as_str())
+                .or_default()
+                .insert(dev.as_str());
+        }
+        let same_device = |a: &str, b: &str| -> bool {
+            match (devices_of.get(a), devices_of.get(b)) {
+                (Some(x), Some(y)) => !x.is_disjoint(y),
+                _ => false,
+            }
+        };
         // (账号对) → (完全相同的张数, 相近的张数, 首末时刻)
         let mut exact: BTreeMap<(String, String), Hits> = BTreeMap::new();
         let mut near: BTreeMap<(String, String), Hits> = BTreeMap::new();
@@ -420,6 +435,10 @@ pub(super) fn scan(
             let accts: Vec<&str> = accts.into_iter().collect();
             for (i, a) in accts.iter().enumerate() {
                 for b in &accts[i + 1..] {
+                    // 3 把以上 Key 都用这张图 = 素材在流传；只留「还有共同设备」的账号对
+                    if accts.len() > 2 && !same_device(a, b) {
+                        continue;
+                    }
                     exact
                         .entry(pair(a, b))
                         .or_default()

@@ -374,3 +374,57 @@ async fn foreign_origin_requests_are_flagged() {
     assert_eq!(item("Discord"), da);
     assert!(item("时间").contains("~"), "{detail}");
 }
+
+#[tokio::test]
+async fn shared_reference_images_need_a_shared_device_once_three_keys_use_them() {
+    // 线上 10-31：3 张图被 4 个账号各上传几百上千次，设备一台都不重合（素材在群里流传）。
+    // 这种不该进待复核；但其中两个账号要是在同一台机器上登录过，那就是真信号。
+    let e = setup(&[]).await;
+    let st = &e.state;
+    let (da, db_, dc) = (
+        "900000000000000911",
+        "900000000000000912",
+        "900000000000000913",
+    );
+    let a = member_key(st, 1, &[("discord_id", json!(da))]).await;
+    let b = member_key(st, 2, &[("discord_id", json!(db_))]).await;
+    let c = member_key(st, 3, &[("discord_id", json!(dc))]).await;
+    let now = st.now();
+    let sql = [format!(
+        "INSERT INTO ref_images(rid, key_id, ts, kind, sha256, dhash) VALUES \
+         ('r1', {a}, {now}, 'vibe', 'aaaa', '00ff00ff00ff00ff'), \
+         ('r2', {b}, {now}, 'vibe', 'aaaa', '00ff00ff00ff00ff'), \
+         ('r3', {c}, {now}, 'vibe', 'aaaa', '00ff00ff00ff00ff')"
+    )];
+    st.db.run_script(sql.to_vec()).await.unwrap();
+    run_job(st, "abuse_scan").await.unwrap();
+    let n = query(
+        &st.db,
+        "SELECT count(*) AS n FROM abuse_signals WHERE kind = 'same_ref_image'",
+    )
+    .await;
+    assert_eq!(
+        n[0]["n"].as_i64().unwrap(),
+        0,
+        "三个账号传同一张图，没有共同设备"
+    );
+
+    // a、b 在同一台机器上网页登录过 → 只出这一对
+    st.db
+        .run_script(vec![format!(
+            "INSERT INTO device_logins(discord_id, device_id, ip, ts) VALUES \
+             ('{da}', 'dev-shared', '', {now}), ('{db_}', 'dev-shared', '', {now})"
+        )])
+        .await
+        .unwrap();
+    run_job(st, "abuse_scan").await.unwrap();
+    let rows = query(
+        &st.db,
+        "SELECT subject, score FROM abuse_signals WHERE kind = 'same_ref_image'",
+    )
+    .await;
+    assert_eq!(rows.len(), 1, "{rows:?}");
+    let pair = format!("{da},{db_}");
+    assert_eq!(rows[0]["subject"].as_str().unwrap(), pair);
+    assert_eq!(rows[0]["score"].as_f64().unwrap(), 70.0);
+}
