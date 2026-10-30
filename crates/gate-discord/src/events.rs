@@ -132,6 +132,19 @@ pub struct GuildInfo {
     pub unavailable: bool,
 }
 
+/// 消息附件（看图只关心图片类）。
+#[derive(Debug, Clone, Default, Deserialize)]
+pub struct Attachment {
+    #[serde(default)]
+    pub id: String,
+    #[serde(default)]
+    pub url: String,
+    #[serde(default)]
+    pub filename: String,
+    #[serde(default)]
+    pub content_type: Option<String>,
+}
+
 /// MESSAGE_CREATE 里我们关心的部分（AI 对话的触发源；宽容解析，其余字段忽略）。
 #[derive(Debug, Clone, Default, Deserialize)]
 pub struct MessageInfo {
@@ -146,16 +159,23 @@ pub struct MessageInfo {
     /// 被 @ 的用户；@奶妹 触发对话就看这里有没有奶妹本人。
     #[serde(default)]
     pub mentions: Vec<User>,
+    /// 消息附件（图片会转给视觉模型）。
+    #[serde(default)]
+    pub attachments: Vec<Attachment>,
     /// 回复目标消息；「回复奶妹触发对话」看它的作者是不是奶妹。
     #[serde(default)]
     pub referenced_message: Option<ReferencedMessage>,
 }
 
-/// 回复目标消息（只需要作者）。
+/// 回复目标消息：作者 + 内容 + 附件（引用的上下文和图片都要进模型）。
 #[derive(Debug, Clone, Default, Deserialize)]
 pub struct ReferencedMessage {
     #[serde(default)]
     pub author: Option<User>,
+    #[serde(default)]
+    pub content: String,
+    #[serde(default)]
+    pub attachments: Vec<Attachment>,
 }
 
 /// 一条网关消息分类后的结果。

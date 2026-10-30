@@ -309,10 +309,44 @@ impl Naimei {
         if !is_chat_trigger(&m, &bot_id) {
             return;
         }
-        let text = strip_mention(&m.content, &bot_id).trim().to_owned();
-        if text.is_empty() {
-            return; // 只 @ 不说话（纯表情、纯附件）不触发
+        // 图片：自己的附件 + 被引用消息的附件（只收 image/*，最多 4 张）
+        let image_urls = |atts: &[events::Attachment]| -> Vec<String> {
+            atts.iter()
+                .filter(|a| {
+                    a.content_type
+                        .as_deref()
+                        .is_some_and(|t| t.starts_with("image/"))
+                })
+                .map(|a| a.url.clone())
+                .collect()
+        };
+        let mut images = image_urls(&m.attachments);
+        // 引用上下文：被回复消息的内容（和它的图）对模型可见，不然「fix it」没法修
+        let mut text = strip_mention(&m.content, &bot_id).trim().to_owned();
+        if let Some(r) = m.referenced_message.as_ref() {
+            let who = r
+                .author
+                .as_ref()
+                .map(User::display_tag)
+                .unwrap_or_else(|| "某人".into());
+            let quoted: String = r.content.trim().chars().take(600).collect();
+            if !quoted.is_empty() {
+                text = format!("[引用 {who}：{quoted}]\n{text}");
+            }
+            for url in image_urls(&r.attachments) {
+                if images.len() >= 4 {
+                    break;
+                }
+                images.push(url);
+            }
         }
+        if text.is_empty() && images.is_empty() {
+            return; // 只 @ 不说话（纯表情）不触发
+        }
+        if text.is_empty() {
+            text = "(看这张图)".to_owned(); // 纯图消息：给模型一个明确指令
+        }
+        images.truncate(4);
         let Ok(channel_id) = m.channel_id.parse::<u64>() else {
             return;
         };
@@ -341,6 +375,7 @@ impl Naimei {
             channel_id,
             message_id: &m.id,
             text: &text,
+            images,
             is_owner,
             author_id: &author.id,
             author_name: &author.display_tag(),
@@ -426,8 +461,9 @@ impl Naimei {
             })
         });
         let started = std::time::Instant::now();
+        let user_content = chat::user_content(req.text, &req.images);
         let reply = chat
-            .reply_stream(&system, &history, req.text, move |acc| {
+            .reply_stream(&system, &history, user_content, move |acc| {
                 let _ = tx.try_send(acc);
             })
             .await;
@@ -450,7 +486,11 @@ impl Naimei {
                         req.author_id,
                         req.author_name,
                         req.is_owner,
-                        req.text,
+                        &if req.images.is_empty() {
+                            req.text.to_owned()
+                        } else {
+                            format!("{}（附图{}张）", req.text, req.images.len())
+                        },
                         &answer,
                         chat.model(),
                         started.elapsed().as_millis(),
@@ -627,6 +667,7 @@ struct ChatRequest<'a> {
     channel_id: u64,
     message_id: &'a str,
     text: &'a str,
+    images: Vec<String>,
     is_owner: bool,
     author_id: &'a str,
     author_name: &'a str,
