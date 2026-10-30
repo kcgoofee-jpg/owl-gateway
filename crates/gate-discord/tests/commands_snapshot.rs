@@ -51,9 +51,11 @@ fn only_the_member_commands_are_registered() {
 }
 
 #[test]
-fn intents_are_guilds_only() {
-    // 513 → 1：不再有 GUILD_MESSAGES（不读频道消息，@奶妹 不回应），也没有任何特权 Intent
-    assert_eq!(NAIMEI_INTENTS.bits(), 1);
+fn intents_are_guilds_plus_chat_minimum() {
+    // 10-31 起为 AI 对话开启 GUILD_MESSAGES + MESSAGE_CONTENT（特权，站长已在后台勾选）：
+    // 1(GUILDS) + 512(GUILD_MESSAGES) + 32768(MESSAGE_CONTENT) = 33281。
+    // 只此三项——依旧没有 GUILD_MEMBERS / PRESENCE，不私信、不点赞（历史教训 680009）。
+    assert_eq!(NAIMEI_INTENTS.bits(), 1 | 512 | 32768);
 }
 
 /// `PUT` 只发给 DISCORD_GUILD_ID 这一个公会，请求体就是上面那份定义；不碰全局命令。

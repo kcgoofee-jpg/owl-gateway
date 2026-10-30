@@ -65,8 +65,16 @@ services:
       - REGISTRATION_BRIDGE_SECRET=${REGISTRATION_BRIDGE_SECRET}
       - REGISTRATION_BACKEND_URL=http://nai-gate:8000
       - SITE_URL=${SITE_URL}
+      # AI 对话（@奶妹 / 回复奶妹）：KEY 未配置时该功能整体关闭，其余不受影响。
+      # 走宿主机 127.0.0.1:8080 的 zcode-proxy（bigmodel GLM），经 host-gateway 进来。
+      - NAIMEI_LLM_BASE_URL=${NAIMEI_LLM_BASE_URL:-http://host.docker.internal:8080}
+      - NAIMEI_LLM_API_KEY=${NAIMEI_LLM_API_KEY:-}
+      - NAIMEI_LLM_MODEL=${NAIMEI_LLM_MODEL:-glm-5.3-flash}
       - TZ=Asia/Shanghai
-    mem_limit: 128m
+    # host.docker.internal 在 Linux 上需要 host-gateway 映射
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    mem_limit: 256m
     networks: [internal]
     logging:
       driver: journald

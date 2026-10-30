@@ -125,6 +125,18 @@ impl DiscordApi {
         self.send(Request::builder(&route).json(&definitions).build())
             .await
     }
+
+    /// `POST /channels/{id}/messages`（频道里发消息；body 由调用方拼，须带 `allowed_mentions`）。
+    pub async fn create_message(&self, channel_id: u64, body: &Value) -> Result<(), ApiError> {
+        let route = Route::CreateMessage { channel_id };
+        self.send(Request::builder(&route).json(body).build()).await
+    }
+
+    /// `POST /channels/{id}/typing`（「正在输入…」，有效期约 10 秒；失败无所谓）。
+    pub async fn create_typing_trigger(&self, channel_id: u64) -> Result<(), ApiError> {
+        let route = Route::CreateTypingTrigger { channel_id };
+        self.send(Request::builder(&route).build()).await
+    }
 }
 
 #[cfg(test)]

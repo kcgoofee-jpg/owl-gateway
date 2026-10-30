@@ -960,6 +960,7 @@ dependencies = [
  "axum",
  "clap",
  "futures",
+ "regex",
  "reqwest",
  "rustls",
  "serde",

@@ -23,6 +23,9 @@ pub struct User {
     /// 头像哈希（`a_` 开头表示动图）；没有头像是 null。
     #[serde(default)]
     pub avatar: Option<String>,
+    /// 是否为机器人；只有 MESSAGE_CREATE 带这个字段（对话功能用来防自环）。
+    #[serde(default)]
+    pub bot: bool,
 }
 
 impl User {
@@ -129,6 +132,32 @@ pub struct GuildInfo {
     pub unavailable: bool,
 }
 
+/// MESSAGE_CREATE 里我们关心的部分（AI 对话的触发源；宽容解析，其余字段忽略）。
+#[derive(Debug, Clone, Default, Deserialize)]
+pub struct MessageInfo {
+    pub id: String,
+    pub channel_id: String,
+    #[serde(default)]
+    pub guild_id: Option<String>,
+    #[serde(default)]
+    pub author: Option<User>,
+    #[serde(default)]
+    pub content: String,
+    /// 被 @ 的用户；@奶妹 触发对话就看这里有没有奶妹本人。
+    #[serde(default)]
+    pub mentions: Vec<User>,
+    /// 回复目标消息；「回复奶妹触发对话」看它的作者是不是奶妹。
+    #[serde(default)]
+    pub referenced_message: Option<ReferencedMessage>,
+}
+
+/// 回复目标消息（只需要作者）。
+#[derive(Debug, Clone, Default, Deserialize)]
+pub struct ReferencedMessage {
+    #[serde(default)]
+    pub author: Option<User>,
+}
+
 /// 一条网关消息分类后的结果。
 #[derive(Debug, Clone)]
 pub enum Gateway {
@@ -137,6 +166,7 @@ pub enum Gateway {
     GuildUpdate(GuildInfo),
     GuildDelete(String),
     Interaction(Box<Interaction>),
+    MessageCreate(Box<MessageInfo>),
     /// 其他事件（含 HELLO / HEARTBEAT_ACK 等控制帧）：机器人不关心。
     Other,
 }
@@ -203,6 +233,9 @@ pub fn parse(raw: &str) -> Result<Gateway, serde_json::Error> {
         }
         Some("INTERACTION_CREATE") => {
             Gateway::Interaction(Box::new(serde_json::from_str::<Frame<Interaction>>(raw)?.d))
+        }
+        Some("MESSAGE_CREATE") => {
+            Gateway::MessageCreate(Box::new(serde_json::from_str::<Frame<MessageInfo>>(raw)?.d))
         }
         _ => Gateway::Other,
     })
@@ -293,6 +326,50 @@ mod tests {
         };
         assert_eq!(it.guild_id_str(), "None");
         assert_eq!(it.actor().unwrap().id, "900000000000000005");
+    }
+
+    #[test]
+    fn message_create_keeps_trigger_fields() {
+        let raw = frame(
+            "MESSAGE_CREATE",
+            json!({"id": "900000000000000020", "channel_id": "900000000000000021",
+                   "guild_id": "900000000000000001",
+                   "author": {"id": "900000000000000005", "username": "alice", "bot": false},
+                   "content": "<@900000000000000099> 你好", "type": 0,
+                   "mentions": [{"id": "900000000000000099", "username": "naimei"}],
+                   "referenced_message": null,
+                   "attachments": [{"id": "1", "filename": "x.bin", "size": 1,
+                                    "content_type": "application/octet-stream"}],
+                   "components": [{"type": 9999}]}),
+        );
+        let Gateway::MessageCreate(m) = parse(&raw).unwrap() else {
+            panic!("not message")
+        };
+        let author = m.author.unwrap();
+        assert_eq!(author.id, "900000000000000005");
+        assert!(!author.bot);
+        assert_eq!(m.mentions[0].id, "900000000000000099");
+        assert!(m.referenced_message.is_none());
+        assert_eq!(m.channel_id, "900000000000000021");
+    }
+
+    #[test]
+    fn message_create_keeps_reply_author() {
+        let raw = frame(
+            "MESSAGE_CREATE",
+            json!({"id": "900000000000000022", "channel_id": "900000000000000021",
+                   "guild_id": "900000000000000001",
+                   "author": {"id": "900000000000000005", "username": "alice"},
+                   "content": "再讲讲领 key",
+                   "message_reference": {"message_id": "900000000000000098", "type": 0},
+                   "referenced_message": {"id": "900000000000000098",
+                       "author": {"id": "900000000000000099", "username": "naimei", "bot": true}}}),
+        );
+        let Gateway::MessageCreate(m) = parse(&raw).unwrap() else {
+            panic!("not message")
+        };
+        let referenced = m.referenced_message.unwrap();
+        assert_eq!(referenced.author.unwrap().id, "900000000000000099");
     }
 
     #[test]

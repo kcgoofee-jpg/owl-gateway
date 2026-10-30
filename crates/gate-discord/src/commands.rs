@@ -15,9 +15,12 @@
 use serde_json::{Value, json};
 use twilight_model::gateway::Intents;
 
-/// 奶妹的网关 Intents：只有 GUILDS（服务器名，用来在心跳里显示）。
-/// 斜杠命令走交互回调，不需要任何 Intent；没有 GUILD_MESSAGES / MESSAGE_CONTENT / GUILD_MEMBERS 等。数值 1。
-pub const NAIMEI_INTENTS: Intents = Intents::GUILDS;
+/// 奶妹的网关 Intents：GUILDS（服务器名）+ GUILD_MESSAGES + MESSAGE_CONTENT（@奶妹 / 回复奶妹触发对话）。
+/// MESSAGE_CONTENT 是特权 Intent，须在开发者后台勾选，否则网关以 4014 拒连（启动即失败退避重试）。
+/// 它只用来读「@奶妹 / 回复奶妹」的消息文本；不私信、不点赞、不进论坛，其余纪律见 `lib.rs`。
+pub const NAIMEI_INTENTS: Intents = Intents::GUILDS
+    .union(Intents::GUILD_MESSAGES)
+    .union(Intents::MESSAGE_CONTENT);
 
 /// 奶妹的全部斜杠命令（按注册顺序）。
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]

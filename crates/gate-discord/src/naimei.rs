@@ -1,11 +1,14 @@
-//! 奶妹：网关事件循环、斜杠命令分发、向网关报心跳。
+//! 奶妹：网关事件循环、斜杠命令分发、向网关报心跳，以及（配置了 `NAIMEI_LLM_*` 时的）
+//! 「@奶妹 / 回复奶妹」AI 对话。
 //!
 //! 与 Discord 的交互次序：
-//! - `/register /quota /resetkey /help`：先 `defer()`（3 秒内确认），再去问网关，最后用跟进消息（ephemeral）回话；
+//! - `/register /resetkey`：先 `defer()`（3 秒内确认），再去问网关，最后用跟进消息（ephemeral）回话；
 //! - 命令出错 → 打 `[bug]` 日志，并回一句「出了点问题……」（已确认过就用跟进消息，否则直接回复）；
-//! - 不发私信、不加表情、不碰论坛，也不读频道里的消息（没有 GUILD_MESSAGES Intent，@奶妹 不会回应）；
+//! - AI 对话：成员 @奶妹 或回复奶妹的消息 → 检索知识库 → 调 LLM → 出口过滤 → 分片公开发送。
+//!   只在配置的服务器里说话；不私信、不点赞、不碰论坛；一个频道同时只处理一条、冷却 3 秒；
 //!   管理员命令都在网页后台，机器人里没有。
 
+use std::collections::{HashMap, HashSet, VecDeque};
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
@@ -18,15 +21,31 @@ use twilight_model::gateway::CloseFrame;
 
 use crate::api::{self, ApiError, DiscordApi};
 use crate::bridge::{Bridge, who_payload};
+use crate::chat::{self, Chat, ChatError, Turn};
 use crate::commands::{self, Command, NAIMEI_INTENTS};
 use crate::config::NaimeiConfig;
 use crate::events::{
-    self, Gateway, GuildInfo, INTERACTION_APPLICATION_COMMAND, Interaction, ReadyInfo, User,
+    self, Gateway, GuildInfo, INTERACTION_APPLICATION_COMMAND, Interaction, MessageInfo, ReadyInfo,
+    User,
 };
 use crate::handlers::{self, Backend, HandlerError};
+use crate::kb;
 
 /// 心跳间隔。
 pub const SYNC_INTERVAL: Duration = Duration::from_secs(60);
+
+/// 同一频道两次对话至少隔 3 秒（防连点刷屏）。
+const CHAT_COOLDOWN: f64 = 3.0;
+/// 每个频道保留的最近对话轮数（作为上下文）。
+const CHAT_HISTORY_TURNS: usize = 6;
+/// 最多记住多少个频道的对话；超出就整表清空（防内存无限涨）。
+const CHAT_MAX_CHANNELS: usize = 128;
+/// Discord 单条消息长度上限（2000 字符，留了余量）。
+const DISCORD_MESSAGE_LIMIT: usize = 1900;
+/// 上游额度/并发不足时的兜底话术（不透露任何内部实现）。
+const CHAT_QUOTA: &str = "呜——我的脑子今天被大家用光光啦 (´•̥ω•̥`) 过一阵再来戳我吧～";
+/// 其他对话失败时的兜底话术。
+const CHAT_FAILED: &str = "呜，刚才走神了……再戳我一次试试 (´･ω･`)";
 
 /// 命令执行中可能出现的错误；全部会被统一接住：打日志，并回成员「出了点问题」。
 #[derive(Debug, thiserror::Error)]
@@ -59,6 +78,15 @@ struct Inner {
     /// 配置的那个服务器的名字（只用来在心跳里显示）。
     guild_name: Option<String>,
     sync_started: bool,
+    // ---------- AI 对话状态 ----------
+    /// 奶妹自己的用户 ID（READY 里来），对话触发判断用。
+    bot_id: Option<String>,
+    /// 每个频道的最近对话：频道 ID → (成员说的, 奶妹答的) 队列。
+    histories: HashMap<u64, VecDeque<Turn>>,
+    /// 正在生成回复的频道：一个频道同时只处理一条，多出来的直接忽略。
+    busy: HashSet<u64>,
+    /// 每个频道上次对话的 Unix 秒（冷却用）。
+    last_chat: HashMap<u64, f64>,
 }
 
 /// 墙钟（Unix 秒）。测试里换成固定值，「Key 剩余有效期」才不会随时间漂移。
@@ -68,6 +96,8 @@ pub struct Naimei {
     pub cfg: NaimeiConfig,
     pub api: DiscordApi,
     pub bridge: Bridge,
+    /// AI 对话客户端；未配置 `NAIMEI_LLM_*` 时为 `None`，对话功能整体关闭。
+    chat: Option<Chat>,
     clock: Clock,
     /// 最近一次心跳延迟（毫秒）；`u64::MAX` = 还没有数据。
     latency_ms: AtomicU64,
@@ -90,10 +120,12 @@ impl Naimei {
     pub fn with_clock(cfg: NaimeiConfig, discord_proxy: Option<String>, clock: Clock) -> Arc<Self> {
         let api = DiscordApi::new(&cfg.token, discord_proxy);
         let bridge = Bridge::new(cfg.backend.clone(), cfg.secret.clone());
+        let chat = cfg.chat.as_ref().map(|c| Chat::new(c.clone()));
         Arc::new(Naimei {
             cfg,
             api,
             bridge,
+            chat,
             clock,
             latency_ms: AtomicU64::new(u64::MAX),
             inner: Mutex::new(Inner::default()),
@@ -117,7 +149,9 @@ impl Naimei {
     }
 
     pub fn set_bot_user(&self, user: User) {
-        self.lock().bot = Some(user);
+        let mut inner = self.lock();
+        inner.bot_id = Some(user.id.clone());
+        inner.bot = Some(user);
     }
 
     /// GUILD_CREATE / GUILD_UPDATE：只关心配置的那个服务器的名字。
@@ -239,6 +273,137 @@ impl Naimei {
             b.text()
         };
         Ok(r.followup(&text).await?)
+    }
+
+    // ---------- AI 对话 ----------
+
+    /// 处理一条 MESSAGE_CREATE：@奶妹 或回复奶妹 → AI 对话；其余一律忽略。
+    pub async fn handle_message(self: &Arc<Self>, m: MessageInfo) {
+        let Some(bot_id) = self.lock().bot_id.clone() else {
+            return; // READY 之前收到的消息不带触发信息
+        };
+        let Some(chat) = self.chat.as_ref() else {
+            return; // 未配置 NAIMEI_LLM_*，对话功能关闭
+        };
+        let Some(author) = m.author.as_ref() else {
+            return;
+        };
+        if author.bot || author.id == bot_id {
+            return; // 自己 / 其他机器人一律不回，防自环
+        }
+        let same_guild = m
+            .guild_id
+            .as_deref()
+            .and_then(|g| g.parse::<u64>().ok())
+            .is_some_and(|g| g == self.cfg.guild_id);
+        if !same_guild {
+            return; // 只在配置的服务器里说话
+        }
+        if !is_chat_trigger(&m, &bot_id) {
+            return;
+        }
+        let text = strip_mention(&m.content, &bot_id).trim().to_owned();
+        if text.is_empty() {
+            return; // 只 @ 不说话（纯表情、纯附件）不触发
+        }
+        let Ok(channel_id) = m.channel_id.parse::<u64>() else {
+            return;
+        };
+        let now = self.now();
+        {
+            let mut inner = self.lock();
+            if inner.busy.contains(&channel_id)
+                || inner
+                    .last_chat
+                    .get(&channel_id)
+                    .is_some_and(|t| now - *t < CHAT_COOLDOWN)
+            {
+                return; // 正在回复 / 冷却中：直接忽略，不排队（宁可漏答不可刷屏）
+            }
+            inner.busy.insert(channel_id);
+            inner.last_chat.insert(channel_id, now);
+            if inner.histories.len() > CHAT_MAX_CHANNELS {
+                inner.histories.clear();
+            }
+        }
+        let result = self.chat_once(chat, channel_id, &m.id, &text).await;
+        self.lock().busy.remove(&channel_id);
+        match result {
+            Ok(()) => {}
+            Err(ChatError::Quota) => {
+                self.send_chat_message(channel_id, &m.id, CHAT_QUOTA).await;
+            }
+            Err(e) => {
+                // 额度类失败是常态，不打 [bug]；其他失败记日志但不惊动成员
+                info!("[chat] 对话失败：{e}");
+                self.send_chat_message(channel_id, &m.id, CHAT_FAILED).await;
+            }
+        }
+    }
+
+    /// 完整一轮对话：报「正在输入」→ 组上下文（历史 + 知识库检索）→ 调 LLM → 出口过滤 → 分片发送 → 记历史。
+    async fn chat_once(
+        self: &Arc<Self>,
+        chat: &Chat,
+        channel_id: u64,
+        message_id: &str,
+        text: &str,
+    ) -> Result<(), ChatError> {
+        let _ = self.api.create_typing_trigger(channel_id).await;
+        let history: Vec<Turn> = self
+            .lock()
+            .histories
+            .get(&channel_id)
+            .map(|h| {
+                h.iter()
+                    .rev()
+                    .take(CHAT_HISTORY_TURNS)
+                    .rev()
+                    .cloned()
+                    .collect()
+            })
+            .unwrap_or_default();
+        let stickers = chat::wants_stickers(text).then(kb::nailong);
+        let system = chat::system_prompt(&kb::retrieve(text, 2), stickers);
+        let answer = chat.reply(&system, &history, text).await?;
+        let answer = chat::scrub(&answer);
+        {
+            let mut inner = self.lock();
+            let h = inner.histories.entry(channel_id).or_default();
+            h.push_back((text.to_owned(), answer.clone()));
+            while h.len() > CHAT_HISTORY_TURNS {
+                h.pop_front();
+            }
+        }
+        for (i, part) in chat::split_for_discord(&answer, DISCORD_MESSAGE_LIMIT)
+            .into_iter()
+            .enumerate()
+        {
+            let mut body = json!({
+                "content": part,
+                // 历史（应用曾被误标记 680009）：只允许 @ 成员，不允许 here / everyone
+                "allowed_mentions": {"parse": ["users"]},
+            });
+            if i == 0 {
+                body["message_reference"] = json!({"message_id": message_id, "type": 0});
+            }
+            if let Err(e) = self.api.create_message(channel_id, &body).await {
+                debug!("[chat] 回复第 {} 片发送失败：{e}", i + 1);
+            }
+        }
+        Ok(())
+    }
+
+    /// 对话的兜底回复（额度用完 / 其他失败），不带知识库，直接以回复消息发出。
+    async fn send_chat_message(&self, channel_id: u64, reply_to: &str, content: &str) {
+        let body = json!({
+            "content": content,
+            "allowed_mentions": {"parse": ["users"]},
+            "message_reference": {"message_id": reply_to, "type": 0},
+        });
+        if let Err(e) = self.api.create_message(channel_id, &body).await {
+            debug!("[chat] 兜底消息发送失败：{e}");
+        }
     }
 
     // ---------- 启动 / 同步 ----------
@@ -370,6 +535,24 @@ fn string_option_opt(it: &Interaction, name: &str) -> Option<String> {
         .map(str::to_owned)
 }
 
+/// 是否触发 AI 对话：被 @ 或回复的对象是奶妹本人。其余消息（哪怕内容里提到奶妹）不触发。
+fn is_chat_trigger(m: &MessageInfo, bot_id: &str) -> bool {
+    let mentioned = m.mentions.iter().any(|u| u.id == bot_id);
+    let reply_to_bot = m
+        .referenced_message
+        .as_ref()
+        .and_then(|r| r.author.as_ref())
+        .is_some_and(|a| a.id == bot_id);
+    mentioned || reply_to_bot
+}
+
+/// 把消息文本里的 `<@id>` / `<@!id>` 提及标记去掉（@奶妹 本身不算提问内容）。
+fn strip_mention(content: &str, bot_id: &str) -> String {
+    content
+        .replace(&format!("<@{bot_id}>"), "")
+        .replace(&format!("<@!{bot_id}>"), "")
+}
+
 // ---------- 事件循环 ----------
 
 /// 等 SIGINT / SIGTERM（docker stop）。
@@ -407,6 +590,10 @@ pub fn dispatch(app: &Arc<Naimei>, raw: &str) {
         Ok(Gateway::Interaction(it)) => {
             let app = app.clone();
             tokio::spawn(async move { app.handle_interaction(*it).await });
+        }
+        Ok(Gateway::MessageCreate(m)) => {
+            let app = app.clone();
+            tokio::spawn(async move { app.handle_message(*m).await });
         }
         Ok(Gateway::Other) => {}
         Err(e) => warn!("无法解析的网关消息：{e}"),
@@ -459,6 +646,7 @@ mod tests {
             backend: "http://127.0.0.1:1".into(),
             site: "https://site.test".into(),
             secret: "s".into(),
+            chat: None,
         };
         Naimei::new(cfg, None)
     }
@@ -492,5 +680,79 @@ mod tests {
         assert_eq!(app.status_report(1.0)["latency_ms"], 0, "还没有数据按 0 报");
         app.set_latency(Some(Duration::from_secs_f64(0.0425)));
         assert_eq!(app.status_report(1.0)["latency_ms"], 43);
+    }
+
+    // ---------- AI 对话触发 ----------
+
+    const BOT_ID: &str = "900000000000000099";
+
+    fn message(content: &str, mentions: Value, referenced: Value) -> MessageInfo {
+        serde_json::from_value(json!({
+            "id": "900000000000000020",
+            "channel_id": "900000000000000021",
+            "guild_id": "900000000000000001",
+            "author": {"id": "900000000000000005", "username": "alice", "bot": false},
+            "content": content,
+            "mentions": mentions,
+            "referenced_message": referenced,
+        }))
+        .unwrap()
+    }
+
+    #[test]
+    fn mention_and_reply_trigger_others_do_not() {
+        let m = message(
+            "<@900000000000000099> 你好",
+            json!([{"id": BOT_ID}]),
+            Value::Null,
+        );
+        assert!(is_chat_trigger(&m, BOT_ID));
+
+        let m = message(
+            "再讲讲",
+            json!([]),
+            json!({"id": "1", "author": {"id": BOT_ID, "username": "naimei", "bot": true}}),
+        );
+        assert!(is_chat_trigger(&m, BOT_ID));
+
+        // 只有内容里提到奶妹、没有 @ 也不是回复奶妹：不触发
+        let m = message("奶妹真可爱", json!([]), Value::Null);
+        assert!(!is_chat_trigger(&m, BOT_ID));
+        // 回复的是别人的消息：不触发
+        let m = message(
+            "看看这条",
+            json!([]),
+            json!({"id": "1", "author": {"id": "900000000000000005", "username": "bob"}}),
+        );
+        assert!(!is_chat_trigger(&m, BOT_ID));
+    }
+
+    #[test]
+    fn mention_token_is_stripped() {
+        assert_eq!(
+            strip_mention("<@900000000000000099> 怎么领 key", BOT_ID),
+            " 怎么领 key"
+        );
+        assert_eq!(
+            strip_mention("<@!900000000000000099>旧式写法", BOT_ID),
+            "旧式写法"
+        );
+        // 别人的 @ 不动
+        assert_eq!(
+            strip_mention("<@900000000000000005> 看看", BOT_ID),
+            "<@900000000000000005> 看看"
+        );
+    }
+
+    #[tokio::test]
+    async fn chat_disabled_ignores_messages() {
+        // 未配置 NAIMEI_LLM_*：消息进来直接忽略（不发任何请求）
+        let app = app();
+        let m = message(
+            "<@900000000000000099> 你好",
+            json!([{"id": BOT_ID}]),
+            Value::Null,
+        );
+        app.handle_message(m).await; // 不 panic、不产生回复即为通过
     }
 }
