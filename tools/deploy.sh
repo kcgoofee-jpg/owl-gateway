@@ -113,6 +113,11 @@ scp -q "${KEY[@]}" "${files[@]}" "root@$OWL_IP:/opt/owl/" 2>&1 | mask
 # 官网生图页镜像：59MB 静态资源不进仓库也不进镜像，cutover 之前同步到宿主机只读挂载点。
 tools/sync-mirror.sh
 
+# cutover 自己的 smoke 也要求公共接口 200；维护模式开着时先临时切 off，部署完由 verify 脚本切回。
+# 这里把当前档位写到服务器上的一个小文件，verify 脚本读它恢复。
+say "suspending maintenance for the cutover"
+ssh "${KEY[@]}" "root@$OWL_IP" "bash -s -- $(printf %q "$DOMAIN")" < tools/deploy/suspend-maintenance.sh 2>&1 | mask || true
+
 say "cutover"
 remote "set -e; cd /opt/owl; chmod +x cutover.sh caddy-reload.sh
   ./cutover.sh load owl-gate.tar.gz

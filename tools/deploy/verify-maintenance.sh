@@ -18,6 +18,11 @@ probe_public() { curl -s -o /dev/null -w '%{http_code}' "$A/public/live" 2>/dev/
 run_smoke() { docker exec owl-gate nai-ops smoke http://127.0.0.1:8000 | tail -3; }
 check_image() { curl -s -o /dev/null -w 'image: %{http_code}\n' "$A/image" 2>/dev/null || true; }
 
+# cutover 之前 suspend-maintenance.sh 记录了原档位；优先用它恢复
+STATE=${MAINTENANCE_STATE:-/var/tmp/owl-maintenance-mode}
+SAVED=""
+[[ -f $STATE ]] && SAVED=$(cat "$STATE")
+
 CURRENT=$(mode || true)
 if [[ -z ${CURRENT:-} ]]; then
   login >/dev/null 2>&1 || true
@@ -37,7 +42,8 @@ if [[ -z ${CURRENT:-} ]]; then
   exit 0
 fi
 
-echo "maintenance mode: $CURRENT"
+TARGET=${SAVED:-$CURRENT}
+echo "maintenance mode: $CURRENT (restore to $TARGET)"
 if [[ $CURRENT != off ]]; then
   set_mode off
   for _ in $(seq 1 10); do
@@ -55,6 +61,7 @@ status=0
 run_smoke || status=$?
 check_image || status=$?
 
-[[ $CURRENT == off ]] || set_mode "$CURRENT"
-echo "maintenance restored to $CURRENT"
+set_mode "$TARGET"
+rm -f "$STATE"
+echo "maintenance restored to $TARGET"
 exit $status
