@@ -81,6 +81,69 @@ fn clean_file_name(raw: Option<&str>, mime: &str) -> String {
     }
 }
 
+/// 从原图里读生成参数：官网出的 PNG 带 `tEXt` 元数据（`Comment` 是完整参数 JSON，`Software` 是模型名）。
+/// 读到了就用图里的值——比前端从 DOM 里抓的尺寸/种子可信。
+fn png_meta(bytes: &[u8]) -> Option<Value> {
+    if bytes.len() < 8 || &bytes[0..8] != b"\x89PNG\r\n\x1a\n" {
+        return None;
+    }
+    let mut pos = 8usize;
+    let mut comment: Option<String> = None;
+    let mut software: Option<String> = None;
+    while pos + 8 <= bytes.len() {
+        let len = u32::from_be_bytes(bytes[pos..pos + 4].try_into().ok()?) as usize;
+        let kind = &bytes[pos + 4..pos + 8];
+        let start = pos + 8;
+        let end = start.checked_add(len)?;
+        if end + 4 > bytes.len() {
+            break;
+        }
+        let data = &bytes[start..end];
+        match kind {
+            b"tEXt" | b"iTXt" => {
+                let mut parts = data.splitn(3, |b| *b == 0);
+                let key = parts.next().unwrap_or_default();
+                let value = if kind == b"tEXt" {
+                    parts.next().unwrap_or_default()
+                } else {
+                    // iTXt：压缩标志 + 压缩方法 + 语言 + 译文 + 正文，NAI 写的是不压缩
+                    let rest = parts.next().unwrap_or_default();
+                    rest.iter()
+                        .position(|b| *b == 0)
+                        .and_then(|_| rest.get(2..))
+                        .map(|tail| {
+                            let mut it = tail.splitn(3, |b| *b == 0);
+                            it.nth(2).unwrap_or_default()
+                        })
+                        .unwrap_or_default()
+                };
+                let text = String::from_utf8_lossy(value).to_string();
+                match key {
+                    b"Comment" if comment.is_none() => comment = Some(text),
+                    b"Software" if software.is_none() => software = Some(text),
+                    _ => {}
+                }
+            }
+            b"IEND" => break,
+            _ => {}
+        }
+        pos = end + 4;
+    }
+    let parsed: Option<Value> = comment
+        .as_deref()
+        .and_then(|text| serde_json::from_str::<Value>(text).ok());
+    if parsed.is_none() && software.is_none() {
+        return None;
+    }
+    let mut out = parsed.unwrap_or_else(|| json!({}));
+    if let Some(sw) = software
+        && out.get("software").is_none()
+    {
+        out["software"] = json!(sw);
+    }
+    Some(out)
+}
+
 async fn upload(State(st): State<AppState>, headers: HeaderMap, req: Request) -> ApiResult {
     let Some((discord_id, key)) = crate::session::member_state(&st, &headers).await? else {
         return Err(HttpError::new(401, "请先在网页登录，再上传到 Explore。").into());
@@ -117,6 +180,40 @@ async fn upload(State(st): State<AppState>, headers: HeaderMap, req: Request) ->
         file_name: clean_file_name(image.file_name.as_deref(), mime),
         mime,
     };
+    let mut meta = meta;
+    if let Some(inner) = png_meta(&upload.bytes) {
+        let mut put = |key: &str, value: String| {
+            if !value.trim().is_empty() {
+                meta.insert(key.to_string(), value);
+            }
+        };
+        put(
+            "prompt",
+            inner
+                .get("prompt")
+                .and_then(Value::as_str)
+                .unwrap_or_default()
+                .to_string(),
+        );
+        let (w, h) = (
+            inner.get("width").and_then(Value::as_u64),
+            inner.get("height").and_then(Value::as_u64),
+        );
+        if let (Some(w), Some(h)) = (w, h) {
+            put("size", format!("{w} × {h}"));
+        }
+        if let Some(seed) = inner.get("seed").and_then(Value::as_u64) {
+            put("seed", seed.to_string());
+        }
+        put(
+            "model",
+            inner
+                .get("software")
+                .and_then(Value::as_str)
+                .unwrap_or_default()
+                .to_string(),
+        );
+    }
     let uploader = st
         .db
         .discord_profile_row(&discord_id)

@@ -203,10 +203,13 @@
 
   function metaFor(img) {
     var body = document.body.innerText || "";
+    // 尺寸以图片自身像素为准（页面上的文字是显示尺寸，可能被缩放）
     var size = "";
-    var m = body.match(/(\d{3,5})\s*[×x]\s*(\d{3,5})/);
-    if (m) size = m[1] + " × " + m[2];
-    if (!size && img && img.naturalWidth) size = img.naturalWidth + " × " + img.naturalHeight;
+    if (img && img.naturalWidth) size = img.naturalWidth + " × " + img.naturalHeight;
+    if (!size) {
+      var m = body.match(/(\d{3,5})\s*[×x]\s*(\d{3,5})/);
+      if (m) size = m[1] + " × " + m[2];
+    }
     var seed = "";
     var s = body.match(/\b(\d{9,11})\b/);
     if (s) seed = s[1];
