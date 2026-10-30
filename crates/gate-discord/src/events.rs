@@ -167,6 +167,16 @@ pub struct MessageInfo {
     pub referenced_message: Option<ReferencedMessage>,
 }
 
+/// THREAD_CREATE 里我们关心的部分：新帖子 id（自动入帖用）+ 可选的首楼内容。
+#[derive(Debug, Clone, Default, Deserialize)]
+pub struct ThreadInfo {
+    pub id: String,
+    #[serde(default)]
+    pub name: Option<String>,
+    #[serde(default)]
+    pub message: Option<ReferencedMessage>,
+}
+
 /// 回复目标消息：作者 + 内容 + 附件（引用的上下文和图片都要进模型）。
 #[derive(Debug, Clone, Default, Deserialize)]
 pub struct ReferencedMessage {
@@ -187,6 +197,7 @@ pub enum Gateway {
     GuildDelete(String),
     Interaction(Box<Interaction>),
     MessageCreate(Box<MessageInfo>),
+    ThreadCreate(Box<ThreadInfo>),
     /// 其他事件（含 HELLO / HEARTBEAT_ACK 等控制帧）：机器人不关心。
     Other,
 }
@@ -253,6 +264,9 @@ pub fn parse(raw: &str) -> Result<Gateway, serde_json::Error> {
         }
         Some("INTERACTION_CREATE") => {
             Gateway::Interaction(Box::new(serde_json::from_str::<Frame<Interaction>>(raw)?.d))
+        }
+        Some("THREAD_CREATE") => {
+            Gateway::ThreadCreate(Box::new(serde_json::from_str::<Frame<ThreadInfo>>(raw)?.d))
         }
         Some("MESSAGE_CREATE") => {
             Gateway::MessageCreate(Box::new(serde_json::from_str::<Frame<MessageInfo>>(raw)?.d))

@@ -885,6 +885,19 @@ pub fn dispatch(app: &Arc<Naimei>, raw: &str) {
             let app = app.clone();
             tokio::spawn(async move { app.handle_message(*m).await });
         }
+        Ok(Gateway::ThreadCreate(t)) => {
+            // 不自动加入帖子就收不到帖子内的消息（Discord 机制），这里一律加入
+            let app = app.clone();
+            tokio::spawn(async move {
+                if let Ok(tid) = t.id.parse::<u64>() {
+                    if let Err(e) = app.api.join_thread(tid).await {
+                        debug!("[bot] 加入帖子失败：{e}");
+                    } else {
+                        info!("[bot] 已加入新帖子 {}", t.name.as_deref().unwrap_or(""));
+                    }
+                }
+            });
+        }
         Ok(Gateway::Other) => {}
         Err(e) => warn!("无法解析的网关消息：{e}"),
     }

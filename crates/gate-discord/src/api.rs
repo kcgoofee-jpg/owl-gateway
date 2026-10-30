@@ -169,6 +169,14 @@ impl DiscordApi {
         Ok(v.as_array().cloned().unwrap_or_default())
     }
 
+    /// `PUT /channels/{tid}/thread-members/@me` —— bot 加入帖子（不加入收不到帖子内消息）。
+    pub async fn join_thread(&self, thread_id: u64) -> Result<(), ApiError> {
+        let route = Route::JoinThread {
+            channel_id: thread_id,
+        };
+        self.send(Request::builder(&route).build()).await
+    }
+
     /// `GET /channels/{id}` —— 频道信息（type 11/12 = 帖子/子区）。
     pub async fn channel_info(&self, channel_id: u64) -> Result<Value, ApiError> {
         let route = Route::GetChannel { channel_id };
