@@ -7,7 +7,8 @@ import { readCreds } from "./devEnv";
 import { asMember, watchConsole } from "./helpers";
 
 const hasMember = Boolean(readCreds().member);
-const BASE = process.env.E2E_BASE ?? "http://localhost:5174";
+// 镜像页整页由网关渲染，测试直接打网关（CI 里没有镜像资源时整组跳过）
+const BASE = process.env.E2E_GATE ?? "http://127.0.0.1:18000";
 
 /** 官网首次登录会弹许可/订阅/教程层，测试里点掉；都不在就直接过。 */
 async function dismissFirstRun(page: import("@playwright/test").Page) {
@@ -25,6 +26,10 @@ async function dismissFirstRun(page: import("@playwright/test").Page) {
 
 test.describe("官网镜像页", () => {
   test.skip(!hasMember, "需要成员会话（cargo xtask dev 的 cookies.json）");
+  test.beforeAll(async ({ request }) => {
+    const mirror = await request.get(`${BASE}/image`);
+    test.skip(mirror.status() !== 200, "镜像资源未就绪（需要 STATIC_DIR 指向 mirror/）");
+  });
 
   test("/workbench 跳到 /image，并且是登录态", async ({ page, context }) => {
     await asMember(context, BASE);

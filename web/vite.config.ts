@@ -8,12 +8,16 @@ function pageRoutes(): Plugin {
   return {
     name: "owl-page-routes",
     configureServer(server) {
-      server.middlewares.use((req, _res, next) => {
+      server.middlewares.use((req, res, next) => {
         const url = req.url ?? "/";
         const path = url.split("?")[0] ?? "/";
         const qs = url.slice(path.length);
         if (path === "/") req.url = `/_owl/landing.html${qs}`;
-        else if ((path === "/admin" || path.startsWith("/admin/")) && !path.startsWith("/admin/api/"))
+        else if (path === "/workbench") {
+          res.writeHead(302, { location: "/image" });
+          res.end();
+          return;
+        } else if ((path === "/admin" || path.startsWith("/admin/")) && !path.startsWith("/admin/api/"))
           req.url = `/_owl/admin.html${qs}`;
         next();
       });
@@ -46,6 +50,11 @@ export default defineConfig({
     proxy: {
       // 状态页由网关渲染，它的样式 / 脚本（/_owl/status-page.*）也编在网关里
       // ai / nai：网页出图（生图工作台 /workbench 与备用模块画匣）在开发与 e2e 里直接打网关的 NAI 兼容出图接口
+      // 官网镜像页（/image）整页由网关渲染，静态资源也在网关的 STATIC_DIR 里，
+      // 开发与 e2e 只把这几条路径转过去即可
+      "^/(image|bridge\.js|_next|tokenizer|cf-fonts|icons|manifest\.json|updateReload\.json)": {
+        target: process.env.VITE_GATE ?? "http://127.0.0.1:18000",
+      },
       "^/(public|admin/api|self-register|login|logout|member|v1|ai|nai|status|livez|readyz|healthz|announcement|_owl/status-page)":
         {
           target: process.env.VITE_GATE ?? "http://127.0.0.1:18000",
