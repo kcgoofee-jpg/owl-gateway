@@ -196,11 +196,15 @@ export function NaiApp() {
   const member = me?.logged_in === true ? me : undefined;
   const paid = member?.policy?.paid_parameters !== false;
   const v5Open = member?.policy?.v5 === true;
+  const v5Available =
+    v5Open &&
+    member?.today?.v5_paused !== true &&
+    member?.today?.v5_access_allowed !== false &&
+    member?.today?.upstream_v5_free !== false &&
+    member?.today?.site_v5_left !== 0;
 
   const [theme, setTheme] = useState<WbTheme>(() => loadPrefs().theme);
-  const [model, setModel] = useState<string>(() =>
-    v5Open ? "nai-diffusion-5-curated" : "nai-diffusion-4-5-full",
-  );
+  const [model, setModel] = useState<string>("nai-diffusion-4-5-full");
   const [mode, setMode] = useState<"anime" | "text">("anime");
   const [prompt, setPrompt] = useState("");
   const [negative, setNegative] = useState("");
@@ -213,7 +217,7 @@ export function NaiApp() {
   const [presetId, setPresetId] = useState("portrait");
   const [count, setCount] = useState(1);
   const [steps, setSteps] = useState(23);
-  const [scale, setScale] = useState(v5Open ? 7 : 5);
+  const [scale, setScale] = useState(5);
   const [sampler, setSampler] = useState("k_euler_ancestral");
   const [seed, setSeed] = useState("-1");
   const [shots, setShots] = useState<Shot[]>([]);
@@ -235,6 +239,12 @@ export function NaiApp() {
 
   const abortRef = useRef<AbortController | null>(null);
   useEffect(() => () => abortRef.current?.abort(), []);
+  useEffect(() => {
+    if (!v5Available && isV5(model)) {
+      setModel("nai-diffusion-4-5-full");
+      setScale(5);
+    }
+  }, [model, v5Available]);
 
   const cycleTheme = () => {
     const order: WbTheme[] = ["dark", "sand", "slate"];
@@ -745,17 +755,18 @@ export function NaiApp() {
                   </button>
                   <Pop open={pop === "model"} onClose={() => setPop("")}>
                     <div class="nai-pop-cap">New</div>
-                    {V5_MODELS.map((m) => (
-                      <PopItem
-                        key={m.id}
-                        selected={model === m.id}
-                        disabled={!v5Open}
-                        desc={v5Open ? MODEL_BLURBS[m.id]?.blurb : "需要站长为你的 Key 开放 V5。"}
-                        onSelect={() => pickModel(m.id)}
-                      >
-                        {m.label}
-                      </PopItem>
-                    ))}
+                    {v5Available
+                      ? V5_MODELS.map((m) => (
+                          <PopItem
+                            key={m.id}
+                            selected={model === m.id}
+                            desc={MODEL_BLURBS[m.id]?.blurb}
+                            onSelect={() => pickModel(m.id)}
+                          >
+                            {m.label}
+                          </PopItem>
+                        ))
+                      : null}
                     <div class="nai-pop-cap">Legacy</div>
                     {BASE_MODELS.map((m) => (
                       <PopItem
