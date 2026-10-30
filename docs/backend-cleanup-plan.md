@@ -136,13 +136,12 @@ busy 重试、panic 后重开连接），但 `Db::write()` 在 async 函数里�
 | ② | 已上线：`repo/usage.rs` 1009 → 406，拆出 `settlement.rs`(371) / `usage_stats.rs`(256) | — |
 | ③ | 已上线：`admission.rs` 649 → 22（`queue` 209 / `quota` 168 / `budget` 284），路由不再锁 `state.budget` | — |
 | ④ | 已上线：`policy.rs` 1982 → 124（`params` 376 / `references` 324 / `prompts` 529 / `pricing` 220 / `probe` 436） | — |
-| ⑥ | 已上线：`dispatch.rs` 1176 → 829（`outcome.rs` 308 结算守卫+状态码表 / `stream.rs` 54） | — |
-| ⑦ | 已上线：`routes/admin/members.rs` 977 → 888，业务挪进 `member_ops.rs`(148)；还有一批路由待继续瘦身 | — |
+| ⑥ | 已上线：`dispatch.rs` 1176 → 446（`outcome.rs` 317 结算守卫+状态码表 / `stream.rs` 54 / `v5.rs` 398 V5 计费确认） | — |
+| ⑦ | 已上线：`routes/admin/members.rs` 977 → 782，业务挪进 `member_ops.rs`(274)（重置额度 / 发券 / 删 Key+封禁 / 标签 / 解暂停 / 列表 / 邀请 Key / 换 Token / 改 Key） | — |
 | ⑤ | 待做 | — |
 
-未达「单文件 < 700 行」的还有 `members.rs`(888)、`dispatch.rs`(829)、`prompts.rs`(529 已达标)：
-⑦ 的第二批（`list_keys` / `create_invite_key` / `patch_key` 等）和 ⑥ 的 `confirm_v5*` / `wait_slot`
-还需要各挪一次。这两块继续按本计划推进。
+剩下的收尾：`members.rs`(782) 距离 700 还差一点（黑名单、成员页聚合、券列表还没挪），
+下一步把黑名单和成员页聚合也搬进 `member_ops.rs` / 新开 `member_view.rs`。
 
 ## 4. 每次落地的固定动作
 
