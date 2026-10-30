@@ -68,14 +68,15 @@ fn bigrams(text: &str) -> HashSet<[char; 2]> {
 }
 
 /// 按用户的问题检索知识库，返回最多 `top` 块的 Markdown 拼接；都不相关时返回空串。
-/// 相关门槛：命中二元组要覆盖问题的三分之一以上——「今天天气怎么样」这类闲聊
-/// 只会撞上「怎么」之类的公共词，不该硬塞知识库。
+/// 相关门槛：命中二元组数 ≥ max(2, 问题二元组的 1/5)——「今天天气怎么样」这类闲聊
+/// 只会撞上「怎么」之类的公共词，不该硬塞知识库；而「V5 的尺寸限制」这类正经问题
+/// 即使措辞与知识库不同也放得进来。
 pub fn retrieve(query: &str, top: usize) -> String {
     let q = bigrams(query);
     if q.is_empty() {
         return String::new();
     }
-    let threshold = (q.len() / 3).max(1);
+    let threshold = ((q.len() + 4) / 5).max(2);
     let mut scored: Vec<(usize, &Chunk)> = chunks()
         .iter()
         .map(|c| {
@@ -120,6 +121,11 @@ mod tests {
         assert!(hit.contains("领 Key"), "应命中领 Key 块：{hit}");
         let hit = retrieve("提示词权重 {} 怎么用", 2);
         assert!(hit.contains("提示词"), "应命中提示词块：{hit}");
+        let hit = retrieve("V5 的尺寸限制和步数限制", 2);
+        assert!(
+            hit.contains("免费出图规格") || hit.contains("尺寸"),
+            "应命中规格块：{hit}"
+        );
         let miss = retrieve("今天天气怎么样", 2);
         assert!(miss.is_empty(), "无关问题不硬塞知识库：{miss}");
     }
