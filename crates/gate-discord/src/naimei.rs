@@ -326,7 +326,13 @@ impl Naimei {
                 inner.histories.clear();
             }
         }
-        let result = self.chat_once(chat, channel_id, &m.id, &text).await;
+        let is_owner = author
+            .id
+            .parse::<u64>()
+            .is_ok_and(|id| self.cfg.owner_ids.contains(&id));
+        let result = self
+            .chat_once(chat, channel_id, &m.id, &text, is_owner)
+            .await;
         self.lock().busy.remove(&channel_id);
         match result {
             Ok(()) => {}
@@ -348,6 +354,7 @@ impl Naimei {
         channel_id: u64,
         message_id: &str,
         text: &str,
+        is_owner: bool,
     ) -> Result<(), ChatError> {
         let _ = self.api.create_typing_trigger(channel_id).await;
         let history: Vec<Turn> = self
@@ -364,7 +371,7 @@ impl Naimei {
             })
             .unwrap_or_default();
         let stickers = chat::wants_stickers(text).then(kb::nailong);
-        let system = chat::system_prompt(&kb::retrieve(text, 2), stickers);
+        let system = chat::system_prompt(&kb::retrieve(text, 2), stickers, is_owner);
         let answer = chat.reply(&system, &history, text).await?;
         let answer = chat::scrub(&answer);
         {
@@ -647,6 +654,7 @@ mod tests {
             site: "https://site.test".into(),
             secret: "s".into(),
             chat: None,
+            owner_ids: Vec::new(),
         };
         Naimei::new(cfg, None)
     }

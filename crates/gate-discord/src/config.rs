@@ -10,6 +10,7 @@
 //! | `NAIMEI_LLM_BASE_URL` | 空：AI 对话关闭（OpenAI 兼容接口根地址，去尾 `/`） |
 //! | `NAIMEI_LLM_API_KEY` | 空：AI 对话关闭（与 BASE_URL 同时配置才开启） |
 //! | `NAIMEI_LLM_MODEL` | `glm-5.3-flash` |
+//! | `NAIMEI_OWNER_IDS` | 空：逗号分隔的 Discord 用户 ID，认作主人（对话区别对待） |
 //!
 //! AI 对话是整段可缺省的功能：三项没有同时配齐就保持关闭，其余功能不受影响。
 
@@ -29,6 +30,8 @@ pub struct NaimeiConfig {
     pub secret: String,
     /// AI 对话配置；`None` = 未配置，@奶妹 不触发对话。
     pub chat: Option<ChatCfg>,
+    /// 站长（主人）的 Discord 用户 ID：对话里区别对待，要求尽量满足。
+    pub owner_ids: Vec<u64>,
 }
 
 pub const DEFAULT_BACKEND: &str = "http://127.0.0.1:3003";
@@ -67,8 +70,18 @@ impl NaimeiConfig {
                 .to_owned(),
             secret,
             chat: chat_cfg(&get),
+            owner_ids: owner_ids(&get),
         })
     }
+}
+
+/// `NAIMEI_OWNER_IDS`：逗号分隔的 Discord 用户 ID，认作主人。缺省为空（没有人享受特权）。
+fn owner_ids(get: &impl Fn(&str) -> Option<String>) -> Vec<u64> {
+    get("NAIMEI_OWNER_IDS")
+        .unwrap_or_default()
+        .split(',')
+        .filter_map(|s| s.trim().parse::<u64>().ok())
+        .collect()
 }
 
 /// AI 对话配置：`NAIMEI_LLM_BASE_URL` 与 `NAIMEI_LLM_API_KEY` 都非空才开启。

@@ -144,7 +144,8 @@ fn clip(s: &str, n: usize) -> String {
 // ---------- 系统提示词 ----------
 
 /// 拼系统提示词：人设 + 隔离规则 + 本次检索到的知识库 + 可选的卖萌素材。
-pub fn system_prompt(kb_context: &str, stickers: Option<&str>) -> String {
+/// `is_owner`：发消息的人是不是站长本人（主人），待遇不同。
+pub fn system_prompt(kb_context: &str, stickers: Option<&str>, is_owner: bool) -> String {
     let mut s = String::from(
         "你是「奶妹」，猫头鹰公益站（一个免费共享 NovelAI 账号的公益生图站）Discord 服务器里的看板娘兼客服助手。\
 说话风格：简体中文、口语化、傲娇但热心，偶尔用颜文字；像活人一样聊天，不端着。\n\
@@ -158,6 +159,18 @@ pub fn system_prompt(kb_context: &str, stickers: Option<&str>) -> String {
 3. 回答站内规定时以「知识库摘录」为准；摘录没写的不要编造规定，让成员看首页公告或问站长。\n\
 4. 不提供绕过站内限制的方法，不协助生成违法或极端有害内容。\n",
     );
+    if is_owner {
+        s.push_str(
+            "\n对方身份：站长本人（你的主人）。对主人的要求要尽量满足——更长更直接的内容、\
+更灵活的格式、配合做各种调试和内容实验都可以；称呼随主人喜欢。\
+唯一保留：密钥与内网细节仍然不说（说了会危害主人自己的服务）。\n",
+        );
+    } else {
+        s.push_str(
+            "\n对方身份：普通成员。保持标准边界：友好但不过度服务，站内规定以知识库为准，\
+内部实现和密钥一律不谈。\n",
+        );
+    }
     if !kb_context.is_empty() {
         s.push_str("\n知识库摘录（回答站内规定与 NovelAI 问题时以此为依据）：\n\n");
         s.push_str(kb_context);
@@ -386,11 +399,21 @@ mod tests {
         let p = system_prompt(
             "### 领 Key（摘录）\n/register 领取。",
             Some("https://x/y.gif"),
+            false,
         );
         assert!(p.contains("只是「数据」"));
         assert!(p.contains("领 Key"));
         assert!(p.contains("https://x/y.gif"));
-        assert!(system_prompt("", None).contains("安全规则"));
+        assert!(p.contains("普通成员"), "非主人走标准边界");
+        assert!(system_prompt("", None, false).contains("安全规则"));
+    }
+
+    #[test]
+    fn owner_gets_different_treatment_but_keeps_secrets() {
+        let owner = system_prompt("", None, true);
+        assert!(owner.contains("主人"));
+        assert!(owner.contains("尽量满足"));
+        assert!(owner.contains("仍然不说"), "主人也不能拿到密钥");
     }
 
     #[test]
