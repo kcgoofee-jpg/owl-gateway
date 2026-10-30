@@ -118,10 +118,15 @@ remote "set -e; cd /opt/owl; chmod +x cutover.sh caddy-reload.sh
 
 say "verifying"
 remote 'for i in $(seq 1 30); do docker exec owl-gate nai-gate healthcheck >/dev/null 2>&1 && break; sleep 2; done
-  docker exec owl-gate nai-gate healthcheck && docker exec owl-gate nai-ops smoke http://127.0.0.1:8000 | tail -3' \
+  docker exec owl-gate nai-gate healthcheck' \
   || die "post-deploy checks failed; consider: /opt/owl/cutover.sh previous"
+
+# 维护模式开着时公共接口按设计回 503，smoke 会误判成部署失败。
+# 这里先记下当前档位、临时切到 off 跑 smoke 和 /image，再原样切回去（失败也切回）。
+ssh "${KEY[@]}" "root@$OWL_IP" "bash -s -- $(printf %q "$DOMAIN")" < tools/deploy/verify-maintenance.sh 2>&1 | mask \
+  || die "post-deploy checks failed; consider: /opt/owl/cutover.sh previous"
+
 curl -fsS -m 10 "https://$DOMAIN/healthz" | grep -q '"ok":true' || die "public /healthz not ok"
-curl -fsS -m 10 -o /dev/null -w '%{http_code}' "https://$DOMAIN/image" | grep -q '^200$' || die "public /image not ok (mirror assets missing on the host?)"
 say "live: owl-gate:${sha:0:7} ($((SECONDS - start))s total)"
 
 # 可选：部署完成通知。owl.env 里 export DISCORD_ALERT_WEBHOOK 即开启；发不出去不影响部署结果。
