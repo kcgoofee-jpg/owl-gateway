@@ -115,6 +115,9 @@ pub(super) async fn prepare(
     if body.get("image").is_some_and(enabled) || body.get("mask").is_some_and(enabled) {
         return Err(GateError::with_code(400, "图生图请求格式错误，未扣费。请更新或更换客户端。给客户端作者：image 和 mask 要放在 parameters 里", reasons::PARAM).into());
     }
+    // 官网页面第二次用同一张参考图时只发 cache_secret_key；把数据从进程内缓存补回来再校验
+    crate::ref_cache::expand(&mut body, key.id());
+    crate::ref_cache::absorb(&body, key.id());
     if let Some(problem) = policy::validate_image_references(&body) {
         return Err(GateError::with_code(400, problem, reasons::PARAM).into());
     }

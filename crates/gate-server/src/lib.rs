@@ -25,6 +25,7 @@ pub mod middleware;
 pub mod multipart;
 pub mod ops;
 pub mod reconciliation;
+pub mod ref_cache;
 pub mod ref_images;
 pub mod registration;
 pub mod reqctx;
