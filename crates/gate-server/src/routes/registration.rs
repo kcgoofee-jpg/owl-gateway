@@ -16,17 +16,19 @@ use axum::extract::{ConnectInfo, Request, State};
 use axum::http::HeaderValue;
 use axum::http::request::Parts;
 use axum::response::Response;
-use axum::routing::post;
+use axum::routing::{get, post};
 use gate_core::bot_config;
 use gate_core::primitives::take_chars;
 use serde_json::{Map, Value, json};
 use std::net::SocketAddr;
+use tracing::info;
 
 pub fn router() -> Router<AppState> {
     Router::new()
         .route("/self-register/resetkey", post(resetkey))
         .route("/self-register/issue", post(issue))
         .route("/self-register/bot/report", post(bot_report))
+        .route("/self-register/bot/stats", get(bot_stats))
 }
 
 /// 桥接 / 成员页接口的请求体上限（正常请求都在几百字节）。
@@ -275,6 +277,34 @@ async fn issue(State(state): State<AppState>, req: Request) -> ApiResult {
 
 /// 机器人每分钟上报一次心跳，后台「机器人状态」据此显示在线 / 离线。
 /// 3.0 起只收 `status`（`event`、`ai_ready` 之类旧字段会被忽略）。
+/// 奶妹 bot 拉站点运行摘要：排队数、今日（7 点边界）出图张数、近一小时排队等待。
+/// 只读；桥接密钥鉴权；每次查询打一行结构化日志（审计落库版本跟 ops 重构走）。
+async fn bot_stats(State(state): State<AppState>, parts: Parts) -> ApiResult {
+    authorize(&state, &parts, false)?;
+    let now = state.now();
+    let day = state
+        .db
+        .image_stats_since(state.clock.day_start(now))
+        .await?;
+    let hour = state.db.image_stats_since(now - 3600.0).await?;
+    let waiting = state
+        .global_waiting
+        .load(std::sync::atomic::Ordering::Relaxed);
+    info!(
+        "[bot-stats] waiting={waiting} images_today={} ok_1h={}",
+        day.images, hour.ok_count
+    );
+    Ok(ok_json(&json!({
+        "queue_waiting": waiting,
+        "images_today": day.images,
+        "ok_requests_today": day.ok_count,
+        "avg_wait_ms_1h": hour.avg_wait_ms,
+        "max_wait_ms_1h": hour.max_wait_ms,
+        "ok_requests_1h": hour.ok_count,
+        "server_time": now,
+    })))
+}
+
 async fn bot_report(State(state): State<AppState>, req: Request) -> ApiResult {
     let (parts, body) = req.into_parts();
     let mut m = read_model(&parts, body).await?;
