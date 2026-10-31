@@ -143,6 +143,9 @@ async fn unknown_result_stays_in_live_budget_and_is_restored_after_restart() {
 
     e.mock
         .push("/ai/generate-image", Reply::status(500, "upstream failure"));
+    // 派发层对干净 5xx 会先按「结果未知」结算再同账号重试一次：两次 500 才停
+    e.mock
+        .push("/ai/generate-image", Reply::status(500, "upstream failure"));
     let _ = Call::new("POST", "/ai/generate-image")
         .bearer(TOKEN)
         .json(body(1))
@@ -159,7 +162,7 @@ async fn unknown_result_stays_in_live_budget_and_is_restored_after_restart() {
         .await
         .unwrap();
     assert_eq!(status, "uncertain");
-    assert_eq!(e.mock.requests_to("/ai/generate-image").len(), 1);
+    assert_eq!(e.mock.requests_to("/ai/generate-image").len(), 2); // uncertain 后：2 次（含同账号重试）
 
     let restarted = e.restart().await;
     let recovered = restarted.budget.lock().await.reservations.clone();
@@ -170,7 +173,7 @@ async fn unknown_result_stays_in_live_budget_and_is_restored_after_restart() {
     );
     assert_eq!(
         e.mock.requests_to("/ai/generate-image").len(),
-        1,
+        2,
         "recovery never replays POST"
     );
     let (status, _, live) = Call::new("GET", "/public/status").send(&restarted).await;
@@ -189,7 +192,7 @@ async fn unknown_result_stays_in_live_budget_and_is_restored_after_restart() {
         status, 403,
         "unknown reservation still consumes image quota"
     );
-    assert_eq!(e.mock.requests_to("/ai/generate-image").len(), 1);
+    assert_eq!(e.mock.requests_to("/ai/generate-image").len(), 2); // 403 后仍 2 次
     let reconcile =
         gate_server::reconciliation::run_with(&restarted, std::time::Duration::from_millis(250))
             .await;

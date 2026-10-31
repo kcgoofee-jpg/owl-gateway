@@ -71,8 +71,8 @@ INSERT INTO key_donations (ts, token, message, contact, handled, handled_at, han
 INSERT INTO key_donations (ts, token, message, contact, handled, handled_at, handled_note) VALUES (1789780800.0, 'pst-donate-cccc', '旧的', '', 1, 1789867200.0, '已接入');
 INSERT INTO coupons (key_id, kind, note, by, created_at, expires_at, used_at) VALUES (1, 'reset', '唱得真好听', '站长', 1789867200.0, 1790472000.0, NULL);
 INSERT INTO coupons (key_id, kind, note, by, created_at, expires_at, used_at) VALUES (1, 'reset', '已用的', '奶妹', 1789521600.0, 1789953600.0, 1789780800.0);
-INSERT INTO share_state (key_id, score, score_ts, strikes, paused_until, warned_ts, paused_ts, pause_reason) VALUES (6, 1.0, 1790039900.0, 1, 1790043600.0, 0, 1790039900.0, '客户端死循环重试');
-INSERT INTO share_state (key_id, score, score_ts, strikes, paused_until, warned_ts, paused_ts, pause_reason) VALUES (4, 0.0, 0, 0, 1790039900.0, 0, 0, '');
+INSERT INTO share_state (key_id, paused_until, pause_reason) VALUES (6, 1790043600.0, '客户端死循环重试');
+INSERT INTO share_state (key_id, paused_until, pause_reason) VALUES (4, 1790039900.0, '');
 INSERT INTO admin_actions (ts, actor, action, target, detail, ok) VALUES (1790020000.0, '后台 *.*.0.1', '重置今日额度', 'Key #1 月见草', '', 1);
 INSERT INTO admin_actions (ts, actor, action, target, detail, ok) VALUES (1790037000.0, '后台 *.*.0.1', '重置今日额度', 'Key #1 月见草', '', 1);
 INSERT INTO admin_actions (ts, actor, action, target, detail, ok) VALUES (1790039000.0, '站长', '重置今日额度', 'Key #1 月见草', '', 1);

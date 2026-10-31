@@ -209,6 +209,11 @@ async fn image_tool_upstream_5xx_marks_unknown_in_body_and_settlement() {
         "/ai/upscale",
         Reply::json(500, &json!({"message":"temporary upstream error"})),
     );
+    // 派发层对 image lane 的干净 5xx 会先结算再原账号重试一次：第二次仍 500 才透传 502
+    e.mock.push(
+        "/ai/upscale",
+        Reply::json(500, &json!({"message":"temporary upstream error"})),
+    );
 
     let (status, _, body) = call(
         &e.state,
