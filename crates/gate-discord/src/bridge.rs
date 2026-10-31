@@ -107,6 +107,23 @@ impl Bridge {
         }
         response.json::<Value>().await.ok()
     }
+
+    /// GET `/self-register/bot/stats`：站点运行摘要（排队数、今日出图、近 1 小时等待）。
+    /// 只读、共享命令超时；非 200 / 连不上 / 不是 JSON 一律 `None`，调用方按「拿不到实时数据」降级。
+    pub async fn site_stats(&self) -> Option<Value> {
+        let response = self
+            .http
+            .get(format!("{}/self-register/bot/stats", self.backend))
+            .timeout(self.command_timeout)
+            .header("Authorization", self.bearer())
+            .send()
+            .await
+            .ok()?;
+        if response.status().as_u16() != 200 {
+            return None;
+        }
+        response.json::<Value>().await.ok()
+    }
 }
 
 /// 发给网关的请求体：`{discord_id, guild_id, ...extra}`，`discord_id` 是发起命令的人。

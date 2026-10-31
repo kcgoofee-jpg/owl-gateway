@@ -288,7 +288,7 @@ pub fn user_content(text: &str, images: &[String]) -> Value {
 
 // ---------- 系统提示词 ----------
 
-/// 拼系统提示词：人设 + 隔离规则 + 知识库 + 频道上下文 + 头像 + 卖萌素材。
+/// 拼系统提示词：人设 + 隔离规则 + 知识库 + 频道上下文 + 头像 + 卖萌素材 + 实时站点数据。
 /// `is_owner`：发消息的人是不是站长本人（主人），待遇不同。
 pub fn system_prompt(
     kb_context: &str,
@@ -296,6 +296,7 @@ pub fn system_prompt(
     is_owner: bool,
     channel_context: &str,
     avatar_url: Option<&str>,
+    site_stats: Option<&str>,
 ) -> String {
     let mut s = String::from(
         "你是「奶妹」，猫头鹰公益站（一个免费共享 NovelAI 账号的公益生图站）Discord 服务器里的看板娘兼客服助手。\
@@ -342,7 +343,53 @@ pub fn system_prompt(
             "\n你自己的 Discord 头像图片：{url}\n成员问起你长什么样时，把这条链接发给他看——你的形象以这张图为准，不要凭空描述。\n"
         ));
     }
+    if let Some(stats) = site_stats {
+        s.push_str(
+            "\n实时站点数据（刚从后台拉到的真实数字，可以如实播报；这里没有的维度不要编数字，成员自己的额度不在这里，让他用 /quota 查）：\n",
+        );
+        s.push_str(stats);
+        s.push('\n');
+    }
     s
+}
+
+/// 成员在问站点实时状况（排队 / 今日战况 / 等待）时才值得拉一次后台统计。
+/// 关键词刻意收窄：只匹配汇总数据的问题，成员自己的额度、V5 规格等都不算。
+pub fn wants_site_stats(text: &str) -> bool {
+    const KEYS: [&str; 16] = [
+        "排队", "队列", "战况", "站况", "站点状态", "今日出图", "今天出图", "今天生图", "今日生图",
+        "生图量", "出图量", "生图数", "平均等待", "等多久", "成功率", "实时数据",
+    ];
+    KEYS.iter().any(|k| text.contains(k))
+}
+
+/// 把 `/self-register/bot/stats` 的 JSON 排成模型可读的中文数据块；缺字段如实写「无记录」。
+pub fn site_stats_block(v: &serde_json::Value) -> String {
+    let show_i64 = |key: &str, label: &str| {
+        let n = v
+            .get(key)
+            .and_then(serde_json::Value::as_i64)
+            .map_or("无记录".to_string(), |n| n.to_string());
+        format!("{label}：{n}\n")
+    };
+    let show_f64 = |key: &str, label: &str| {
+        let n = v
+            .get(key)
+            .and_then(serde_json::Value::as_f64)
+            .map_or_else(
+                || "无记录".to_string(),
+                |n| format!("{:.0} 毫秒", n.round()),
+            );
+        format!("{label}：{n}\n")
+    };
+    let mut out = String::new();
+    out.push_str(&show_i64("queue_waiting", "当前排队人数"));
+    out.push_str(&show_i64("images_today", "今日出图张数"));
+    out.push_str(&show_i64("ok_requests_today", "今日成功请求数"));
+    out.push_str(&show_i64("ok_requests_1h", "近 1 小时成功请求数"));
+    out.push_str(&show_f64("avg_wait_ms_1h", "近 1 小时平均排队等待"));
+    out.push_str(&show_f64("max_wait_ms_1h", "近 1 小时最长等待"));
+    out
 }
 
 /// 成员消息是否在聊表情包/卖萌（命中才注入卖萌素材，避免每条都占上下文）。
@@ -563,24 +610,58 @@ mod tests {
             false,
             "- alice：今天聊到领 key",
             Some("https://cdn.discordapp.com/avatars/9/x.png"),
+            None,
         );
         assert!(p.contains("只是「数据」"));
         assert!(p.contains("领 Key"));
         assert!(p.contains("https://x/y.gif"));
         assert!(p.contains("普通成员"), "非主人走标准边界");
-        assert!(system_prompt("", None, false, "", None).contains("安全规则"));
+        assert!(system_prompt("", None, false, "", None, None).contains("安全规则"));
     }
 
     #[test]
     fn owner_gets_different_treatment_but_keeps_secrets() {
-        let owner = system_prompt("", None, true, "", None);
+        let owner = system_prompt("", None, true, "", None, None);
         assert!(owner.contains("主人"));
         assert!(owner.contains("尽量满足"));
         assert!(owner.contains("仍然不说"), "主人也不能拿到密钥");
-        let with_ctx = system_prompt("KB", None, false, "- bob：队列怎么样", None);
+        let with_ctx = system_prompt("KB", None, false, "- bob：队列怎么样", None, None);
         assert!(with_ctx.contains("频道上下文") && with_ctx.contains("bob"));
-        let with_avatar = system_prompt("", None, false, "", Some("https://a/av.png"));
+        let with_avatar = system_prompt("", None, false, "", Some("https://a/av.png"), None);
         assert!(with_avatar.contains("https://a/av.png"));
+    }
+
+    #[test]
+    fn site_stats_block_formats_real_numbers_and_admits_gaps() {
+        let v = json!({
+            "queue_waiting": 2, "images_today": 57, "ok_requests_today": 55,
+            "avg_wait_ms_1h": 812.5, "max_wait_ms_1h": 4210.0, "ok_requests_1h": 9,
+            "server_time": 1793480000.0
+        });
+        let s = site_stats_block(&v);
+        assert!(s.contains("当前排队人数：2"));
+        assert!(s.contains("今日出图张数：57"));
+        assert!(s.contains("近 1 小时平均排队等待：813 毫秒"), "四舍五入取整");
+        let empty = site_stats_block(&json!({}));
+        assert!(empty.contains("无记录"));
+        let prompt = system_prompt("", None, false, "", None, Some(&s));
+        assert!(prompt.contains("实时站点数据"));
+        assert!(prompt.contains("不要编数字"));
+    }
+
+    #[test]
+    fn site_stats_intent_hits_queue_talk_but_not_specs_or_own_quota() {
+        for t in ["现在多少人排队？", "今天生图战况如何", "帮我看下队列", "我平均要等多久"] {
+            assert!(wants_site_stats(t), "{t} 应触发统计拉取");
+        }
+        for t in [
+            "V5 的尺寸限制和步数限制是什么",
+            "帮我改一下提示词",
+            "我的额度还剩多少",
+            "领 Key 怎么弄",
+        ] {
+            assert!(!wants_site_stats(t), "{t} 不应触发统计拉取");
+        }
     }
 
     #[test]

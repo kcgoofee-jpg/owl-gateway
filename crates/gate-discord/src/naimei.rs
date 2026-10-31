@@ -499,12 +499,22 @@ impl Naimei {
             channel_ctx.push_str(&format!("\n成员附带的文本文件 [{name}]:\n{content}\n"));
         }
         let avatar_url = self.lock().avatar_url.clone();
+        // 实时站点数据：消息问起排队/战况才拉一次后台；拿不到也照常回复，只是明说没有数字
+        let stats_block = if chat::wants_site_stats(req.text) {
+            match self.bridge.site_stats().await {
+                Some(v) => Some(chat::site_stats_block(&v)),
+                None => Some("（本次没连上后台数据源，实时数字拿不到。）".to_string()),
+            }
+        } else {
+            None
+        };
         let system = chat::system_prompt(
             &kb::retrieve(req.text, 2),
             stickers,
             req.is_owner,
             &channel_ctx,
             avatar_url.as_deref(),
+            stats_block.as_deref(),
         );
         // 非流式（默认）：typing 循环保活 + 一次性完整回复（观感干净）
         if !chat.stream_enabled() {
