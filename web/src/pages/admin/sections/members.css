@@ -190,32 +190,7 @@
   flex-wrap: wrap;
 }
 
-/* 成员身份 */
-.mb-ident {
-  display: flex;
-  align-items: center;
-  gap: var(--sp-3);
-  min-width: 0;
-}
-.mb-ident__t {
-  min-width: 0;
-}
-.mb-name {
-  display: flex;
-  align-items: center;
-  flex-wrap: wrap;
-  gap: var(--sp-2);
-  font-weight: 650;
-}
-.mb-name__t {
-  overflow-wrap: anywhere;
-}
-.mb-sub {
-  display: flex;
-  align-items: center;
-  gap: var(--sp-2);
-  min-height: 20px;
-}
+/* 成员身份格子的样式在 shared.css（.mb-ident 一组，日志页也用） */
 .mb-status {
   display: inline-flex;
   flex-wrap: wrap;

@@ -317,3 +317,30 @@
   gap: var(--sp-4);
   min-width: 0;
 }
+
+/* 成员身份格子：头像 + 名字 + @handle（成员页 / 日志页同一套排布，组件在 shared.tsx 的 MemberIdent） */
+.mb-ident {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-3);
+  min-width: 0;
+}
+.mb-ident__t {
+  min-width: 0;
+}
+.mb-name {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: var(--sp-2);
+  font-weight: 650;
+}
+.mb-name__t {
+  overflow-wrap: anywhere;
+}
+.mb-sub {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+  min-height: 20px;
+}

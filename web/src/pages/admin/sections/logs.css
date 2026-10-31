@@ -83,8 +83,14 @@
   outline: 2px solid var(--focus);
   outline-offset: 2px;
 }
-.lg-ua,
+.lg-ua {
+  white-space: nowrap;
+}
+/* 成员格子是两行身份（头像 + 名字 / @handle），不能 nowrap；纯文字兜底才收着 */
 .lg-who {
+  text-align: left;
+}
+.lg-who-plain {
   white-space: nowrap;
 }
 .lg-exp {

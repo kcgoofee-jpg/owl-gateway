@@ -8,8 +8,16 @@ import { useAdmin } from "../../Admin";
 import { LoadError, TableWrap } from "../_kit";
 import { LOG_FEATURES } from "../features";
 import { FreshBar, useFrozenList, useScrolledPast } from "../live";
-import { memberKeyOptions } from "../members/logic";
-import { Empty, NARROW, Pager, useDebounced, useMedia, usePageData } from "../members/shared";
+import { memberKeyOptions, memberLabel } from "../members/logic";
+import {
+  Empty,
+  MemberIdent,
+  NARROW,
+  Pager,
+  useDebounced,
+  useMedia,
+  usePageData,
+} from "../members/shared";
 import type { Member } from "../members/types";
 import { kindLabel, STATUS_TEXT, shortModel, statusText, statusTone, timing } from "./format";
 import { intParam, useQueryState } from "./query";
@@ -82,9 +90,22 @@ function Client(props: { l: UsageLog }) {
   );
 }
 
-function Who(props: { l: UsageLog; memberOf: (id: number) => string; onFilter: Filter }) {
+function Who(props: {
+  l: UsageLog;
+  memberOf: (id: number) => string;
+  memberByKey: Map<number, Member>;
+  onFilter: Filter;
+}) {
   const { l } = props;
   if (l.key_id == null) return <span class="muted">{l.key_name || "—"}</span>;
+  const m = props.memberByKey.get(l.key_id as number);
+  const title = m ? memberLabel(m) : l.key_name || `#${l.key_id}`;
+  // 成员页同款身份格子；成员已删（不在列表里）时退回纯文字
+  const ident = m ? (
+    <MemberIdent title={title} username={m.discord?.username} avatarUrl={m.discord?.avatar_url} />
+  ) : (
+    <span class="lg-who-plain">{title}</span>
+  );
   return (
     <button
       type="button"
@@ -92,7 +113,7 @@ function Who(props: { l: UsageLog; memberOf: (id: number) => string; onFilter: F
       title="只看这位成员"
       onClick={() => props.onFilter({ key: props.memberOf(l.key_id as number), page: null })}
     >
-      {l.key_name || `#${l.key_id}`}
+      {ident}
     </button>
   );
 }
@@ -220,6 +241,8 @@ export function Usage() {
   }, [dRid]);
 
   const memberList = members.data?.members ?? [];
+  const memberByKey = new Map<number, Member>();
+  for (const m of memberList) for (const k of m.all_key_ids ?? []) memberByKey.set(k, m);
   const options = memberKeyOptions(memberList);
   if (key && !options.some((o) => o.value === key))
     options.unshift({ value: key, label: `Key ${key}`, hint: "" });
@@ -371,7 +394,7 @@ export function Usage() {
                       <Status l={l} onFilter={set} />
                     </div>
                     <div class="lg-card__meta">
-                      <Who l={l} memberOf={memberOf} onFilter={set} />
+                      <Who l={l} memberOf={memberOf} memberByKey={memberByKey} onFilter={set} />
                       <What l={l} />
                     </div>
                     <div class="lg-card__meta small">
@@ -421,7 +444,7 @@ export function Usage() {
                           </td>
                           <td class="nowrap">{fullTime(l.ts)}</td>
                           <td>
-                            <Who l={l} memberOf={memberOf} onFilter={set} />
+                            <Who l={l} memberOf={memberOf} memberByKey={memberByKey} onFilter={set} />
                           </td>
                           <td>
                             <What l={l} />

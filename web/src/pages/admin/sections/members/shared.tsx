@@ -8,6 +8,7 @@ import { useEffect, useId, useRef, useState } from "preact/hooks";
 import { usedOf } from "../../../../lib/format";
 import { Button, cx } from "../../../../ui";
 import { useAdmin } from "../../Admin";
+import { Avatar } from "../_kit";
 import "./shared.css";
 
 /* ---------------- hooks ---------------- */
@@ -190,6 +191,32 @@ export function Empty(props: { title: string; children?: ComponentChildren }) {
     <div class="xa-empty">
       <p class="xa-empty__title">{props.title}</p>
       {props.children && <p class="muted small">{props.children}</p>}
+    </div>
+  );
+}
+
+/**
+ * 成员身份格子：头像 + 名字 + @handle，成员页 / 日志页同一套排布（样式 .mb-ident 在 shared.css）。
+ * `badge` 拼在名字行（如「邀请」），`sub` 整行替换副行（默认 `@username`，和名字一样时省略）。
+ */
+export function MemberIdent(props: {
+  title: string;
+  username?: string | null | undefined;
+  avatarUrl?: string | null | undefined;
+  badge?: ComponentChildren | undefined;
+  sub?: ComponentChildren | undefined;
+}) {
+  const auto = props.username && props.username !== props.title ? `@${props.username}` : "";
+  return (
+    <div class="mb-ident">
+      <Avatar name={props.title} fallback={props.username} src={props.avatarUrl} size={32} />
+      <div class="mb-ident__t">
+        <div class="mb-name">
+          <span class="mb-name__t">{props.title}</span>
+          {props.badge}
+        </div>
+        <div class="small muted mb-sub">{props.sub ?? auto}</div>
+      </div>
     </div>
   );
 }

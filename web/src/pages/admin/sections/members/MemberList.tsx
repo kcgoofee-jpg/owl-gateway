@@ -3,10 +3,10 @@ import { ArrowDown, ArrowUp, ChevronDown, ChevronsUpDown } from "lucide-preact";
 import { type ComponentChildren, Fragment } from "preact";
 import { rel, withUnit } from "../../../../lib/format";
 import { Badge, Button, cx } from "../../../../ui";
-import { Avatar, TableWrap } from "../_kit";
+import { TableWrap } from "../_kit";
 import { memberLabel, memberStatus, type SortKey, userTags } from "./logic";
 import { type DetailActions, MemberDetail } from "./MemberDetail";
-import { MiniBar } from "./shared";
+import { MemberIdent, MiniBar } from "./shared";
 import type { MemberRow } from "./types";
 
 type Props = {
@@ -25,27 +25,28 @@ function Identity(props: { m: MemberRow }) {
   const { m } = props;
   const title = memberLabel(m);
   const dc = m.discord;
-  const handle =
-    dc?.username && dc.username !== title ? `@${dc.username}` : m.discord_id ? "" : "后台建的 Key";
   const tag = userTags(m).find((t) => t.tag !== "邀请");
   return (
-    <div class="mb-ident">
-      <Avatar name={title} fallback={dc?.username} src={dc?.avatar_url} size={32} />
-      <div class="mb-ident__t">
-        <div class="mb-name">
-          <span class="mb-name__t">{title}</span>
-          {m.invited && <Badge tone="info">邀请</Badge>}
-        </div>
-        <div class="small muted mb-sub">
-          {handle}
+    <MemberIdent
+      title={title}
+      username={dc?.username}
+      avatarUrl={dc?.avatar_url}
+      badge={m.invited ? <Badge tone="info">邀请</Badge> : null}
+      sub={
+        <>
+          {dc?.username && dc.username !== title
+            ? `@${dc.username}`
+            : m.discord_id
+              ? ""
+              : "后台建的 Key"}
           {tag && (
             <span class="xa-chip" title={tag.note || undefined}>
               {tag.tag}
             </span>
           )}
-        </div>
-      </div>
-    </div>
+        </>
+      }
+    />
   );
 }
 
