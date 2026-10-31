@@ -308,6 +308,42 @@ fn run_gzips_with_owner_only_permissions_and_cleans_up() {
 }
 
 #[test]
+fn plaintext_snapshot_is_private_while_snapshot_is_in_progress() {
+    use std::os::unix::fs::PermissionsExt;
+    let dir = tempfile::tempdir().unwrap();
+    let src = dir.path().join("source.db");
+    let conn = rusqlite::Connection::open(&src).unwrap();
+    conn.execute_batch("CREATE TABLE api_keys(id INTEGER); BEGIN EXCLUSIVE")
+        .unwrap();
+    let out = dir.path().join("backup.gz");
+    let worker = std::thread::spawn(move || snapshot::run(&src, &out));
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
+    loop {
+        let private = std::fs::read_dir(dir.path())
+            .unwrap()
+            .flatten()
+            .find(|e| e.file_name().to_string_lossy().starts_with(".snap-"));
+        if let Some(private) = private
+            && let Some(db) = std::fs::read_dir(private.path()).unwrap().flatten().next()
+        {
+            assert_eq!(
+                private.metadata().unwrap().permissions().mode() & 0o777,
+                0o700
+            );
+            assert_eq!(db.metadata().unwrap().permissions().mode() & 0o777, 0o600);
+            break;
+        }
+        assert!(
+            std::time::Instant::now() < deadline,
+            "snapshot did not create a private database"
+        );
+        std::thread::sleep(std::time::Duration::from_millis(5));
+    }
+    conn.execute_batch("ROLLBACK").unwrap();
+    worker.join().unwrap().unwrap();
+}
+
+#[test]
 fn run_failure_leaves_no_partial_output() {
     let dir = tempfile::tempdir().unwrap();
     let out_dir = dir.path().join("out");

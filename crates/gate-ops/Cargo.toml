@@ -31,10 +31,10 @@ sha2.workspace = true
 hex.workspace = true
 base64.workspace = true
 flate2 = "1"
+tempfile = "3"
 
 [dev-dependencies]
 axum.workspace = true
-tempfile = "3"
 
 [lints]
 workspace = true

@@ -1,9 +1,10 @@
 #!/bin/bash
 # 每晚 03:30（/etc/cron.d/naigate-backup）。GFS 轮换：每日留 14 份、每周日留 8 份、每月 1 号留 6 份。
 set -euo pipefail
+umask 077
 # 轮换那几行：目录里一份都没有时 ls 返回 2，在 pipefail 下会把整个备份判成失败，所以兜成 true
 R=/opt/backups
-mkdir -p "$R/daily" "$R/weekly" "$R/monthly"
+install -d -m 700 "$R/daily" "$R/weekly" "$R/monthly"
 OUT="$R/daily/nai_gate-$(date +%F).db.gz"
 /usr/local/bin/naigate-snapshot "$OUT"
 # 备份里不留生成记录（提示词 / 参数 / 图片指纹）：线上 30 天后就删了，备份要留到 6 个月，

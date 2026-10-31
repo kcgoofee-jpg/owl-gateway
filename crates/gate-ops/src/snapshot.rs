@@ -5,7 +5,8 @@ use crate::util;
 use anyhow::{Context, Result, bail};
 use rusqlite::{Connection, OpenFlags};
 use std::io::Write;
-use std::path::{Path, PathBuf};
+use std::os::unix::fs::PermissionsExt;
+use std::path::Path;
 use std::time::Duration;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -90,47 +91,20 @@ pub fn make_snapshot(src: &Path, out: &Path) -> Result<Info> {
 
 /// 把 `from` gzip 到 `to`（先写临时文件再改名；文件权限 600，创建时就是 600，不留宽权限窗口）。
 pub fn gzip_file(from: &Path, to: &Path) -> Result<u64> {
-    let part = to.with_file_name(format!(
-        ".{}.part",
-        to.file_name()
-            .map_or_else(|| "snapshot".into(), |n| n.to_string_lossy().into_owned())
-    ));
-    let result = (|| -> Result<u64> {
-        let mut opts = std::fs::OpenOptions::new();
-        opts.write(true).create(true).truncate(true);
-        #[cfg(unix)]
-        std::os::unix::fs::OpenOptionsExt::mode(&mut opts, 0o600);
-        let file = opts
-            .open(&part)
-            .with_context(|| format!("创建 {} 失败", part.display()))?;
-        let mut enc = flate2::write::GzEncoder::new(
-            std::io::BufWriter::new(file),
-            flate2::Compression::default(),
-        );
-        let mut src = std::fs::File::open(from)?;
-        std::io::copy(&mut src, &mut enc)?;
-        enc.finish()?.flush()?;
-        std::fs::rename(&part, to).with_context(|| format!("改名到 {} 失败", to.display()))?;
-        Ok(std::fs::metadata(to)?.len())
-    })();
-    if result.is_err() {
-        let _ = std::fs::remove_file(&part);
-    }
-    result
-}
-
-/// 退出时清理临时快照（无论成功失败）。
-struct TempFile(PathBuf);
-impl Drop for TempFile {
-    fn drop(&mut self) {
-        let _ = std::fs::remove_file(&self.0);
-        // 回滚日志 / WAL 残留
-        for suffix in ["-journal", "-wal", "-shm"] {
-            let mut p = self.0.clone().into_os_string();
-            p.push(suffix);
-            let _ = std::fs::remove_file(PathBuf::from(p));
-        }
-    }
+    let parent = to
+        .parent()
+        .filter(|p| !p.as_os_str().is_empty())
+        .unwrap_or(Path::new("."));
+    let mut part = tempfile::NamedTempFile::new_in(parent)?;
+    let mut enc = flate2::write::GzEncoder::new(
+        std::io::BufWriter::new(part.as_file_mut()),
+        flate2::Compression::default(),
+    );
+    let mut src = std::fs::File::open(from)?;
+    std::io::copy(&mut src, &mut enc)?;
+    enc.finish()?.flush()?;
+    part.persist(to)?;
+    Ok(std::fs::metadata(to)?.len())
 }
 
 /// `nai-ops snapshot <out.db.gz>`：快照 → 完整性校验 → gzip（600）。返回要打印的那一行。
@@ -139,12 +113,12 @@ pub fn run(src: &Path, out: &Path) -> Result<String> {
         .parent()
         .filter(|p| !p.as_os_str().is_empty())
         .unwrap_or(Path::new("."));
-    let tmp = TempFile(dir.join(format!(
-        ".snap-{}-{}.db",
-        std::process::id(),
-        util::now_secs() as u64
-    )));
-    let info = make_snapshot(src, &tmp.0)?;
+    let private = tempfile::Builder::new()
+        .prefix(".snap-")
+        .permissions(std::fs::Permissions::from_mode(0o700))
+        .tempdir_in(dir)?;
+    let tmp = tempfile::NamedTempFile::new_in(private.path())?;
+    let info = make_snapshot(src, tmp.path())?;
     if info.integrity != "ok" {
         bail!(
             "snapshot FAILED integrity_check: {} {}",
@@ -152,7 +126,7 @@ pub fn run(src: &Path, out: &Path) -> Result<String> {
             info.keys
         );
     }
-    let size = gzip_file(&tmp.0, out)?;
+    let size = gzip_file(tmp.path(), out)?;
     Ok(format!(
         "snapshot {} ({}, integrity ok, keys={})",
         out.display(),

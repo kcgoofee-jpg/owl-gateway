@@ -263,7 +263,7 @@ fn login_state_secret(secret_key: &str) -> String {
 }
 
 /// 签一个自带用途和过期时间的 state：`<p|v>.<nonce>.<exp>.<hmac>`。
-/// 不依赖 Cookie，所以 Discord 内置浏览器丢了 Cookie 也能完成回调。
+/// 回调还必须匹配登录发起浏览器的 Cookie。
 pub fn sign_login_state(
     secret_key: &str,
     mode: LoginMode,
@@ -272,7 +272,7 @@ pub fn sign_login_state(
     now: i64,
 ) -> String {
     let m = if mode == LoginMode::Verify { 'v' } else { 'p' };
-    // dev = 浏览器设备指纹（十六进制，可空）：跟着签名 state 走一圈 Discord 再回来，不依赖 Cookie
+    // dev = 浏览器设备指纹（十六进制，可空）：跟着签名 state 走一圈 Discord 再回来
     let payload = format!("{m}.{nonce}.{}.{dev}", now + LOGIN_STATE_SECS);
     let sig = hmac_hex(&login_state_secret(secret_key), &payload);
     format!("{payload}.{sig}")

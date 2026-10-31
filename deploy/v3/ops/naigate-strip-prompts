@@ -4,6 +4,7 @@
 # 线上库 30 天后自动删提示词；备份留得更久（本机 GFS 最长 6 个月），所以备份里一律不留（站长 10-18）。
 # 每份先解压到临时文件、删表、VACUUM（真正释放页，不留可恢复的残片）、完整性检查，全部通过才替换原文件。
 set -euo pipefail
+umask 077
 for f in "$@"; do
   tmp=$(mktemp /tmp/nai-strip.XXXXXX.db)
   trap 'rm -f "$tmp" "$tmp-journal" "$f.stripping"' EXIT

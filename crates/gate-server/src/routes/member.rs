@@ -101,7 +101,7 @@ async fn login_start(
     };
     // 浏览器设备指纹（POST /public/device-fp 时服务端算出并回给前端的十六进制短哈希，可选）：只留十六进制、最多 32 位；跟着签名 state 走一圈
     let dev = sanitize_dev(q.get("dev"));
-    // state 自带用途、过期时间、设备指纹和签名；Cookie 里存同一份，两条路任意一条对得上都算数
+    // state 自带用途、过期时间、设备指纹和签名；Cookie 绑定发起授权的浏览器
     let st = sign_login_state(&state.secret_key, mode, &nonce, &dev, state.now() as i64);
     let mut resp = redirect(&svc.web_login_url(&st, mode == LoginMode::Verify));
     resp.headers_mut().append(
@@ -126,21 +126,15 @@ async fn login_callback(
     let given = q.get("state").map_or("", String::as_str);
     let expected = cookie(&parts.headers, STATE_COOKIE).unwrap_or_default();
     let same = ct_eq(given.as_bytes(), expected.as_bytes());
-    // 签名 state 不依赖 Cookie（Discord 内置浏览器常丢 Cookie）；它的用途只信签名里的。
-    // 只有 Cookie 对得上的旧式 state 一律当普通登录，不可能借它进入验证模式。
-    let signed = verify_login_state(&state.secret_key, given, state.now() as i64);
-    let dev = signed.as_ref().map(|(_, d)| d.clone()).unwrap_or_default();
-    let mode = match &signed {
-        Some((m, _)) => Some(*m),
-        None if same && !given.is_empty() => Some(LoginMode::Plain),
-        None => None,
-    };
-    let Some(mode) = mode.filter(|_| !code.is_empty()) else {
+    // 签名证明来源，Cookie 绑定发起授权的浏览器；二者不能互相替代。
+    let signed = verify_login_state(&state.secret_key, given, state.now() as i64).filter(|_| same);
+    let state_ok = signed.is_some();
+    let Some((mode, dev)) = signed.filter(|_| !code.is_empty()) else {
         // error=access_denied（成员点了取消）/ state 过期或被改都会走到这里
         tracing::info!(
             "[web-login] callback rejected: code={} state_ok={} err={}",
             if code.is_empty() { 'n' } else { 'y' },
-            if signed.is_some() || same { 'y' } else { 'n' },
+            if state_ok { 'y' } else { 'n' },
             gate_core::primitives::take_chars(q.get("error").map_or("", String::as_str), 40)
         );
         return Ok(redirect("/?login=failed"));

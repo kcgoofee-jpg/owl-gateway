@@ -12,6 +12,30 @@ pub struct UpstreamCounter {
     pub v5: i64,
 }
 
+pub const POOL_REVISION: &str = "upstream_token_pool_revision";
+
+fn migrate_token(
+    tx: &rusqlite::Transaction<'_>,
+    old_id: &str,
+    new_id: &str,
+) -> rusqlite::Result<()> {
+    if old_id == new_id {
+        return Ok(());
+    }
+    for table in [
+        "upstream_token_settings",
+        "upstream_token_enabled",
+        "upstream_token_counters",
+    ] {
+        tx.execute(&format!("DELETE FROM {table} WHERE token_id=?"), [new_id])?;
+        tx.execute(
+            &format!("UPDATE {table} SET token_id=? WHERE token_id=?"),
+            params![new_id, old_id],
+        )?;
+    }
+    Ok(())
+}
+
 impl Db {
     pub async fn get_upstream_counter(&self, token_id: &str, day: &str) -> Result<UpstreamCounter> {
         let (token_id, day) = (token_id.to_string(), day.to_string());
@@ -33,25 +57,43 @@ impl Db {
 
     /// 令牌被替换（同一账号重置了 Token）：把设置和计数从旧标识迁移到新标识。
     pub async fn move_upstream_token(&self, old_id: &str, new_id: &str) -> Result<()> {
-        if old_id == new_id {
-            return Ok(());
-        }
-        let (old_id, new_id) = (old_id.to_string(), new_id.to_string());
-        self.write(move |tx| {
-            for table in [
-                "upstream_token_settings",
-                "upstream_token_enabled",
-                "upstream_token_counters",
-            ] {
-                tx.execute(&format!("DELETE FROM {table} WHERE token_id=?"), [&new_id])?;
+        let (old, new) = (old_id.to_owned(), new_id.to_owned());
+        self.write(move |tx| migrate_token(tx, &old, &new)).await
+    }
+
+    /// Store only fingerprints and the commit revision in SQLite. The actual
+    /// credentials have already been fsynced in the private token file.
+    pub async fn commit_token_pool(
+        &self,
+        revision: String,
+        replaced: Option<(String, String)>,
+        quarantine: Option<String>,
+    ) -> Result<()> {
+        self.write_raw(move |conn| {
+            // The credential file is fsynced. Its matching SQLite commit must
+            // survive power loss too, prior to removing the previous credentials.
+            conn.pragma_update(None, "synchronous", "FULL")?;
+            let result = (|| {
+                let tx = conn.transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)?;
+                if let Some((old, new)) = &replaced {
+                    migrate_token(&tx, old, new)?;
+                }
+                if let Some(value) = &quarantine {
+                    tx.execute(
+                        "INSERT OR REPLACE INTO site_settings(key,value) VALUES ('upstream_invalid_token_fingerprints',?)", [value],
+                    )?;
+                }
                 tx.execute(
-                    &format!("UPDATE {table} SET token_id=? WHERE token_id=?"),
-                    params![new_id, old_id],
+                    "INSERT OR REPLACE INTO site_settings(key,value) VALUES (?,?)",
+                    [POOL_REVISION, &revision],
                 )?;
+                tx.commit()
+            })();
+            if let Err(e) = conn.pragma_update(None, "synchronous", "NORMAL") {
+                tracing::warn!("无法恢复 SQLite 同步级别：{e}");
             }
-            Ok(())
-        })
-        .await
+            result
+        }).await
     }
 
     pub async fn get_upstream_token_limits(&self) -> Result<OrderedPairs<String, i64>> {

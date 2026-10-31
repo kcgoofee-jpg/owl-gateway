@@ -213,9 +213,25 @@ pub(super) async fn pool_status(state: &AppState) -> Result<Vec<Value>, ApiError
     Ok(out)
 }
 
-/// 把令牌池写回 `upstream_tokens.json`（权限 600，不进数据库）。
-async fn persist_pool(state: &AppState) -> Result<(), ApiError> {
-    let entries: Vec<token_store::Entry> = state
+enum Edit {
+    Add { token: String, allow_anlas: bool },
+    Replace { id: String, token: String },
+    Remove { id: String },
+}
+
+async fn edit_pool(state: &AppState, edit: Edit) -> Result<(), ApiError> {
+    // Disconnecting the administrator must not cancel publication after the DB commit.
+    let worker = state.clone();
+    state
+        .tasks
+        .spawn(async move { commit_edit(&worker, edit).await })
+        .await
+        .map_err(|_| InternalError("上游凭据变更任务中断".into()))?
+}
+
+async fn commit_edit(state: &AppState, edit: Edit) -> Result<(), ApiError> {
+    let _serial = state.token_edits.lock().await;
+    let previous: Vec<_> = state
         .nai
         .tokens()
         .await
@@ -225,8 +241,123 @@ async fn persist_pool(state: &AppState) -> Result<(), ApiError> {
             allow_anlas: t.fields().allow_anlas,
         })
         .collect();
-    token_store::save(&state.env.upstream_tokens_path(), &entries)
+    let mut next = previous.clone();
+    let position = |id: &str| previous.iter().position(|e| token_id(&e.token) == id);
+    let mut replaced = None;
+    let mut verified = Vec::new();
+    let mut saved_v5 = None;
+    let mut saved_enabled = None;
+    match &edit {
+        Edit::Add { token, allow_anlas } => {
+            let id = token_id(token);
+            if position(&id).is_some() {
+                return Err(HttpError::new(409, "这把 Token 已经在令牌池里").into());
+            }
+            saved_v5 = state
+                .db
+                .get_upstream_token_limits()
+                .await?
+                .into_iter()
+                .find(|(k, _)| *k == id)
+                .map(|(_, v)| v);
+            saved_enabled = state
+                .db
+                .get_upstream_token_enabled()
+                .await?
+                .into_iter()
+                .find(|(k, _)| *k == id)
+                .map(|(_, v)| v);
+            verified.push(id);
+            next.push(token_store::Entry {
+                token: token.clone(),
+                allow_anlas: *allow_anlas,
+            });
+        }
+        Edit::Replace { id, token } => {
+            let i = position(id).ok_or_else(|| HttpError::new(404, NOT_FOUND))?;
+            let new_id = token_id(token);
+            if position(&new_id).is_some_and(|other| other != i) {
+                return Err(HttpError::new(409, "这把 Token 已经在令牌池的另一个位置").into());
+            }
+            verified.extend([id.clone(), new_id.clone()]);
+            replaced = Some((id.clone(), new_id));
+            next[i].token = token.clone();
+        }
+        Edit::Remove { id } => {
+            if previous.len() <= 1 {
+                return Err(HttpError::new(409, "至少需要保留一把上游 Token").into());
+            }
+            next.remove(position(id).ok_or_else(|| HttpError::new(404, NOT_FOUND))?);
+        }
+    }
+    let _quarantine = state.invalid_token_save.lock().await;
+    let mut quarantine = None;
+    if !verified.is_empty() {
+        let raw = state
+            .db
+            .get_setting(crate::hooks::INVALID_TOKENS_KEY)
+            .await?;
+        let mut ids = crate::hooks::decode_invalid_tokens(raw.as_deref()).map_err(InternalError)?;
+        let before = ids.len();
+        for id in &verified {
+            ids.remove(id);
+        }
+        if ids.len() != before {
+            let mut sorted: Vec<_> = ids.into_iter().collect();
+            sorted.sort();
+            quarantine = Some(serde_json::to_string(&sorted).expect("string array"));
+        }
+    }
+    let path = state.env.upstream_tokens_path();
+    let revision = hex::encode(rand::random::<[u8; 16]>());
+    let had_file = path
+        .try_exists()
+        .map_err(|e| InternalError(e.to_string()))?;
+    let prior = if had_file { previous.as_slice() } else { &[] };
+    token_store::stage(&path, prior, &next, &revision)
         .map_err(|e| InternalError(format!("上游 Token 文件写入失败：{e}")))?;
+    if let Err(err) = state
+        .db
+        .commit_token_pool(revision, replaced, quarantine)
+        .await
+    {
+        // An interrupted cleanup also recovers the old pool by revision on restart.
+        let cleanup = if had_file {
+            token_store::save(&path, prior)
+        } else {
+            std::fs::remove_file(&path)
+        };
+        if let Err(e) = cleanup {
+            tracing::warn!("清理未提交的上游凭据失败：{e}");
+        }
+        return Err(err.into());
+    }
+    // Membership and per-account settings are serialized by token_edits. The
+    // operations below have no I/O and their preconditions were checked above.
+    match edit {
+        Edit::Add { token, allow_anlas } => {
+            state
+                .nai
+                .add_token(token, allow_anlas, saved_v5, saved_enabled)
+                .await
+                .map_err(InternalError)?;
+        }
+        Edit::Replace { id, token } => {
+            state
+                .nai
+                .replace_token(&id, token)
+                .await
+                .map_err(InternalError)?;
+        }
+        Edit::Remove { id } => {
+            state.nai.remove_token(&id).await.map_err(InternalError)?;
+        }
+    }
+    // The committed candidate is already restart-safe. Remove old credentials
+    // and restore the legacy on-disk format once publication is complete.
+    if let Err(e) = token_store::save(&path, &next) {
+        tracing::warn!("已提交上游 Token 变更；清理旧凭据失败：{e}");
+    }
     Ok(())
 }
 
@@ -276,33 +407,8 @@ async fn add_token(State(state): State<AppState>, _s: AdminSession, req: Request
     let (parts, body) = req.into_parts();
     let (token, body) = token_payload(&parts, body).await?;
     let tier = verify(&state, &token, None).await?;
-    let id = token_id(&token);
-    let saved_v5 = state
-        .db
-        .get_upstream_token_limits()
-        .await?
-        .into_iter()
-        .find(|(k, _)| *k == id)
-        .map(|(_, v)| v);
-    let saved_enabled = state
-        .db
-        .get_upstream_token_enabled()
-        .await?
-        .into_iter()
-        .find(|(k, _)| *k == id)
-        .map(|(_, v)| v);
     let allow_anlas = body.get("allow_anlas").is_some_and(values::enabled);
-    state
-        .nai
-        .add_token(token, allow_anlas, saved_v5, saved_enabled)
-        .await
-        .map_err(|msg| HttpError::new(409, msg))?;
-    state
-        .nai
-        .clear_unauthorized(&id)
-        .await
-        .map_err(|e| InternalError(format!("验证后的上游凭据隔离状态清除失败：{e}")))?;
-    persist_pool(&state).await?;
+    edit_pool(&state, Edit::Add { token, allow_anlas }).await?;
     alert_owner(
         &state,
         &format!(
@@ -324,27 +430,7 @@ async fn replace_token(
     let (parts, body) = req.into_parts();
     let (token, _) = token_payload(&parts, body).await?;
     let tier = verify(&state, &token, Some(&old_id)).await?;
-    match state.nai.replace_token(&old_id, token).await {
-        Ok((new, previous)) => {
-            state
-                .db
-                .move_upstream_token(&previous, &new.token_id)
-                .await?;
-            state
-                .nai
-                .clear_unauthorized(&previous)
-                .await
-                .map_err(|e| InternalError(format!("验证后的上游凭据隔离状态清除失败：{e}")))?;
-            state
-                .nai
-                .clear_unauthorized(&new.token_id)
-                .await
-                .map_err(|e| InternalError(format!("验证后的新上游凭据隔离状态清除失败：{e}")))?;
-            persist_pool(&state).await?;
-        }
-        Err(msg) if exists(&state, &old_id).await => return Err(HttpError::new(409, msg).into()),
-        Err(_) => return Err(HttpError::new(404, NOT_FOUND).into()),
-    }
+    edit_pool(&state, Edit::Replace { id: old_id, token }).await?;
     alert_owner(
         &state,
         "后台替换了一把上游 Token。如果这不是你操作的，请立刻更换后台密码。",
@@ -359,12 +445,7 @@ async fn remove_token(
     _s: AdminSession,
     Path(id): Path<String>,
 ) -> ApiResult {
-    match state.nai.remove_token(&id).await {
-        Err(msg) => return Err(HttpError::new(409, msg).into()),
-        Ok(false) => return Err(HttpError::new(404, NOT_FOUND).into()),
-        Ok(true) => {}
-    }
-    persist_pool(&state).await?;
+    edit_pool(&state, Edit::Remove { id }).await?;
     alert_owner(&state, "后台删除了一把上游 Token。");
     Ok(ok_json(
         &json!({"ok": true, "pool": pool_status(&state).await?}),
@@ -390,6 +471,7 @@ async fn set_v5_limit(
             .into());
         }
     };
+    let _serial = state.token_edits.lock().await;
     if !exists(&state, &id).await {
         return Err(HttpError::new(404, NOT_FOUND).into());
     }
@@ -411,6 +493,7 @@ async fn set_enabled(
     let Some(enabled) = body.get("enabled").and_then(Value::as_bool) else {
         return Err(HttpError::new(422, "enabled 必须是布尔值").into());
     };
+    let _serial = state.token_edits.lock().await;
     if !exists(&state, &id).await {
         return Err(HttpError::new(404, NOT_FOUND).into());
     }

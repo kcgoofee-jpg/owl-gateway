@@ -720,7 +720,7 @@ async fn young_discord_accounts_are_refused() {
     assert_eq!(issue(&e, &snowflake(30.0)).await.0, 200);
 }
 
-/// 走一遍普通「登录」：`/login` 取 state，再不带 Cookie 回调（模拟丢 Cookie 的内置浏览器）。
+/// 走一遍普通「登录」：`/login` 取 state，再携带同一浏览器的 Cookie 回调。
 /// 门槛配齐时这一步就会申请并核验身份组。
 async fn verify_login(e: &Env) -> (u16, HeaderMap) {
     login_via(e, "/login").await
@@ -731,7 +731,8 @@ async fn login_via(e: &Env, start: &str) -> (u16, HeaderMap) {
     assert_eq!(s, 307);
     let loc = h["location"].to_str().unwrap();
     let st = loc.split("state=").nth(1).unwrap().to_string();
-    let (s, h, _) = get_raw(e, &format!("/login/callback?code=ok&state={st}"), None).await;
+    let ck = format!("owl_login_state={st}");
+    let (s, h, _) = get_raw(e, &format!("/login/callback?code=ok&state={st}"), Some(&ck)).await;
     (s, h)
 }
 
@@ -1102,8 +1103,13 @@ async fn verify_scope_and_state_rules() {
         gated.contains("&scope=identify+guilds+connections+guilds.members.read&state=v."),
         "{gated}"
     );
-    // 改过的 state 不认；cookie 对得上的旧式 state 只能是普通登录，不会进入验证模式
+    // 改过的 state 不认；cookie 对得上的未签名 state 也不能用
     let st = loc.split("state=").nth(1).unwrap().to_string();
+    for ck in [None, Some("owl_login_state=unrelated")] {
+        let (_, h, _) = get_raw(&e, &format!("/login/callback?code=ok&state={st}"), ck).await;
+        assert_eq!(h["location"], "/?login=failed");
+        assert!(cookie_value(&h, "owl_member").is_empty());
+    }
     let forged = st.replacen("v.", "p.", 1);
     let (_, h, _) = get_raw(&e, &format!("/login/callback?code=ok&state={forged}"), None).await;
     assert_eq!(h["location"], "/?login=failed");
@@ -1113,24 +1119,27 @@ async fn verify_scope_and_state_rules() {
         Some("owl_login_state=v.legacy.1"),
     )
     .await;
-    assert_eq!(h["location"], "/");
+    assert_eq!(h["location"], "/?login=failed");
     assert!(!d.calls().iter().any(|c| c.ends_with("/member")));
 }
 
 #[tokio::test]
-async fn legacy_cookie_only_state_is_plain_and_never_asks_discord_for_the_role() {
+async fn unsigned_cookie_state_is_rejected_before_exchange() {
     let (e, d) = setup_reg(&[]).await;
     require_role(&e, "900000000000000077").await;
-    // 没签名、只有 Cookie 对得上的旧式 state：当普通登录（授权时没申请 guilds.members.read），不核验也不拦
+    // 即使 Cookie 与回调一致，也必须有有效签名。
     let (s, h, _) = get_raw(
         &e,
         "/login/callback?code=ok&state=legacy.1",
         Some("owl_login_state=legacy.1"),
     )
     .await;
-    assert_eq!((s, h["location"].to_str().unwrap()), (307, "/"));
-    assert!(cookie_value(&h, "owl_member").contains(MEMBER));
-    assert!(!d.calls().iter().any(|c| c.ends_with("/member")));
+    assert_eq!(
+        (s, h["location"].to_str().unwrap()),
+        (307, "/?login=failed")
+    );
+    assert!(cookie_value(&h, "owl_member").is_empty());
+    assert!(d.seen().is_empty());
     // 但 /register 那边仍然只认核验记录
     open_registration(&e).await;
     assert_eq!(issue(&e, MEMBER).await.0, 403);
@@ -2201,7 +2210,9 @@ async fn web_login_next_to_a_banned_account_is_flagged_and_blocked() {
 async fn web_login_rejections() {
     let (e, d) = setup_reg(&[]).await;
     require_role(&e, "900000000000000077").await;
-    let ck = "owl_login_state=st";
+    let (_, headers, _) = get_raw(&e, "/login", None).await;
+    let st = cookie_value(&headers, "owl_login_state");
+    let ck = format!("owl_login_state={st}");
     // 授权码被 Discord 拒绝
     d.script(
         "POST",
@@ -2209,17 +2220,27 @@ async fn web_login_rejections() {
         400,
         json!({"error": "invalid_grant"}),
     );
-    let (s, h, _) = get_raw(&e, "/login/callback?code=bad&state=st", Some(ck)).await;
+    let (s, h, _) = get_raw(
+        &e,
+        &format!("/login/callback?code=bad&state={st}"),
+        Some(&ck),
+    )
+    .await;
     assert_eq!(
         (s, h["location"].to_str().unwrap()),
         (307, "/?login=failed")
     );
-    // 配了身份组门槛时，普通登录也不查成员、不拒绝（只有「验证身份组」才查）
     d.clear_scripts();
-    let (s, h, _) = get_raw(&e, "/login/callback?code=ok&state=st", Some(ck)).await;
-    assert_eq!((s, h["location"].to_str().unwrap()), (307, "/"));
-    assert_eq!(set_cookies(&h).len(), 2);
-    assert!(!d.calls().iter().any(|c| c.ends_with("/member")));
+    let (_, headers, _) = get_raw(&e, "/login", None).await;
+    let st = cookie_value(&headers, "owl_login_state");
+    let (s, h, _) = get_raw(
+        &e,
+        &format!("/login/callback?code=ok&state={st}"),
+        Some(&format!("owl_login_state={st}")),
+    )
+    .await;
+    assert_eq!(s, 307);
+    assert!(!set_cookies(&h).is_empty());
 }
 
 #[tokio::test]
@@ -2227,12 +2248,7 @@ async fn member_session_dies_when_the_key_is_reset() {
     let (e, _d) = setup_reg(&[]).await;
     open_registration(&e).await;
     issue(&e, MEMBER).await;
-    let (_, h, _) = get_raw(
-        &e,
-        "/login/callback?code=ok&state=st",
-        Some("owl_login_state=st"),
-    )
-    .await;
+    let (_, h) = verify_login(&e).await;
     let cookie = format!("owl_member={}", cookie_value(&h, "owl_member"));
     let me = |c: &str| {
         let c = c.to_string();

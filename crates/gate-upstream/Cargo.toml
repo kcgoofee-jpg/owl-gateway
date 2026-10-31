@@ -15,6 +15,8 @@ tokio.workspace = true
 bytes.workspace = true
 futures.workspace = true
 serde_json.workspace = true
+serde.workspace = true
+tempfile = "3"
 sha2.workspace = true
 hex.workspace = true
 thiserror.workspace = true
@@ -22,7 +24,6 @@ tracing.workspace = true
 rand.workspace = true
 
 [dev-dependencies]
-tempfile = "3"
 gate-testkit = { path = "../gate-testkit" }
 # 假上游开 HTTP/2（明文 h2c）：测 HTTP/2 下的请求头顺序
 axum = { workspace = true, features = ["http2"] }

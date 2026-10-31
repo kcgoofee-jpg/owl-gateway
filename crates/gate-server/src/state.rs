@@ -91,6 +91,8 @@ pub struct Inner {
     pub budget: tokio::sync::Mutex<Budget>,
     pub budget_idle: tokio::sync::Notify,
     /// 后台改过的密码（scrypt 哈希）；None 时用 ADMIN_PASSWORD。
+    pub(crate) token_edits: tokio::sync::Mutex<()>,
+    pub(crate) invalid_token_save: Arc<tokio::sync::Mutex<()>>,
     pub admin_pw_hash: RwLock<Option<String>>,
     /// 会话签名密钥（SECRET_KEY 或 data/secret_key）。
     pub secret_key: String,
@@ -149,7 +151,11 @@ impl AppState {
 
         // 上游 Token：后台接管过就以 upstream_tokens.json 为准，否则用 NAI_TOKENS。
         // V5 日限额、启停在后台按 Token 设（存库，见 startup 的 apply_saved）；出图并发固定 1
-        let managed = gate_upstream::token_store::load(&env.upstream_tokens_path());
+        let revision = db
+            .get_setting(gate_db::repo::upstream::POOL_REVISION)
+            .await?;
+        let managed =
+            gate_upstream::token_store::load(&env.upstream_tokens_path(), revision.as_deref())?;
         let tokens: Vec<(String, i64, bool)> = match &managed {
             Some(entries) => entries
                 .iter()
@@ -170,6 +176,7 @@ impl AppState {
                 .collect(),
         };
         let hooks = GateHooks::new(db.clone(), clock.clone(), guard.clone(), alerter.clone());
+        let invalid_token_save = hooks.invalid_token_save.clone();
         let nai = NaiClient::new(
             UpConfig {
                 image_host: env.image_host.clone(),
@@ -207,6 +214,8 @@ impl AppState {
             global_active: AtomicI64::new(0),
             budget: tokio::sync::Mutex::new(Budget::default()),
             budget_idle: tokio::sync::Notify::new(),
+            token_edits: Default::default(),
+            invalid_token_save,
             admin_pw_hash: RwLock::new(None),
             secret_key,
             tasks,

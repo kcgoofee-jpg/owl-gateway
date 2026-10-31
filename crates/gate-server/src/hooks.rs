@@ -22,7 +22,7 @@ pub struct GateHooks {
     alerter: Arc<Alerter>,
     /// 冷却存库串行化：读出 → 合并 → 写回 必须一次做完，不然两次 403 挨得近时后一次会被覆盖。
     cooldown_save: Arc<tokio::sync::Mutex<()>>,
-    invalid_token_save: Arc<tokio::sync::Mutex<()>>,
+    pub(crate) invalid_token_save: Arc<tokio::sync::Mutex<()>>,
 }
 
 impl GateHooks {

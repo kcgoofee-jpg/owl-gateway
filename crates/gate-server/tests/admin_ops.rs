@@ -1040,6 +1040,55 @@ async fn upstream_token_settings_endpoints() {
 }
 
 #[tokio::test]
+async fn failed_token_edits_preserve_live_and_restarted_membership() {
+    let e = setup(&[]).await;
+    let api = Admin::login_bare(&e.state).await;
+    let old = e.state.nai.tokens().await[0].token_id.clone();
+    let endpoint = format!("/upstream-tokens/{old}");
+    let body = json!({"token":"pst-synthetic-replacement-0002"});
+    let path = e.state.env.upstream_tokens_path();
+    // Force the atomic file replacement to fail even when the test runs as root.
+    std::fs::create_dir(&path).unwrap();
+    assert_eq!(api.text("PUT", &endpoint, Some(body.clone())).await.0, 500);
+    assert_eq!(e.state.nai.tokens().await[0].token_id, old);
+    std::fs::remove_dir(&path).unwrap();
+    e.state.db.write(|tx| tx.execute_batch("CREATE TRIGGER fail_revision BEFORE INSERT ON site_settings WHEN NEW.key='upstream_token_pool_revision' BEGIN SELECT RAISE(ABORT,'injected'); END;")).await.unwrap();
+    assert_eq!(api.text("PUT", &endpoint, Some(body.clone())).await.0, 500);
+    assert_eq!(e.state.nai.tokens().await[0].token_id, old);
+    assert_eq!(e.restart().await.nai.tokens().await[0].token_id, old);
+    e.state
+        .db
+        .write(|tx| tx.execute_batch("DROP TRIGGER fail_revision"))
+        .await
+        .unwrap();
+    assert_eq!(api.text("PUT", &endpoint, Some(body)).await.0, 200);
+    let new = e.state.nai.tokens().await[0].token_id.clone();
+    assert_ne!(old, new);
+    assert_eq!(e.restart().await.nai.tokens().await[0].token_id, new);
+}
+
+#[tokio::test]
+async fn concurrent_token_additions_both_survive_restart() {
+    let e = setup(&[]).await;
+    let api = Admin::login_bare(&e.state).await;
+    let add = |token: &str| api.text("POST", "/upstream-tokens", Some(json!({"token":token})));
+    let (a, b) = tokio::join!(
+        add("pst-synthetic-concurrent-0001"),
+        add("pst-synthetic-concurrent-0002")
+    );
+    assert_eq!((a.0, b.0), (200, 200));
+    let ids = |tokens: Vec<std::sync::Arc<gate_upstream::pool::Token>>| {
+        tokens
+            .iter()
+            .map(|t| t.token_id.clone())
+            .collect::<Vec<_>>()
+    };
+    let live = ids(e.state.nai.tokens().await);
+    assert_eq!(live.len(), 3);
+    assert_eq!(ids(e.restart().await.nai.tokens().await), live);
+}
+
+#[tokio::test]
 async fn upstream_token_add_replace_remove() {
     let hook = MockUpstream::start().await;
     let e = setup(&owner_dm(&hook)).await;
