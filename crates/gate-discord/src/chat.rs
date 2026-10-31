@@ -357,8 +357,22 @@ pub fn system_prompt(
 /// 关键词刻意收窄：只匹配汇总数据的问题，成员自己的额度、V5 规格等都不算。
 pub fn wants_site_stats(text: &str) -> bool {
     const KEYS: [&str; 16] = [
-        "排队", "队列", "战况", "站况", "站点状态", "今日出图", "今天出图", "今天生图", "今日生图",
-        "生图量", "出图量", "生图数", "平均等待", "等多久", "成功率", "实时数据",
+        "排队",
+        "队列",
+        "战况",
+        "站况",
+        "站点状态",
+        "今日出图",
+        "今天出图",
+        "今天生图",
+        "今日生图",
+        "生图量",
+        "出图量",
+        "生图数",
+        "平均等待",
+        "等多久",
+        "成功率",
+        "实时数据",
     ];
     KEYS.iter().any(|k| text.contains(k))
 }
@@ -373,13 +387,10 @@ pub fn site_stats_block(v: &serde_json::Value) -> String {
         format!("{label}：{n}\n")
     };
     let show_f64 = |key: &str, label: &str| {
-        let n = v
-            .get(key)
-            .and_then(serde_json::Value::as_f64)
-            .map_or_else(
-                || "无记录".to_string(),
-                |n| format!("{:.0} 毫秒", n.round()),
-            );
+        let n = v.get(key).and_then(serde_json::Value::as_f64).map_or_else(
+            || "无记录".to_string(),
+            |n| format!("{:.0} 毫秒", n.round()),
+        );
         format!("{label}：{n}\n")
     };
     let mut out = String::new();
@@ -641,7 +652,10 @@ mod tests {
         let s = site_stats_block(&v);
         assert!(s.contains("当前排队人数：2"));
         assert!(s.contains("今日出图张数：57"));
-        assert!(s.contains("近 1 小时平均排队等待：813 毫秒"), "四舍五入取整");
+        assert!(
+            s.contains("近 1 小时平均排队等待：813 毫秒"),
+            "四舍五入取整"
+        );
         let empty = site_stats_block(&json!({}));
         assert!(empty.contains("无记录"));
         let prompt = system_prompt("", None, false, "", None, Some(&s));
@@ -651,7 +665,12 @@ mod tests {
 
     #[test]
     fn site_stats_intent_hits_queue_talk_but_not_specs_or_own_quota() {
-        for t in ["现在多少人排队？", "今天生图战况如何", "帮我看下队列", "我平均要等多久"] {
+        for t in [
+            "现在多少人排队？",
+            "今天生图战况如何",
+            "帮我看下队列",
+            "我平均要等多久",
+        ] {
             assert!(wants_site_stats(t), "{t} 应触发统计拉取");
         }
         for t in [

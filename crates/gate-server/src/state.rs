@@ -273,8 +273,8 @@ impl AppState {
         }
         let limits = self.db.get_upstream_token_limits().await?;
         let enabled = self.db.get_upstream_token_enabled().await?;
-        // 出图并发固定 1（NovelAI 一个账号同时只出 1 张，多了只会撞并发锁；10-23 删掉后台的并发设置，
-        // 库里 upstream_token_image_concurrency 的旧行不再读）
+        // 出图并发固定 1（NovelAI 一个账号同时只出 1 张，多了只会撞并发锁；后台并发设置 10-23 删除，
+        // 遗留的 upstream_token_image_concurrency 表 10-31 清掉，启动时 DROP）
         self.nai
             .apply_saved(
                 &limits.into_iter().collect(),

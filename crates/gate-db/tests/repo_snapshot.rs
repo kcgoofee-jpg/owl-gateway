@@ -275,9 +275,6 @@ async fn call(db: &Db, c: &Case) -> Out {
         }
         "get_upstream_token_limits" => str_map(db.get_upstream_token_limits().await?),
         "get_upstream_token_enabled" => str_map(db.get_upstream_token_enabled().await?),
-        "get_upstream_token_image_concurrency" => {
-            str_map(db.get_upstream_token_image_concurrency().await?)
-        }
         "set_upstream_token_limit" => {
             db.set_upstream_token_limit(&s(a(0, "token_id"), ""), int(a(1, "limit"), 0))
                 .await?;
@@ -287,14 +284,6 @@ async fn call(db: &Db, c: &Case) -> Out {
             db.set_upstream_token_enabled(
                 &s(a(0, "token_id"), ""),
                 enabled(a(1, "enabled"), false),
-            )
-            .await?;
-            Value::Null
-        }
-        "set_upstream_token_image_concurrency" => {
-            db.set_upstream_token_image_concurrency(
-                &s(a(0, "token_id"), ""),
-                int(a(1, "limit"), 0),
             )
             .await?;
             Value::Null
@@ -699,10 +688,8 @@ const METHODS: &[&str] = &[
     "move_upstream_token",
     "get_upstream_token_limits",
     "get_upstream_token_enabled",
-    "get_upstream_token_image_concurrency",
     "set_upstream_token_limit",
     "set_upstream_token_enabled",
-    "set_upstream_token_image_concurrency",
     "bump_upstream_image_counter",
     "bump_upstream_v5_counter",
     "get_setting",

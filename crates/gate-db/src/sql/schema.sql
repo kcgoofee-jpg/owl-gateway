@@ -99,14 +99,10 @@ CREATE TABLE IF NOT EXISTS key_donations (     -- 访客在首页「捐赠 Key�
     handled_at REAL,
     handled_note TEXT NOT NULL DEFAULT ''
 );
-CREATE TABLE IF NOT EXISTS share_state (       -- 防分享风险分（share_guard.py）
+CREATE TABLE IF NOT EXISTS share_state (       -- Key 临时暂停（自动驾驶等模块用；打分列随 share_guard.py 删除，老库启动时重建）
     key_id INTEGER PRIMARY KEY,
-    score REAL NOT NULL DEFAULT 0,
-    score_ts REAL NOT NULL DEFAULT 0,
-    strikes INTEGER NOT NULL DEFAULT 0,
     paused_until REAL NOT NULL DEFAULT 0,
-    warned_ts REAL NOT NULL DEFAULT 0,
-    paused_ts REAL NOT NULL DEFAULT 0
+    pause_reason TEXT NOT NULL DEFAULT ''
 );
 CREATE TABLE IF NOT EXISTS upstream_snapshots (   -- 每小时记一次上游真实状态，和我们自己的计数做独立核对
     ts REAL NOT NULL,
@@ -146,10 +142,6 @@ CREATE TABLE IF NOT EXISTS upstream_token_settings (
 CREATE TABLE IF NOT EXISTS upstream_token_enabled (
     token_id TEXT PRIMARY KEY,
     enabled INTEGER NOT NULL DEFAULT 1
-);
-CREATE TABLE IF NOT EXISTS upstream_token_image_concurrency (
-    token_id TEXT PRIMARY KEY,
-    concurrency INTEGER NOT NULL DEFAULT 1
 );
 CREATE TABLE IF NOT EXISTS daily_quota_offsets (
     key_id INTEGER NOT NULL,

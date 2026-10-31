@@ -41,7 +41,6 @@ impl Db {
             for table in [
                 "upstream_token_settings",
                 "upstream_token_enabled",
-                "upstream_token_image_concurrency",
                 "upstream_token_counters",
             ] {
                 tx.execute(&format!("DELETE FROM {table} WHERE token_id=?"), [&new_id])?;
@@ -96,35 +95,6 @@ impl Db {
                 "INSERT INTO upstream_token_enabled(token_id, enabled) VALUES(?,?) \
                  ON CONFLICT(token_id) DO UPDATE SET enabled=excluded.enabled",
                 params![token_id, i64::from(enabled)],
-            )?;
-            Ok(())
-        })
-        .await
-    }
-
-    pub async fn get_upstream_token_image_concurrency(&self) -> Result<OrderedPairs<String, i64>> {
-        self.read(|c| {
-            let mut stmt =
-                c.prepare("SELECT token_id, concurrency FROM upstream_token_image_concurrency")?;
-            stmt.query_map([], |r| {
-                Ok((value::text_or(r, 0, "")?, value::i64_or(r, 1, 0)?))
-            })?
-            .collect()
-        })
-        .await
-    }
-
-    pub async fn set_upstream_token_image_concurrency(
-        &self,
-        token_id: &str,
-        limit: i64,
-    ) -> Result<()> {
-        let token_id = token_id.to_string();
-        self.write(move |tx| {
-            tx.execute(
-                "INSERT INTO upstream_token_image_concurrency(token_id, concurrency) VALUES(?,?) \
-                 ON CONFLICT(token_id) DO UPDATE SET concurrency=excluded.concurrency",
-                params![token_id, limit],
             )?;
             Ok(())
         })

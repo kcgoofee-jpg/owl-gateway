@@ -229,6 +229,8 @@ pub const REMOVED_TABLES: &[&str] = &[
     "incident_updates",
     "incidents",
     "status_hourly",
+    // 后台出图并发设置 10-23 删除后遗留的表；并发固定 1，旧行不再读
+    "upstream_token_image_concurrency",
 ];
 
 /// 建表 + 迁移。
@@ -252,6 +254,20 @@ pub fn run(conn: &mut Connection) -> rusqlite::Result<()> {
     conn.execute_batch(REBUILD_TRIGGER)?;
     if !has_column(conn, "api_keys", "discord_id")? {
         conn.execute("ALTER TABLE api_keys ADD COLUMN discord_id TEXT", [])?;
+    }
+    // share_state 原来带防分享打分的 5 列（share_guard.py 早已删除，线上一直空着）：老库重建为 3 列。
+    // 必须在 ADD_COLUMNS 之后：老库先补上 pause_reason，下面才 SELECT 得到。
+    if has_column(conn, "share_state", "score")? {
+        conn.execute_batch(
+            "CREATE TABLE share_state_new (\
+                 key_id INTEGER PRIMARY KEY,\
+                 paused_until REAL NOT NULL DEFAULT 0,\
+                 pause_reason TEXT NOT NULL DEFAULT '');\
+             INSERT INTO share_state_new(key_id, paused_until, pause_reason) \
+                 SELECT key_id, paused_until, pause_reason FROM share_state;\
+             DROP TABLE share_state;\
+             ALTER TABLE share_state_new RENAME TO share_state;",
+        )?;
     }
     // 3.0 的列放在 2.x 的所有列（含上面的 discord_id）之后：全新库和线上库的列顺序一致，
     // 不带列名的整行 `INSERT ... VALUES(...)` 也不受影响。
