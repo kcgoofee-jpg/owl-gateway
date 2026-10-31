@@ -8,6 +8,9 @@
 //!
 //! 取消安全用 Drop 守卫实现：请求 future 在任何点被丢弃，V5 预留、计数、出图后静默、排队票、
 //! 没用上的出图间隔与并发槽都会照常结算（旧版用 `asyncio.shield` + `CancelScope(shield=True)` 达到同样效果）。
+//!
+//! 上游明确的 5xx 响应（收到了 5xx 状态码；传输故障与「结果不明」不在此列）在结算完成后
+//! 于同一账号上不占排队位重发一次：官方对 5xx 不扣费，线上占比 0.15%，同 Key 几分钟内可重试成功。
 
 use crate::client::{Callbacks, Inner, NaiClient, RequestOpts, ResolveV5, UpResponse};
 use crate::error::{Transport, UpstreamError};
@@ -75,9 +78,34 @@ impl<H: Hooks> NaiClient<H> {
             let outcome = self
                 .request_once(&mut o, cb, allowance, obs, &mut fl, !switched)
                 .await;
+            let last_token = fl.token.clone();
             fl.finish().await;
             match outcome {
-                Attempt::Done(r) => return r,
+                Attempt::Done(r) => {
+                    // 上游明确的 5xx 响应（非传输故障、非并发锁、非 401→502）：settle 已完成（未扣费），
+                    // 在同一账号上不占排队位重发一次（acquire 无票 = 只等出图间隔）。
+                    // 只试一次，重试的结果（无论成败）直接返回；重试路径要求换号 / V5 异常时保守返回原始 5xx。
+                    if o.image_lane && r.as_ref().is_ok_and(|resp| resp.status >= 500) {
+                        obs.picked(&last_token.token_id);
+                        tracing::warn!(
+                            target: "upstream",
+                            token_id = %last_token.token_id,
+                            status = r.as_ref().unwrap().status,
+                            "上游 5xx：已结算（未扣费），在同一账号上不占排队位重发一次"
+                        );
+                        let mut fl2 =
+                            InFlight::new(inner.clone(), last_token, o.v5_free, o.image_count);
+                        let outcome2 = self
+                            .request_once(&mut o, cb, allowance, obs, &mut fl2, !switched)
+                            .await;
+                        fl2.finish().await;
+                        return match outcome2 {
+                            Attempt::Done(r2) => r2,
+                            Attempt::Retry | Attempt::SwitchV5 => r,
+                        };
+                    }
+                    return r;
+                }
                 Attempt::Retry => continue,
                 Attempt::SwitchV5 => {
                     switched = true;

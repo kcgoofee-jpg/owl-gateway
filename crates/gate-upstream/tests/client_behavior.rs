@@ -5,7 +5,9 @@ mod common;
 use bytes::Bytes;
 use common::TestHooks;
 use gate_testkit::{MockUpstream, Reply};
-use gate_upstream::client::{Callbacks, Config, Hooks, NaiClient, NoObserver, RequestOpts};
+use gate_upstream::client::{
+    Callbacks, Config, Hooks, NaiClient, NoObserver, Observer, RequestOpts,
+};
 use serde_json::json;
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
@@ -135,7 +137,8 @@ async fn only_produced_images_count_toward_the_account_today() {
                 .await
         }
     };
-    // 上游 500：没出图
+    // 上游 500：没出图（自动重试会再打一次，两个都是 500 → 透传，仍不计账）
+    up.push("/ai/generate-image", Reply::status(500, "boom"));
     up.push("/ai/generate-image", Reply::status(500, "boom"));
     let _ = send(Callbacks::default()).await;
     // 返回 200 但不是图：校验不过，按没出图
@@ -964,4 +967,108 @@ async fn compressed_msgpack_stream_is_not_buffered() {
         drop(stream);
         s.finish().await;
     }
+}
+
+/// 记录 picked 序列（验证 5xx 重试留在同一账号）。
+struct PickLog(Mutex<Vec<String>>);
+impl Observer for PickLog {
+    fn picked(&self, token_id: &str) {
+        self.0.lock().unwrap().push(token_id.to_owned());
+    }
+}
+
+#[tokio::test]
+async fn upstream_5xx_retries_once_on_the_same_account_and_charges_once() {
+    let up = MockUpstream::start().await;
+    let hooks = TestHooks::default();
+    let c = NaiClient::new(
+        config(&up.url(), false),
+        hooks.clone(),
+        vec![(T1.into(), 0, false)],
+    )
+    .unwrap();
+    let tid = gate_upstream::headers::token_id(T1);
+    let picks = Arc::new(PickLog(Mutex::new(Vec::new())));
+    let images = || {
+        hooks
+            .0
+            .images
+            .lock()
+            .unwrap()
+            .get(&tid)
+            .copied()
+            .unwrap_or(0)
+    };
+    let body = image_body(1);
+    // 第一次 500、同账号重发 200：最终 200，只记 1 张，两次都在同一账号上
+    up.push("/ai/generate-image", Reply::status(500, "boom"));
+    up.push(
+        "/ai/generate-image",
+        Reply::status(200, Bytes::from(gate_testkit::zip_of_pngs(1))),
+    );
+    let (c, url) = (c.clone(), up.url());
+    let send = |obs: Arc<PickLog>, body: serde_json::Value| {
+        let (c, url, body) = (c.clone(), url.clone(), body);
+        async move {
+            c.request(
+                image_opts(&url, &body, 1),
+                &Callbacks::default(),
+                None,
+                obs.as_ref(),
+            )
+            .await
+        }
+    };
+    let resp = send(picks.clone(), body.clone()).await.unwrap();
+    assert_eq!(resp.status, 200);
+    assert_eq!(images(), 1, "重试成功只记 1 张、扣 1 次费");
+    let log = picks.0.lock().unwrap();
+    assert_eq!(log.len(), 2, "picked 两次（原始 + 同账号重试）：{log:?}");
+    assert!(
+        log.iter().all(|t| t == &tid),
+        "重试必须留在同一账号：{log:?}"
+    );
+}
+
+#[tokio::test]
+async fn upstream_5xx_twice_is_returned_without_endless_retry() {
+    let up = MockUpstream::start().await;
+    let hooks = TestHooks::default();
+    let c = NaiClient::new(
+        config(&up.url(), false),
+        hooks.clone(),
+        vec![(T1.into(), 0, false)],
+    )
+    .unwrap();
+    let tid = gate_upstream::headers::token_id(T1);
+    let images = || {
+        hooks
+            .0
+            .images
+            .lock()
+            .unwrap()
+            .get(&tid)
+            .copied()
+            .unwrap_or(0)
+    };
+    let body = image_body(1);
+    // 连续两次 500：重发一次后把 500 透传给调用方，不记账、不无限重试
+    up.push("/ai/generate-image", Reply::status(500, "boom"));
+    up.push("/ai/generate-image", Reply::status(500, "boom again"));
+    let (c, url) = (c.clone(), up.url());
+    let send = |body: serde_json::Value| {
+        let (c, url, body) = (c.clone(), url.clone(), body);
+        async move {
+            c.request(
+                image_opts(&url, &body, 1),
+                &Callbacks::default(),
+                None,
+                &NoObserver,
+            )
+            .await
+        }
+    };
+    let resp = send(body).await.unwrap();
+    assert_eq!(resp.status, 500);
+    assert_eq!(images(), 0, "失败不计账");
 }
