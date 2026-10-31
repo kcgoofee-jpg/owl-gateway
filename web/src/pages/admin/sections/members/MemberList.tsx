@@ -34,11 +34,7 @@ function Identity(props: { m: MemberRow }) {
       badge={m.invited ? <Badge tone="info">邀请</Badge> : null}
       sub={
         <>
-          {dc?.username && dc.username !== title
-            ? `@${dc.username}`
-            : m.discord_id
-              ? ""
-              : "后台建的 Key"}
+          {dc?.username && dc.username !== title ? `@${dc.username}` : m.discord_id ? "" : "后台建的 Key"}
           {tag && (
             <span class="xa-chip" title={tag.note || undefined}>
               {tag.tag}
