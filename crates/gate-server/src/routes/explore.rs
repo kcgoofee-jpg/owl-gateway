@@ -242,16 +242,24 @@ async fn upload(State(st): State<AppState>, headers: HeaderMap, req: Request) ->
                 .unwrap_or_default()
         })
         .unwrap_or_default();
-    let message_id = post_to_discord(&st, &discord_id, &uploader, &upload, &meta).await?;
-    tracing::info!(
-        target: "explore",
-        "Explore 上传：{}（{}）{} 字节，msg={}",
-        &discord_id,
-        upload.mime,
-        upload.bytes.len(),
-        message_id
-    );
-    Ok(ok_json(&json!({ "ok": true, "message_id": message_id })))
+    // Discord 投递放后台：成员的图一到网关就回执。原图上传本来就慢（走的是成员自己的上行带宽），
+    // 再同步等一次 Discord 往返只会让按钮转更久；失败记 error 日志，刷屏由入口的 20 秒冷却挡住。
+    let st2 = st.clone();
+    let discord_id2 = discord_id.clone();
+    tokio::spawn(async move {
+        match post_to_discord(&st2, &discord_id2, &uploader, &upload, &meta).await {
+            Ok(message_id) => tracing::info!(
+                target: "explore",
+                "Explore 上传：{}（{}）{} 字节，msg={}",
+                discord_id2,
+                upload.mime,
+                upload.bytes.len(),
+                message_id
+            ),
+            Err(e) => tracing::error!(target: "explore", "Explore 后台投递失败：{e:?}"),
+        }
+    });
+    Ok(ok_json(&json!({ "ok": true, "queued": true })))
 }
 
 /// multipart 里的一项。
@@ -369,6 +377,18 @@ fn human_size(bytes: usize) -> String {
     }
 }
 
+/// 共享的 Discord 上传客户端：连接池复用，省掉每次上传的 TLS 握手。
+fn http_client() -> &'static reqwest::Client {
+    static HTTP: std::sync::OnceLock<reqwest::Client> = std::sync::OnceLock::new();
+    HTTP.get_or_init(|| {
+        reqwest::Client::builder()
+            .timeout(std::time::Duration::from_secs(30))
+            .user_agent(gate_core::discord_ua::DISCORD_USER_AGENT)
+            .build()
+            .expect("reqwest 客户端配置固定，不会失败")
+    })
+}
+
 async fn post_to_discord(
     st: &AppState,
     discord_id: &str,
@@ -470,12 +490,7 @@ async fn post_to_discord(
         .text("payload_json", payload.to_string())
         .part("files[0]", part);
 
-    let http = reqwest::Client::builder()
-        .timeout(std::time::Duration::from_secs(30))
-        .user_agent(gate_core::discord_ua::DISCORD_USER_AGENT)
-        .build()
-        .map_err(|e| InternalError(format!("初始化上传客户端失败：{e}")))?;
-    let resp = http
+    let resp = http_client()
         .post(&url)
         .header(
             reqwest::header::AUTHORIZATION,

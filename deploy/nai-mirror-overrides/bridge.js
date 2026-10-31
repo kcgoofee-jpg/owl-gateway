@@ -379,7 +379,7 @@
       })
       .then(function (r) { return r.json().catch(function () { return {}; }).then(function (j) { return { ok: r.ok, j: j }; }); })
       .then(function (res) {
-        if (res.ok) toast("已发到 Discord 图乐园频道 ✅");
+        if (res.ok) toast("已收到，正在发到图乐园频道 ✅");
         else toast((res.j && (res.j.detail || res.j.message)) || "提交失败，稍后再试。", true);
       })
       .catch(function (e) { toast("提交失败：" + e, true); })
