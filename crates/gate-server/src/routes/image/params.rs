@@ -106,11 +106,23 @@ pub(super) async fn prepare(
         )
         .into());
     }
-    // 客户端的「连接测试」（小图、几步、短提示词）：Key 已验证有效，在这里直接答复，不出图、不占额度 / 队列 / 上游
+    // 客户端的「连接测试」（小图、几步、短提示词）：Key 已验证有效，在这里直接答复，不出图、不占额度 / 队列 / 上游。
+    // 拦截会经错误路径以 reason=test_request 落库，可审计。
     if policy::is_connection_test(&body) {
         return Err(
             GateError::with_code(400, CONNECTION_TEST_MESSAGE, reasons::TEST_REQUEST).into(),
         );
+    }
+    // 「四无」裸空请求（正文 0 字、负面 0 字、无角色参考、无 Vibe / 图生图材料）：上游对空提示词
+    // 直接 500（10-30 两次线上实锤），在网关挡下来省一次排队和上游调用；带任一材料的放行。
+    if policy::is_blank_generation(&body) {
+        reject(&model, "提示词全空（正文/负面 0 字，无角色参考、无 Vibe）");
+        return Err(GateError::with_code(
+            400,
+            "提示词不能全空：正文和负面提示词都是 0 字，也没有角色参考或 Vibe。NovelAI 会直接拒绝空提示词，写几个词再生成吧。",
+            reasons::PARAM,
+        )
+        .into());
     }
     if body.get("image").is_some_and(enabled) || body.get("mask").is_some_and(enabled) {
         return Err(GateError::with_code(400, "图生图请求格式错误，未扣费。请更新或更换客户端。给客户端作者：image 和 mask 要放在 parameters 里", reasons::PARAM).into());

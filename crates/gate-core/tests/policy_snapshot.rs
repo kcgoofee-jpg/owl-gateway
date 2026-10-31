@@ -66,15 +66,10 @@ fn run(name: &str, min: usize, mut f: impl FnMut(&Case) -> Value) {
 #[test]
 fn constants() {
     assert_eq!(policy::V5_COST_MULTIPLIER, 1.5);
+    // V3 / V2 / V1 时代模型 10-31 起下线：白名单里不再有它们
     assert_eq!(
         policy::LEGACY_IMAGE_MODEL_PREFIXES,
-        [
-            "nai-diffusion-4-5",
-            "nai-diffusion-4",
-            "nai-diffusion-3",
-            "nai-diffusion-2",
-            "nai-diffusion-furry-3"
-        ]
+        ["nai-diffusion-4-5", "nai-diffusion-4"]
     );
     let sorted = |xs: &[&str]| -> Vec<String> {
         let mut v: Vec<String> = xs.iter().map(|x| x.to_string()).collect();
@@ -82,21 +77,8 @@ fn constants() {
         v
     };
     assert_eq!(
-        sorted(&policy::LEGACY_IMAGE_MODEL_EXACT),
-        ["nai-diffusion", "nai-diffusion-furry", "safe-diffusion"]
-    );
-    assert_eq!(
         policy::V5_NORMAL_PRESETS,
         [(832, 1216), (1216, 832), (1024, 1024)]
-    );
-    assert_eq!(
-        sorted(&policy::VIBE_RAW_MODELS),
-        [
-            "nai-diffusion-3",
-            "nai-diffusion-3-inpainting",
-            "nai-diffusion-furry-3",
-            "nai-diffusion-furry-3-inpainting"
-        ]
     );
     assert_eq!(
         sorted(&policy::VIBE_ENCODED_MODELS),

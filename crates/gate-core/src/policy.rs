@@ -16,26 +16,14 @@ use std::sync::OnceLock;
 pub const V5_COST_MULTIPLIER: f64 = 1.5;
 
 /// 仅允许明确认识的图片模型族；未知模型不能当旧模型，否则上游新增模型会绕过 V5 / Anlas 保护。
-pub const LEGACY_IMAGE_MODEL_PREFIXES: [&str; 5] = [
-    "nai-diffusion-4-5",
-    "nai-diffusion-4",
-    "nai-diffusion-3",
-    "nai-diffusion-2",
-    "nai-diffusion-furry-3",
-];
-pub const LEGACY_IMAGE_MODEL_EXACT: [&str; 3] =
-    ["safe-diffusion", "nai-diffusion", "nai-diffusion-furry"];
+/// V3 / V2 / V1 时代模型 10-31 起整体下线（站长：没人用了），不再列入白名单——请求会得到
+/// 「本站不支持该模型」，历史日志里的显示标签保留在后台前端。
+pub const LEGACY_IMAGE_MODEL_PREFIXES: [&str; 2] = ["nai-diffusion-4-5", "nai-diffusion-4"];
 
 /// 免费 Key 按预设钳制尺寸。
 pub const V5_NORMAL_PRESETS: [(i64, i64); 3] = [(832, 1216), (1216, 832), (1024, 1024)];
 
-/// V3 传原图，V4 / V4.5 传预编码 Vibe，V5 两者都没有。
-pub const VIBE_RAW_MODELS: [&str; 4] = [
-    "nai-diffusion-3",
-    "nai-diffusion-3-inpainting",
-    "nai-diffusion-furry-3",
-    "nai-diffusion-furry-3-inpainting",
-];
+/// V4 / V4.5 传预编码 Vibe，V5 没有 Vibe（只有精确参考）。
 pub const VIBE_ENCODED_MODELS: [&str; 11] = [
     "nai-diffusion-4",
     "nai-diffusion-4-full",

@@ -215,12 +215,9 @@ pub fn validate_image_references(payload: &Value) -> Option<String> {
     if vibe_count > 0 && precise_count > 0 {
         return Some("精确参考和 Vibe 不能同时使用，未扣费。请只保留一种。".into());
     }
-    let is_raw = in_models(&VIBE_RAW_MODELS, &model);
     let is_encoded = in_models(&VIBE_ENCODED_MODELS, &model);
-    if vibe_count > 0 && !(is_raw || is_encoded) {
-        return Some(
-            "该模型不支持 Vibe，未扣费。请切换到 V3、V4 或 V4.5，或去掉 Vibe 参考图。".into(),
-        );
+    if vibe_count > 0 && !is_encoded {
+        return Some("该模型不支持 Vibe，未扣费。请切换到 V4 或 V4.5，或去掉 Vibe 参考图。".into());
     }
     if precise_count > 0 && !in_models(&PRECISE_REFERENCE_MODELS, &model) {
         return Some("精确参考只支持 V4.5，未扣费。请切换到 V4.5，或去掉精确参考图。".into());
@@ -230,7 +227,7 @@ pub fn validate_image_references(payload: &Value) -> Option<String> {
         "reference_information_extracted_multiple",
         "reference_strength_multiple",
     ] {
-        // V4/V4.5 的编码里已含提取量；V3 原图仍然需要。显式提供的数组必须合法。
+        // V4/V4.5 的编码里已含提取量，没有显式提供就跳过；显式提供的数组必须合法。
         if name == "reference_information_extracted_multiple" && is_encoded && !p.contains_key(name)
         {
             continue;
@@ -276,10 +273,10 @@ pub fn validate_image_references(payload: &Value) -> Option<String> {
         }
     }
     for item in vibes {
-        if !base64_data(Some(item), is_raw, false)
-            || (is_encoded && base64_data(Some(item), true, false))
-        {
-            return Some("Vibe 参考图数据无法读取，未扣费。请重新添加参考图。给客户端作者：须为有效 base64，V3 要传原图而不是 V4 编码".into());
+        // V4 / V4.5 的 Vibe 必须是 vibe_encode 出来的编码数据：有效 base64，但不能是原图
+        // （原图要走 /ai/encode-vibe；V3 原图通道 10-31 随 V3 一起下线）
+        if !base64_data(Some(item), false, false) || base64_data(Some(item), true, false) {
+            return Some("Vibe 参考图数据无法读取，未扣费。请重新添加参考图。给客户端作者：须为 V4 编码格式的有效 base64".into());
         }
     }
     // `cached_vibes + precise`：前半是 Vibe 缓存，后半是精确参考（按下标区分）
@@ -294,8 +291,9 @@ pub fn validate_image_references(payload: &Value) -> Option<String> {
         let data = obj.and_then(|m| m.get("data"));
         let bad = obj.is_none()
             || !valid_key
-            || !base64_data(data, !is_precise && is_raw, is_precise)
-            || (!is_precise && is_encoded && base64_data(data, true, false));
+            || (is_precise && !base64_data(data, false, true))
+            || (!is_precise
+                && (!base64_data(data, false, false) || base64_data(data, true, false)));
         if bad {
             return Some(
                 "参考图缓存数据不完整，未扣费。请重新添加参考图。开发者参考：缓存参考须包含 64 位小写十六进制 cache_secret_key，Vibe 也可用小写 UUIDv4，以及完整 base64 data；精确参考须为 PNG"

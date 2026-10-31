@@ -18,10 +18,9 @@ pub fn image_model_tier(model: &str) -> Option<&'static str> {
     if is_v5_model(&m) {
         return Some("v5");
     }
-    if in_models(&LEGACY_IMAGE_MODEL_EXACT, &m)
-        || LEGACY_IMAGE_MODEL_PREFIXES
-            .iter()
-            .any(|prefix| m == *prefix || m.starts_with(&format!("{prefix}-")))
+    if LEGACY_IMAGE_MODEL_PREFIXES
+        .iter()
+        .any(|prefix| m == *prefix || m.starts_with(&format!("{prefix}-")))
     {
         return Some("legacy");
     }

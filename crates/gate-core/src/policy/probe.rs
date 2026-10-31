@@ -46,6 +46,8 @@ pub fn is_connection_test(body: &Value) -> bool {
         || ["image", "mask"]
             .iter()
             .any(|k| enabled_opt(values::get(body, k)))
+        // 官网第二次用同一张 Vibe 时只发 cache_secret_key（数据在网关缓存里）——有材料就不是测试
+        || enabled_opt(p.get("cache_secret_key"))
     {
         return false;
     }
@@ -86,10 +88,98 @@ pub fn is_connection_test(body: &Value) -> bool {
     primitives::len_chars(primitives::strip(prompt)) <= TEST_REQUEST_MAX_PROMPT_CHARS
 }
 
+/// 「四无」裸空生图：正文、负面提示词都是 0 字，也没有角色提示词和任何 Vibe / 参考图 / 图生图材料。
+/// 上游对 prompt=0 字直接 500（10-30 线上两次实锤），这种请求必然失败，在网关挡下来省一次排队
+/// 和上游调用；带任一材料的空提示词是正当玩法（风格迁移 / 角色传承），不算裸空，放行。
+/// 要在 `normalize_image_request` 之后调用：V4 / V4.5 / V5 的结构化提示词已填好。
+pub fn is_blank_generation(body: &Value) -> bool {
+    let Some(Value::Object(p)) = values::get(body, "parameters") else {
+        return false;
+    };
+    if NON_PLAIN_PARAMS
+        .iter()
+        .chain(REFERENCE_FIELDS.iter())
+        .any(|k| enabled_opt(p.get(*k)))
+        || ["image", "mask"]
+            .iter()
+            .any(|k| enabled_opt(values::get(body, k)))
+        // 官网第二次用同一张 Vibe 时只发 cache_secret_key，数据在网关进程内缓存里还没展开
+        || enabled_opt(p.get("cache_secret_key"))
+    {
+        return false;
+    }
+    if matches!(p.get("characterPrompts"), Some(Value::Array(a)) if !a.is_empty()) {
+        return false;
+    }
+    let has_char_captions = |key: &str| {
+        matches!(
+            p.get(key).and_then(|v| v.get("caption")).and_then(|c| c.get("char_captions")),
+            Some(Value::Array(a)) if !a.is_empty()
+        )
+    };
+    if has_char_captions("v4_prompt") || has_char_captions("v4_uc") {
+        return false;
+    }
+    let cap = |key: &str| -> &str {
+        p.get(key)
+            .and_then(|v| v.get("caption"))
+            .and_then(|c| c.get("base_caption"))
+            .and_then(Value::as_str)
+            .unwrap_or("")
+    };
+    // normalize 之后 V4 / V4.5 / V5 一定有 v4_prompt / v4_uc；input / negative_prompt 兜底防旧客户端
+    let prompt = cap("v4_prompt");
+    let uc = cap("v4_uc");
+    let legacy_prompt = values::get(body, "input")
+        .and_then(Value::as_str)
+        .unwrap_or("");
+    let legacy_uc = p
+        .get("negative_prompt")
+        .and_then(Value::as_str)
+        .unwrap_or("");
+    primitives::strip(prompt).is_empty()
+        && primitives::strip(uc).is_empty()
+        && primitives::strip(legacy_prompt).is_empty()
+        && primitives::strip(legacy_uc).is_empty()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use serde_json::json;
+
+    /// 归一化之后 V4.5 请求该有的形状（测试用）。
+    fn v45_body(prompt: &str, uc: &str) -> Value {
+        serde_json::json!({
+            "model": "nai-diffusion-4-5-full",
+            "input": prompt,
+            "parameters": {
+                "negative_prompt": uc,
+                "width": 832, "height": 1216, "steps": 23,
+                "v4_prompt": {"caption": {"base_caption": prompt, "char_captions": []}},
+                "v4_uc": {"caption": {"base_caption": uc, "char_captions": []}}
+            }
+        })
+    }
+
+    #[test]
+    fn blank_generation_rejects_only_the_four_nothing_case() {
+        // 四无：正文/负面 0 字，无角色、无 Vibe —— 拦
+        assert!(is_blank_generation(&v45_body("", "")));
+        // 带正文 / 带负面 / 带角色 / 带 Vibe —— 都是正当玩法，放行
+        assert!(!is_blank_generation(&v45_body("1girl", "")));
+        assert!(!is_blank_generation(&v45_body("", "lowres")));
+        let mut with_char = v45_body("", "");
+        with_char["parameters"]["characterPrompts"] = json!([{"prompt": "owl girl"}]);
+        assert!(!is_blank_generation(&with_char));
+        let mut with_vibe = v45_body("", "");
+        with_vibe["parameters"]["reference_image_multiple"] = json!(["cached"]);
+        assert!(!is_blank_generation(&with_vibe));
+        // 只发 cache_secret_key 的请求：材料在网关缓存里，不能当裸空拦
+        let mut cached_vibe = v45_body("", "");
+        cached_vibe["parameters"]["cache_secret_key"] = json!("abc");
+        assert!(!is_blank_generation(&cached_vibe));
+    }
 
     #[test]
     fn v5_structured_prompts_include_base_and_character_captions() {
