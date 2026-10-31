@@ -11,7 +11,6 @@ use std::time::{Duration, Instant};
 
 const TTL: Duration = Duration::from_secs(30 * 60);
 const MAX_ENTRIES: usize = 256;
-const MAX_BYTES: usize = 64 * 1024 * 1024;
 
 struct Entry {
     data: String,
@@ -150,11 +149,6 @@ pub fn expand(body: &mut Value, key_id: i64) {
 /// 当前缓存条目数（后台/测试观测用）。
 pub fn size() -> usize {
     CACHE.lock().map(|m| m.len()).unwrap_or(0)
-}
-
-/// 单条上限检查：超过 MAX_BYTES 的图不缓存。
-pub fn too_large(data: &str) -> bool {
-    data.len() > MAX_BYTES
 }
 
 #[cfg(test)]

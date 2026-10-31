@@ -96,12 +96,6 @@ impl Db {
             params![payload, result_at, now, request_id])? == 1)).await
     }
 
-    pub async fn mark_request_uncertain(&self, request_id: &str, now: f64) -> Result<bool> {
-        let request_id = request_id.to_owned();
-        self.write(move |tx| Ok(tx.execute("UPDATE request_settlements SET status='uncertain',updated_at=? WHERE request_id=? AND status='dispatched'",
-            params![now, request_id])? == 1)).await
-    }
-
     /// Release only requests proven not to have been dispatched.
     pub async fn release_request_reservation(&self, request_id: &str, now: f64) -> Result<bool> {
         let request_id = request_id.to_owned();
@@ -117,23 +111,6 @@ impl Db {
             tx.execute("UPDATE request_settlements SET status=CASE status WHEN 'reserved' THEN 'released' WHEN 'dispatched' THEN 'uncertain' ELSE status END,updated_at=? WHERE request_id=?",
                 params![now, request_id])?;
             tx.query_row("SELECT status FROM request_settlements WHERE request_id=?", [&request_id], |r| r.get(0))
-        }).await
-    }
-
-    pub async fn resolve_request_failure(
-        &self,
-        request_id: &str,
-        uncertain: bool,
-        now: f64,
-    ) -> Result<()> {
-        let (request_id, status) = (
-            request_id.to_owned(),
-            if uncertain { "uncertain" } else { "released" },
-        );
-        self.write(move |tx| {
-            tx.execute("UPDATE request_settlements SET status=?,updated_at=? WHERE request_id=? AND status='dispatched'",
-                params![status, now, request_id])?;
-            Ok(())
         }).await
     }
 

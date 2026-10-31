@@ -58,13 +58,6 @@ pub fn dhash(bytes: &[u8]) -> Option<String> {
     Some(format!("{bits:016x}"))
 }
 
-/// 两个 dHash 的汉明距离（格式不对返回 None）。
-pub fn hamming(a: &str, b: &str) -> Option<u32> {
-    let a = u64::from_str_radix(a, 16).ok()?;
-    let b = u64::from_str_radix(b, 16).ok()?;
-    Some((a ^ b).count_ones())
-}
-
 /// 一张图的哈希：base64（可带 `data:...;base64,` 前缀）解得出来就对字节算，解不出来就对原文算 sha256（dHash 为空）。
 pub fn hash_one(kind: &'static str, b64: &str) -> RefImage {
     let text = b64.split_once(";base64,").map_or(b64, |(_, t)| t).trim();
@@ -129,12 +122,16 @@ mod tests {
         let a = dhash(&png(256, 256, grad(256))).unwrap();
         let b = dhash(&png(128, 128, grad(128))).unwrap();
         assert_eq!(a.len(), 16);
-        assert!(hamming(&a, &b).unwrap() <= 6, "{a} vs {b}");
+        // 汉明距离：同图缩放 ≤6，别图 >6（只在测试里用，不再挂公共 API）
+        let dist = |a: &str, b: &str| {
+            (u64::from_str_radix(a, 16).unwrap() ^ u64::from_str_radix(b, 16).unwrap()).count_ones()
+        };
+        assert!(dist(&a, &b) <= 6, "{a} vs {b}");
         let other = dhash(&png(256, 256, |x, y| {
             if (x / 32 + y / 32) % 2 == 0 { 0 } else { 255 }
         }))
         .unwrap();
-        assert!(hamming(&a, &other).unwrap() > 6);
+        assert!(dist(&a, &other) > 6);
         assert_eq!(dhash(b"not an image"), None);
     }
 
