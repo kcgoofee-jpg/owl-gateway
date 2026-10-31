@@ -3,6 +3,8 @@ use crate::{asn::AsnDb, ban_link, jobs::JobError, state::AppState};
 use gate_core::abuse::{self, NetworkClass, ScanWindow};
 use std::collections::HashMap;
 const ASN_FILE: &str = "ip2asn-combined.tsv.gz";
+/// 影子运行的新规则（§2.2 B4 机器节拍 / B2 设备簇覆盖）：先记录、不提示，对比一周再切正式。
+const SHADOW_KINDS: [&str; 2] = ["machine_cadence", "cluster_coverage"];
 pub async fn run(state: &AppState) -> Result<String, JobError> {
     let now = state.now();
     let gate_since = state
@@ -49,14 +51,20 @@ pub async fn run(state: &AppState) -> Result<String, JobError> {
     let signals = outcome.signals;
     let mut counts: HashMap<&str, usize> = HashMap::new();
     for s in &signals {
-        *counts.entry(s.kind).or_default() += 1;
+        // 影子模式（docs/anti-abuse-redesign.md §3.1.4）：新规则先入库 status='shadow'，
+        // 只记录不进待审队列，攒一周和现有提示对比误报率；切正式时把 kind 从这里移除。
+        let shadow = SHADOW_KINDS.contains(&s.kind);
+        *counts
+            .entry(if shadow { "影子" } else { s.kind })
+            .or_default() += 1;
         let prev = match s.alert {
             Some(_) => state.db.abuse_signal_status(s.kind, &s.subject).await?,
             None => None,
         };
         let id = state
             .db
-            .upsert_abuse_signal(
+            .upsert_abuse_signal_with_status(
+                if shadow { "shadow" } else { "open" },
                 s.kind,
                 &s.subject,
                 &s.key_ids,

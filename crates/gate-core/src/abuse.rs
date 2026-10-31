@@ -443,6 +443,109 @@ mod tests {
         ));
         assert_eq!(fuzzy_key(&json!({"screen": "1x1"})), None);
     }
+
+    fn ev_at(ts: f64, ip: &str) -> RequestEvent {
+        RequestEvent {
+            ts,
+            ip: ip.to_string(),
+            ..Default::default()
+        }
+    }
+
+    #[test]
+    fn machine_cadence_fires_on_metronomic_intervals() {
+        let s = ScanSnapshot {
+            keys: vec![(1, "u1".into())],
+            requests: (0..8)
+                .map(|i| (1, ev_at(1000.0 + i as f64 * 60.0, "1.2.3.4")))
+                .collect(),
+            ..ScanSnapshot::default()
+        };
+        let out = evaluate(&s, 200000.0, &Clock::new("UTC", 7), &[], None);
+        let hits: Vec<_> = out
+            .signals
+            .iter()
+            .filter(|s| s.kind == "machine_cadence")
+            .collect();
+        assert_eq!(hits.len(), 1);
+        assert_eq!(hits[0].score, 20.0);
+        assert!(
+            hits[0].detail["summary"]
+                .as_str()
+                .unwrap()
+                .contains("CV=0.000")
+        );
+    }
+
+    #[test]
+    fn human_jitter_never_counts_as_machine_cadence() {
+        // 人手点图：间隔在 30–90 秒之间乱跳
+        let gaps = [30.0, 75.0, 50.0, 90.0, 40.0, 65.0, 55.0, 80.0, 45.0];
+        let mut ts = 1000.0;
+        let requests: Vec<_> = gaps
+            .iter()
+            .map(|g| {
+                ts += g;
+                (1, ev_at(ts, "1.2.3.4"))
+            })
+            .collect();
+        let s = ScanSnapshot {
+            keys: vec![(1, "u1".into())],
+            requests,
+            ..ScanSnapshot::default()
+        };
+        let out = evaluate(&s, 200000.0, &Clock::new("UTC", 7), &[], None);
+        assert!(out.signals.iter().all(|s| s.kind != "machine_cadence"));
+    }
+
+    #[test]
+    fn cluster_coverage_fires_when_hours_and_networks_spread() {
+        let mut requests = vec![];
+        for h in 0..21 {
+            let ip = ["10.1.0.5", "10.2.0.5", "10.3.0.5"][h % 3];
+            let ts = 3600.0 * h as f64 + 500.0;
+            requests.push((1, ev_at(ts, ip)));
+            requests.push((2, ev_at(ts + 60.0, ip)));
+        }
+        let s = ScanSnapshot {
+            keys: vec![(1, "u1".into()), (2, "u2".into())],
+            requests,
+            device_logins: vec![("u1".into(), "dev1".into()), ("u2".into(), "dev1".into())],
+            ..ScanSnapshot::default()
+        };
+        let out = evaluate(&s, 200000.0, &Clock::new("UTC", 7), &[], None);
+        assert!(
+            out.signals
+                .iter()
+                .any(|s| s.kind == "cluster_coverage" && s.score == 20.0),
+            "{:?}",
+            out.signals
+                .iter()
+                .map(|s| (s.kind, s.score))
+                .collect::<Vec<_>>()
+        );
+        // 设备簇本身也该在
+        assert!(out.signals.iter().any(|s| s.kind == "device_cluster"));
+    }
+
+    #[test]
+    fn cluster_coverage_needs_both_hours_and_networks() {
+        // 同样 21 个小时段，但只从一个网段来：像一个人换设备登录，不算共用
+        let mut requests = vec![];
+        for h in 0..21 {
+            let ts = 3600.0 * h as f64 + 500.0;
+            requests.push((1, ev_at(ts, "10.1.0.5")));
+            requests.push((2, ev_at(ts + 60.0, "10.1.0.5")));
+        }
+        let s = ScanSnapshot {
+            keys: vec![(1, "u1".into()), (2, "u2".into())],
+            requests,
+            device_logins: vec![("u1".into(), "dev1".into()), ("u2".into(), "dev1".into())],
+            ..ScanSnapshot::default()
+        };
+        let out = evaluate(&s, 200000.0, &Clock::new("UTC", 7), &[], None);
+        assert!(out.signals.iter().all(|s| s.kind != "cluster_coverage"));
+    }
 }
 
 /// Owned metadata snapshot supplied by the database adapter; never contains prompts or image bytes.
@@ -853,6 +956,44 @@ pub fn evaluate(
                     "evidence": evidence,
                 }),
             });
+            // B2：同一台机器上的账号们请求时段铺得很开、来源网段又杂 → 更像几个人轮着用一台机器。
+            // 文档里的「城市」没有地理库，用 /24 网段多样性代替（住宅宽带 / 手机流量会换网段，
+            // 但一个人一天通常只落在两三个里；跨 3 个以上且跨 20 个小时段就是共用形态）。
+            let mut hours: BTreeSet<i64> = BTreeSet::new();
+            let mut nets: BTreeSet<&str> = BTreeSet::new();
+            for d in &ids {
+                for k in keys_of.get(d).into_iter().flatten() {
+                    for e in events.get(k).into_iter().flatten() {
+                        hours.insert((e.ts / 3600.0) as i64);
+                        if !e.ip.is_empty() {
+                            nets.insert(net24(&e.ip));
+                        }
+                    }
+                }
+            }
+            if hours.len() >= 20 && nets.len() >= 3 {
+                out.push(Signal {
+                    alert: None,
+                    all_banned: false,
+                    kind: "cluster_coverage",
+                    subject: subject(&ids),
+                    key_ids: kids(&ids),
+                    score: 20.0,
+                    detail: json!({
+                        "summary": format!(
+                            "{} 个账号在同一台机器上，请求跨 {} 个小时段、来自 {} 个不同网段——更像几个人共用",
+                            ids.len(),
+                            hours.len(),
+                            nets.len()
+                        ),
+                        "evidence": [
+                            ev("账号", ids.len()),
+                            ev("时段覆盖", format!("{} 小时", hours.len())),
+                            ev("网段", format!("{} 个", nets.len())),
+                        ],
+                    }),
+                });
+            }
         }
     }
 
@@ -938,6 +1079,60 @@ pub fn evaluate(
                             "evidence": [ev("跳网", format!("{hops} 次")), ev("运营商", format!("{} 家", nets.len())), ev("Discord", d)],
                         }),
                     });
+        }
+    }
+    // ---------- B4 机器节拍：同一把 Key 的请求间隔几乎没有变化（CV < 0.05） ----------
+    // 人手点生图，间隔受打字 / 看图 / 走神影响，方差不会比均值小 20 倍；
+    // 脚本轮询、批量跑图才会敲出稳定的节拍。样本要 ≥6 个间隔，一两个巧合不算。
+    {
+        for (&k, es) in &events {
+            let mut ts: Vec<f64> = es.iter().map(|e| e.ts).collect();
+            if ts.len() < 7 {
+                continue;
+            }
+            ts.sort_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
+            let (mut sum, mut sq, mut n) = (0.0_f64, 0.0_f64, 0_usize);
+            for w in ts.windows(2) {
+                let d = w[1] - w[0];
+                if d <= 0.0 {
+                    continue;
+                }
+                sum += d;
+                sq += d * d;
+                n += 1;
+            }
+            if n < 6 {
+                continue;
+            }
+            let mean = sum / n as f64;
+            if mean <= 0.0 {
+                continue;
+            }
+            let variance = (sq / n as f64 - mean * mean).max(0.0);
+            let cv = variance.sqrt() / mean;
+            if cv >= 0.05 {
+                continue;
+            }
+            let d = &did_of[&k];
+            out.push(Signal {
+                alert: None,
+                all_banned: false,
+                kind: "machine_cadence",
+                subject: format!("key:{k}"),
+                key_ids: k.to_string(),
+                score: 20.0,
+                detail: json!({
+                    "summary": format!(
+                        "Key #{k} 的请求间隔几乎是固定节拍（CV={cv:.3}，{n} 个间隔，平均 {mean:.0} 秒）——人手点不出这么均匀"
+                    ),
+                    "evidence": [
+                        ev("间隔样本", n),
+                        ev("平均间隔", format!("{mean:.0} 秒")),
+                        ev("变异系数 CV", format!("{cv:.3}")),
+                        ev("Discord", d),
+                    ],
+                }),
+            });
         }
     }
     // ---------- 登录用的是机房 / VPN IP：给涉及这些账号的信号补一条证据（单独不成信号） ----------

@@ -99,24 +99,50 @@ impl Db {
         detail_json: &str,
         now: f64,
     ) -> Result<i64> {
-        let (kind, subject, key_ids, detail) = (
+        self.upsert_abuse_signal_with_status(
+            "open",
+            kind,
+            subject,
+            key_ids,
+            score,
+            detail_json,
+            now,
+        )
+        .await
+    }
+
+    /// 影子模式的信号用 `status='shadow'` 入库：只记录不进待审队列，攒一周对比误报率。
+    /// 影子行不会被「重新打开」逻辑翻成 open，切正式时把 kind 移出影子名单即可。
+    #[allow(clippy::too_many_arguments)] // 参数一一对应 abuse_signals 的列
+    pub async fn upsert_abuse_signal_with_status(
+        &self,
+        status: &str,
+        kind: &str,
+        subject: &str,
+        key_ids: &str,
+        score: f64,
+        detail_json: &str,
+        now: f64,
+    ) -> Result<i64> {
+        let (kind, subject, key_ids, detail, status) = (
             kind.to_string(),
             subject.to_string(),
             key_ids.to_string(),
             detail_json.to_string(),
+            status.to_string(),
         );
         let score = score.clamp(0.0, 100.0);
         self.write(move |tx| {
             tx.query_row(
                 "INSERT INTO abuse_signals(kind, subject, key_ids, score, detail, status, first_ts, last_ts) \
-                 VALUES (?1,?2,?3,?4,?5,'open',?6,?6) \
+                 VALUES (?1,?2,?3,?4,?5,?6,?7,?7) \
                  ON CONFLICT(kind, subject) DO UPDATE SET \
-                 status = CASE WHEN abuse_signals.status='expired' THEN 'open' \
+                 status = CASE WHEN abuse_signals.status='expired' THEN excluded.status \
                    WHEN abuse_signals.status='dismissed' \
-                   AND excluded.score >= abuse_signals.score + ?7 THEN 'open' ELSE abuse_signals.status END, \
+                   AND excluded.score >= abuse_signals.score + ?8 THEN excluded.status ELSE abuse_signals.status END, \
                  key_ids=excluded.key_ids, score=excluded.score, detail=excluded.detail, last_ts=excluded.last_ts \
                  RETURNING id",
-                params![kind, subject, key_ids, score, detail, now, ABUSE_REOPEN_DELTA],
+                params![kind, subject, key_ids, score, detail, status, now, ABUSE_REOPEN_DELTA],
                 |r| r.get(0),
             )
         })
