@@ -106,3 +106,49 @@ async fn waiting_readers_do_not_hold_blocking_threads() {
     let n = threads.lock().unwrap().len();
     assert!(n <= 6, "执行读查询的阻塞线程有 {n} 个（池子只有 2 条连接）");
 }
+
+#[tokio::test]
+async fn health_rejects_a_writer_that_can_only_read() {
+    let (_dir, db) = open();
+    db.write_raw(|c| c.pragma_update(None, "query_only", "ON"))
+        .await
+        .unwrap();
+    assert_eq!(
+        db.health(Duration::from_secs(2)).await,
+        Err(Unhealthy::Write)
+    );
+}
+
+#[tokio::test]
+async fn uncertain_site_paid_dispatch_survives_restart_and_blocks_the_next_image() {
+    let (dir, db) = open();
+    db.set_setting("v5_paid_tokens", r#"{"t":{"max_anlas":10,"until":100}}"#)
+        .await
+        .unwrap();
+    for id in ["a", "b"] {
+        db.reserve_request_settlement(id, id, 1, "day", "month", false, 0.0, 1, 0, 1.0)
+            .await
+            .unwrap();
+    }
+    let (a, b) = tokio::join!(
+        db.reserve_site_paid("a", "t", 8.0, 1.0),
+        db.reserve_site_paid("b", "t", 8.0, 1.0)
+    );
+    let a = a.unwrap();
+    assert_ne!(a, b.unwrap());
+    let (first, second) = if a { ("a", "b") } else { ("b", "a") };
+    assert!(db.reserve_site_paid(first, "t", 8.0, 1.0).await.unwrap());
+    db.dispatch_request_settlement(first, "correlation", "day", "month", false, 0.0, 1, 0, 2.0)
+        .await
+        .unwrap();
+    drop(db);
+    let db = Db::open(dir.path().join("t.db")).unwrap();
+    db.close_request_reservation(first, 3.0).await.unwrap();
+    assert!(!db.reserve_site_paid(second, "t", 8.0, 3.0).await.unwrap());
+    assert!(
+        db.manually_release_unknown_request(first, "test", "verified no charge", 4.0)
+            .await
+            .unwrap()
+    );
+    assert!(db.reserve_site_paid(second, "t", 8.0, 4.0).await.unwrap());
+}

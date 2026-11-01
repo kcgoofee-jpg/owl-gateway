@@ -69,6 +69,7 @@ pub const RUST_ADDED_COLUMNS: &[&str] = &[
 
 /// 3.0 新增的表（只增不减）。同 `RUST_ADDED_COLUMNS`：
 pub const RUST_ADDED_TABLES: &[&str] = &[
+    "CREATE TABLE IF NOT EXISTS gateway_health_probe(id INTEGER PRIMARY KEY, bit INTEGER NOT NULL)",
     "CREATE TABLE IF NOT EXISTS member_rules (\
      discord_id TEXT PRIMARY KEY, overrides TEXT NOT NULL, recycle_not_before REAL)",
     // Durable image request lifecycle. Unknown dispatched outcomes remain held for reconciliation;
@@ -172,6 +173,8 @@ pub const RUST_ADDED_TABLE_COLUMNS: &[&str] = &[
     "ALTER TABLE request_settlements ADD COLUMN result_at REAL",
     "ALTER TABLE request_settlements ADD COLUMN delivery_state TEXT NOT NULL DEFAULT 'pending'",
     "ALTER TABLE request_settlements ADD COLUMN correlation_id TEXT NOT NULL DEFAULT ''",
+    "ALTER TABLE request_settlements ADD COLUMN site_paid_token TEXT NOT NULL DEFAULT ''",
+    "ALTER TABLE request_settlements ADD COLUMN site_paid_hold REAL NOT NULL DEFAULT 0",
     // 这个账号第一次在这台设备 / 这个浏览器上网页登录的时刻（ts 是最近一次）。待审卡片显示「首次 / 最近登录」用；
     // 加列之前的老行为 NULL，读的时候退回 ts。
     "ALTER TABLE device_logins ADD COLUMN first_ts REAL",
@@ -303,6 +306,7 @@ pub fn run(conn: &mut Connection) -> rusqlite::Result<()> {
     for idx in INDEXES {
         conn.execute(idx, [])?;
     }
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_settlement_site_paid ON request_settlements(site_paid_token) WHERE site_paid_hold > 0", [])?;
     conn.pragma_update(None, "user_version", SCHEMA_VERSION)?;
     Ok(())
 }

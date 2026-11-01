@@ -224,8 +224,8 @@ impl Db {
                 params![now, i64::from(is_image_kind(&s.kind)), result_at, s.key_id],
             )?;
             if let Some(id) = request_id.as_deref() {
-                tx.execute("UPDATE request_settlements SET status=?,anlas=?,v5=?,legacy=?,result_json=NULL,updated_at=? WHERE request_id=? AND status='result_saved'",
-                    params![if held { "uncertain" } else { "committed" }, s.remaining_anlas, s.remaining_v5, s.remaining_legacy, now, id])?;
+                tx.execute("UPDATE request_settlements SET status=?,site_paid_hold=MAX(0,site_paid_hold-?),anlas=?,v5=?,legacy=?,result_json=NULL,updated_at=? WHERE request_id=? AND status='result_saved'",
+                    params![if held { "uncertain" } else { "committed" }, s.site_paid_anlas, s.remaining_anlas, s.remaining_v5, s.remaining_legacy, now, id])?;
             }
             Ok(())
         })
@@ -304,6 +304,66 @@ impl Db {
             tx.execute("INSERT INTO admin_actions(ts,actor,action,target,detail,ok) VALUES(?,?,?,?,?,1)", params![now,actor,"request_settlement_release",request_id,reason])?;
             Ok(true)
         }).await
+    }
+
+    /// Admit a site-paid dispatch against committed spending and all unresolved
+    /// holds in the same SQLite write transaction. Reconfirming excludes itself.
+    pub async fn reserve_site_paid(
+        &self,
+        id: &str,
+        token: &str,
+        cost: f64,
+        now: f64,
+    ) -> Result<bool> {
+        use gate_core::paid_v5;
+        let (id, token) = (id.to_owned(), token.to_owned());
+        self.write(move |tx| {
+            let raw: Option<String> = tx
+                .query_row(
+                    "SELECT value FROM site_settings WHERE key=?",
+                    [paid_v5::KEY],
+                    |r| r.get(0),
+                )
+                .optional()?;
+            let Some(grant) = paid_v5::grant(raw.as_deref(), &token, now) else {
+                return Ok(false);
+            };
+            let spent: f64 = tx.query_row(
+                "SELECT COALESCE(SUM(anlas),0) FROM usage_log
+                 WHERE token_id=? AND status='ok' AND detail LIKE ?",
+                params![token, format!("%{}%", paid_v5::MARKER)],
+                |r| r.get(0),
+            )?;
+            let held: f64 = tx.query_row(
+                "SELECT COALESCE(SUM(site_paid_hold),0) FROM request_settlements
+                 WHERE site_paid_token=? AND site_paid_hold>0 AND request_id<>?
+                 AND status IN ('reserved','dispatched','uncertain','result_saved')",
+                params![token, id],
+                |r| r.get(0),
+            )?;
+            if !paid_v5::fits(grant, spent + held, cost) {
+                return Ok(false);
+            }
+            Ok(tx.execute(
+                "UPDATE request_settlements SET site_paid_token=?, site_paid_hold=?
+                 WHERE request_id=? AND status IN ('reserved','dispatched')",
+                params![token, cost, id],
+            )? == 1)
+        })
+        .await
+    }
+
+    pub async fn clear_site_paid(&self, id: &str) -> Result<()> {
+        let id = id.to_owned();
+        self.write(move |tx| {
+            tx.execute(
+                "UPDATE request_settlements SET site_paid_hold=0, site_paid_token=''
+                 WHERE request_id=? AND status IN ('reserved','dispatched')",
+                [&id],
+            )?;
+            Ok(())
+        })
+        .await
     }
 
     /// Anlas already spent on site-paid images through `token_id` (rows whose detail carries `marker`).

@@ -215,3 +215,23 @@ async fn every_endpoint_requires_login_and_same_origin() {
         "{acts:?}"
     );
 }
+
+#[tokio::test]
+async fn throttled_logins_stop_writing_audit_rows() {
+    let e = setup(&[]).await;
+    let mut rejected = 0;
+    for _ in 0..9 {
+        let (code, _, _) = Call::new("POST", "/admin/api/login")
+            .json(json!({"password":"wrong"}))
+            .send(&e.state)
+            .await;
+        match code.as_u16() {
+            401 => rejected += 1,
+            429 => {}
+            _ => panic!("unexpected {code}"),
+        }
+    }
+    assert!(rejected > 0 && rejected < 9);
+    let rows = query(&e.state.db, "SELECT count(*) AS n FROM admin_actions").await;
+    assert_eq!(rows[0]["n"], json!(rejected));
+}

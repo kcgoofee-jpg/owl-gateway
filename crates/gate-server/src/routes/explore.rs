@@ -145,16 +145,15 @@ fn png_meta(bytes: &[u8]) -> Option<Value> {
 }
 
 async fn upload(State(st): State<AppState>, headers: HeaderMap, req: Request) -> ApiResult {
-    let Some((discord_id, key)) = crate::session::member_state(&st, &headers).await? else {
+    let Some((discord_id, _)) = crate::session::member_state(&st, &headers).await? else {
         return Err(HttpError::new(401, "请先在网页登录，再上传到 Explore。").into());
     };
     if st.env.explore_channel_id.trim().is_empty() || st.env.discord_bot_token.trim().is_empty() {
         return Err(InternalError("站点还没配置上传频道，暂时无法提交。".into()).into());
     }
-    let bucket = key.as_ref().map(crate::key::Key::id).unwrap_or_default();
     if !st
-        .rpm
-        .check_then_push(&bucket, 1, COOLDOWN_SECONDS, st.now())
+        .explore_uploads
+        .check_then_push(&discord_id, 1, COOLDOWN_SECONDS, st.now())
     {
         return Err(HttpError::new(
             429,

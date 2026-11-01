@@ -572,3 +572,24 @@ fn old_snapshots_with_req_features_are_dropped() {
         "req_features 必须整张删掉，不能把词条哈希留在脱敏快照里"
     );
 }
+
+#[test]
+fn sanitize_removes_login_addresses_from_all_three_tables() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = new_db(dir.path());
+    let c = rw(&path);
+    for table in ["web_logins", "browser_logins", "device_logins"] {
+        c.execute_batch(&format!("DROP TABLE IF EXISTS {table}; CREATE TABLE {table}(ip TEXT); INSERT INTO {table} VALUES('192.0.2.19'),('2001:db8:1234::99')")).unwrap();
+    }
+    drop(c);
+    sanitize::sanitize(&path).unwrap();
+    let c = ro(&path);
+    for table in ["web_logins", "browser_logins", "device_logins"] {
+        let got: String = c
+            .query_row(&format!("SELECT group_concat(ip) FROM {table}"), [], |r| {
+                r.get(0)
+            })
+            .unwrap();
+        assert_eq!(got, "192.0.*.*,2001:db8:*");
+    }
+}

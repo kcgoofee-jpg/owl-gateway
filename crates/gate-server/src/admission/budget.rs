@@ -55,6 +55,10 @@ pub struct Reserved {
 }
 
 impl Reserved {
+    pub(crate) fn request_id(&self) -> &str {
+        &self.request_id
+    }
+
     pub fn id(&self) -> u64 {
         self.id
     }

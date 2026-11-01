@@ -58,13 +58,29 @@ pub fn sanitize(path: &Path) -> Result<usize> {
     // —— 以下是相对旧版新增的（见模块文档）——
     // 用量日志的来源 IP：3.0（10-18 起）存的是完整 IP，快照里只留前两段（a.b.*.*，和 2.x 存的一样），
     // 网段分析照样能做，但不能定位到个人。IPv6 只留前两组。已经打过码的老行（含 `*`）不动。
-    tx.execute(
-        "UPDATE usage_log SET src = CASE \
-           WHEN instr(src, ':') > 0 THEN substr(src, 1, instr(substr(src, instr(src, ':') + 1), ':') + instr(src, ':')) || '*' \
-           ELSE substr(src, 1, instr(src, '.') + instr(substr(src, instr(src, '.') + 1), '.')) || '*.*' END \
-         WHERE src <> '' AND instr(src, '*') = 0",
+    for (table, field) in [
+        ("usage_log", "src"),
+        ("web_logins", "ip"),
+        ("device_logins", "ip"),
+        ("browser_logins", "ip"),
+    ] {
+        // Older snapshots may predate these login tables or the IP column.
+        let exists: bool = tx.query_row(
+            "SELECT EXISTS(SELECT 1 FROM pragma_table_info(?1) WHERE name=?2)",
+            [table, field],
+            |row| row.get(0),
+        )?;
+        if !exists {
+            continue;
+        }
+        tx.execute(
+        &format!("UPDATE {table} SET {field} = CASE \
+           WHEN instr({field}, ':') > 0 THEN substr({field}, 1, instr(substr({field}, instr({field}, ':') + 1), ':') + instr({field}, ':')) || '*' \
+           ELSE substr({field}, 1, instr({field}, '.') + instr(substr({field}, instr({field}, '.') + 1), '.')) || '*.*' END \
+         WHERE {field} <> '' AND instr({field}, '*') = 0"),
         [],
     )?;
+    }
     let donated: Vec<(i64, String)> = {
         let mut stmt = tx.prepare("SELECT id, token FROM key_donations")?;
         stmt.query_map([], |r| Ok((r.get(0)?, r.get(1)?)))?

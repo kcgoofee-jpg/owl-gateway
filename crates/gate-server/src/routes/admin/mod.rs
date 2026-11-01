@@ -184,6 +184,11 @@ async fn audited(State(state): State<AppState>, req: Request, next: Next) -> Res
     if !authed {
         return resp;
     }
+    // Invalid-origin requests are rejected before the IP limiter. Excess attempts
+    // are already rate-limited, so neither category may enqueue anonymous writes.
+    if is_login && matches!(resp.status().as_u16(), 403 | 429) {
+        return resp;
+    }
     if let Some(HttpErrorInfo(e)) = resp.extensions().get::<HttpErrorInfo>() {
         let detail = gate_core::primitives::take_chars(
             &format!(

@@ -21,7 +21,7 @@ use rusqlite::{Connection, OpenFlags, Transaction, TransactionBehavior};
 use std::panic::{AssertUnwindSafe, catch_unwind};
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
-use std::time::Duration;
+use std::time::{Duration, Instant};
 use tokio::sync::oneshot;
 
 #[derive(Debug, thiserror::Error)]
@@ -58,6 +58,7 @@ struct Inner {
     /// 许可数 = 写队列长度：拿到许可才入队，任务跑完才还，因此队列永远不会满
     write_slots: Arc<tokio::sync::Semaphore>,
     readers: Mutex<Vec<Connection>>,
+    last_health_commit: Mutex<Option<Instant>>,
     /// 许可数 = 读连接数：拿到许可才进阻塞线程，所以进去时池子里一定有空闲连接。
     read_slots: Arc<tokio::sync::Semaphore>,
 }
@@ -170,6 +171,7 @@ impl Db {
                 write_slots: Arc::new(tokio::sync::Semaphore::new(queue)),
                 read_slots: Arc::new(tokio::sync::Semaphore::new(pool.len())),
                 readers: Mutex::new(pool),
+                last_health_commit: Mutex::new(None),
             }),
         })
     }
@@ -287,7 +289,7 @@ impl Db {
         .map_err(|_| DbError::ReaderPanicked)?
     }
 
-    /// 读、写两条路各跑一次 `SELECT 1`，都要在 `limit` 内完成。
+    /// 读连接执行查询，写连接提交一笔探针事务；两秒内复用已成功的提交。
     /// 写那一条排在写队列里，所以写线程退出或队列卡住都会在这里暴露。
     pub async fn health(&self, limit: Duration) -> std::result::Result<(), Unhealthy> {
         let one = |c: &Connection| c.query_row("SELECT 1", [], |r| r.get::<_, i64>(0));
@@ -295,8 +297,23 @@ impl Db {
             Ok(Ok(1)) => {}
             _ => return Err(Unhealthy::Read),
         }
-        match tokio::time::timeout(limit, self.write_raw(move |c| one(c))).await {
-            Ok(Ok(1)) => Ok(()),
+        let inner = self.inner.clone();
+        let probe = self.write_raw(move |conn| {
+            let mut last = inner.last_health_commit.lock().expect("health probe");
+            if last.is_some_and(|t| t.elapsed() < Duration::from_secs(2)) {
+                return Ok(());
+            }
+            let tx = conn.transaction()?;
+            tx.execute(
+                "INSERT INTO gateway_health_probe VALUES(1,1) ON CONFLICT(id) DO UPDATE SET bit=1-bit",
+                [],
+            )?;
+            tx.commit()?;
+            *last = Some(Instant::now());
+            Ok(())
+        });
+        match tokio::time::timeout(limit, probe).await {
+            Ok(Ok(())) => Ok(()),
             _ => Err(Unhealthy::Write),
         }
     }

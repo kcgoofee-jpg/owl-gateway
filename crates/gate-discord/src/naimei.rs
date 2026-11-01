@@ -330,28 +330,6 @@ impl Naimei {
                 .collect()
         };
         let mut images = image_urls(&m.attachments);
-        // 文本附件（txt/md/json/csv/log，≤128KB）：抓内容进上下文
-        let mut text_files: Vec<(String, String)> = Vec::new();
-        for a in m.attachments.iter().take(3) {
-            if text_files.len() >= 2 {
-                break;
-            }
-            let ct = a.content_type.as_deref().unwrap_or("");
-            let name = a.filename.to_lowercase();
-            let is_text = ct.starts_with("text/")
-                || name.ends_with(".txt")
-                || name.ends_with(".md")
-                || name.ends_with(".json")
-                || name.ends_with(".csv")
-                || name.ends_with(".log");
-            if !is_text {
-                continue;
-            }
-            if let Some(content) = chat::fetch_text_file(&a.url).await {
-                let cut: String = content.chars().take(2500).collect();
-                text_files.push((a.filename.clone(), cut));
-            }
-        }
         // 引用上下文：被回复消息的内容（和它的图）对模型可见，不然「fix it」没法修
         let mut text = strip_mention(&m.content, &bot_id).trim().to_owned();
         if let Some(r) = m.referenced_message.as_ref() {
@@ -396,6 +374,28 @@ impl Naimei {
             inner.last_chat.insert(channel_id, now);
             if inner.histories.len() > CHAT_MAX_CHANNELS {
                 inner.histories.clear();
+            }
+        }
+        // 文本附件（txt/md/json/csv/log，≤128KB）：抓内容进上下文
+        let mut text_files: Vec<(String, String)> = Vec::new();
+        for a in m.attachments.iter().take(3) {
+            if text_files.len() >= 2 {
+                break;
+            }
+            let ct = a.content_type.as_deref().unwrap_or("");
+            let name = a.filename.to_lowercase();
+            let is_text = ct.starts_with("text/")
+                || name.ends_with(".txt")
+                || name.ends_with(".md")
+                || name.ends_with(".json")
+                || name.ends_with(".csv")
+                || name.ends_with(".log");
+            if !is_text {
+                continue;
+            }
+            if let Some(content) = chat::fetch_text_file(&a.url).await {
+                let cut: String = content.chars().take(2500).collect();
+                text_files.push((a.filename.clone(), cut));
             }
         }
         let is_owner = author
@@ -707,7 +707,9 @@ impl Naimei {
             })
         };
         let started = std::time::Instant::now();
-        let reply = chat.reply(&system, &history, req.text).await;
+        let reply = chat
+            .reply(&system, &history, chat::user_content(req.text, &req.images))
+            .await;
         typing_done.store(true, Ordering::Relaxed);
         typing_task.abort();
         let record = |assistant: &str, status: &str| {

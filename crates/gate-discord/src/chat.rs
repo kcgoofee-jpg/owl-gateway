@@ -74,9 +74,9 @@ impl Chat {
         &self,
         system: &str,
         history: &[Turn],
-        user: &str,
+        user: impl Into<Value>,
     ) -> Result<String, ChatError> {
-        let body = self.request_body(system, history, json!(user), false);
+        let body = self.request_body(system, history, user.into(), false);
         let url = format!("{}/v1/chat/completions", self.cfg.base_url);
         let resp = self
             .http
@@ -255,7 +255,7 @@ pub async fn fetch_text_file(url: &str) -> Option<String> {
             .build()
             .expect("构建附件下载客户端失败")
     });
-    let resp = client.get(url).send().await.ok()?;
+    let mut resp = client.get(url).send().await.ok()?.error_for_status().ok()?;
     let ct = resp
         .headers()
         .get(reqwest::header::CONTENT_TYPE)?
@@ -265,11 +265,18 @@ pub async fn fetch_text_file(url: &str) -> Option<String> {
     if !ct.starts_with("text/") {
         return None;
     }
-    let bytes = resp.bytes().await.ok()?;
-    if bytes.len() > 128 * 1024 {
+    const LIMIT: usize = 128 * 1024;
+    if resp.content_length().is_some_and(|n| n > LIMIT as u64) {
         return None;
     }
-    String::from_utf8(bytes.to_vec()).ok()
+    let mut bytes = Vec::new();
+    while let Some(chunk) = resp.chunk().await.ok()? {
+        if chunk.len() > LIMIT - bytes.len() {
+            return None;
+        }
+        bytes.extend_from_slice(&chunk);
+    }
+    String::from_utf8(bytes).ok()
 }
 
 // ---------- 用户内容构造 ----------
@@ -586,6 +593,36 @@ mod tests {
     use serde_json::json;
 
     // ---------- classify ----------
+
+    #[tokio::test]
+    async fn attachment_limit_applies_before_an_unbounded_body_finishes() {
+        use axum::body::{Body, Bytes};
+        use axum::routing::get;
+        use futures::StreamExt;
+        let app = axum::Router::new().route(
+            "/file",
+            get(|| async {
+                let chunks = futures::stream::iter([Ok::<_, std::io::Error>(Bytes::from(vec![
+                        b'x';
+                        128 * 1024
+                            + 1
+                    ]))])
+                .chain(futures::stream::pending());
+                (
+                    [(axum::http::header::CONTENT_TYPE, "text/plain")],
+                    Body::from_stream(chunks),
+                )
+            }),
+        );
+        let socket = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let url = format!("http://{}/file", socket.local_addr().unwrap());
+        let server = tokio::spawn(async move { axum::serve(socket, app).await.unwrap() });
+        let result = tokio::time::timeout(Duration::from_secs(3), fetch_text_file(&url))
+            .await
+            .unwrap();
+        assert!(result.is_none());
+        server.abort();
+    }
 
     #[test]
     fn upstream_quota_shapes_are_recognized() {

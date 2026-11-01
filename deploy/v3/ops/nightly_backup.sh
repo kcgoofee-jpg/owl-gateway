@@ -5,8 +5,8 @@
 set -euo pipefail
 cd /opt/service-tools
 export AWS_PROFILE=naigate-push
-ACC=$(aws sts get-caller-identity --query Account --output text 2>/dev/null || true)
-[ -n "$ACC" ] || { echo "$(date '+%F %T') 无法取 AWS 身份，跳过"; exit 0; }
+ACC=$(aws sts get-caller-identity --query Account --output text)
+[ -n "$ACC" ] || { echo "$(date '+%F %T') 无法取 AWS 身份，备份失败" >&2; exit 1; }
 BUCKET="nai-gate-backups-${ACC}"
 STAMP=$(date +%Y%m%d-%H%M)
 WORK=$(mktemp -d /tmp/nai-backup.XXXX)
@@ -19,15 +19,18 @@ trap 'rm -rf "$WORK"' EXIT
 
 # 2) 敏感与配置文件 + 快照 一起打包（存在的才收：upstream_tokens.json 只在接管过令牌池时存在）
 FILES=(.env)
-for f in data/secret_key data/upstream_tokens.json data/discord_layout.json; do
+for f in data/secret_key data/upstream_tokens.json data/discord_layout.json data/private_params.json; do
   [ -f "/opt/service-tools/$f" ] && FILES+=("$f")
 done
 tar -czf "$WORK/bundle.tar.gz" -C /opt/service-tools "${FILES[@]}"
 # 3.0 的部署文件与线上 Caddy 配置
-tar -czf "$WORK/owl.tar.gz" -C / opt/owl/compose.yml opt/owl/cutover.sh opt/caddy/Caddyfile
+test -s /opt/owl/nai-mirror/nai-app/image.html
+test -s /opt/owl/nai-mirror/nai-app/bridge.js
+(cd /opt/owl/nai-mirror && find nai-app -type f -print0 | sort -z | xargs -0 sha256sum) > "$WORK/workbench.sha256"
+tar -czf "$WORK/owl.tar.gz" -C / opt/owl/compose.yml opt/owl/cutover.sh opt/caddy/Caddyfile opt/owl/nai-mirror/nai-app
 
 # 3) 单 tar 包（DB 快照 + 配置包），客户端加密（AES-256 + PBKDF2）：S3 只存密文，桶泄露也不泄露成员 Key 与令牌
-tar -czf "$WORK/all.tar.gz" -C "$WORK" nai_gate.db.gz bundle.tar.gz owl.tar.gz
+tar -czf "$WORK/all.tar.gz" -C "$WORK" nai_gate.db.gz bundle.tar.gz owl.tar.gz workbench.sha256
 openssl enc -aes-256-cbc -pbkdf2 -salt \
   -pass "file:/root/.backup_pass" -in "$WORK/all.tar.gz" -out "$WORK/backup.tar.gz.enc"
 

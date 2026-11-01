@@ -44,7 +44,7 @@ mkdir -p /opt/service-tools/data
 gunzip -c "$WORK/split/nai_gate.db.gz" > /opt/service-tools/data/nai_gate.db
 sqlite3 /opt/service-tools/data/nai_gate.db "PRAGMA integrity_check;" | grep -qx ok || { echo "数据库校验失败"; exit 1; }
 cp "$WORK/split/.env" /opt/service-tools/.env
-for f in secret_key upstream_tokens.json discord_layout.json; do
+for f in secret_key upstream_tokens.json discord_layout.json private_params.json; do
   [[ -f "$WORK/split/data/$f" ]] && cp "$WORK/split/data/$f" /opt/service-tools/data/
 done
 chown -R 10001:10001 /opt/service-tools/data
@@ -58,6 +58,12 @@ else
   cp deploy/v3/compose.yml deploy/v3/cutover.sh /opt/owl/
   cp deploy/Caddyfile.production /opt/caddy/Caddyfile
 fi
+if [[ -f "$WORK/split/workbench.sha256" ]]; then
+  (cd /opt/owl/nai-mirror && sha256sum --quiet --check "$WORK/split/workbench.sha256")
+fi
+for asset in image.html bridge.js; do
+  [[ -s /opt/owl/nai-mirror/nai-app/$asset ]] || { echo "缺少工作台资源 $asset，请先用 tools/sync-mirror.sh 同步到恢复主机" >&2; exit 1; }
+done
 mkdir -p /opt/owl/ops && cp deploy/v3/ops/* /opt/owl/ops/ && chmod 750 /opt/owl/ops/*
 
 echo "== 6/6 启动 =="
@@ -73,5 +79,8 @@ docker image rm owl-gate:staged >/dev/null 2>&1 || true
 docker compose -p owl --env-file /opt/service-tools/.env -f /opt/owl/compose.yml up -d
 for _ in $(seq 1 30); do curl -fsS -m 2 http://127.0.0.1:3003/healthz >/dev/null 2>&1 && break; sleep 2; done
 curl -fsS http://127.0.0.1:3003/healthz && echo
+# /_owl is available even when the restored site has maintenance enabled.
+curl -fsS -m 10 http://127.0.0.1:3003/_owl/nai-app/bridge.js -o "$WORK/served-bridge.js"
+cmp /opt/owl/nai-mirror/nai-app/bridge.js "$WORK/served-bridge.js"
 echo "恢复完成。剩下：起 Caddy（配置在 /opt/caddy/Caddyfile，接 service-tools_edge 网络）、"
 echo "装定时任务（deploy/harden.sh 与 docs/OPERATIONS.md）、把域名 A 记录切到本机。"

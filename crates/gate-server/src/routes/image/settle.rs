@@ -32,20 +32,16 @@ pub(super) struct Billing {
 /// Site-paid V5 cost for one image on `token_id`, if that account has a live grant with budget left.
 async fn site_paid_cost(
     state: &AppState,
+    request_id: &str,
     token_id: &str,
     body: &Value,
 ) -> Result<Option<f64>, UpstreamError> {
-    use gate_core::paid_v5;
     let db_err = |_| {
         UpstreamError::local(
             500,
             "读取付费设置失败，请求未发出，未扣费。请稍后重试。",
             "",
         )
-    };
-    let raw = state.db.get_setting(paid_v5::KEY).await.map_err(db_err)?;
-    let Some(grant) = paid_v5::grant(raw.as_deref(), token_id, state.now()) else {
-        return Ok(None);
     };
     let cost = Est::from_cost(
         policy::estimate_image_cost(body, true, false)
@@ -60,12 +56,12 @@ async fn site_paid_cost(
     {
         return Ok(None);
     }
-    let spent = state
+    let fits = state
         .db
-        .site_paid_spent(token_id, paid_v5::MARKER)
+        .reserve_site_paid(request_id, token_id, cost, state.now())
         .await
         .map_err(db_err)?;
-    Ok(paid_v5::fits(grant, spent, cost).then_some(cost))
+    Ok(fits.then_some(cost))
 }
 
 /// V5 只开放免费规格：要花成员 Anlas 的 V5（超尺寸、超步数、多张、局部重绘等）一律拒绝（站长 10-22）。
@@ -104,14 +100,19 @@ pub(super) fn resolve_v5(
         Box::pin(async move {
             // 每次确认都从头算：排队前后各确认一次，换号重试（上游 402）也会再来一次，
             // 上一次的「站付」结论不能留到这一次
-            {
+            let previously_held = {
                 let mut b = billing.lock().expect("billing");
+                let held = b.site_paid > 0.0;
                 b.site_paid = 0.0;
                 b.detail = detail0;
-            }
+                held
+            };
             // 站付优先（账号自己的 Anlas，不论成员有没有 Anlas 权限）：先用掉快到期账号的 Anlas，
             // 别的账号的免费 V5 留着
-            if exhausted && let Some(cost) = site_paid_cost(&state, &token_id, &body).await? {
+            if exhausted
+                && let Some(cost) =
+                    site_paid_cost(&state, reserved.request_id(), &token_id, &body).await?
+            {
                 // The account pays from its own Anlas; the member's Anlas budget is untouched
                 let mut b = billing.lock().expect("billing");
                 b.site_paid = cost;
@@ -129,6 +130,13 @@ pub(super) fn resolve_v5(
                     .collect::<Vec<_>>()
                     .join("; ");
                 return Ok(false);
+            }
+            if previously_held {
+                state
+                    .db
+                    .clear_site_paid(reserved.request_id())
+                    .await
+                    .map_err(|_| UpstreamError::local(500, "无法更新站付预算预留", ""))?;
             }
             if can_switch {
                 return Ok(true);
