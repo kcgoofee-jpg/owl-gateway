@@ -51,8 +51,8 @@ def discord_id_from_cookie(cookie):
     return uid
 
 
-def _ensure(uid):
-    if uid not in eligible_ids():
+def _ensure(uid, allowed_ids=None):
+    if uid not in (eligible_ids() if allowed_ids is None else allowed_ids):
         raise PermissionError('not an eligible OWL member')
     now = int(time.time())
     with sqlite3.connect(NEWAPI_DB, timeout=20) as c:
@@ -103,7 +103,7 @@ def reconcile():
     for uid in sorted(ids):
         try:
             with _lock:
-                _, created, token_created = _ensure(uid)
+                _, created, token_created = _ensure(uid, ids)
             result['created'] += int(created)
             result['tokens_created'] += int(token_created)
         except PermissionError:

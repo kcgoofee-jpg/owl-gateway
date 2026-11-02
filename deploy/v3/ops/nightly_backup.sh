@@ -29,8 +29,27 @@ test -s /opt/owl/nai-mirror/nai-app/bridge.js
 (cd /opt/owl/nai-mirror && find nai-app -type f -print0 | sort -z | xargs -0 sha256sum) > "$WORK/workbench.sha256"
 tar -czf "$WORK/owl.tar.gz" -C / opt/owl/compose.yml opt/owl/cutover.sh opt/caddy/Caddyfile opt/owl/nai-mirror/nai-app
 
+# New API and the OWL account bridge are restored together with the gateway.
+python3 - "$WORK" <<'PYNEWAPI'
+import gzip,os,pathlib,shutil,sqlite3,sys,tarfile
+os.umask(0o077)
+work=pathlib.Path(sys.argv[1]);db=work/'newapi.db'
+a=sqlite3.connect('file:/opt/newapi/data/one-api.db?mode=ro',uri=True);b=sqlite3.connect(db);a.backup(b)
+assert b.execute('PRAGMA quick_check').fetchone()[0]=='ok'
+b.close();a.close()
+with open(db,'rb') as src,gzip.open(work/'newapi.db.gz','wb') as dst:shutil.copyfileobj(src,dst)
+db.unlink()
+with tarfile.open(work/'newapi-config.tar.gz','w:gz') as archive:
+ for name in ['opt/welfare/ai.secret','opt/welfare/ai_account.py','opt/welfare/README.md','opt/newapi/start.sh',
+              'opt/newapi/credentials.txt','opt/newapi/backup.py','opt/newapi/backup.sh',
+              'opt/owl/ops/ai-panel.js','opt/owl/ops/theme-init.js','opt/owl/ops/ai-panel-heal.sh',
+              'etc/systemd/system/owl-ai-account.service']:
+  if pathlib.Path('/'+name).is_file():archive.add('/'+name,arcname=name,recursive=False)
+print('New API consistent database and account-bridge configuration verified')
+PYNEWAPI
+
 # 3) 单 tar 包（DB 快照 + 配置包），客户端加密（AES-256 + PBKDF2）：S3 只存密文，桶泄露也不泄露成员 Key 与令牌
-tar -czf "$WORK/all.tar.gz" -C "$WORK" nai_gate.db.gz bundle.tar.gz owl.tar.gz workbench.sha256
+tar -czf "$WORK/all.tar.gz" -C "$WORK" nai_gate.db.gz bundle.tar.gz owl.tar.gz workbench.sha256 newapi.db.gz newapi-config.tar.gz
 openssl enc -aes-256-cbc -pbkdf2 -salt \
   -pass "file:/root/.backup_pass" -in "$WORK/all.tar.gz" -out "$WORK/backup.tar.gz.enc"
 
