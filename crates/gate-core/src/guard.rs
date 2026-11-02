@@ -413,9 +413,11 @@ impl GuardCore {
                 reasons::MEMBER_QUEUE_FULL,
             ));
         }
-        if let Some(cap) = cap.filter(|_| self.queue_full(cap)) {
+        // 文案不报全站并发闸门的具体张数：那是站点内部数字（还随上游账号数变），
+        // 成员在报错里看到只会困惑「我一次只发了一张，怎么说我排了 8 张」。
+        if cap.is_some() && self.queue_full(cap) {
             return Some(Reason::new(
-                format!("全站排队已满，最多同时排 {cap} 张，未扣费。请稍后重试。"),
+                "全站排队已满，这轮没排上，未扣费。请稍后重试。",
                 reasons::QUEUE_FULL,
             ));
         }
@@ -598,7 +600,10 @@ mod tests {
         assert!(g.queue_full(two));
         let r = g.admit_image(5, two, NOON).unwrap();
         assert_eq!(r.code(), reasons::QUEUE_FULL);
-        assert!(r.text().contains("最多同时排 4 张"), "{}", r.text());
+        // 文案只说「排队满」，不报全站闸门张数：那是站点内部数字（还随账号数变），
+        // 成员一次只发一张却看到「最多同时排 4 张」只会以为是自己占了名额。
+        assert!(r.text().contains("全站排队已满"), "{}", r.text());
+        assert!(!r.text().contains("最多同时排"), "{}", r.text());
         // 账号多了，上限跟着变；一个可用账号都没有按一个算；None = 不限
         assert!(!g.queue_full(g.queue_cap(&[None, None, None])));
         assert_eq!(g.queue_cap(&[]), Some(2));

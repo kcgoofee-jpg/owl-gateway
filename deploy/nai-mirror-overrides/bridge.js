@@ -1,7 +1,7 @@
 /* owl ⇄ NovelAI 生图页桥：把官网前端的 API 调用改到本站网关。
    只做三件事：改 base、带 Key、隐藏账号横幅。 */
 (function () {
-  window.__BRIDGE_VERSION__ = "2026-10-31-a";
+  window.__BRIDGE_VERSION__ = "2026-11-01-a";
   var CFG = window.__NAI_BRIDGE__ || {};
   var GATE = CFG.gate || "";
   var KEY = CFG.key || "";
@@ -33,6 +33,70 @@
     return "owl." + payload + ".owl";
   }
 
+  /* ---- 排队反馈（2026-11-01）：本站队列满时出图请求会挂 60–120 秒，官网前端在这段时间
+     不显示任何东西，用户以为卡死就刷新页面——刷新等于断开，前面白等。这里补一条计时提示，
+     并在 429 / 断连时换成一句人话（等多久看 Retry-After）。只加显示，不动请求。 ---- */
+  var QW = { n: 0, since: 0, timer: null, el: null };
+  var QW_PAT = /\/ai\/generate-image(?:-stream)?(?:\?|$)/;
+
+  function qwBox() {
+    if (QW.el && QW.el.isConnected) return QW.el;
+    var el = document.createElement("div");
+    el.setAttribute("data-owl-queue", "1");
+    el.style.cssText = [
+      "position:fixed", "left:50%", "bottom:32px", "transform:translateX(-50%)",
+      "padding:10px 16px", "border-radius:999px", "z-index:2147482999",
+      "font:600 13px/1.4 system-ui,-apple-system,'Segoe UI',sans-serif",
+      "color:#fff", "background:#2f2a56", "border:1px solid #5b52a8",
+      "box-shadow:0 6px 22px rgba(0,0,0,.4)", "pointer-events:none", "white-space:nowrap",
+    ].join(";");
+    (document.body || document.documentElement).appendChild(el);
+    QW.el = el;
+    return el;
+  }
+
+  function qwStart() {
+    QW.n++;
+    if (QW.timer) return true;
+    QW.since = Date.now();
+    var el = qwBox();
+    function tick() {
+      var s = Math.round((Date.now() - QW.since) / 1000);
+      el.textContent = s < 3
+        ? "正在出图…"
+        : "排队中 " + s + " 秒 · 别刷新，刷新就白等了";
+    }
+    tick();
+    QW.timer = setInterval(tick, 1000);
+    return true;
+  }
+
+  function qwStop() {
+    QW.n = Math.max(0, QW.n - 1);
+    if (QW.n > 0) return;
+    if (QW.timer) { clearInterval(QW.timer); QW.timer = null; }
+    if (QW.el) { QW.el.remove(); QW.el = null; }
+  }
+
+  function qwFail(r, netErr) {
+    var wait = 15;
+    try {
+      var ra = r && r.headers && r.headers.get("retry-after");
+      if (ra && /^\d+$/.test(ra) && +ra > 0 && +ra <= 300) wait = +ra;
+    } catch (e) {}
+    var text = netErr
+      ? "连接断了 · 等 10 秒再点一次（这次没扣费）"
+      : "这轮没排上 · 约 " + wait + " 秒后重试（没扣费）";
+    var el = qwBox();
+    el.style.background = "#7a2c2c";
+    el.style.borderColor = "#d16060";
+    el.textContent = text;
+    setTimeout(function () {
+      if (el.isConnected) el.remove();
+      if (QW.el === el) QW.el = null;
+    }, 6000);
+  }
+
   var of = window.fetch;
   window.fetch = function (input, init) {
     var url = typeof input === "string" ? input : (input && input.url) || "";
@@ -47,11 +111,14 @@
     // 同源请求必须带 Cookie：维护模式按网页会话判定站长，丢 Cookie 会被当成访客挡掉
     init.credentials = "same-origin";
     window.__bridgeLog = window.__bridgeLog || [];
+    var watching = QW_PAT.test(mapped) ? qwStart() : false;
     return of.call(window, mapped, init).then(function (r) {
       window.__bridgeLog.push(mapped + " -> " + r.status);
+      if (watching) { qwStop(); if (r.status === 429) qwFail(r); }
       return r;
     }).catch(function (e) {
       window.__bridgeLog.push(mapped + " -> ERR " + e);
+      if (watching) { qwStop(); qwFail(null, true); }
       throw e;
     });
   };
