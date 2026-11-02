@@ -21,12 +21,22 @@ def derive_password(discord_id):
 
 
 def eligible_ids():
+    # Active image members, plus authenticated OWL profiles with a recent
+    # verification of one of the currently configured qualifying roles.
     with sqlite3.connect(f'file:{OWL_DB}?mode=ro', uri=True) as c:
-        return {r[0] for r in c.execute('''SELECT DISTINCT k.discord_id FROM api_keys k
+        banned={r[0] for r in c.execute('SELECT discord_id FROM discord_bans')}
+        ids={r[0] for r in c.execute('''SELECT DISTINCT k.discord_id FROM api_keys k
             JOIN discord_registrations r ON r.discord_id=k.discord_id AND r.key_id=k.id
             WHERE k.enabled=1 AND k.discord_id IS NOT NULL AND k.discord_id<>''
-            AND (k.expires_at IS NULL OR k.expires_at=0 OR k.expires_at>?)
-            AND NOT EXISTS(SELECT 1 FROM discord_bans b WHERE b.discord_id=k.discord_id)''', (time.time(),))}
+            AND (k.expires_at IS NULL OR k.expires_at=0 OR k.expires_at>?)''', (time.time(),))}
+        setting=c.execute('SELECT value FROM site_settings WHERE key=?',('claim_rules',)).fetchone()
+        rules=json.loads(setting[0]).get('roles',[]) if setting else []
+        for rule in rules:
+            ids.update(r[0] for r in c.execute('''SELECT p.discord_id FROM web_profiles p
+                JOIN role_verifications v ON v.discord_id=p.discord_id
+                WHERE v.guild_id=? AND v.role_id=? AND v.verified_at>?''',
+                (rule['guild'],rule['role'],time.time()-30*86400)))
+        return ids-banned
 
 
 def discord_id_from_cookie(cookie):
@@ -36,7 +46,7 @@ def discord_id_from_cookie(cookie):
     with urllib.request.urlopen(req, timeout=10) as r:
         me = json.load(r)
     uid = str((me.get('discord') or {}).get('id') or '')
-    if not me.get('logged_in') or not me.get('has_key') or uid not in eligible_ids():
+    if not me.get('logged_in') or uid not in eligible_ids():
         return None
     return uid
 
@@ -184,7 +194,7 @@ class H(BaseHTTPRequestHandler):
         try:
             uid = discord_id_from_cookie(self.headers.get('Cookie'))
             if not uid:
-                return self._send(401,{'error':'请登录 owl，并确认已获得成员 Key'})
+                return self._send(401,{'error':'请重新登录 owl 完成身份组验证'})
             key = ensure(uid)
             with sqlite3.connect(f'file:{NEWAPI_DB}?mode=ro',uri=True) as c:
                 user_id,quota = c.execute('SELECT id,quota FROM users WHERE username=?',(uid,)).fetchone()

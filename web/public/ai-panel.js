@@ -4,8 +4,8 @@
  */
 (function () {
   'use strict';
-  if (window.__owlAiPanelVersion >= 13) return;
-  window.__owlAiPanelVersion = 13;
+  if (window.__owlAiPanelVersion >= 14) return;
+  window.__owlAiPanelVersion = 14;
   window.__owlAiPanel = true;
 
   var API = '/ai/api/account';
@@ -101,10 +101,11 @@
   // 把「我的 Key」「接入地址」两个标签改名（nai 侧），并向容器里补 NEW API 块
   function patch() {
     var box = document.querySelector('.lp-account__key');
-    if (!box) return false;
+    var accountHeader = document.querySelector('.menu:has(.lp-avatar) .menu__header');
+    if (!box && !accountHeader) return false;
 
     // 1) 标签改名
-    var labels = box.querySelectorAll('.field__label');
+    var labels = box ? box.querySelectorAll('.field__label') : [];
     for (var i = 0; i < labels.length; i++) {
       var t = labels[i].textContent.trim();
       if (t === '我的 Key' || t === '我的Key') labels[i].textContent = 'nai key';
@@ -112,7 +113,7 @@
     }
 
     // 2) 去掉「已登录」
-    var walker = document.createTreeWalker(box.parentNode || box, NodeFilter.SHOW_TEXT, null);
+    var walker = document.createTreeWalker((box ? box.parentNode : accountHeader), NodeFilter.SHOW_TEXT, null);
     var n;
     while ((n = walker.nextNode())) {
       if (n.nodeValue && n.nodeValue.indexOf('已登录') !== -1) {
@@ -121,7 +122,7 @@
     }
 
     // 3) NEW API 块
-    var host = box.parentNode;
+    var host = box ? box.parentNode : accountHeader;
     if (!host) return false;
     var slot = host.querySelector('[data-owl-newapi]');
     if (!slot) {
@@ -159,7 +160,7 @@
 
     getAccount().then(function (a) {
       if (!a) {
-        body.textContent = '请登录 owl 并确认已领取成员 Key；若账号不可用，请联系管理员。';
+        body.textContent = '请重新登录 owl 完成身份组验证；无需先领取生图 Key。若仍不可用，请联系管理员。';
         body.style.opacity = '.7';
         body.setAttribute('data-filled', '1');
         return;
@@ -192,7 +193,7 @@
   }
 
   function tick() {
-    if (!document.querySelector('.lp-account__key')) return;
+    if (!document.querySelector('.menu:has(.lp-avatar) .menu__header')) return;
     if (patch()) fill();
   }
 
