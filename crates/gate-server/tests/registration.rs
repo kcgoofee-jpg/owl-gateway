@@ -1294,6 +1294,33 @@ async fn resetkey_matches_legacy() {
 // ------------------------------------------------------------------ 桥接：机器人配置
 
 #[tokio::test]
+async fn bot_context_requires_bridge_auth_and_exposes_only_member_facts() {
+    let (e, _d) = setup_reg(&[]).await;
+    let payload = json!({"discord_id":MEMBER,"guild_id":GUILD});
+    let denied = parse(
+        Call::new("POST", "/self-register/bot/context")
+            .json(payload.clone())
+            .send(&e.state)
+            .await,
+    );
+    assert_eq!(denied.0, 401);
+    let wrong_guild = bridge(
+        &e,
+        "/self-register/bot/context",
+        json!({"discord_id":MEMBER,"guild_id":OTHER}),
+    )
+    .await;
+    assert_eq!(wrong_guild.0, 403);
+    let result = bridge(&e, "/self-register/bot/context", payload).await;
+    assert_eq!(result.0, 200);
+    assert_eq!(result.2["timezone"], "Asia/Shanghai");
+    assert!(result.2["member"].get("has_key").is_some());
+    assert!(result.2["member"].get("key").is_none());
+    assert!(result.2["member"].get("discord").is_none());
+    assert!(result.2["site"].get("limits").is_some());
+}
+
+#[tokio::test]
 async fn bot_report_keeps_only_the_heartbeat() {
     let (e, _d) = setup_reg(&[]).await;
     // 机器人拉「跑图分享设置」的接口已删除（跑图分享整个删了）

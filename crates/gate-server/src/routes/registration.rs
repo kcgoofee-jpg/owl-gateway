@@ -29,6 +29,7 @@ pub fn router() -> Router<AppState> {
         .route("/self-register/issue", post(issue))
         .route("/self-register/bot/report", post(bot_report))
         .route("/self-register/bot/stats", get(bot_stats))
+        .route("/self-register/bot/context", post(bot_context))
 }
 
 /// 桥接 / 成员页接口的请求体上限（正常请求都在几百字节）。
@@ -305,6 +306,38 @@ async fn bot_stats(State(state): State<AppState>, parts: Parts) -> ApiResult {
     })))
 }
 
+/// Read-only member facts for the authenticated bot. No credentials or other members' records.
+async fn bot_context(State(state): State<AppState>, req: Request) -> ApiResult {
+    let (parts, body) = req.into_parts();
+    let mut m = read_model(&parts, body).await?;
+    let who = Who::read(&mut m);
+    m.finish()?;
+    let svc = authorize(&state, &parts, false)?;
+    let discord_id = checked(svc, &who)?;
+    let key = svc.key_row_for(discord_id).await?;
+    let me = super::public::me_payload(&state, discord_id, key.as_ref()).await?;
+    let member = member_bot_projection(&me);
+    let status = state.live.status(&state).await?;
+    Ok(no_store(ok_json(&json!({
+        "server_time": state.now(), "timezone": "Asia/Shanghai",
+        "member": member, "site": status.as_ref(),
+    }))))
+}
+
+fn member_bot_projection(me: &Value) -> Value {
+    let mut out = Map::new();
+    for name in ["has_key", "requires_web_login", "policy", "today", "timing"] {
+        if let Some(value) = me.get(name) {
+            out.insert(name.into(), value.clone());
+        }
+    }
+    out.insert(
+        "available_coupon_count".into(),
+        json!(me["coupons"].as_array().map_or(0, Vec::len)),
+    );
+    Value::Object(out)
+}
+
 async fn bot_report(State(state): State<AppState>, req: Request) -> ApiResult {
     let (parts, body) = req.into_parts();
     let mut m = read_model(&parts, body).await?;
@@ -321,4 +354,21 @@ async fn bot_report(State(state): State<AppState>, req: Request) -> ApiResult {
             .await?;
     }
     Ok(ok_json(&json!({"ok": true})))
+}
+
+#[cfg(test)]
+mod bot_context_tests {
+    use super::*;
+    #[test]
+    fn projection_excludes_credentials_and_coupon_identifiers() {
+        let data = member_bot_projection(
+            &json!({"key":"synthetic-secret", "discord":{"id":"synthetic"},
+            "name":"private name", "today":{"reset_hour":7}, "has_key":true,
+            "coupons":[{"id":42,"code":"private-code"}], "untrusted_extra":"secret"}),
+        );
+        assert_eq!(
+            data,
+            json!({"today":{"reset_hour":7},"has_key":true,"available_coupon_count":1})
+        );
+    }
 }

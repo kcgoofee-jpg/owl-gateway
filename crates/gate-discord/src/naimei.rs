@@ -508,13 +508,22 @@ impl Naimei {
         } else {
             None
         };
+        let mut facts = stats_block.unwrap_or_default();
+        if chat::wants_member_context(req.text) {
+            let (owl, newapi) = tokio::join!(
+                self.bridge.member_context(req.author_id, self.cfg.guild_id),
+                self.bridge.newapi_context(&self.cfg.site, req.author_id)
+            );
+            facts.push_str(&format!("\n本次发言成员的只读实时事实（仅本人，不查询被提及的其他人）：\n{}\n",
+                json!({"owl":owl,"newapi":newapi,"missing_data_rule":"null 表示本次未获取到，不能猜测或沿用旧数字"})));
+        }
         let system = chat::system_prompt(
             &kb::retrieve(req.text, 2),
             stickers,
             req.is_owner,
             &channel_ctx,
             avatar_url.as_deref(),
-            stats_block.as_deref(),
+            (!facts.is_empty()).then_some(facts.as_str()),
         );
         // 非流式（默认）：typing 循环保活 + 一次性完整回复（观感干净）
         if !chat.stream_enabled() {

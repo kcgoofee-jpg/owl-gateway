@@ -108,6 +108,40 @@ impl Bridge {
         response.json::<Value>().await.ok()
     }
 
+    /// Only the actual Discord message author is supplied by the event handler.
+    pub async fn member_context(&self, discord_id: &str, guild_id: u64) -> Option<Value> {
+        let result = self
+            .command(
+                "/self-register/bot/context",
+                &serde_json::json!({
+                    "discord_id": discord_id, "guild_id": guild_id.to_string(),
+                }),
+            )
+            .await
+            .ok()?;
+        result.is_ok().then_some(result.data)
+    }
+
+    /// Read-only New API wallet/model facts; the endpoint returns no login credentials.
+    pub async fn newapi_context(&self, site: &str, discord_id: &str) -> Option<Value> {
+        if site.is_empty() {
+            return None;
+        }
+        let response = self
+            .http
+            .post(format!("{site}/ai/api/context"))
+            .timeout(self.command_timeout)
+            .header("Authorization", self.bearer())
+            .json(&serde_json::json!({"discord_id":discord_id}))
+            .send()
+            .await
+            .ok()?;
+        if !response.status().is_success() {
+            return None;
+        }
+        response.json().await.ok()
+    }
+
     /// GET `/self-register/bot/stats`：站点运行摘要（排队数、今日出图、近 1 小时等待）。
     /// 只读、共享命令超时；非 200 / 连不上 / 不是 JSON 一律 `None`，调用方按「拿不到实时数据」降级。
     pub async fn site_stats(&self) -> Option<Value> {
