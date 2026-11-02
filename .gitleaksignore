@@ -1,3 +1,9 @@
 # gitleaks 误报（指纹 = 提交:文件:规则:行）。只放已人工确认不含任何密钥的条目，每条写明原因。
 # 初始快照中的 key_id 是数据库主键列名，不是凭据，被通用 API Key 规则误判。
 2fd73c8fb8455eea6c562652e5444ed32d80bbe2:crates/gate-db/src/sql/schema.sql:generic-api-key:232
+# 历史提交中的固定数据库设置名，不是 API key；仅放行已核对的这三个具体指纹。
+# records_removal_v1_vacuum_pending: VACUUM 迁移标记。
+458fed44374a2473ba98ec5ca785bcd0bfd73e80:crates/gate-db/src/archive_removal.rs:generic-api-key:106
+458fed44374a2473ba98ec5ca785bcd0bfd73e80:crates/gate-db/src/archive_removal.rs:generic-api-key:113
+# quota_9999_migrated: 测试中的旧配额迁移标记。
+6386bb010036ce8eec0c0f603add0cd2ab8bcb4a:crates/gate-db/src/bootstrap.rs:generic-api-key:600
