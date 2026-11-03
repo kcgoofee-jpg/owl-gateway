@@ -10,6 +10,7 @@
 
   var account = null;
   var pending = false;
+  var legacyCleaned = false;
 
   function credentialRow(label, value) {
     var wrap = document.createElement('div');
@@ -70,9 +71,13 @@
     var accountHeader = document.querySelector('.menu:has(.lp-avatar) .menu__header');
     if (!box && !accountHeader) return false;
 
-    // Remove the block inserted by older cached copies of this script.
-    var oldNewApi = document.querySelectorAll('[data-owl-newapi]');
-    for (var j = 0; j < oldNewApi.length; j++) oldNewApi[j].remove();
+    // Remove the block inserted by older cached copies once. Repeating this
+    // during the menu refresh loop would detach the link while it is clicked.
+    if (!legacyCleaned) {
+      var oldNewApi = document.querySelectorAll('[data-owl-newapi]');
+      for (var j = 0; j < oldNewApi.length; j++) oldNewApi[j].remove();
+      legacyCleaned = true;
+    }
 
     // 1) 标签改名
     var labels = box ? box.querySelectorAll('.field__label') : [];
