@@ -25,7 +25,7 @@ try {
   if (window.__owlAiPanelLoader) return;
   window.__owlAiPanelLoader = true;
   var s = document.createElement("script");
-  s.src = "/_owl/ai-panel.js?v=18";
+  s.src = "/_owl/ai-panel.js?v=19";
   s.onerror = function () {};
   (document.head || document.documentElement).appendChild(s);
 })();

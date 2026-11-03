@@ -113,7 +113,10 @@ impl Assets {
         let cache = if hashed {
             "public, max-age=31536000, immutable"
         } else {
-            "public, max-age=3600"
+            // Mutable bootstrap files (theme-init.js, ai-panel.js) must be
+            // revalidated; otherwise a stale initializer can keep requesting
+            // an old panel forever even after deploy syncs the new bytes.
+            "public, max-age=0, must-revalidate"
         };
         let mut resp = Response::new(Body::from(bytes));
         let h = resp.headers_mut();

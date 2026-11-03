@@ -4,8 +4,8 @@
  */
 (function () {
   'use strict';
-  if (window.__owlAiPanelVersion >= 18) return;
-  window.__owlAiPanelVersion = 18;
+  if (window.__owlAiPanelVersion >= 19) return;
+  window.__owlAiPanelVersion = 19;
   window.__owlAiPanel = true;
 
   var account = null;
