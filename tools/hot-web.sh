@@ -23,7 +23,10 @@ fi
 [[ -f web/dist/landing.html ]] || { echo "web/dist 缺失，先构建" >&2; exit 1; }
 
 say "syncing dist to $OWL_IP:/opt/owl/nai-mirror"
-rsync -a --delete --exclude 'nai-app' -e "ssh ${KEY[*]}" web/dist/ "root@$OWL_IP:/opt/owl/nai-mirror/" 2>&1 | mask
+# Build hosts can emit different content with equal size/mtime (for example when
+# the build clock is normalized). Compare checksums so the deployed static tree
+# is based on bytes, not rsync's size+mtime quick check.
+rsync -a --checksum --delete --exclude 'nai-app' -e "ssh ${KEY[*]}" web/dist/ "root@$OWL_IP:/opt/owl/nai-mirror/" 2>&1 | mask
 
 say "verifying"
 for p in /admin /favicon.svg; do
