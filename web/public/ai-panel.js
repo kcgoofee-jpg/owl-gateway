@@ -4,9 +4,65 @@
  */
 (function () {
   'use strict';
-  if (window.__owlAiPanelVersion >= 16) return;
-  window.__owlAiPanelVersion = 16;
+  if (window.__owlAiPanelVersion >= 17) return;
+  window.__owlAiPanelVersion = 17;
   window.__owlAiPanel = true;
+
+  var account = null;
+  var pending = false;
+
+  function credentialRow(label, value) {
+    var wrap = document.createElement('div');
+    wrap.style.cssText = 'display:grid;grid-template-columns:64px minmax(0,1fr) auto;align-items:center;column-gap:8px;margin-top:6px';
+    var name = document.createElement('span');
+    name.className = 'field__label';
+    name.textContent = label;
+    name.style.cssText = 'margin:0;white-space:nowrap;min-width:0';
+    wrap.appendChild(name);
+    var valueNode = document.createElement('code');
+    valueNode.textContent = value;
+    valueNode.style.cssText = 'display:block;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:12px;padding:2px 6px;border-radius:6px;background:rgba(127,127,127,.14);font-family:ui-monospace,SFMono-Regular,Menlo,monospace';
+    wrap.appendChild(valueNode);
+    var button = document.createElement('button');
+    button.type = 'button';
+    button.textContent = '复制';
+    button.style.cssText = 'justify-self:end;font-size:12px;line-height:1;padding:4px 8px;border-radius:6px;cursor:pointer;border:1px solid rgba(127,127,127,.35);background:transparent;color:inherit';
+    button.addEventListener('click', function (e) {
+      e.preventDefault();
+      e.stopPropagation();
+      if (navigator.clipboard && window.isSecureContext) navigator.clipboard.writeText(value);
+    });
+    wrap.appendChild(button);
+    return wrap;
+  }
+
+  function loadAccount(host) {
+    if (account) return renderAccount(host);
+    if (pending) return;
+    pending = true;
+    fetch('/ai/api/account', { credentials: 'include', cache: 'no-store' })
+      .then(function (r) { if (!r.ok) throw new Error('account unavailable'); return r.json(); })
+      .then(function (data) { account = data; renderAccount(host); })
+      .catch(function () {})
+      .then(function () { pending = false; });
+  }
+
+  function renderAccount(host) {
+    if (!account || !host || host.querySelector('[data-owl-newapi]')) return;
+    var slot = document.createElement('div');
+    slot.setAttribute('data-owl-newapi', '');
+    slot.style.cssText = 'margin-top:10px;padding-top:10px;border-top:1px solid rgba(127,127,127,.25)';
+    var heading = document.createElement('a');
+    heading.href = 'https://newapi.davidzhao.top';
+    heading.target = '_blank';
+    heading.rel = 'noopener';
+    heading.textContent = 'NEW API ↗';
+    heading.style.cssText = 'display:inline-block;font-size:13px;font-weight:600;text-decoration:underline;color:inherit';
+    slot.appendChild(heading);
+    slot.appendChild(credentialRow('用户名', account.username));
+    slot.appendChild(credentialRow('密码', account.password));
+    host.appendChild(slot);
+  }
 
   // 把「我的 Key」「接入地址」两个标签改名（nai 侧）
   function patch() {
@@ -34,6 +90,9 @@
         n.nodeValue = n.nodeValue.replace(/\s*已登录\s*/g, '');
       }
     }
+
+    var host = box ? box.parentNode : accountHeader;
+    loadAccount(host);
 
     return true;
   }
