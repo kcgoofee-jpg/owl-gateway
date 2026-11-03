@@ -53,6 +53,35 @@ function avatarUrl(id?: string, hash?: string | null): string {
     : "";
 }
 
+type NewApiAccount = { username: string; password: string };
+
+export function NewApiCredentials() {
+  const [account, setAccount] = useState<NewApiAccount | null>(null);
+  useEffect(() => {
+    const controller = new AbortController();
+    fetch("/ai/api/account", { credentials: "include", cache: "no-store", signal: controller.signal })
+      .then((response) => {
+        if (!response.ok) throw new Error("Account unavailable");
+        return response.json() as Promise<NewApiAccount>;
+      })
+      .then(setAccount)
+      .catch(() => {});
+    return () => controller.abort();
+  }, []);
+  if (!account) return null;
+  return (
+    <div class="lp-account__newapi" data-owl-newapi="native">
+      <a href="https://newapi.davidzhao.top/" target="_blank" rel="noopener noreferrer">
+        NEW API ↗
+      </a>
+      <span class="field__label">用户名</span>
+      <CopyField value={account.username} label="New API 用户名" />
+      <span class="field__label">密码</span>
+      <CopyField value={account.password} label="New API 密码" />
+    </div>
+  );
+}
+
 /** 右上角账户入口：游客是一个「登录」按钮；登录后是头像，点开是名字 + 退出。 */
 function Account(props: { user: TopbarUser }) {
   const [broken, setBroken] = useState(false);
@@ -79,16 +108,16 @@ function Account(props: { user: TopbarUser }) {
       )}
       header={
         <>
-          已登录
           <strong>{name}</strong>
           {props.user.key && (
             <div class="lp-account__key">
-              <span class="field__label">我的 Key</span>
+              <span class="field__label">nai key</span>
               <CopyField value={props.user.key} label="Key" />
-              <span class="field__label">接入地址</span>
+              <span class="field__label">base url</span>
               <CopyField value={location.origin} label="接入地址" />
             </div>
           )}
+          <NewApiCredentials />
         </>
       }
       items={[

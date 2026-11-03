@@ -18,14 +18,3 @@ try {
   addEventListener("pagereveal", quiet);
 })();
 
-// New API 登录账号由头像菜单展示；不展示 API key、接入地址、余额或签到信息。
-// 放在这个文件里是因为 public/ 下的资源
-// vite build 只会原样拷贝，不会被重新构建覆盖，也不会被部署时的前端同步冲掉。
-(function () {
-  if (window.__owlAiPanelLoader) return;
-  window.__owlAiPanelLoader = true;
-  var s = document.createElement("script");
-  s.src = "/_owl/ai-panel.js?v=19";
-  s.onerror = function () {};
-  (document.head || document.documentElement).appendChild(s);
-})();

@@ -764,3 +764,21 @@
 .lp-use-rules li {
   text-wrap: pretty;
 }
+
+.lp-account__newapi {
+  display: grid;
+  gap: var(--sp-1);
+  width: min(280px, calc(100vw - 56px));
+  margin-top: var(--sp-3);
+  padding-top: var(--sp-3);
+  border-top: 1px solid var(--border);
+  text-align: left;
+}
+.lp-account__newapi > a {
+  display: block;
+  padding: 4px 0;
+  text-decoration: underline;
+}
+.menu__list:has(.lp-account__newapi) {
+  width: min(320px, calc(100vw - 32px));
+}

@@ -23,12 +23,22 @@ fi
 [[ -f web/dist/landing.html ]] || { echo "web/dist 缺失，先构建" >&2; exit 1; }
 
 say "syncing dist to $OWL_IP:/opt/owl/nai-mirror"
+# Retired DOM-injection healer must never overwrite the native account menu.
+ssh "${KEY[@]}" "root@$OWL_IP" 'set -e
+  if systemctl list-unit-files owl-ai-panel.timer --no-legend | grep -q owl-ai-panel.timer; then
+    systemctl disable --now owl-ai-panel.timer
+    systemctl stop owl-ai-panel.service
+  fi' 2>&1 | mask
 # Build hosts can emit different content with equal size/mtime (for example when
 # the build clock is normalized). Compare checksums so the deployed static tree
 # is based on bytes, not rsync's size+mtime quick check.
 rsync -a --checksum --delete --exclude 'nai-app' -e "ssh ${KEY[*]}" web/dist/ "root@$OWL_IP:/opt/owl/nai-mirror/" 2>&1 | mask
 
 say "verifying"
+for asset in theme-init.js ai-panel.js; do
+  curl -fsS --max-time 15 "https://$DOMAIN/_owl/$asset?deployment=$(git rev-parse HEAD)" |
+    cmp -s - "web/dist/$asset" || { echo "deployed bytes differ: $asset" >&2; exit 1; }
+done
 for p in /admin /favicon.svg; do
   code=$(curl -s -o /dev/null -w '%{http_code}' "https://$DOMAIN$p" || true)
   echo "  $p -> $code"
