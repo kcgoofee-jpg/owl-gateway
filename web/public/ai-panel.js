@@ -4,8 +4,8 @@
  */
 (function () {
   'use strict';
-  if (window.__owlAiPanelVersion >= 15) return;
-  window.__owlAiPanelVersion = 15;
+  if (window.__owlAiPanelVersion >= 16) return;
+  window.__owlAiPanelVersion = 16;
   window.__owlAiPanel = true;
 
   // 把「我的 Key」「接入地址」两个标签改名（nai 侧）
@@ -13,6 +13,10 @@
     var box = document.querySelector('.lp-account__key');
     var accountHeader = document.querySelector('.menu:has(.lp-avatar) .menu__header');
     if (!box && !accountHeader) return false;
+
+    // Remove the block inserted by older cached copies of this script.
+    var oldNewApi = document.querySelectorAll('[data-owl-newapi]');
+    for (var j = 0; j < oldNewApi.length; j++) oldNewApi[j].remove();
 
     // 1) 标签改名
     var labels = box ? box.querySelectorAll('.field__label') : [];
