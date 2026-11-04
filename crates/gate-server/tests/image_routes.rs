@@ -675,6 +675,80 @@ async fn stream_disconnect_after_final_keeps_single_image_charge_and_marks_inter
     );
 }
 
+/// 长排队时不能一直静默：20 秒后先发响应头，再用 SSE 注释帧保活，客户端才不会按空闲超时断开。
+#[tokio::test]
+async fn stream_sends_headers_and_heartbeat_while_queued() {
+    let e = setup(&[]).await;
+    // 测试默认把排队超时压到 5 秒；这里要覆盖长排队，改回生产级别的 90 秒。
+    e.state.apply_runtime_limits(&[("queue_timeout", 90)]).await;
+    e.mock.push(
+        "/ai/generate-image",
+        Reply::Chunks {
+            status: 200,
+            content_type: "application/zip".into(),
+            chunks: vec![(
+                std::time::Duration::from_secs(120),
+                bytes::Bytes::from(gate_testkit::zip_of_pngs(1)),
+            )],
+        },
+    );
+    let state = e.state.clone();
+    let first = tokio::spawn(async move {
+        call(
+            &state,
+            "POST",
+            "/ai/generate-image",
+            Some(TOKEN),
+            Some(image_body("nai-diffusion-4-5-full", 1)),
+        )
+        .await
+    });
+    tokio::time::timeout(std::time::Duration::from_secs(2), async {
+        while e.mock.requests_to("/ai/generate-image").is_empty() {
+            tokio::time::sleep(std::time::Duration::from_millis(2)).await;
+        }
+    })
+    .await
+    .expect("first request should reach the upstream and hold the only slot");
+
+    let req = Request::builder()
+        .method("POST")
+        .uri("/ai/generate-image-stream")
+        .header("authorization", format!("Bearer {TOKEN}"))
+        .header("content-type", "application/json")
+        .body(Body::from(
+            serde_json::to_vec(&image_body("nai-diffusion-4-5-full", 1)).unwrap(),
+        ))
+        .unwrap();
+    let response = tokio::time::timeout(
+        std::time::Duration::from_secs(40),
+        gate_server::app(e.state.clone()).oneshot(req),
+    )
+    .await
+    .expect("queued stream must send headers before the client idle timeout")
+    .unwrap();
+    let status = response.status();
+    if status != StatusCode::OK {
+        let out = axum::body::to_bytes(response.into_body(), 1024 * 1024)
+            .await
+            .unwrap();
+        panic!(
+            "unexpected status {status}: {}",
+            String::from_utf8_lossy(&out)
+        );
+    }
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(response.headers()["content-type"], "text/event-stream");
+    let mut body = response.into_body().into_data_stream();
+    let frame = tokio::time::timeout(std::time::Duration::from_secs(40), body.next())
+        .await
+        .expect("heartbeat should arrive while the request is still queued")
+        .expect("stream body")
+        .unwrap();
+    assert_eq!(&frame[..], b": ping\n\n");
+    first.abort();
+}
+
 /// 每人只有每日上限：2.x 的每人注水（底仓 30 张、每小时补 4 张，一天最多约 126 张）已删除。
 /// 上限 200、今天已用 150 张的算法管理成员照样能出图，不会被 `paced` 拦下；
 /// 用满上限才是「今日 V4.5 免费图额度已用完」。

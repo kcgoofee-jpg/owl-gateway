@@ -1,5 +1,6 @@
-//! 流式出图：响应头等上游接受之后才发；排队时断开直接取消、派发之前断开记「cancelled」，
-//! 派发之后在后台任务里跑完并按实际完成的张数记账。
+//! 流式出图：响应头通常等上游接受之后才发；排队超过 [`EARLY_HEADERS_AFTER`] 仍未派发时
+//! 先发响应头并每 [`QUEUE_PING_EVERY`] 推一帧 SSE 注释，避免客户端在长排队里空闲超时。
+//! 排队时断开直接取消、派发之前断开记「cancelled」，派发之后在后台任务里跑完并按实际完成的张数记账。
 
 use super::params::Prepared;
 use super::settle::{Billing, resolve_v5};
@@ -27,6 +28,12 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 use tokio_util::sync::CancellationToken;
+
+/// 排队超过这么久还没派发，就先发响应头让客户端知道自己已在队列里，避免它按空闲超时断开。
+/// 20 秒：比常见的出图节流等待（15 秒）长，短错误仍能以普通 JSON 返回；又明显短于客户端 60 秒超时。
+const EARLY_HEADERS_AFTER: Duration = Duration::from_secs(20);
+/// 排队期间的心跳间隔：必须明显小于常见客户端 60 秒的空闲超时。
+const QUEUE_PING_EVERY: Duration = Duration::from_secs(15);
 
 /// 流式格式容错：返回 SSE 或 MessagePack；认不出的写法 400。
 fn normalize_wire_format(raw: Option<&Value>) -> Result<WireFormat, GateError> {
@@ -80,6 +87,21 @@ impl StreamSink {
         }
         let sent =
             tokio::time::timeout(Duration::from_secs(10), self.tx.send(Bytes::from(data))).await;
+        if !matches!(sent, Ok(Ok(()))) {
+            self.disconnected = true;
+        }
+    }
+
+    /// 排队等待期间的空心跳。SSE 注释帧不会进入客户端的 data 事件；msgpack 不能插注释，跳过。
+    async fn ping(&mut self) {
+        if self.disconnected || !matches!(self.wire, WireFormat::Sse) {
+            return;
+        }
+        let sent = tokio::time::timeout(
+            Duration::from_secs(5),
+            self.tx.send(Bytes::from_static(b": ping\n\n")),
+        )
+        .await;
         if !matches!(sent, Ok(Ok(()))) {
             self.disconnected = true;
         }
@@ -187,7 +209,7 @@ async fn run_stream(
 ) {
     let key = prep.key.clone();
     let model = prep.model.clone();
-    let queued = async {
+    let mut queued = Box::pin(async {
         let admission = image_admission(&state, &ctx, &key).await?;
         let slots = acquire_slots(&state);
         check_image_cooldown(&state)?;
@@ -201,32 +223,58 @@ async fn run_stream(
         )
         .await?;
         Ok::<_, ApiError>((admission, slots, reserved))
-    };
-    let held = tokio::select! {
-        r = queued => r,
-        _ = disconnect.cancelled() => {
-            let stage = ctx.lifecycle_stage();
-            if ctx.cancel_before_dispatch() {
-                log_client_disconnect(&ctx, stage, "stream_disconnected_while_queued", false, false);
-                if let Err(error) = state
-                    .db
-                    .release_request_reservation(&ctx.internal_id(), state.now())
-                    .await
-                {
-                    tracing::error!(%error, rid = %ctx.rid(), "failed to release streaming reservation after client disconnect");
+    });
+    // 长排队时客户端只在等响应头：超过 EARLY_HEADERS_AFTER 还没派发就先发 200 + 心跳，
+    // 否则 60/120 秒的客户端会在静默排队里超时；超时后上游仍会出图，用户却拿不到。
+    let mut started = false;
+    let grace = tokio::time::sleep(EARLY_HEADERS_AFTER);
+    tokio::pin!(grace);
+    let mut ping = tokio::time::interval(QUEUE_PING_EVERY);
+    ping.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
+    let held = loop {
+        tokio::select! {
+            r = &mut queued => break r,
+            _ = disconnect.cancelled() => {
+                let stage = ctx.lifecycle_stage();
+                if ctx.cancel_before_dispatch() {
+                    log_client_disconnect(&ctx, stage, "stream_disconnected_while_queued", false, false);
+                    if let Err(error) = state
+                        .db
+                        .release_request_reservation(&ctx.internal_id(), state.now())
+                        .await
+                    {
+                        tracing::error!(%error, rid = %ctx.rid(), "failed to release streaming reservation after client disconnect");
+                    }
+                    let cancelled = Entry::new("image_stream", &prep.model, "cancelled")
+                        .detail("派发前客户端断开，未向上游发送、未扣费")
+                        .reason("client_disconnected");
+                    if let Some(task) = state.record_context(&ctx, cancelled)
+                        && let Err(error) = task.await
+                    {
+                        tracing::error!(%error, "stream disconnect accounting task failed");
+                    }
                 }
-                let cancelled = Entry::new("image_stream", &prep.model, "cancelled")
-                    .detail("派发前客户端断开，未向上游发送、未扣费")
-                    .reason("client_disconnected");
-                if let Some(task) = state.record_context(&ctx, cancelled)
-                    && let Err(error) = task.await
-                {
-                    tracing::error!(%error, "stream disconnect accounting task failed");
+                return;
+            },
+            // 响应头已经发出后，接收端关闭只表现为心跳写入失败：转成同一个取消路径。
+            _ = &mut grace, if !started => {
+                sink.start().await;
+                started = true;
+                ping.tick().await;
+                sink.ping().await;
+                if sink.disconnected {
+                    disconnect.cancel();
                 }
-            }
-            return;
-        },
+            },
+            _ = ping.tick(), if started => {
+                sink.ping().await;
+                if sink.disconnected {
+                    disconnect.cancel();
+                }
+            },
+        }
     };
+    drop(queued);
     let res = match held {
         Ok((admission, slots, reserved)) => {
             let _held = (admission, slots);
