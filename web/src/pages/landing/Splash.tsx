@@ -11,6 +11,7 @@ import { signal } from "@preact/signals";
 import { useEffect, useRef } from "preact/hooks";
 import { animate, EASE_OUT, reduceMotion } from "../../lib/motion";
 import "./splash.css";
+import { createSplashLight, posterUrl, type SplashLight } from "./splash-light";
 
 const KEY = "owl-splash";
 /** 本地日期 YYYY-MM-DD */
@@ -75,6 +76,36 @@ export function Splash(props: {
     const race = (p: Promise<unknown>) => Promise.race([p.then(() => "done" as const), skipped]);
 
     let alive = true;
+    let finished = false;
+    const lighting: { renderer: SplashLight | null } = { renderer: null };
+    let lightFrame = 0;
+    const started = performance.now();
+    const canvas = el.querySelector<HTMLCanvasElement>(".splash__canvas");
+    if (canvas) {
+      createSplashLight(canvas)
+        .then((renderer) => {
+          if (!alive || finished) {
+            renderer.dispose();
+            return;
+          }
+          lighting.renderer = renderer;
+          title?.classList.add("splash__title--ready");
+          const tick = () => {
+            const elapsed = Math.min((performance.now() - started) / 1000, 1.6);
+            renderer.draw(elapsed);
+            if (elapsed < 1.6 && alive && !finished) lightFrame = requestAnimationFrame(tick);
+          };
+          tick();
+        })
+        .catch(() => {
+          if (alive && !finished) title?.classList.add("splash__title--fallback");
+        });
+      canvas.addEventListener("webglcontextlost", () => {
+        title?.classList.remove("splash__title--ready");
+        title?.classList.add("splash__title--fallback");
+        cancelAnimationFrame(lightFrame);
+      });
+    }
     (async () => {
       try {
         if (title)
@@ -111,6 +142,7 @@ export function Splash(props: {
         )
           return;
         el.classList.add("splash--flying");
+        lighting.renderer?.draw(1.6);
         const rects = landing.targets.map((t) => t.getBoundingClientRect());
         if (rects.length < 2 || rects.some((b) => b.bottom < 0 || b.top > innerHeight)) {
           await animate(el, { opacity: [1, 0] }, { duration: 0.4 }).finished;
@@ -158,6 +190,10 @@ export function Splash(props: {
         if (title) animate(title, { opacity: 0, y: -10 }, { duration: 0.3 });
         await race(Promise.all(flights));
       } finally {
+        finished = true;
+        cancelAnimationFrame(lightFrame);
+        lighting.renderer?.dispose();
+        lighting.renderer = null;
         if (alive) {
           document.removeEventListener("keydown", onKey);
           delete root.dataset.splash;
@@ -168,6 +204,9 @@ export function Splash(props: {
     })();
     return () => {
       alive = false;
+      cancelAnimationFrame(lightFrame);
+      lighting.renderer?.dispose();
+      lighting.renderer = null;
       document.removeEventListener("keydown", onKey);
       delete root.dataset.splash;
       splashActive.value = false;
@@ -184,9 +223,13 @@ export function Splash(props: {
           <i class="splash__eye" />
         </div>
         <p class="splash__title" lang="en">
-          Drawing
-          <br />
-          fantasy
+          <img class="splash__poster" src={posterUrl} alt="" />
+          <canvas class="splash__canvas" />
+          <span class="splash__text">
+            Drawing
+            <br />
+            fantasy
+          </span>
         </p>
       </div>
     </div>
