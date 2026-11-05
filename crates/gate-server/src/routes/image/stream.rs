@@ -348,7 +348,7 @@ async fn perform_stream(
     let cb = Callbacks {
         correlation_id: Some(ctx.correlation_id()),
         on_rate_limited: Some(on_429(state)),
-        resolve_v5_cost: (est0.v5 > 0)
+        resolve_v5_cost: (est0.v5 > 0 && est0.anlas == 0.0)
             .then(|| resolve_v5(state, &prep, billing.clone(), reserved.clone())),
         before_dispatch: Some(before_dispatch(state)),
         on_dispatch: Some(Box::new(move || {
@@ -375,7 +375,7 @@ async fn perform_stream(
                 &prep.body,
                 image_count,
                 est0.anlas > 0.0,
-                est0.v5 > 0,
+                est0.v5 > 0 && est0.anlas == 0.0,
                 state.limits().queue_timeout,
                 &cb,
                 allow,

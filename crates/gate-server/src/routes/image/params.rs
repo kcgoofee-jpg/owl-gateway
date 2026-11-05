@@ -231,6 +231,10 @@ pub(super) async fn prepare(
             GateError::with_code(403, super::settle::V5_PAID_REFUSED, reasons::PARAM).into(),
         );
     }
+    // Paid owner V5 outputs still count toward the personal/shared V5 limits.
+    if tier == "v5" && key.owner_image_full {
+        est.v5 = image_count;
+    }
     let legacy_free_images = if tier == "legacy"
         && policy::opus_free_eligible(&body).map_err(|e| InternalError(e.to_string()))?
     {

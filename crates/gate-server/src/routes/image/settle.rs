@@ -88,6 +88,7 @@ pub(super) fn resolve_v5(
         prep.detail.clone(),
     );
     let owner_full = prep.key.owner_image_full;
+    let owner_v5_count = prep.image_count;
     let state = state.clone();
     Box::new(move |exhausted: bool, token_id: String, can_switch: bool| {
         let (body, notes, billing, reserved, state, detail0) = (
@@ -120,10 +121,11 @@ pub(super) fn resolve_v5(
                         .await
                         .map_err(|_| UpstreamError::local(500, "无法更新站付预算预留", ""))?;
                 }
-                let updated = Est::from_cost(
+                let mut updated = Est::from_cost(
                     policy::estimate_image_cost(&body, true, false)
                         .map_err(|e| UpstreamError::local(400, e.message().to_string(), ""))?,
                 );
+                updated.v5 = owner_v5_count;
                 reserved.update(&updated, legacy).await.map_err(local)?;
                 let mut b = billing.lock().expect("billing");
                 b.est = updated;
@@ -203,7 +205,7 @@ pub(super) async fn perform_generation(
     let cb = Callbacks {
         correlation_id: Some(ctx.correlation_id()),
         on_rate_limited: Some(on_429(state)),
-        resolve_v5_cost: (est0.v5 > 0)
+        resolve_v5_cost: (est0.v5 > 0 && est0.anlas == 0.0)
             .then(|| resolve_v5(state, &prep, billing.clone(), reserved.clone())),
         before_dispatch: Some(before_dispatch(state)),
         on_dispatch: Some(on_dispatch(state, ctx, reserved.clone())),
@@ -211,7 +213,7 @@ pub(super) async fn perform_generation(
     let url = format!("{}/ai/generate-image", state.nai.image_host());
     let mut opts = RequestOpts::post(url, &prep.body);
     opts.requires_anlas = est0.anlas > 0.0;
-    opts.v5_free = est0.v5 > 0;
+    opts.v5_free = est0.v5 > 0 && est0.anlas == 0.0;
     opts.image_count = prep.image_count as usize;
     opts.image_lane = true;
     opts.max_response_bytes = Some(MAX_RESPONSE_BYTES);

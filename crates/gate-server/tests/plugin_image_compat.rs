@@ -345,6 +345,54 @@ async fn full_access_keeps_personal_and_shared_budgets_and_v5_pause() {
         )
         .await
         .unwrap();
+    shared.daily_v5 = 0;
+    e.state.db.set_shared_budgets(&shared).await.unwrap();
+    assert_eq!(
+        Call::new("POST", "/ai/generate-image")
+            .bearer(TOKEN)
+            .json(request("nai-diffusion-5-full"))
+            .send(&e.state)
+            .await
+            .0,
+        403
+    );
+    assert!(e.mock.requests_to("/ai/generate-image").is_empty());
+    shared.daily_v5 = 150;
+    e.state.db.set_shared_budgets(&shared).await.unwrap();
+    e.state
+        .db
+        .set_member_overrides(
+            SUBJECT,
+            &gate_core::member_policy::MemberOverrides {
+                daily_anlas: Some(100),
+                daily_v5: Some(0),
+                ..Default::default()
+            },
+        )
+        .await
+        .unwrap();
+    assert_eq!(
+        Call::new("POST", "/ai/generate-image")
+            .bearer(TOKEN)
+            .json(request("nai-diffusion-5-full"))
+            .send(&e.state)
+            .await
+            .0,
+        403
+    );
+    assert!(e.mock.requests_to("/ai/generate-image").is_empty());
+    e.state
+        .db
+        .set_member_overrides(
+            SUBJECT,
+            &gate_core::member_policy::MemberOverrides {
+                daily_anlas: Some(100),
+                daily_v5: Some(10),
+                ..Default::default()
+            },
+        )
+        .await
+        .unwrap();
     e.state.db.set_setting("v5_paused", "true").await.unwrap();
     assert_eq!(
         Call::new("POST", "/ai/generate-image")
@@ -441,7 +489,7 @@ async fn exhausted_owner_v5_uses_personal_budget_and_records_unknown_delivery() 
     settle().await;
     let counter = e.state.db.get_counter(1, &e.state.day()).await.unwrap();
     assert!(counter.anlas > 0.0);
-    assert_eq!(counter.v5, 0);
+    assert_eq!(counter.v5, 1);
     e.mock.push(
         "/ai/generate-image",
         gate_testkit::Reply::json(500, &json!({"message":"synthetic failure"})),
