@@ -3261,6 +3261,7 @@ async fn personal_channel_is_bound_encrypted_private_and_revocable() {
             .await,
     );
     assert_eq!(r.0, 200);
+    assert!(r.1["set-cookie"].to_str().unwrap().contains("Max-Age=0"));
     assert_eq!(get(cookie).await.2, json!({"connected":false}));
 }
 
@@ -3278,6 +3279,10 @@ async fn personal_channel_rejects_wrong_browser_account_and_destination_without_
         .send(&e.state)
         .await;
     assert!(String::from_utf8_lossy(&r.2).contains("连接未完成"));
+    assert!(
+        r.1.get("set-cookie").is_none(),
+        "an invalid callback must not cancel a newer authorization"
+    );
     assert!(!d.seen().iter().any(|s| s.path == "/oauth2/token"));
     d.script("GET", "/users/@me", 200, json!({"id":OTHER}));
     let r = Call::new("GET", &path)

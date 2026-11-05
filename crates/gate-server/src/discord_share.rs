@@ -320,9 +320,12 @@ async fn disconnect(State(state): State<AppState>, headers: HeaderMap) -> ApiRes
         None => true,
     };
     state.db.set_setting(&format!("{PREFIX}{id}"), "").await?;
-    Ok(private(ok_json(
-        &json!({"ok":true,"remote_revoked":revoked}),
-    )))
+    let mut response = private(ok_json(&json!({"ok":true,"remote_revoked":revoked})));
+    response.headers_mut().append(
+        "set-cookie",
+        session::delete_cookie_header(STATE_COOKIE, true, "lax", true),
+    );
+    Ok(response)
 }
 
 pub async fn check_cooldown(state: &AppState, d: &Destination) -> Result<(), ApiError> {

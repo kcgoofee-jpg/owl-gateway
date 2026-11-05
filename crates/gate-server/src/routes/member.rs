@@ -140,7 +140,11 @@ async fn login_callback(
             gate_core::primitives::take_chars(q.get("error").map_or("", String::as_str), 40)
         );
         if given.starts_with("w.") {
-            return Ok(crate::discord_share::result_page(false));
+            let mut response = crate::discord_share::result_page(false);
+            if !state_ok {
+                response.headers_mut().remove("set-cookie");
+            }
+            return Ok(response);
         }
         return Ok(redirect("/?login=failed"));
     };
