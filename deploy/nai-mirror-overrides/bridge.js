@@ -1,7 +1,7 @@
 /* owl ⇄ NovelAI 生图页桥：把官网前端的 API 调用改到本站网关。
    只做三件事：改 base、带 Key、隐藏账号横幅。 */
 (function () {
-  window.__BRIDGE_VERSION__ = "2026-11-06-share-confirm";
+  window.__BRIDGE_VERSION__ = "2026-11-06-share-metadata";
   var CFG = window.__NAI_BRIDGE__ || {};
   var GATE = CFG.gate || "";
   var KEY = CFG.key || "";
@@ -420,36 +420,142 @@
     };
   }
 
+  // null = cancel, false = image only, true = original bytes and generation metadata.
+  function confirmShare() {
+    return new Promise(function (resolve) {
+      var previous = document.activeElement;
+      var dialog = document.createElement("dialog");
+      dialog.className = "owl-share-dialog";
+      dialog.setAttribute("aria-labelledby", "owl-share-title");
+      dialog.setAttribute("aria-describedby", "owl-share-warning owl-share-help");
+      dialog.style.cssText = "width:min(480px,calc(100vw - 40px));box-sizing:border-box;padding:24px;border:1px solid #494844;border-radius:14px;background:#191918;color:#eeeeec;font:14px/1.65 system-ui,-apple-system,'Segoe UI',sans-serif;box-shadow:0 20px 70px #0009;";
+      var style = document.createElement("style");
+      style.textContent = ".owl-share-dialog::backdrop{background:rgba(0,0,0,.65)}.owl-share-dialog button:focus-visible,.owl-share-dialog input:focus-visible{outline:2px solid #b1a9ff;outline-offset:3px}";
+      var title = document.createElement("h2");
+      title.id = "owl-share-title";
+      title.textContent = "确认分享";
+      title.style.cssText = "margin:0 0 12px;font-size:18px;";
+      var warning = document.createElement("p");
+      warning.id = "owl-share-warning";
+      warning.textContent = "该分享转发至 owl 服务器进行保存备份，请确认是否有潜在二传违规风险！";
+      warning.style.cssText = "margin:0 0 20px;";
+      var label = document.createElement("label");
+      label.style.cssText = "display:flex;align-items:center;gap:10px;cursor:pointer;";
+      var checkbox = document.createElement("input");
+      checkbox.type = "checkbox";
+      checkbox.checked = false;
+      checkbox.style.cssText = "width:18px;height:18px;flex:none;accent-color:#5b5bd6;";
+      label.appendChild(checkbox);
+      label.appendChild(document.createTextNode("包含生成元数据（提示词、种子等）"));
+      var help = document.createElement("p");
+      help.id = "owl-share-help";
+      help.textContent = "默认仅分享去除生成参数的图片（PNG）。勾选后将发送原图和生成参数，其他人可能据此复现图片。";
+      help.style.cssText = "margin:10px 0 24px;color:#b5b3ad;font-size:13px;";
+      var actions = document.createElement("div");
+      actions.style.cssText = "display:flex;justify-content:flex-end;gap:10px;";
+      var cancel = document.createElement("button");
+      cancel.type = "button";
+      cancel.textContent = "取消";
+      cancel.style.cssText = "padding:9px 18px;border:1px solid #494844;border-radius:8px;background:#222221;color:#eeeeec;font:inherit;cursor:pointer;";
+      var submit = document.createElement("button");
+      submit.type = "button";
+      submit.textContent = "确认转发";
+      submit.style.cssText = "padding:9px 18px;border:1px solid #5b5bd6;border-radius:8px;background:#5b5bd6;color:#fff;font:inherit;cursor:pointer;";
+      var settled = false;
+      function finish(value) {
+        if (settled) return;
+        settled = true;
+        dialog.remove();
+        if (previous && previous.isConnected && previous.focus) previous.focus();
+        resolve(value);
+      }
+      cancel.addEventListener("click", function () { finish(null); });
+      submit.addEventListener("click", function () { finish(checkbox.checked); });
+      dialog.addEventListener("cancel", function (ev) { ev.preventDefault(); finish(null); });
+      dialog.addEventListener("close", function () { finish(null); });
+      actions.appendChild(cancel);
+      actions.appendChild(submit);
+      [style, title, warning, label, help, actions].forEach(function (el) { dialog.appendChild(el); });
+      document.body.appendChild(dialog);
+      try { dialog.showModal(); cancel.focus(); }
+      catch (e) { finish(null); toast("当前浏览器无法打开分享确认，请更新浏览器后再试。", true); }
+    });
+  }
+
+  // Re-encode decoded pixels, omitting PNG text / WebP EXIF / JPEG EXIF and comments.
+  // NovelAI also stores generation metadata in alpha LSBs. Clear LSB payloads in
+  // all channels, keeping near-opaque alpha fully opaque and preserving dimensions.
+  // Pixel values may change by one level; never fall back to the original on error.
+  function imageWithoutMetadata(blob) {
+    return new Promise(function (resolve, reject) {
+      var url = URL.createObjectURL(blob);
+      var image = new Image();
+      image.onload = function () {
+        URL.revokeObjectURL(url);
+        try {
+          var w = image.naturalWidth, h = image.naturalHeight;
+          if (!w || !h || w > 8192 || h > 8192 || w * h > 16777216) throw new Error("图片尺寸过大，无法清理元数据");
+          var canvas = document.createElement("canvas");
+          canvas.width = w; canvas.height = h;
+          var ctx = canvas.getContext("2d");
+          if (!ctx) throw new Error("浏览器无法处理图片");
+          ctx.drawImage(image, 0, 0);
+          var pixels = ctx.getImageData(0, 0, w, h);
+          for (var i = 0; i < pixels.data.length; i += 4) {
+            pixels.data[i] &= 254;
+            pixels.data[i + 1] &= 254;
+            pixels.data[i + 2] &= 254;
+            var alpha = pixels.data[i + 3];
+            pixels.data[i + 3] = alpha >= 254 ? 255 : alpha & 254;
+          }
+          ctx.putImageData(pixels, 0, 0);
+          canvas.toBlob(function (clean) {
+            canvas.width = canvas.height = 0;
+            if (clean && clean.size > 0) resolve(clean);
+            else reject(new Error("清理元数据失败，未转发"));
+          }, "image/png");
+        } catch (e) { reject(e); }
+      };
+      image.onerror = function () { URL.revokeObjectURL(url); reject(new Error("图片无法读取，未转发")); };
+      image.src = url;
+    });
+  }
+
   function uploadToExplore(ev) {
     var link = ev.target && ev.target.closest ? ev.target.closest('a[href="/explore/register"]') : null;
     if (!link) return;
     ev.preventDefault();
     ev.stopPropagation();
-    if (link.getAttribute("data-owl-busy") === "1") return;
+    if (link.getAttribute("data-owl-busy") === "1" || document.querySelector(".owl-share-dialog")) return;
     var img = currentImage();
     if (!img) { toast("没找到当前这张图，先出图再上传。", true); return; }
-    if (!window.confirm("该分享转发至 owl 服务器进行保存备份，请确认是否有潜在二传违规风险！")) return;
-    var meta = metaFor(img);
     link.setAttribute("data-owl-busy", "1");
-    toast("正在提交到 Discord…");
-    var src = img.currentSrc || img.src;
-    var reused = BLOBS.get(src);
-    (reused ? Promise.resolve(reused) : fetch(src).then(function (r) { return r.blob(); }))
-      .then(function (blob) {
-        var fd = new FormData();
-        var ext = /png/.test(blob.type) ? "png" : "webp";
-        fd.append("image", blob, "owl-explore." + ext);
-        fd.append("prompt", meta.prompt || "");
-        fd.append("size", meta.size || "");
-        fd.append("seed", meta.seed || "");
-        fd.append("model", meta.model || "");
-        return fetch("/owl/explore", { method: "POST", body: fd, credentials: "same-origin" });
-      })
-      .then(function (r) { return r.json().catch(function () { return {}; }).then(function (j) { return { ok: r.ok, j: j }; }); })
-      .then(function (res) {
-        if (res.ok) toast("已收到，正在发到图乐园频道 ✅");
-        else toast((res.j && (res.j.detail || res.j.message)) || "提交失败，稍后再试。", true);
-      })
+    confirmShare().then(function (includeMetadata) {
+      if (includeMetadata === null) return;
+      var meta = includeMetadata ? metaFor(img) : {};
+      toast("正在提交到 Discord…");
+      var src = img.currentSrc || img.src;
+      var reused = BLOBS.get(src);
+      return (reused ? Promise.resolve(reused) : fetch(src).then(function (r) { return r.blob(); }))
+        .then(function (blob) { return includeMetadata ? blob : imageWithoutMetadata(blob); })
+        .then(function (blob) {
+          var fd = new FormData();
+          var ext = /png/.test(blob.type) ? "png" : /jpe?g/.test(blob.type) ? "jpg" : "webp";
+          fd.append("image", blob, "owl-explore." + ext);
+          if (includeMetadata) {
+            fd.append("prompt", meta.prompt || "");
+            fd.append("size", meta.size || "");
+            fd.append("seed", meta.seed || "");
+            fd.append("model", meta.model || "");
+          }
+          return fetch("/owl/explore", { method: "POST", body: fd, credentials: "same-origin" });
+        })
+        .then(function (r) { return r.json().catch(function () { return {}; }).then(function (j) { return { ok: r.ok, j: j }; }); })
+        .then(function (res) {
+          if (res.ok) toast("已收到，正在发到图乐园频道 ✅");
+          else toast((res.j && (res.j.detail || res.j.message)) || "提交失败，稍后再试。", true);
+        });
+    })
       .catch(function (e) { toast("提交失败：" + e, true); })
       .then(function () { link.removeAttribute("data-owl-busy"); });
   }
