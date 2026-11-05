@@ -98,6 +98,8 @@ test("Discord sharing confirmation keeps or removes file and hidden metadata", a
     w.__uploads = [];
     window.requestIdleCallback = () => 0;
     window.fetch = async (_input, init) => {
+      if (_input === "/public/me/share-destination")
+        return new Response(JSON.stringify({ connected: false }), { status: 200 });
       w.__uploads.push(init?.body as FormData);
       return new Response("{}", { status: 200, headers: { "content-type": "application/json" } });
     };
@@ -220,7 +222,7 @@ test("Discord sharing confirmation keeps or removes file and hidden metadata", a
       type: "image/png",
       width: 32,
       height: 32,
-      fields: ["image"],
+      fields: ["image", "destination"],
       hasSecret: false,
       opaque: true,
     });
@@ -255,4 +257,102 @@ test("Discord sharing confirmation keeps or removes file and hidden metadata", a
   expect(await page.evaluate(() => (window as unknown as { __uploads: FormData[] }).__uploads.length)).toBe(
     0,
   );
+});
+
+test("personal channel sharing selects the bound destination and never falls back to public", async ({
+  page,
+}) => {
+  const bridge = readFileSync(
+    resolve(import.meta.dirname, "../../deploy/nai-mirror-overrides/bridge.js"),
+    "utf8",
+  );
+  await page.route("https://personal-share-fixture.test/**", (route) =>
+    route.fulfill({
+      contentType: "text/html",
+      body: '<!doctype html><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><img width="256" height="256"><a href="/explore/register">Upload to Explore</a>',
+    }),
+  );
+  await page.goto("https://personal-share-fixture.test/");
+  await page.evaluate(() => {
+    const w = window as typeof window & { __sent: string[]; __failRead: boolean; __failSend: boolean };
+    w.__sent = [];
+    w.__failRead = false;
+    w.__failSend = false;
+    window.requestIdleCallback = () => 0;
+    window.fetch = async (url, init) => {
+      if (url === "/public/me/share-destination")
+        return new Response(
+          JSON.stringify({
+            connected: true,
+            binding_id: "900000000000000081",
+            channel_url: "https://discord.com/channels/900000000000000083/900000000000000082",
+          }),
+          { status: w.__failRead ? 503 : 200 },
+        );
+      const fd = init?.body as FormData;
+      w.__sent.push(String(fd.get("destination")));
+      if (fd.get("destination") === "personal" && fd.get("binding_id") !== "900000000000000081")
+        throw new Error("wrong binding");
+      return new Response(
+        JSON.stringify(
+          w.__failSend
+            ? { detail: "个人频道投递失败" }
+            : { ok: true, queued: false, destination: "personal" },
+        ),
+        { status: w.__failSend ? 409 : 200 },
+      );
+    };
+  });
+  await page.evaluate(bridge);
+  await page.evaluate(async () => {
+    const c = document.createElement("canvas");
+    c.width = c.height = 32;
+    const ctx = c.getContext("2d");
+    if (!ctx) throw new Error("no canvas");
+    ctx.fillRect(0, 0, 32, 32);
+    const blob = await new Promise<Blob>((resolve) =>
+      c.toBlob((b) => {
+        if (b) resolve(b);
+      }, "image/png"),
+    );
+    const image = document.querySelector("img");
+    if (!image) throw new Error("no image");
+    image.src = URL.createObjectURL(blob);
+    await image.decode();
+  });
+  const share = page.locator('a[href="/explore/register"]');
+  await share.click();
+  const dialog = page.getByRole("dialog", { name: "确认分享" });
+  const destination = dialog.getByRole("combobox", { name: "转发到" });
+  await expect(destination).toHaveValue("personal");
+  await expect(
+    dialog.getByText("该分享将转发至你的个人 Discord 频道，请确认是否有潜在二传违规风险！"),
+  ).toBeVisible();
+  await dialog.getByRole("checkbox").check();
+  await destination.selectOption("owl");
+  await expect(dialog.getByRole("checkbox")).not.toBeChecked();
+  await expect(
+    dialog.getByText("该分享转发至 owl 服务器进行保存备份，请确认是否有潜在二传违规风险！"),
+  ).toBeVisible();
+  await destination.selectOption("personal");
+  await dialog.getByRole("button", { name: "确认转发", exact: true }).click();
+  await expect(share).not.toHaveAttribute("data-owl-busy", "1");
+  expect(await page.evaluate(() => (window as unknown as { __sent: string[] }).__sent)).toEqual(["personal"]);
+  await page.evaluate(() => {
+    (window as unknown as { __failSend: boolean }).__failSend = true;
+  });
+  await share.click();
+  await dialog.getByRole("button", { name: "确认转发", exact: true }).click();
+  await expect(share).not.toHaveAttribute("data-owl-busy", "1");
+  expect(await page.evaluate(() => (window as unknown as { __sent: string[] }).__sent)).toEqual([
+    "personal",
+    "personal",
+  ]);
+  await page.evaluate(() => {
+    (window as unknown as { __failRead: boolean }).__failRead = true;
+  });
+  await share.click();
+  await expect(dialog.getByRole("button", { name: "确认转发", exact: true })).toBeDisabled();
+  await expect(dialog.getByRole("button", { name: "重试读取", exact: true })).toBeVisible();
+  await dialog.getByRole("button", { name: "取消", exact: true }).click();
 });

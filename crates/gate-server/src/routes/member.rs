@@ -23,6 +23,7 @@ use std::collections::HashMap;
 
 pub fn router() -> Router<AppState> {
     Router::new()
+        .merge(crate::discord_share::router())
         .route("/login", get(login_start))
         .route("/login/callback", get(login_callback))
         .route("/logout", post(logout))
@@ -138,8 +139,14 @@ async fn login_callback(
             if state_ok { 'y' } else { 'n' },
             gate_core::primitives::take_chars(q.get("error").map_or("", String::as_str), 40)
         );
+        if given.starts_with("w.") {
+            return Ok(crate::discord_share::result_page(false));
+        }
         return Ok(redirect("/?login=failed"));
     };
+    if mode == LoginMode::Webhook {
+        return crate::discord_share::callback(&state, &parts.headers, &q, &dev).await;
+    }
     let verify = mode == LoginMode::Verify;
     let who = match svc.web_identify(code, verify).await {
         Ok(w) => w,

@@ -3088,3 +3088,297 @@ async fn my_request_stats_cover_full_day_costs_outcomes_and_missing_timings() {
         );
     }
 }
+
+const SHARE_HOOK: &str = "900000000000000081";
+const SHARE_CHANNEL: &str = "900000000000000082";
+const SHARE_GUILD: &str = "900000000000000083";
+const SHARE_TOKEN: &str = "synthetic-webhook-token-only-for-tests";
+
+async fn share_authorization(e: &Env, d: &Discord, cookie: &str) -> (String, String) {
+    let response = parse(
+        Call::new("POST", "/public/me/share-destination")
+            .header("cookie", cookie)
+            .send(&e.state)
+            .await,
+    );
+    assert_eq!(response.0, 200, "{}", response.2);
+    let url = reqwest::Url::parse(response.2["url"].as_str().unwrap()).unwrap();
+    assert!(
+        url.query_pairs()
+            .any(|(k, v)| k == "scope" && v == "identify webhook.incoming")
+    );
+    assert!(
+        url.query_pairs()
+            .any(|(k, v)| k == "redirect_uri" && v.ends_with("/login/callback"))
+    );
+    let state = url
+        .query_pairs()
+        .find(|(k, _)| k == "state")
+        .unwrap()
+        .1
+        .into_owned();
+    let state_cookie = response.1["set-cookie"]
+        .to_str()
+        .unwrap()
+        .split(';')
+        .next()
+        .unwrap()
+        .to_owned();
+    d.script("POST","/oauth2/token",200,json!({"access_token":"synthetic-oauth-token", "webhook":{"id":SHARE_HOOK,"channel_id":SHARE_CHANNEL,"guild_id":SHARE_GUILD,"token":SHARE_TOKEN,"url":"https://untrusted.invalid/ignored"}}));
+    (state, format!("{cookie}; {state_cookie}"))
+}
+
+async fn connect_share(e: &Env, d: &Discord, cookie: &str) {
+    let (state, cookies) = share_authorization(e, d, cookie).await;
+    let path = format!("/login/callback?code=synthetic-code&state={state}");
+    let r = Call::new("GET", &path)
+        .header("cookie", cookies)
+        .send(&e.state)
+        .await;
+    assert_eq!(r.0, 200);
+    assert!(String::from_utf8_lossy(&r.2).contains("个人频道已连接"));
+}
+
+async fn share_image(e: &Env, cookie: &str, binding: &str) -> Resp {
+    use http_body_util::BodyExt;
+    use tower::ServiceExt;
+    let boundary = "synthetic-share-boundary";
+    let mut body = Vec::new();
+    for (key, value) in [("destination", "personal"), ("binding_id", binding)] {
+        body.extend_from_slice(
+            format!(
+                "--{boundary}\r\nContent-Disposition: form-data; name=\"{key}\"\r\n\r\n{value}\r\n"
+            )
+            .as_bytes(),
+        );
+    }
+    body.extend_from_slice(format!("--{boundary}\r\nContent-Disposition: form-data; name=\"image\"; filename=\"fixture.png\"\r\nContent-Type: image/png\r\n\r\n").as_bytes());
+    body.extend_from_slice(&gate_testkit::tiny_png());
+    body.extend_from_slice(format!("\r\n--{boundary}--\r\n").as_bytes());
+    let request = axum::http::Request::builder()
+        .method("POST")
+        .uri("/owl/explore")
+        .header("cookie", cookie)
+        .header(
+            "content-type",
+            format!("multipart/form-data; boundary={boundary}"),
+        )
+        .body(Body::from(body))
+        .unwrap();
+    let r = gate_server::app(e.state.clone())
+        .oneshot(request)
+        .await
+        .unwrap();
+    let (parts, body) = r.into_parts();
+    parse((
+        parts.status,
+        parts.headers,
+        body.collect().await.unwrap().to_bytes().to_vec(),
+    ))
+}
+
+#[tokio::test]
+async fn personal_channel_is_bound_encrypted_private_and_revocable() {
+    let (e, d) = setup_reg(&[]).await;
+    open_registration(&e).await;
+    issue(&e, MEMBER).await;
+    issue(&e, OTHER).await;
+    for method in ["GET", "POST", "DELETE"] {
+        assert_eq!(
+            parse(
+                Call::new(method, "/public/me/share-destination")
+                    .send(&e.state)
+                    .await
+            )
+            .0,
+            401
+        );
+    }
+    let cookie = login_member(&e, MEMBER).await;
+    assert_eq!(
+        parse(
+            Call::new("POST", "/public/me/share-destination")
+                .header("cookie", &cookie)
+                .header("origin", "https://untrusted.invalid")
+                .send(&e.state)
+                .await
+        )
+        .0,
+        403
+    );
+    connect_share(&e, &d, &cookie).await;
+    let get = |cookie: String| {
+        let state = e.state.clone();
+        async move {
+            parse(
+                Call::new("GET", "/public/me/share-destination")
+                    .header("cookie", cookie)
+                    .send(&state)
+                    .await,
+            )
+        }
+    };
+    let status = get(cookie.clone()).await;
+    assert_eq!(status.0, 200);
+    assert_eq!(status.1["cache-control"], "no-store");
+    assert_eq!(status.2["connected"], true);
+    assert!(!status.2.to_string().contains(SHARE_TOKEN));
+    let raw = e
+        .state
+        .db
+        .get_setting(&format!("discord_share_destination:{MEMBER}"))
+        .await
+        .unwrap()
+        .unwrap();
+    assert!(raw.starts_with("v1."));
+    assert!(!raw.contains(SHARE_TOKEN));
+    assert!(!raw.contains(SHARE_CHANNEL));
+    let other = login_member(&e, OTHER).await;
+    assert_eq!(get(other).await.2, json!({"connected":false}));
+    d.script(
+        "POST",
+        &format!("/webhooks/{SHARE_HOOK}/{SHARE_TOKEN}"),
+        200,
+        json!({"id":"900000000000000084"}),
+    );
+    let sent = share_image(&e, &cookie, SHARE_HOOK).await;
+    assert_eq!(sent.0, 200, "{}", sent.2);
+    assert_eq!(sent.2["destination"], "personal");
+    assert_eq!(sent.2["queued"], false);
+    let seen = d.seen();
+    let post = seen
+        .iter()
+        .find(|s| s.path.starts_with("/webhooks/") && s.method == "POST")
+        .unwrap();
+    assert_eq!(post.auth, "");
+    assert!(post.body.windows(17).any(|w| w == b"allowed_mentions\""));
+    assert!(!seen.iter().any(|s| s.method == "POST"
+        && (s.path.starts_with("/channels/") || s.path == "/users/@me/channels")));
+    let r = parse(
+        Call::new("DELETE", "/public/me/share-destination")
+            .header("cookie", &cookie)
+            .send(&e.state)
+            .await,
+    );
+    assert_eq!(r.0, 200);
+    assert_eq!(get(cookie).await.2, json!({"connected":false}));
+}
+
+#[tokio::test]
+async fn personal_channel_rejects_wrong_browser_account_and_destination_without_public_fallback() {
+    let (e, d) = setup_reg(&[]).await;
+    open_registration(&e).await;
+    issue(&e, MEMBER).await;
+    issue(&e, OTHER).await;
+    let cookie = login_member(&e, MEMBER).await;
+    let (signed, cookies) = share_authorization(&e, &d, &cookie).await;
+    let path = format!("/login/callback?code=synthetic-code&state={signed}");
+    let r = Call::new("GET", &path)
+        .header("cookie", &cookie)
+        .send(&e.state)
+        .await;
+    assert!(String::from_utf8_lossy(&r.2).contains("连接未完成"));
+    assert!(!d.seen().iter().any(|s| s.path == "/oauth2/token"));
+    d.script("GET", "/users/@me", 200, json!({"id":OTHER}));
+    let r = Call::new("GET", &path)
+        .header("cookie", cookies)
+        .send(&e.state)
+        .await;
+    assert!(String::from_utf8_lossy(&r.2).contains("连接未完成"));
+    assert!(
+        e.state
+            .db
+            .get_setting(&format!("discord_share_destination:{MEMBER}"))
+            .await
+            .unwrap()
+            .is_none()
+    );
+    d.clear_scripts();
+    connect_share(&e, &d, &cookie).await;
+    let before = d.seen().len();
+    assert_eq!(share_image(&e, &cookie, "900000000000000099").await.0, 409);
+    assert_eq!(d.seen().len(), before);
+}
+
+#[tokio::test]
+async fn personal_channel_respects_discord_retry_after_and_keeps_errors_secret() {
+    let (e, d) = setup_reg(&[]).await;
+    open_registration(&e).await;
+    issue(&e, MEMBER).await;
+    let cookie = login_member(&e, MEMBER).await;
+    connect_share(&e, &d, &cookie).await;
+    d.script(
+        "POST",
+        &format!("/webhooks/{SHARE_HOOK}/{SHARE_TOKEN}"),
+        429,
+        json!({"retry_after":61.2}),
+    );
+    let r = share_image(&e, &cookie, SHARE_HOOK).await;
+    assert_eq!(r.0, 429, "{}", r.2);
+    assert_eq!(r.1["retry-after"], "62");
+    assert!(!r.2.to_string().contains(SHARE_TOKEN));
+    let before = d.seen().len();
+    let dest = gate_server::discord_share::destination(&e.state, MEMBER)
+        .await
+        .unwrap()
+        .unwrap();
+    assert!(
+        gate_server::discord_share::check_cooldown(&e.state, &dest)
+            .await
+            .is_err()
+    );
+    assert_eq!(d.seen().len(), before);
+    let raw = e
+        .state
+        .db
+        .get_setting(&format!("discord_share_destination:{MEMBER}"))
+        .await
+        .unwrap()
+        .unwrap();
+    e.state
+        .db
+        .set_setting(&format!("discord_share_destination:{OTHER}"), &raw)
+        .await
+        .unwrap();
+    assert!(
+        gate_server::discord_share::destination(&e.state, OTHER)
+            .await
+            .is_err()
+    );
+}
+
+#[tokio::test]
+async fn personal_channel_replacement_keeps_the_new_binding_and_retires_the_old_webhook() {
+    let (e, d) = setup_reg(&[]).await;
+    open_registration(&e).await;
+    issue(&e, MEMBER).await;
+    let cookie = login_member(&e, MEMBER).await;
+    connect_share(&e, &d, &cookie).await;
+    let (signed, cookies) = share_authorization(&e, &d, &cookie).await;
+    d.clear_scripts();
+    let new_hook = "900000000000000086";
+    d.script("POST","/oauth2/token",200,json!({"access_token":"synthetic-oauth-token", "webhook":{"id":new_hook,"channel_id":SHARE_CHANNEL,"guild_id":SHARE_GUILD,"token":SHARE_TOKEN}}));
+    let path = format!("/login/callback?code=synthetic-replace-code&state={signed}");
+    let r = Call::new("GET", &path)
+        .header("cookie", cookies)
+        .send(&e.state)
+        .await;
+    assert!(String::from_utf8_lossy(&r.2).contains("个人频道已连接"));
+    assert_eq!(
+        gate_server::discord_share::destination(&e.state, MEMBER)
+            .await
+            .unwrap()
+            .unwrap()
+            .id,
+        new_hook
+    );
+    assert!(
+        d.seen()
+            .iter()
+            .any(|s| s.method == "DELETE"
+                && s.path == format!("/webhooks/{SHARE_HOOK}/{SHARE_TOKEN}"))
+    );
+    let count = d.seen().len();
+    assert_eq!(share_image(&e, &cookie, SHARE_HOOK).await.0, 409);
+    assert_eq!(d.seen().len(), count);
+}

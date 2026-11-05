@@ -1,7 +1,7 @@
 /* owl ⇄ NovelAI 生图页桥：把官网前端的 API 调用改到本站网关。
    只做三件事：改 base、带 Key、隐藏账号横幅。 */
 (function () {
-  window.__BRIDGE_VERSION__ = "2026-11-06-share-metadata";
+  window.__BRIDGE_VERSION__ = "2026-11-06-personal-channel";
   var CFG = window.__NAI_BRIDGE__ || {};
   var GATE = CFG.gate || "";
   var KEY = CFG.key || "";
@@ -420,7 +420,7 @@
     };
   }
 
-  // null = cancel, false = image only, true = original bytes and generation metadata.
+  // null = cancel; otherwise the confirmed destination and metadata choice.
   function confirmShare() {
     return new Promise(function (resolve) {
       var previous = document.activeElement;
@@ -439,6 +439,35 @@
       warning.id = "owl-share-warning";
       warning.textContent = "该分享转发至 owl 服务器进行保存备份，请确认是否有潜在二传违规风险！";
       warning.style.cssText = "margin:0 0 20px;";
+      var destinationLabel = document.createElement("label");
+      destinationLabel.style.cssText = "display:block;margin:0 0 8px;";
+      destinationLabel.textContent = "转发到";
+      var select = document.createElement("select");
+      select.style.cssText = "display:block;box-sizing:border-box;width:100%;margin:8px 0 12px;padding:9px;border:1px solid #494844;border-radius:8px;background:#222221;color:#eeeeec;font:inherit;";
+      select.disabled = true;
+      destinationLabel.appendChild(select);
+      var connection = document.createElement("div");
+      connection.style.cssText = "display:flex;flex-wrap:wrap;align-items:center;gap:8px;margin-bottom:20px;font-size:13px;";
+      var status = document.createElement("span");
+      status.setAttribute("role", "status");
+      status.textContent = "正在读取分享目的地…";
+      var channelLink = document.createElement("a");
+      channelLink.textContent = "在 Discord 中查看";
+      channelLink.target = "_blank";
+      channelLink.rel = "noopener noreferrer";
+      channelLink.style.cssText = "color:#b1a9ff;display:none;";
+      function managementButton(text) {
+        var button = document.createElement("button");
+        button.type = "button"; button.textContent = text;
+        button.style.cssText = "padding:5px 9px;border:1px solid #494844;border-radius:6px;background:#222221;color:#eeeeec;font:inherit;cursor:pointer;";
+        return button;
+      }
+      var connect = managementButton("连接个人频道");
+      var disconnect = managementButton("断开");
+      disconnect.style.display = "none";
+      var retry = managementButton("重试读取");
+      retry.style.display = "none";
+      [status, channelLink, connect, disconnect, retry].forEach(function (el) { connection.appendChild(el); });
       var label = document.createElement("label");
       label.style.cssText = "display:flex;align-items:center;gap:10px;cursor:pointer;";
       var checkbox = document.createElement("input");
@@ -460,24 +489,92 @@
       var submit = document.createElement("button");
       submit.type = "button";
       submit.textContent = "确认转发";
+      submit.disabled = true;
       submit.style.cssText = "padding:9px 18px;border:1px solid #5b5bd6;border-radius:8px;background:#5b5bd6;color:#fff;font:inherit;cursor:pointer;";
       var settled = false;
+      var binding = null, loading = false;
+      function destinationChanged() {
+        checkbox.checked = false;
+        warning.textContent = select.value === "personal"
+          ? "该分享将转发至你的个人 Discord 频道，请确认是否有潜在二传违规风险！"
+          : "该分享转发至 owl 服务器进行保存备份，请确认是否有潜在二传违规风险！";
+      }
+      function refreshDestination() {
+        if (settled || loading) return;
+        loading = true; submit.disabled = true;
+        fetch("/public/me/share-destination", {credentials:"same-origin",cache:"no-store"})
+          .then(function (r) { if (!r.ok) throw new Error("无法读取分享目的地，请确认登录状态后重试。"); return r.json(); })
+          .then(function (data) {
+            if (settled) return;
+            var previousChoice = select.value;
+            var previousBinding = binding && binding.binding_id;
+            binding = data.connected ? data : null;
+            select.replaceChildren();
+            var owl = document.createElement("option"); owl.value = "owl"; owl.textContent = "OWL 公共频道"; select.appendChild(owl);
+            if (binding) {
+              var personal = document.createElement("option"); personal.value = "personal"; personal.textContent = "我的个人频道"; select.appendChild(personal);
+              select.value = previousBinding === binding.binding_id && previousChoice ? previousChoice : "personal";
+              channelLink.href = binding.channel_url;
+            } else { select.value = "owl"; }
+            select.disabled = false; submit.disabled = false;
+            status.textContent = binding ? "个人频道已连接" : "尚未连接个人频道";
+            channelLink.style.display = binding ? "inline" : "none";
+            connect.textContent = binding ? "更换频道" : "连接个人频道";
+            disconnect.style.display = binding ? "inline-block" : "none";
+            retry.style.display = "none";
+            if (previousChoice !== select.value || previousBinding !== (binding && binding.binding_id)) destinationChanged();
+          })
+          .catch(function (e) { if (!settled) { status.textContent = e.message; retry.style.display = "inline-block"; } })
+          .then(function () { loading = false; });
+      }
+      select.addEventListener("change", destinationChanged);
+      retry.addEventListener("click", refreshDestination);
+      connect.addEventListener("click", function () {
+        var popup = window.open("about:blank", "_blank");
+        if (!popup) { toast("浏览器拦截了授权窗口，请允许本站打开弹窗后重试。", true); return; }
+        popup.opener = null;
+        connect.disabled = true;
+        fetch("/public/me/share-destination", {method:"POST",credentials:"same-origin"})
+          .then(function (r) { if (!r.ok) throw new Error("无法开始 Discord 授权，请稍后重试。"); return r.json(); })
+          .then(function (data) {
+            if (!/^https:\/\/discord\.com\/oauth2\/authorize\?/.test(data.url || "")) throw new Error("授权地址无效，请重试。");
+            popup.location.href = data.url;
+          })
+          .catch(function (e) { popup.close(); toast(e.message, true); })
+          .then(function () { connect.disabled = false; });
+      });
+      disconnect.addEventListener("click", function () {
+        disconnect.disabled = true; submit.disabled = true;
+        fetch("/public/me/share-destination", {method:"DELETE",credentials:"same-origin"})
+          .then(function (r) { if (!r.ok) throw new Error("断开失败，请稍后重试。"); return r.json(); })
+          .then(function (data) {
+            toast(data.remote_revoked ? "个人频道已断开。" : "已从本站断开；可在 Discord 中删除对应的 Webhook。");
+            refreshDestination();
+          })
+          .catch(function (e) { toast(e.message, true); })
+          .then(function () { disconnect.disabled = false; });
+      });
+      window.addEventListener("focus", refreshDestination);
       function finish(value) {
         if (settled) return;
         settled = true;
+        window.removeEventListener("focus", refreshDestination);
         dialog.remove();
         if (previous && previous.isConnected && previous.focus) previous.focus();
         resolve(value);
       }
       cancel.addEventListener("click", function () { finish(null); });
-      submit.addEventListener("click", function () { finish(checkbox.checked); });
+      submit.addEventListener("click", function () {
+        if (submit.disabled) return;
+        finish({includeMetadata:checkbox.checked,destination:select.value,bindingId:binding && binding.binding_id});
+      });
       dialog.addEventListener("cancel", function (ev) { ev.preventDefault(); finish(null); });
       dialog.addEventListener("close", function () { finish(null); });
       actions.appendChild(cancel);
       actions.appendChild(submit);
-      [style, title, warning, label, help, actions].forEach(function (el) { dialog.appendChild(el); });
+      [style, title, warning, destinationLabel, connection, label, help, actions].forEach(function (el) { dialog.appendChild(el); });
       document.body.appendChild(dialog);
-      try { dialog.showModal(); cancel.focus(); }
+      try { dialog.showModal(); cancel.focus(); refreshDestination(); }
       catch (e) { finish(null); toast("当前浏览器无法打开分享确认，请更新浏览器后再试。", true); }
     });
   }
@@ -530,8 +627,9 @@
     var img = currentImage();
     if (!img) { toast("没找到当前这张图，先出图再上传。", true); return; }
     link.setAttribute("data-owl-busy", "1");
-    confirmShare().then(function (includeMetadata) {
-      if (includeMetadata === null) return;
+    confirmShare().then(function (choice) {
+      if (choice === null) return;
+      var includeMetadata = choice.includeMetadata;
       var meta = includeMetadata ? metaFor(img) : {};
       toast("正在提交到 Discord…");
       var src = img.currentSrc || img.src;
@@ -542,6 +640,8 @@
           var fd = new FormData();
           var ext = /png/.test(blob.type) ? "png" : /jpe?g/.test(blob.type) ? "jpg" : "webp";
           fd.append("image", blob, "owl-explore." + ext);
+          fd.append("destination", choice.destination);
+          if (choice.destination === "personal") fd.append("binding_id", choice.bindingId);
           if (includeMetadata) {
             fd.append("prompt", meta.prompt || "");
             fd.append("size", meta.size || "");
@@ -552,7 +652,7 @@
         })
         .then(function (r) { return r.json().catch(function () { return {}; }).then(function (j) { return { ok: r.ok, j: j }; }); })
         .then(function (res) {
-          if (res.ok) toast("已收到，正在发到图乐园频道 ✅");
+          if (res.ok) toast(choice.destination === "personal" ? "已发送到你的个人频道 ✅" : "已收到，正在发到图乐园频道 ✅");
           else toast((res.j && (res.j.detail || res.j.message)) || "提交失败，稍后再试。", true);
         });
     })

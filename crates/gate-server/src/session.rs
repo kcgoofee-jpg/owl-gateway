@@ -253,6 +253,7 @@ fn member_secret(state: &AppState) -> String {
 pub enum LoginMode {
     Plain,
     Verify,
+    Webhook,
 }
 
 /// 授权 state 的有效期（秒）。
@@ -271,7 +272,11 @@ pub fn sign_login_state(
     dev: &str,
     now: i64,
 ) -> String {
-    let m = if mode == LoginMode::Verify { 'v' } else { 'p' };
+    let m = match mode {
+        LoginMode::Plain => 'p',
+        LoginMode::Verify => 'v',
+        LoginMode::Webhook => 'w',
+    };
     // dev = 浏览器设备指纹（十六进制，可空）：跟着签名 state 走一圈 Discord 再回来
     let payload = format!("{m}.{nonce}.{}.{dev}", now + LOGIN_STATE_SECS);
     let sig = hmac_hex(&login_state_secret(secret_key), &payload);
@@ -297,6 +302,7 @@ pub fn verify_login_state(secret_key: &str, raw: &str, now: i64) -> Option<(Logi
     let mode = match mode {
         "p" => LoginMode::Plain,
         "v" => LoginMode::Verify,
+        "w" => LoginMode::Webhook,
         _ => return None,
     };
     Some((mode, dev.to_string()))

@@ -11,6 +11,7 @@ pub mod body;
 pub mod bugs;
 pub mod client_hints;
 pub mod defaults;
+pub mod discord_share;
 pub mod env;
 pub mod error;
 pub mod fsutil;

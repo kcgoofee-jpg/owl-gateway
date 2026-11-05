@@ -148,8 +148,8 @@ async fn upload(State(st): State<AppState>, headers: HeaderMap, req: Request) ->
     let Some((discord_id, _)) = crate::session::member_state(&st, &headers).await? else {
         return Err(HttpError::new(401, "请先在网页登录，再上传到 Explore。").into());
     };
-    if st.env.explore_channel_id.trim().is_empty() || st.env.discord_bot_token.trim().is_empty() {
-        return Err(InternalError("站点还没配置上传频道，暂时无法提交。".into()).into());
+    if !crate::session::origin_ok(&st, &headers) {
+        return Err(HttpError::new(403, "来源校验失败").into());
     }
     if !st
         .explore_uploads
@@ -171,6 +171,28 @@ async fn upload(State(st): State<AppState>, headers: HeaderMap, req: Request) ->
         .to_string();
     let raw = read_bounded_body(&parts.headers, body, MAX_UPLOAD_BYTES).await?;
     let (image, meta) = parse_form(&content_type, raw).await?;
+    let target = meta.get("destination").map(String::as_str).unwrap_or("owl");
+    let personal = match target {
+        "owl" => {
+            if st.env.explore_channel_id.trim().is_empty()
+                || st.env.discord_bot_token.trim().is_empty()
+            {
+                return Err(HttpError::new(503, "站点还没配置上传频道，暂时无法提交。").into());
+            }
+            None
+        }
+        "personal" => {
+            let dest = crate::discord_share::destination(&st, &discord_id)
+                .await?
+                .ok_or_else(|| HttpError::new(409, "请先连接个人频道，本次未转发。"))?;
+            if meta.get("binding_id").map(String::as_str) != Some(dest.id.as_str()) {
+                return Err(HttpError::new(409, "个人频道已更改，请重新打开分享弹窗确认。").into());
+            }
+            crate::discord_share::check_cooldown(&st, &dest).await?;
+            Some(dest)
+        }
+        _ => return Err(HttpError::new(400, "无效的分享目的地，未转发。").into()),
+    };
     let mime = sniff(&image.bytes)
         .ok_or_else(|| HttpError::new(400, "只支持 webp / png / jpg 图片，未提交。"))?;
 
@@ -241,12 +263,18 @@ async fn upload(State(st): State<AppState>, headers: HeaderMap, req: Request) ->
                 .unwrap_or_default()
         })
         .unwrap_or_default();
+    if let Some(dest) = personal {
+        post_to_discord(&st, &discord_id, &uploader, &upload, &meta, Some(&dest)).await?;
+        return Ok(ok_json(
+            &json!({"ok":true,"queued":false,"destination":"personal"}),
+        ));
+    }
     // Discord 投递放后台：成员的图一到网关就回执。原图上传本来就慢（走的是成员自己的上行带宽），
     // 再同步等一次 Discord 往返只会让按钮转更久；失败记 error 日志，刷屏由入口的 20 秒冷却挡住。
     let st2 = st.clone();
     let discord_id2 = discord_id.clone();
     tokio::spawn(async move {
-        match post_to_discord(&st2, &discord_id2, &uploader, &upload, &meta).await {
+        match post_to_discord(&st2, &discord_id2, &uploader, &upload, &meta, None).await {
             Ok(message_id) => tracing::info!(
                 target: "explore",
                 "Explore 上传：{}（{}）{} 字节，msg={}",
@@ -394,6 +422,7 @@ async fn post_to_discord(
     uploader: &str,
     upload: &Upload,
     meta: &std::collections::HashMap<String, String>,
+    personal: Option<&crate::discord_share::Destination>,
 ) -> Result<String, ApiError> {
     let channel = st.env.explore_channel_id.trim();
     let url = format!(
@@ -489,6 +518,9 @@ async fn post_to_discord(
         .text("payload_json", payload.to_string())
         .part("files[0]", part);
 
+    if let Some(dest) = personal {
+        return crate::discord_share::execute(st, dest, form).await;
+    }
     let resp = http_client()
         .post(&url)
         .header(

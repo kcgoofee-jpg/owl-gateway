@@ -1019,6 +1019,7 @@ dependencies = [
  "multer",
  "rand 0.9.5",
  "reqwest",
+ "ring",
  "rmpv",
  "rusqlite",
  "rust-embed",

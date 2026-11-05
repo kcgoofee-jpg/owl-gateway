@@ -41,6 +41,7 @@ scrypt.workspace = true
 subtle.workspace = true
 hex.workspace = true
 rand.workspace = true
+ring = "0.17"
 jiff.workspace = true
 thiserror.workspace = true
 image.workspace = true
