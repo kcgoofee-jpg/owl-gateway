@@ -687,12 +687,13 @@ async fn user_data(State(state): State<AppState>, req: Request) -> ApiResult {
         .map(|(blob, change_index)| json!({"keystore": blob, "changeIndex": change_index}));
     // 官网页面按 settings.defaultModel 选默认模型；本站默认用 V4.5（V5 可能没给这把 Key 开）。
     // 界面语言默认中文：官网自带 zh-CN 翻译，uiLanguage 是客户端设置，改这里不用动前端。
-    // 已经存过设置的成员也要吃到「界面语言默认中文」：只在缺 uiLanguage 时补，不覆盖人家自己选过的。
+    // 本地留图默认开启（persistImageGenHistory）：让刷新后的原生历史恢复开箱可用，只补缺失字段，
+    // 不覆盖成员自己选过的任何设置，也不写库——默认值是读时补的，不需要数据迁移。
     let settings = state
         .db
         .get_key_settings(key.id())
         .await?
-        .map(|raw| with_default_language(&raw))
+        .map(|raw| with_default_client_settings(&raw))
         .or_else(|| Some(DEFAULT_CLIENT_SETTINGS.to_string()));
     Ok(ok_json(&json!({
         "subscription": public_sub,
@@ -705,23 +706,31 @@ async fn user_data(State(state): State<AppState>, req: Request) -> ApiResult {
     })))
 }
 
-/// 新成员的首屏客户端设置：默认模型 V4.5 + 中文界面（官网自带 `zh-CN` 翻译）。
-pub const DEFAULT_CLIENT_SETTINGS: &str =
-    r#"{"defaultModel":"nai-diffusion-4-5-curated","uiLanguage":"zh-CN"}"#;
+/// 新成员的首屏客户端设置：默认模型 V4.5 + 中文界面 + 本地留图默认开启。
+pub const DEFAULT_CLIENT_SETTINGS: &str = r#"{"defaultModel":"nai-diffusion-4-5-curated","uiLanguage":"zh-CN","persistImageGenHistory":true}"#;
 
-/// 存档里的客户端设置没有 `uiLanguage` 时补上 `zh-CN`；解析不了就原样返回，一个字都不改。
-fn with_default_language(raw: &str) -> String {
+/// 客户端设置的站点默认值：`uiLanguage` 缺了补 `zh-CN`，`persistImageGenHistory` 缺了补 `true`。
+/// 只补缺失字段；成员显式选过的值（包括 `false`）原样保留。解析不了就原样返回，一个字都不改。
+/// 只在读响应时补，不写库：老成员下次拿到设置就是补过默认值的，前端 PUT 回来会自然固化。
+fn with_default_client_settings(raw: &str) -> String {
     let Ok(mut value) = serde_json::from_str::<Value>(raw) else {
         return raw.to_string();
     };
-    let Some(obj) = value.as_object_mut() else {
-        return raw.to_string();
-    };
-    if obj.contains_key("uiLanguage") {
-        return raw.to_string();
-    }
-    obj.insert("uiLanguage".into(), json!("zh-CN"));
+    fill_default_client_settings(&mut value);
     value.to_string()
+}
+
+/// 对已解析的设置对象就地补缺省值；非对象原样跳过。
+fn fill_default_client_settings(value: &mut Value) {
+    let Some(obj) = value.as_object_mut() else {
+        return;
+    };
+    if !obj.contains_key("uiLanguage") {
+        obj.insert("uiLanguage".into(), json!("zh-CN"));
+    }
+    if !obj.contains_key("persistImageGenHistory") {
+        obj.insert("persistImageGenHistory".into(), json!(true));
+    }
 }
 
 /// 原生客户端会探这个端点；404 会被当成「渠道不支持」。官方是 200，我们也回同样的形状。
@@ -773,14 +782,19 @@ async fn user_keystore_put(State(state): State<AppState>, req: Request) -> ApiRe
 }
 
 /// 官网客户端设置：主题、默认模型、许可标记等整块 JSON。
+/// 和 /user/data 一样补站点默认值：前端把这里读到的对象直接当设置用，
+/// 缺了 persistImageGenHistory 会让本地留图退回官网默认（关）。
 async fn user_settings(State(state): State<AppState>, req: Request) -> ApiResult {
     let (parts, _) = req.into_parts();
     let key = authenticate(&state, &parts, false).await?;
     let stored = state.db.get_key_settings(key.id()).await?;
-    Ok(ok_json(&match stored {
-        Some(json) => serde_json::from_str::<Value>(&json).unwrap_or_else(|_| json!({})),
-        None => json!({}),
-    }))
+    let mut value = match stored {
+        Some(json) => serde_json::from_str::<Value>(&json)
+            .unwrap_or_else(|_| serde_json::from_str(DEFAULT_CLIENT_SETTINGS).unwrap()),
+        None => serde_json::from_str(DEFAULT_CLIENT_SETTINGS).unwrap(),
+    };
+    fill_default_client_settings(&mut value);
+    Ok(ok_json(&value))
 }
 
 async fn user_settings_put(State(state): State<AppState>, req: Request) -> ApiResult {
@@ -1157,25 +1171,54 @@ mod tests {
 
 #[cfg(test)]
 mod client_settings_tests {
-    use super::with_default_language;
+    use super::{
+        DEFAULT_CLIENT_SETTINGS, fill_default_client_settings, with_default_client_settings,
+    };
 
     #[test]
     fn adds_chinese_language_when_missing() {
-        let out = with_default_language(r#"{"defaultModel":"nai-diffusion-4-5-curated"}"#);
+        let out = with_default_client_settings(r#"{"defaultModel":"nai-diffusion-4-5-curated"}"#);
         let v: serde_json::Value = serde_json::from_str(&out).unwrap();
         assert_eq!(v["uiLanguage"], "zh-CN");
         assert_eq!(v["defaultModel"], "nai-diffusion-4-5-curated");
     }
 
     #[test]
-    fn keeps_explicit_language() {
-        let raw = r#"{"uiLanguage":"en-US"}"#;
-        assert_eq!(with_default_language(raw), raw);
+    fn enables_local_image_history_by_default() {
+        // 老成员的存量设置没有这个字段：读到响应时补 true（本地留图默认开启）。
+        let out = with_default_client_settings(r#"{"uiLanguage":"zh-CN"}"#);
+        let v: serde_json::Value = serde_json::from_str(&out).unwrap();
+        assert_eq!(v["persistImageGenHistory"], true);
+    }
+
+    #[test]
+    fn keeps_explicit_choices() {
+        // 显式选过的值一律保留：语言、以及刻意关掉的本地留图。
+        let raw = r#"{"uiLanguage":"en-US","persistImageGenHistory":false}"#;
+        let v: serde_json::Value =
+            serde_json::from_str(&with_default_client_settings(raw)).unwrap();
+        assert_eq!(v["uiLanguage"], "en-US");
+        assert_eq!(v["persistImageGenHistory"], false);
+    }
+
+    #[test]
+    fn default_settings_carry_both_defaults() {
+        let v: serde_json::Value = serde_json::from_str(DEFAULT_CLIENT_SETTINGS).unwrap();
+        assert_eq!(v["defaultModel"], "nai-diffusion-4-5-curated");
+        assert_eq!(v["uiLanguage"], "zh-CN");
+        assert_eq!(v["persistImageGenHistory"], true);
     }
 
     #[test]
     fn leaves_broken_json_alone() {
-        assert_eq!(with_default_language("not json"), "not json");
-        assert_eq!(with_default_language("[1,2]"), "[1,2]");
+        assert_eq!(with_default_client_settings("not json"), "not json");
+        assert_eq!(with_default_client_settings("[1,2]"), "[1,2]");
+    }
+
+    #[test]
+    fn fill_skips_non_objects() {
+        let mut value = serde_json::json!([1, 2, 3]);
+        fill_default_client_settings(&mut value);
+        assert_eq!(value, serde_json::json!([1, 2, 3]));
     }
 }
