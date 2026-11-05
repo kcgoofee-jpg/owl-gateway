@@ -4,7 +4,7 @@ use crate::error::{ApiError, ApiResult, GateError, HttpError, InternalError, ok_
 use crate::session::{self, LoginMode, STATE_COOKIE};
 use crate::state::AppState;
 use axum::Router;
-use axum::extract::State;
+use axum::extract::{Request, State};
 use axum::http::{HeaderMap, HeaderValue};
 use axum::response::{Html, IntoResponse, Response};
 use axum::routing::get;
@@ -17,6 +17,9 @@ use std::collections::HashMap;
 use std::time::Duration;
 
 const PREFIX: &str = "discord_share_destination:";
+/// 「记住分享选择」的存储前缀。和目的地一样放在成员级 settings 里：
+/// 跟着登录成员走，共用浏览器、退出换号都不会串到别人的选择上。
+const REMEMBER_PREFIX: &str = "discord_share_remember:";
 
 // No Debug implementation: this struct contains a bearer credential.
 #[derive(Serialize, Deserialize)]
@@ -27,11 +30,29 @@ pub struct Destination {
     pub token: String,
 }
 
+/// 成员勾选「记住本次选择，下次不再提示」后保存的目的地与元数据选择。
+/// `binding_id` 记下确认时的个人频道绑定：绑定换了 / 断开 / 失效，这条选择就作废，必须重新确认。
+#[derive(Serialize, Deserialize, Clone)]
+pub struct SharePreference {
+    /// "owl" 或 "personal"。
+    pub destination: String,
+    pub include_metadata: bool,
+    /// destination == "personal" 时是确认那一刻的绑定 id；owl 时为空。
+    pub binding_id: Option<String>,
+}
+
 pub fn router() -> Router<AppState> {
-    Router::new().route(
-        "/public/me/share-destination",
-        get(status).post(connect).delete(disconnect),
-    )
+    Router::new()
+        .route(
+            "/public/me/share-destination",
+            get(status).post(connect).delete(disconnect),
+        )
+        .route(
+            "/public/me/share-preference",
+            get(preference)
+                .put(save_preference)
+                .delete(clear_preference),
+        )
 }
 
 fn private(response: Response) -> Response {
@@ -129,6 +150,147 @@ fn valid_destination(d: &Destination) -> bool {
         && d.token
             .bytes()
             .all(|b| b.is_ascii_alphanumeric() || b == b'_' || b == b'-')
+}
+
+/// 读回成员「记住的分享选择」，但只在其**当前仍然可用**时返回：
+/// - 记住的是 OWL 公共频道 → 一直可用；
+/// - 记住的是个人频道 → 绑定还在、且就是当初确认的那条才可用。
+///
+/// 绑定换过 / 断开 / 失效一律返回 None，弹窗重新确认——绝不自动转发到公共频道。
+pub async fn usable_preference(
+    state: &AppState,
+    member_id: &str,
+) -> Result<Option<SharePreference>, ApiError> {
+    let Some(raw) = state
+        .db
+        .get_setting(&format!("{REMEMBER_PREFIX}{member_id}"))
+        .await?
+        .filter(|s| !s.is_empty())
+    else {
+        return Ok(None);
+    };
+    let Ok(pref) = serde_json::from_str::<SharePreference>(&raw) else {
+        return Ok(None);
+    };
+    match pref.destination.as_str() {
+        "owl" => Ok(Some(pref)),
+        "personal" => {
+            let binding = destination(state, member_id).await?;
+            let still_bound = binding.is_some_and(|d| Some(d.id) == pref.binding_id);
+            Ok(still_bound.then_some(pref))
+        }
+        _ => Ok(None),
+    }
+}
+
+async fn clear_remembered(state: &AppState, member_id: &str) -> Result<(), ApiError> {
+    state
+        .db
+        .set_setting(&format!("{REMEMBER_PREFIX}{member_id}"), "")
+        .await?;
+    Ok(())
+}
+
+/// 保存前校验：个人频道的选择必须对应「此刻还在」的绑定；owl 不需要绑定。
+async fn validate_preference(
+    state: &AppState,
+    member_id: &str,
+    pref: &SharePreference,
+) -> Result<(), ApiError> {
+    match pref.destination.as_str() {
+        "owl" => Ok(()),
+        "personal" => {
+            let dest = destination(state, member_id)
+                .await?
+                .ok_or_else(|| HttpError::new(409, "请先连接个人频道，再记住这个选择。"))?;
+            if pref.binding_id.as_deref() != Some(dest.id.as_str()) {
+                return Err(HttpError::new(409, "个人频道刚刚有变化，请重新确认后再记住。").into());
+            }
+            Ok(())
+        }
+        _ => Err(HttpError::new(400, "无效的分享目的地。").into()),
+    }
+}
+
+async fn preference(State(state): State<AppState>, headers: HeaderMap) -> ApiResult {
+    let id = subject(&state, &headers, false).await?;
+    let remembered = usable_preference(&state, &id).await?;
+    // last：最近一次保存的原始选择（不看可用性）。绑定失效后弹窗重新出现时，
+    // 前端用它回填「包含元数据」的勾选，尊重成员明确记住过的偏好。
+    let last = state
+        .db
+        .get_setting(&format!("{REMEMBER_PREFIX}{id}"))
+        .await?
+        .filter(|s| !s.is_empty())
+        .and_then(|raw| serde_json::from_str::<SharePreference>(&raw).ok())
+        .map(|p| json!({"destination": p.destination, "include_metadata": p.include_metadata}));
+    Ok(private(ok_json(&json!({
+        "remembered": remembered.map(|p| json!({
+            "destination": p.destination,
+            "include_metadata": p.include_metadata,
+            "binding_id": p.binding_id,
+        })),
+        "last": last,
+    }))))
+}
+
+#[derive(Deserialize)]
+struct PreferenceBody {
+    #[serde(default)]
+    destination: Option<String>,
+    #[serde(default)]
+    include_metadata: Option<bool>,
+    #[serde(default)]
+    binding_id: Option<String>,
+}
+
+async fn save_preference(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    req: Request,
+) -> ApiResult {
+    let id = subject(&state, &headers, true).await?;
+    if !state
+        .explore_uploads
+        .check_then_push(&format!("pref:{id}"), 6, 60.0, state.now())
+    {
+        return Err(HttpError::new(429, "保存得太快了，请一分钟后重试。").into());
+    }
+    let (_parts, body) = req.into_parts();
+    let bytes = axum::body::to_bytes(body, 4 * 1024)
+        .await
+        .map_err(|_| HttpError::new(413, "请求太大。"))?;
+    let parsed: PreferenceBody =
+        serde_json::from_slice(&bytes).map_err(|_| HttpError::new(400, "请求格式无效。"))?;
+    let destination = parsed.destination.unwrap_or_default();
+    let pref = SharePreference {
+        destination: destination.clone(),
+        include_metadata: parsed.include_metadata.unwrap_or(true),
+        binding_id: parsed.binding_id.filter(|_| destination == "personal"),
+    };
+    validate_preference(&state, &id, &pref).await?;
+    let raw = serde_json::to_string(&pref).map_err(|_| InternalError("分享选择无法保存".into()))?;
+    state
+        .db
+        .set_setting(&format!("{REMEMBER_PREFIX}{id}"), &raw)
+        .await?;
+    Ok(private(ok_json(&json!({"ok": true, "remembered": {
+        "destination": pref.destination,
+        "include_metadata": pref.include_metadata,
+        "binding_id": pref.binding_id,
+    }}))))
+}
+
+async fn clear_preference(State(state): State<AppState>, headers: HeaderMap) -> ApiResult {
+    let id = subject(&state, &headers, true).await?;
+    if !state
+        .explore_uploads
+        .check_then_push(&format!("pref:{id}"), 6, 60.0, state.now())
+    {
+        return Err(HttpError::new(429, "操作太频繁，请一分钟后重试。").into());
+    }
+    clear_remembered(&state, &id).await?;
+    Ok(private(ok_json(&json!({"ok": true}))))
 }
 
 async fn status(State(state): State<AppState>, headers: HeaderMap) -> ApiResult {
@@ -306,6 +468,18 @@ pub async fn callback(
             .send()
             .await;
     }
+    // 换了频道就作废「记住的个人频道分享选择」：旧选择是针对旧频道确认的，
+    // 不能悄悄应用到新频道上；下次分享重新弹窗，成员确认后可以重新记住。
+    if let Ok(Some(raw)) = state
+        .db
+        .get_setting(&format!("{REMEMBER_PREFIX}{id}"))
+        .await
+        && let Ok(pref) = serde_json::from_str::<SharePreference>(&raw)
+        && pref.destination == "personal"
+        && pref.binding_id.as_deref() != Some(dest.id.as_str())
+    {
+        let _ = clear_remembered(state, &id).await;
+    }
     Ok(result_page(true))
 }
 
@@ -319,7 +493,20 @@ async fn disconnect(State(state): State<AppState>, headers: HeaderMap) -> ApiRes
             .is_ok_and(|r| r.status().is_success() || r.status().as_u16() == 404),
         None => true,
     };
+    // 主动断开要一并作废「记住的个人频道分享选择」：下次分享重新弹窗确认，
+    // 不能因为之后重连了同一个频道就悄悄恢复自动转发。绑定清掉之前先读原值，
+    // 否则可用性检查会因为没有绑定而跳过清理。
+    let remembered_personal = state
+        .db
+        .get_setting(&format!("{REMEMBER_PREFIX}{id}"))
+        .await?
+        .filter(|s| !s.is_empty())
+        .and_then(|raw| serde_json::from_str::<SharePreference>(&raw).ok())
+        .is_some_and(|p| p.destination == "personal");
     state.db.set_setting(&format!("{PREFIX}{id}"), "").await?;
+    if remembered_personal {
+        clear_remembered(&state, &id).await?;
+    }
     let mut response = private(ok_json(&json!({"ok":true,"remote_revoked":revoked})));
     response.headers_mut().append(
         "set-cookie",

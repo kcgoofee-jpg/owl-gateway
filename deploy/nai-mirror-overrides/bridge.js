@@ -1,7 +1,7 @@
 /* owl ⇄ NovelAI 生图页桥：把官网前端的 API 调用改到本站网关。
    只做三件事：改 base、带 Key、隐藏账号横幅。 */
 (function () {
-  window.__BRIDGE_VERSION__ = "2026-11-06-personal-channel";
+  window.__BRIDGE_VERSION__ = "2026-11-06-share-settings-v2";
   var CFG = window.__NAI_BRIDGE__ || {};
   var GATE = CFG.gate || "";
   var KEY = CFG.key || "";
@@ -235,7 +235,12 @@
   function watchBanners() {
     hideBanners();
     renameDiscord();
-    var mo = new MutationObserver(function () { hideBanners(); renameDiscord(); });
+    ensureSettingsEntry();
+    var mo = new MutationObserver(function () {
+      hideBanners();
+      renameDiscord();
+      ensureSettingsEntry();
+    });
     mo.observe(document.documentElement, { childList: true, subtree: true, characterData: true });
   }
   if (document.body) watchBanners();
@@ -339,7 +344,432 @@
   } catch (e) {}
 
   /* ---- 上传到 Explore：官网那个按钮只是 <a href="/explore/register">，我们镜像里没有 Explore 站。
-     改成把画布上这张原图（webp/png 原始字节，官方元数据都在）交给网关，由机器人发到 Discord。 ---- */
+     改成把画布上这张原图（webp/png 原始字节，官方元数据都在）交给网关，由机器人发到 Discord。
+     分享弹窗用工作台自己的主题（NovelAI Dark token，见下），不再套首页的紫灰配色；
+     自己写 class（owl-*），不依赖打包产物里的 sc-* 哈希类或 Turbopack 私有模块。 ---- */
+
+  // NovelAI Dark：官网 image.html 里 @font-face 自托管了 Source Sans Pro / Eczar，弹窗直接继承。
+  var T = {
+    bg0: "#0E0F21", // 弹窗面板
+    bg1: "#13152C", // 页面底色
+    bg2: "#191B31", // 输入框 / 次级表面
+    bg3: "#22253F", // 悬停 / 抬升
+    border: "#283059",
+    text: "#FFFFFF",
+    dim: "rgba(225,228,255,.78)",
+    heading: "#F5F3C2",
+    accent: "#EC55A7", // 复选框等交互强调色（官网 Dark 主题最常用的交互色）
+    warning: "#FF7878",
+    font: "'Source Sans Pro','Noto Sans SC',-apple-system,'Segoe UI',sans-serif",
+    headingFont: "Eczar,'Source Sans Pro',serif",
+  };
+
+  // 弹窗公共样式只注入一次；选择器都带 owl- 前缀，不碰官网样式。
+  function ensureDialogStyles() {
+    if (document.getElementById("owl-share-styles")) return;
+    var style = document.createElement("style");
+    style.id = "owl-share-styles";
+    style.textContent =
+      ".owl-share-dialog{box-sizing:border-box;width:min(480px,calc(100vw - 40px));padding:24px;border:1px solid " +
+      T.border + ";border-radius:14px;background:" + T.bg0 + ";color:" + T.text +
+      ";font:14px/1.65 " + T.font + ";box-shadow:0 20px 70px rgba(0,0,0,.6)}" +
+      ".owl-share-dialog::backdrop{background:rgba(6,7,20,.72)}" +
+      ".owl-share-dialog h2{margin:0 0 12px;font:600 19px/1.4 " + T.headingFont + ";color:" + T.heading + "}" +
+      ".owl-share-dialog p{margin:0}" +
+      ".owl-share-dialog .owl-help{color:" + T.dim + ";font-size:13px}" +
+      ".owl-share-dialog .owl-warning{color:" + T.warning + "}" +
+      ".owl-share-dialog label.owl-row{display:flex;align-items:center;gap:10px;cursor:pointer}" +
+      ".owl-share-dialog input[type=checkbox]{width:17px;height:17px;flex:none;accent-color:" + T.accent + ";cursor:pointer}" +
+      ".owl-share-dialog select,.owl-share-dialog input[type=text]{display:block;box-sizing:border-box;width:100%;margin:8px 0 0;padding:9px 10px;border:1px solid " +
+      T.border + ";border-radius:8px;background:" + T.bg2 + ";color:" + T.text + ";font:inherit}" +
+      ".owl-share-dialog select:hover{border-color:" + T.bg3 + "}" +
+      ".owl-share-dialog button{font:600 14px/1.2 " + T.font + ";padding:10px 14px;border-radius:8px;cursor:pointer}" +
+      ".owl-btn-primary{background:" + T.heading + ";color:" + T.bg0 + ";border:1px solid " + T.heading + "}" +
+      ".owl-btn-primary:disabled{opacity:.55;cursor:default}" +
+      ".owl-btn-ghost{background:transparent;color:" + T.text + ";border:1px solid " + T.border + "}" +
+      ".owl-btn-ghost:hover{background:" + T.bg2 + "}" +
+      ".owl-btn-mini{padding:5px 9px;border-radius:6px;font-size:13px}" +
+      ".owl-share-dialog button:focus-visible,.owl-share-dialog input:focus-visible,.owl-share-dialog select:focus-visible{outline:2px solid " +
+      T.heading + ";outline-offset:2px}" +
+      ".owl-share-dialog .owl-section{margin-top:20px}" +
+      ".owl-share-dialog .owl-cap{font:600 13px/1.4 " + T.font + ";color:" + T.dim + ";margin:0 0 8px}" +
+      ".owl-settings-entry{font:600 12px/1 " + T.font + ";color:" + T.dim + ";background:" + T.bg2 +
+      ";border:1px solid " + T.border + ";border-radius:999px;padding:7px 12px;cursor:pointer;margin-left:8px}" +
+      ".owl-settings-entry:hover{color:" + T.text + ";border-color:" + T.bg3 + "}";
+    document.head.appendChild(style);
+  }
+
+  // 可复用的模态骨架：主题样式 + 焦点还原 + Esc/关闭兜底；内容由 build 填充，
+  // build 里拿到 handle（finish 结束弹窗并 resolve）。resolve(null) 一律表示取消。
+  function openOwlDialog(build) {
+    return new Promise(function (resolve) {
+      ensureDialogStyles();
+      var previous = document.activeElement;
+      var dialog = document.createElement("dialog");
+      dialog.className = "owl-share-dialog";
+      var settled = false;
+      var cleanups = [];
+      function finish(value) {
+        if (settled) return;
+        settled = true;
+        for (var i = 0; i < cleanups.length; i++) { try { cleanups[i](); } catch (e) {} }
+        dialog.remove();
+        if (previous && previous.isConnected && previous.focus) previous.focus();
+        resolve(value);
+      }
+      var handle = {
+        dialog: dialog,
+        finish: finish,
+        onCleanup: function (fn) { cleanups.push(fn); },
+      };
+      build(handle);
+      dialog.addEventListener("cancel", function (ev) { ev.preventDefault(); finish(null); });
+      dialog.addEventListener("close", function () { finish(null); });
+      document.body.appendChild(dialog);
+      try {
+        dialog.showModal();
+      } catch (e) {
+        finish(null);
+        toast("当前浏览器无法打开分享弹窗，请更新浏览器后再试。", true);
+      }
+    });
+  }
+
+  function dialogButton(text, primary, mini) {
+    var b = document.createElement("button");
+    b.type = "button";
+    b.textContent = text;
+    b.className = (primary ? "owl-btn-primary" : "owl-btn-ghost") + (mini ? " owl-btn-mini" : "");
+    return b;
+  }
+
+  function dialogCheckbox(labelText) {
+    var label = document.createElement("label");
+    label.className = "owl-row";
+    var box = document.createElement("input");
+    box.type = "checkbox";
+    label.appendChild(box);
+    label.appendChild(document.createTextNode(labelText));
+    return { label: label, box: box };
+  }
+
+  /* ---- 记住的分享选择：存服务端（按登录成员隔离），本地不落盘。
+     GET 返回 remembered（当前仍可用，可免弹窗直接分享）和 last（最近一次保存的原始选择，
+     绑定失效后仍用于回填弹窗里「包含元数据」的勾选，尊重成员明确记住过的偏好）。 ---- */
+  function fetchShareState() {
+    return Promise.all([
+      fetch("/public/me/share-preference", { credentials: "same-origin", cache: "no-store" })
+        .then(function (r) { return r.ok ? r.json() : null; })
+        .catch(function () { return null; }),
+      fetch("/public/me/share-destination", { credentials: "same-origin", cache: "no-store" })
+        .then(function (r) { return r.ok ? r.json() : null; })
+        .catch(function () { return null; }),
+    ]);
+  }
+
+  function savePreference(choice) {
+    return fetch("/public/me/share-preference", {
+      method: "PUT",
+      credentials: "same-origin",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        destination: choice.destination,
+        include_metadata: choice.includeMetadata,
+        binding_id: choice.destination === "personal" ? choice.bindingId : null,
+      }),
+    }).then(function (r) {
+      if (!r.ok) throw new Error("save failed");
+      toast("已记住本次选择，下次分享不再提示。可在「分享设置」里修改。");
+    }).catch(function () {
+      toast("这次选择没能记住，下次会再询问。", true);
+    });
+  }
+
+  function clearPreference() {
+    return fetch("/public/me/share-preference", { method: "DELETE", credentials: "same-origin" })
+      .then(function (r) { if (!r.ok) throw new Error("clear failed"); });
+  }
+
+  function destinationName(value) {
+    return value === "personal" ? "我的个人频道" : "OWL 公共频道";
+  }
+
+  /* ---- 分享设置：免提示之后仍能查看/修改记住的选择、管理个人频道连接。 ---- */
+  function openShareSettings() {
+    if (document.querySelector(".owl-share-dialog")) return;
+    openOwlDialog(function (h) {
+      var title = document.createElement("h2");
+      title.id = "owl-share-settings-title";
+      title.textContent = "分享设置";
+      h.dialog.setAttribute("aria-labelledby", "owl-share-settings-title");
+      var choiceCap = document.createElement("p");
+      choiceCap.className = "owl-cap";
+      choiceCap.textContent = "记住的分享选择";
+      var destLabel = document.createElement("label");
+      destLabel.style.cssText = "display:block;font-size:13px;color:" + T.dim + ";";
+      destLabel.textContent = "分享目的地";
+      var select = document.createElement("select");
+      var owlOption = document.createElement("option");
+      owlOption.value = "owl";
+      owlOption.textContent = "OWL 公共频道";
+      select.appendChild(owlOption);
+      destLabel.appendChild(select);
+      destLabel.style.marginTop = "8px";
+      var choiceRow = document.createElement("div");
+      choiceRow.style.cssText = "display:flex;gap:8px;align-items:center;margin-top:12px;flex-wrap:wrap;";
+      var metaBox = dialogCheckbox("包含生成元数据（提示词、种子等）");
+      metaBox.label.style.flex = "1 1 auto";
+      var save = dialogButton("保存", true, true);
+      var clear = dialogButton("清除记忆", false, true);
+      choiceRow.append(metaBox.label, save, clear);
+      var stateLine = document.createElement("p");
+      stateLine.className = "owl-help";
+      stateLine.setAttribute("role", "status");
+      stateLine.style.marginTop = "10px";
+      var connCap = document.createElement("p");
+      connCap.className = "owl-cap owl-section";
+      connCap.textContent = "个人频道";
+      var connLine = document.createElement("p");
+      connLine.className = "owl-help";
+      var connText = document.createElement("span");
+      var channelLink = document.createElement("a");
+      channelLink.textContent = "在 Discord 中查看";
+      channelLink.target = "_blank";
+      channelLink.rel = "noopener noreferrer";
+      channelLink.style.cssText = "color:" + T.heading + ";display:none;margin-left:8px;";
+      connLine.append(connText, channelLink);
+      var connActions = document.createElement("div");
+      connActions.style.cssText = "display:flex;gap:8px;margin-top:10px;flex-wrap:wrap;";
+      var connect = dialogButton("连接个人频道", false, true);
+      var change = dialogButton("更换频道", false, true);
+      var disconnect = dialogButton("断开", false, true);
+      change.style.display = "none";
+      disconnect.style.display = "none";
+      connActions.append(connect, change, disconnect);
+      var actions = document.createElement("div");
+      actions.style.cssText = "display:flex;justify-content:flex-end;margin-top:24px;";
+      var close = dialogButton("关闭", false);
+      // showModal 后焦点落进弹窗：Esc 走 cancel 事件，Tab 也不会跑到弹窗外的惰性区域。
+      close.setAttribute("autofocus", "");
+      actions.appendChild(close);
+
+      var binding = null;
+      function refresh() {
+        fetchShareState().then(function (s) {
+          var pref = s && s[0], dest = s && s[1];
+          binding = dest && dest.connected ? dest : null;
+          var remembered = pref && pref.remembered;
+          var last = pref && pref.last;
+          var personalOption = select.querySelector("option[value=personal]");
+          if (binding && !personalOption) {
+            personalOption = document.createElement("option");
+            personalOption.value = "personal";
+            personalOption.textContent = "我的个人频道";
+            select.appendChild(personalOption);
+          } else if (!binding && personalOption) {
+            personalOption.remove();
+          }
+          if (remembered) {
+            select.value = remembered.destination;
+            metaBox.box.checked = remembered.include_metadata;
+            stateLine.textContent = "当前记住：" + destinationName(remembered.destination) +
+              " · " + (remembered.include_metadata ? "包含元数据" : "不包含元数据") + "，分享时不再提示。";
+          } else {
+            stateLine.textContent = last
+              ? "记住的选择已失效（个人频道有变化），下次分享会重新询问。"
+              : "尚未记住选择：每次分享都会询问。在分享弹窗勾选「记住本次选择」即可跳过。";
+            select.value = binding ? "personal" : "owl";
+            metaBox.box.checked = last ? last.include_metadata : true;
+          }
+          connText.textContent = binding ? "个人频道已连接。" : "尚未连接个人频道。";
+          channelLink.style.display = binding ? "inline" : "none";
+          if (binding) channelLink.href = binding.channel_url;
+          connect.style.display = binding ? "none" : "inline-block";
+          change.style.display = binding ? "inline-block" : "none";
+          disconnect.style.display = binding ? "inline-block" : "none";
+        });
+      }
+      save.addEventListener("click", function () {
+        if (!select.value) return;
+        save.disabled = true;
+        savePreference({
+          destination: select.value,
+          includeMetadata: metaBox.box.checked,
+          bindingId: binding && binding.binding_id,
+        }).catch(function () {}).then(function () {
+          save.disabled = false;
+          refresh();
+        });
+      });
+      clear.addEventListener("click", function () {
+        clear.disabled = true;
+        clearPreference().then(function () {
+          toast("已清除记住的选择，下次分享会重新询问。");
+        }).catch(function () {
+          toast("清除失败，请稍后再试。", true);
+        }).then(function () {
+          clear.disabled = false;
+          refresh();
+        });
+      });
+      connect.addEventListener("click", startPersonalChannelConnect);
+      change.addEventListener("click", startPersonalChannelConnect);
+      disconnect.addEventListener("click", function () {
+        disconnect.disabled = true;
+        fetch("/public/me/share-destination", { method: "DELETE", credentials: "same-origin" })
+          .then(function (r) { if (!r.ok) throw new Error(); return r.json(); })
+          .then(function (data) {
+            toast(data.remote_revoked ? "个人频道已断开。" : "已从本站断开；可在 Discord 中删除对应的 Webhook。");
+          })
+          .catch(function () { toast("断开失败，请稍后再试。", true); })
+          .then(function () { disconnect.disabled = false; refresh(); });
+      });
+      close.addEventListener("click", function () { h.finish(null); });
+      h.dialog.append(title, choiceCap, destLabel, choiceRow, stateLine, connCap, connLine, connActions, actions);
+      refresh();
+    });
+  }
+
+  // 个人频道授权：先占一个窗口再发起 OAuth（和之前一致，弹窗拦截给出提示）。
+  function startPersonalChannelConnect() {
+    var popup = window.open("about:blank", "_blank");
+    if (!popup) { toast("浏览器拦截了授权窗口，请允许本站打开弹窗后重试。", true); return; }
+    popup.opener = null;
+    fetch("/public/me/share-destination", { method: "POST", credentials: "same-origin" })
+      .then(function (r) { if (!r.ok) throw new Error("无法开始 Discord 授权，请稍后重试。"); return r.json(); })
+      .then(function (data) {
+        if (!/^https:\/\/discord\.com\/oauth2\/authorize\?/.test(data.url || "")) throw new Error("授权地址无效，请重试。");
+        popup.location.href = data.url;
+      })
+      .catch(function (e) { popup.close(); toast(e.message, true); });
+  }
+
+  // null = cancel; otherwise the confirmed destination and metadata choice.
+  function confirmShare(pref) {
+    return openOwlDialog(function (h) {
+      var dialog = h.dialog;
+      dialog.setAttribute("aria-labelledby", "owl-share-title");
+      dialog.setAttribute("aria-describedby", "owl-share-warning owl-share-help");
+      var title = document.createElement("h2");
+      title.id = "owl-share-title";
+      title.textContent = "确认分享";
+      var warning = document.createElement("p");
+      warning.id = "owl-share-warning";
+      warning.className = "owl-warning";
+      warning.textContent = "该分享转发至 owl 服务器进行保存备份，请确认是否有潜在二传违规风险！";
+      var destinationLabel = document.createElement("label");
+      destinationLabel.style.cssText = "display:block;margin:20px 0 0;";
+      destinationLabel.textContent = "转发到";
+      var select = document.createElement("select");
+      select.disabled = true;
+      destinationLabel.appendChild(select);
+      var connection = document.createElement("div");
+      connection.style.cssText = "display:flex;flex-wrap:wrap;align-items:center;gap:8px;margin-top:10px;font-size:13px;";
+      var status = document.createElement("span");
+      status.setAttribute("role", "status");
+      status.textContent = "正在读取分享目的地…";
+      status.style.color = T.dim;
+      var channelLink = document.createElement("a");
+      channelLink.textContent = "在 Discord 中查看";
+      channelLink.target = "_blank";
+      channelLink.rel = "noopener noreferrer";
+      channelLink.style.cssText = "color:" + T.heading + ";display:none;";
+      var connect = dialogButton("连接个人频道", false, true);
+      var disconnect = dialogButton("断开", false, true);
+      var retry = dialogButton("重试读取", false, true);
+      disconnect.style.display = "none";
+      retry.style.display = "none";
+      connection.append(status, channelLink, connect, disconnect, retry);
+      var metaRow = dialogCheckbox("包含生成元数据（提示词、种子等）");
+      metaRow.label.style.marginTop = "20px";
+      // 默认包含生成元数据；成员明确记住过「不包含」的（绑定失效后回到弹窗）沿用其保存的偏好。
+      metaRow.box.checked = pref && pref.last && pref.last.include_metadata === false ? false : true;
+      var metaHelp = document.createElement("p");
+      metaHelp.id = "owl-share-help";
+      metaHelp.className = "owl-help";
+      metaHelp.style.marginTop = "10px";
+      metaHelp.textContent = "默认发送原图和生成参数（提示词、种子等），其他人可能据此复现图片；取消勾选将发送去除生成参数的图片。";
+      var rememberRow = dialogCheckbox("记住本次选择，下次不再提示");
+      rememberRow.label.style.marginTop = "16px";
+      var rememberHelp = document.createElement("p");
+      rememberHelp.className = "owl-help";
+      rememberHelp.style.marginTop = "10px";
+      rememberHelp.textContent = "按登录账号记住目的地与元数据选择；个人频道更换、断开或失效后会重新询问。可在「分享设置」里修改。";
+      var actions = document.createElement("div");
+      actions.style.cssText = "display:flex;justify-content:flex-end;gap:10px;margin-top:24px;";
+      var cancel = dialogButton("取消", false);
+      // showModal 后焦点落进弹窗：Esc 走 cancel 事件，Tab 也不会跑到弹窗外的惰性区域。
+      cancel.setAttribute("autofocus", "");
+      var submit = dialogButton("确认转发", true);
+      submit.disabled = true;
+      actions.append(cancel, submit);
+      var binding = null, loading = false;
+      function destinationChanged() {
+        warning.textContent = select.value === "personal"
+          ? "该分享将转发至你的个人 Discord 频道，请确认是否有潜在二传违规风险！"
+          : "该分享转发至 owl 服务器进行保存备份，请确认是否有潜在二传违规风险！";
+      }
+      function refreshDestination() {
+        if (loading) return;
+        loading = true; submit.disabled = true;
+        fetch("/public/me/share-destination", { credentials: "same-origin", cache: "no-store" })
+          .then(function (r) { if (!r.ok) throw new Error("无法读取分享目的地，请确认登录状态后重试。"); return r.json(); })
+          .then(function (data) {
+            var previousChoice = select.value;
+            var previousBinding = binding && binding.binding_id;
+            binding = data.connected ? data : null;
+            select.replaceChildren();
+            var owl = document.createElement("option"); owl.value = "owl"; owl.textContent = "OWL 公共频道"; select.appendChild(owl);
+            if (binding) {
+              var personal = document.createElement("option"); personal.value = "personal"; personal.textContent = "我的个人频道"; select.appendChild(personal);
+              select.value = previousBinding === binding.binding_id && previousChoice ? previousChoice : "personal";
+              channelLink.href = binding.channel_url;
+            } else { select.value = "owl"; }
+            select.disabled = false; submit.disabled = false;
+            status.textContent = binding ? "个人频道已连接" : "尚未连接个人频道";
+            channelLink.style.display = binding ? "inline" : "none";
+            connect.textContent = binding ? "更换频道" : "连接个人频道";
+            disconnect.style.display = binding ? "inline-block" : "none";
+            retry.style.display = "none";
+            if (previousChoice !== select.value || previousBinding !== (binding && binding.binding_id)) destinationChanged();
+          })
+          .catch(function (e) { status.textContent = e.message; retry.style.display = "inline-block"; })
+          .then(function () { loading = false; });
+      }
+      select.addEventListener("change", destinationChanged);
+      retry.addEventListener("click", refreshDestination);
+      connect.addEventListener("click", startPersonalChannelConnect);
+      disconnect.addEventListener("click", function () {
+        disconnect.disabled = true; submit.disabled = true;
+        fetch("/public/me/share-destination", { method: "DELETE", credentials: "same-origin" })
+          .then(function (r) { if (!r.ok) throw new Error("断开失败，请稍后重试。"); return r.json(); })
+          .then(function (data) {
+            toast(data.remote_revoked ? "个人频道已断开。" : "已从本站断开；可在 Discord 中删除对应的 Webhook。");
+            refreshDestination();
+          })
+          .catch(function (e) { toast(e.message, true); })
+          .then(function () { disconnect.disabled = false; });
+      });
+      var onWinFocus = refreshDestination;
+      window.addEventListener("focus", onWinFocus);
+      h.onCleanup(function () { window.removeEventListener("focus", onWinFocus); });
+      cancel.addEventListener("click", function () { h.finish(null); });
+      submit.addEventListener("click", function () {
+        if (submit.disabled) return;
+        h.finish({
+          includeMetadata: metaRow.box.checked,
+          destination: select.value,
+          bindingId: binding && binding.binding_id,
+          remember: rememberRow.box.checked,
+        });
+      });
+      h.dialog.append(
+        title, warning, destinationLabel, connection,
+        metaRow.label, metaHelp, rememberRow.label, rememberHelp, actions
+      );
+      refreshDestination();
+    });
+  }
 
   // 画布上的图是 blob:，官网自己 createObjectURL 出来的就是**原图字节**（含元数据）。
   // 记下来，上传时直接用，避免 fetch 之后被再次编码。
@@ -420,165 +850,6 @@
     };
   }
 
-  // null = cancel; otherwise the confirmed destination and metadata choice.
-  function confirmShare() {
-    return new Promise(function (resolve) {
-      var previous = document.activeElement;
-      var dialog = document.createElement("dialog");
-      dialog.className = "owl-share-dialog";
-      dialog.setAttribute("aria-labelledby", "owl-share-title");
-      dialog.setAttribute("aria-describedby", "owl-share-warning owl-share-help");
-      dialog.style.cssText = "width:min(480px,calc(100vw - 40px));box-sizing:border-box;padding:24px;border:1px solid #494844;border-radius:14px;background:#191918;color:#eeeeec;font:14px/1.65 system-ui,-apple-system,'Segoe UI',sans-serif;box-shadow:0 20px 70px #0009;";
-      var style = document.createElement("style");
-      style.textContent = ".owl-share-dialog::backdrop{background:rgba(0,0,0,.65)}.owl-share-dialog button:focus-visible,.owl-share-dialog input:focus-visible{outline:2px solid #b1a9ff;outline-offset:3px}";
-      var title = document.createElement("h2");
-      title.id = "owl-share-title";
-      title.textContent = "确认分享";
-      title.style.cssText = "margin:0 0 12px;font-size:18px;";
-      var warning = document.createElement("p");
-      warning.id = "owl-share-warning";
-      warning.textContent = "该分享转发至 owl 服务器进行保存备份，请确认是否有潜在二传违规风险！";
-      warning.style.cssText = "margin:0 0 20px;";
-      var destinationLabel = document.createElement("label");
-      destinationLabel.style.cssText = "display:block;margin:0 0 8px;";
-      destinationLabel.textContent = "转发到";
-      var select = document.createElement("select");
-      select.style.cssText = "display:block;box-sizing:border-box;width:100%;margin:8px 0 12px;padding:9px;border:1px solid #494844;border-radius:8px;background:#222221;color:#eeeeec;font:inherit;";
-      select.disabled = true;
-      destinationLabel.appendChild(select);
-      var connection = document.createElement("div");
-      connection.style.cssText = "display:flex;flex-wrap:wrap;align-items:center;gap:8px;margin-bottom:20px;font-size:13px;";
-      var status = document.createElement("span");
-      status.setAttribute("role", "status");
-      status.textContent = "正在读取分享目的地…";
-      var channelLink = document.createElement("a");
-      channelLink.textContent = "在 Discord 中查看";
-      channelLink.target = "_blank";
-      channelLink.rel = "noopener noreferrer";
-      channelLink.style.cssText = "color:#b1a9ff;display:none;";
-      function managementButton(text) {
-        var button = document.createElement("button");
-        button.type = "button"; button.textContent = text;
-        button.style.cssText = "padding:5px 9px;border:1px solid #494844;border-radius:6px;background:#222221;color:#eeeeec;font:inherit;cursor:pointer;";
-        return button;
-      }
-      var connect = managementButton("连接个人频道");
-      var disconnect = managementButton("断开");
-      disconnect.style.display = "none";
-      var retry = managementButton("重试读取");
-      retry.style.display = "none";
-      [status, channelLink, connect, disconnect, retry].forEach(function (el) { connection.appendChild(el); });
-      var label = document.createElement("label");
-      label.style.cssText = "display:flex;align-items:center;gap:10px;cursor:pointer;";
-      var checkbox = document.createElement("input");
-      checkbox.type = "checkbox";
-      checkbox.checked = false;
-      checkbox.style.cssText = "width:18px;height:18px;flex:none;accent-color:#5b5bd6;";
-      label.appendChild(checkbox);
-      label.appendChild(document.createTextNode("包含生成元数据（提示词、种子等）"));
-      var help = document.createElement("p");
-      help.id = "owl-share-help";
-      help.textContent = "默认仅分享去除生成参数的图片（PNG）。勾选后将发送原图和生成参数，其他人可能据此复现图片。";
-      help.style.cssText = "margin:10px 0 24px;color:#b5b3ad;font-size:13px;";
-      var actions = document.createElement("div");
-      actions.style.cssText = "display:flex;justify-content:flex-end;gap:10px;";
-      var cancel = document.createElement("button");
-      cancel.type = "button";
-      cancel.textContent = "取消";
-      cancel.style.cssText = "padding:9px 18px;border:1px solid #494844;border-radius:8px;background:#222221;color:#eeeeec;font:inherit;cursor:pointer;";
-      var submit = document.createElement("button");
-      submit.type = "button";
-      submit.textContent = "确认转发";
-      submit.disabled = true;
-      submit.style.cssText = "padding:9px 18px;border:1px solid #5b5bd6;border-radius:8px;background:#5b5bd6;color:#fff;font:inherit;cursor:pointer;";
-      var settled = false;
-      var binding = null, loading = false;
-      function destinationChanged() {
-        checkbox.checked = false;
-        warning.textContent = select.value === "personal"
-          ? "该分享将转发至你的个人 Discord 频道，请确认是否有潜在二传违规风险！"
-          : "该分享转发至 owl 服务器进行保存备份，请确认是否有潜在二传违规风险！";
-      }
-      function refreshDestination() {
-        if (settled || loading) return;
-        loading = true; submit.disabled = true;
-        fetch("/public/me/share-destination", {credentials:"same-origin",cache:"no-store"})
-          .then(function (r) { if (!r.ok) throw new Error("无法读取分享目的地，请确认登录状态后重试。"); return r.json(); })
-          .then(function (data) {
-            if (settled) return;
-            var previousChoice = select.value;
-            var previousBinding = binding && binding.binding_id;
-            binding = data.connected ? data : null;
-            select.replaceChildren();
-            var owl = document.createElement("option"); owl.value = "owl"; owl.textContent = "OWL 公共频道"; select.appendChild(owl);
-            if (binding) {
-              var personal = document.createElement("option"); personal.value = "personal"; personal.textContent = "我的个人频道"; select.appendChild(personal);
-              select.value = previousBinding === binding.binding_id && previousChoice ? previousChoice : "personal";
-              channelLink.href = binding.channel_url;
-            } else { select.value = "owl"; }
-            select.disabled = false; submit.disabled = false;
-            status.textContent = binding ? "个人频道已连接" : "尚未连接个人频道";
-            channelLink.style.display = binding ? "inline" : "none";
-            connect.textContent = binding ? "更换频道" : "连接个人频道";
-            disconnect.style.display = binding ? "inline-block" : "none";
-            retry.style.display = "none";
-            if (previousChoice !== select.value || previousBinding !== (binding && binding.binding_id)) destinationChanged();
-          })
-          .catch(function (e) { if (!settled) { status.textContent = e.message; retry.style.display = "inline-block"; } })
-          .then(function () { loading = false; });
-      }
-      select.addEventListener("change", destinationChanged);
-      retry.addEventListener("click", refreshDestination);
-      connect.addEventListener("click", function () {
-        var popup = window.open("about:blank", "_blank");
-        if (!popup) { toast("浏览器拦截了授权窗口，请允许本站打开弹窗后重试。", true); return; }
-        popup.opener = null;
-        connect.disabled = true;
-        fetch("/public/me/share-destination", {method:"POST",credentials:"same-origin"})
-          .then(function (r) { if (!r.ok) throw new Error("无法开始 Discord 授权，请稍后重试。"); return r.json(); })
-          .then(function (data) {
-            if (!/^https:\/\/discord\.com\/oauth2\/authorize\?/.test(data.url || "")) throw new Error("授权地址无效，请重试。");
-            popup.location.href = data.url;
-          })
-          .catch(function (e) { popup.close(); toast(e.message, true); })
-          .then(function () { connect.disabled = false; });
-      });
-      disconnect.addEventListener("click", function () {
-        disconnect.disabled = true; submit.disabled = true;
-        fetch("/public/me/share-destination", {method:"DELETE",credentials:"same-origin"})
-          .then(function (r) { if (!r.ok) throw new Error("断开失败，请稍后重试。"); return r.json(); })
-          .then(function (data) {
-            toast(data.remote_revoked ? "个人频道已断开。" : "已从本站断开；可在 Discord 中删除对应的 Webhook。");
-            refreshDestination();
-          })
-          .catch(function (e) { toast(e.message, true); })
-          .then(function () { disconnect.disabled = false; });
-      });
-      window.addEventListener("focus", refreshDestination);
-      function finish(value) {
-        if (settled) return;
-        settled = true;
-        window.removeEventListener("focus", refreshDestination);
-        dialog.remove();
-        if (previous && previous.isConnected && previous.focus) previous.focus();
-        resolve(value);
-      }
-      cancel.addEventListener("click", function () { finish(null); });
-      submit.addEventListener("click", function () {
-        if (submit.disabled) return;
-        finish({includeMetadata:checkbox.checked,destination:select.value,bindingId:binding && binding.binding_id});
-      });
-      dialog.addEventListener("cancel", function (ev) { ev.preventDefault(); finish(null); });
-      dialog.addEventListener("close", function () { finish(null); });
-      actions.appendChild(cancel);
-      actions.appendChild(submit);
-      [style, title, warning, destinationLabel, connection, label, help, actions].forEach(function (el) { dialog.appendChild(el); });
-      document.body.appendChild(dialog);
-      try { dialog.showModal(); cancel.focus(); refreshDestination(); }
-      catch (e) { finish(null); toast("当前浏览器无法打开分享确认，请更新浏览器后再试。", true); }
-    });
-  }
-
   // Re-encode decoded pixels, omitting PNG text / WebP EXIF / JPEG EXIF and comments.
   // NovelAI also stores generation metadata in alpha LSBs. Clear LSB payloads in
   // all channels, keeping near-opaque alpha fully opaque and preserving dimensions.
@@ -627,38 +898,88 @@
     var img = currentImage();
     if (!img) { toast("没找到当前这张图，先出图再上传。", true); return; }
     link.setAttribute("data-owl-busy", "1");
-    confirmShare().then(function (choice) {
-      if (choice === null) return;
-      var includeMetadata = choice.includeMetadata;
-      var meta = includeMetadata ? metaFor(img) : {};
-      toast("正在提交到 Discord…");
-      var src = img.currentSrc || img.src;
-      var reused = BLOBS.get(src);
-      return (reused ? Promise.resolve(reused) : fetch(src).then(function (r) { return r.blob(); }))
-        .then(function (blob) { return includeMetadata ? blob : imageWithoutMetadata(blob); })
-        .then(function (blob) {
-          var fd = new FormData();
-          var ext = /png/.test(blob.type) ? "png" : /jpe?g/.test(blob.type) ? "jpg" : "webp";
-          fd.append("image", blob, "owl-explore." + ext);
-          fd.append("destination", choice.destination);
-          if (choice.destination === "personal") fd.append("binding_id", choice.bindingId);
-          if (includeMetadata) {
-            fd.append("prompt", meta.prompt || "");
-            fd.append("size", meta.size || "");
-            fd.append("seed", meta.seed || "");
-            fd.append("model", meta.model || "");
-          }
-          return fetch("/owl/explore", { method: "POST", body: fd, credentials: "same-origin" });
-        })
-        .then(function (r) { return r.json().catch(function () { return {}; }).then(function (j) { return { ok: r.ok, j: j }; }); })
-        .then(function (res) {
+    // 先看服务端有没有「记住的分享选择」（按登录成员隔离）：
+    // 有且当前可用（个人频道绑定没变）就直接分享，不再弹窗；读不到就退回弹窗确认。
+    fetchShareState().then(function (s) {
+      // 读取的异步间隙里可能已经开了另一个弹窗（连点 / 前一个没关完）：这次点击作废。
+      if (document.querySelector(".owl-share-dialog")) return;
+      var remembered = s && s[0] && s[0].remembered;
+      if (remembered) {
+        toast("已按记住的选择分享：" + destinationName(remembered.destination));
+        return doUpload(img, {
+          includeMetadata: remembered.include_metadata,
+          destination: remembered.destination,
+          bindingId: remembered.binding_id,
+        }).then(function (res) {
+          if (res.ok) toast(remembered.destination === "personal"
+            ? "已发送到你的个人频道 ✅" : "已收到，正在发到图乐园频道 ✅");
+          else toast((res.j && (res.j.detail || res.j.message)) || "提交失败，稍后再试。", true);
+        });
+      }
+      return confirmShare(s && s[0]).then(function (choice) {
+        if (choice === null) return;
+        if (choice.remember) savePreference(choice);
+        toast("正在提交到 Discord…");
+        return doUpload(img, choice).then(function (res) {
           if (res.ok) toast(choice.destination === "personal" ? "已发送到你的个人频道 ✅" : "已收到，正在发到图乐园频道 ✅");
           else toast((res.j && (res.j.detail || res.j.message)) || "提交失败，稍后再试。", true);
         });
+      });
     })
       .catch(function (e) { toast("提交失败：" + e, true); })
       .then(function () { link.removeAttribute("data-owl-busy"); });
   }
+
+  // 取画布字节 → 按选择清理元数据 → 组表单提交。metadata_state 告诉服务端我们做过的处理，
+  // 卡片标签以服务端对附件字节的验证为准（见 explore.rs 的 attachment_label）。
+  function doUpload(img, choice) {
+    var includeMetadata = choice.includeMetadata;
+    var meta = includeMetadata ? metaFor(img) : {};
+    var src = img.currentSrc || img.src;
+    var reused = BLOBS.get(src);
+    return (reused ? Promise.resolve(reused) : fetch(src).then(function (r) { return r.blob(); }))
+      .then(function (blob) { return includeMetadata ? blob : imageWithoutMetadata(blob); })
+      .then(function (blob) {
+        var fd = new FormData();
+        var ext = /png/.test(blob.type) ? "png" : /jpe?g/.test(blob.type) ? "jpg" : "webp";
+        fd.append("image", blob, "owl-explore." + ext);
+        fd.append("destination", choice.destination);
+        fd.append("metadata_state", includeMetadata ? "kept" : "stripped");
+        if (choice.destination === "personal") fd.append("binding_id", choice.bindingId);
+        if (includeMetadata) {
+          fd.append("prompt", meta.prompt || "");
+          fd.append("size", meta.size || "");
+          fd.append("seed", meta.seed || "");
+          fd.append("model", meta.model || "");
+        }
+        return fetch("/owl/explore", { method: "POST", body: fd, credentials: "same-origin" })
+          .then(function (r) { return r.json().catch(function () { return {}; }).then(function (j) { return { ok: r.ok, j: j }; }); });
+      });
+  }
   document.addEventListener("click", uploadToExplore, true);
   document.addEventListener("click", openOwlDiscord, true);
+
+  /* ---- 「分享设置」入口：免提示之后仍要能改选择。放在分享按钮旁边，一个小胶囊按钮。 ---- */
+  function ensureSettingsEntry() {
+    if (!document.body) return;
+    var links = document.querySelectorAll('a[href="/explore/register"]');
+    for (var i = 0; i < links.length; i++) {
+      var link = links[i];
+      if (!link.parentElement || link.parentElement.querySelector("[data-owl-share-settings]")) continue;
+      var b = document.createElement("button");
+      b.type = "button";
+      b.textContent = "分享设置";
+      b.className = "owl-settings-entry";
+      b.setAttribute("data-owl-share-settings", "1");
+      b.setAttribute("aria-label", "分享设置");
+      link.insertAdjacentElement("afterend", b);
+    }
+  }
+  document.addEventListener("click", function (ev) {
+    var btn = ev.target && ev.target.closest ? ev.target.closest("[data-owl-share-settings]") : null;
+    if (!btn) return;
+    ev.preventDefault();
+    ev.stopPropagation();
+    openShareSettings();
+  }, true);
 })();

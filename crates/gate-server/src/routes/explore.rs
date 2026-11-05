@@ -28,6 +28,40 @@ const COOLDOWN_SECONDS: f64 = 20.0;
 const MAX_FIELDS: usize = 8;
 const MAX_FIELD_BYTES: usize = 8 * 1024;
 
+/// 前端对这张附件做过的处理：保留原文件、清理后重编码、还是没说（旧客户端 / 未知）。
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub(crate) enum MetadataHandling {
+    Kept,
+    Stripped,
+    Unknown,
+}
+
+impl MetadataHandling {
+    /// 从 multipart 字段读：只认明确报上来的两种，其余（缺字段、乱值）都算未知。
+    fn from_field(value: Option<&str>) -> Self {
+        match value {
+            Some("kept") => Self::Kept,
+            Some("stripped") => Self::Stripped,
+            _ => Self::Unknown,
+        }
+    }
+}
+
+/// Discord 卡片附件字段的标签——按**真正发送出去的附件**是什么来写：
+/// - 文件里验证得到生成参数（PNG tEXt/iTXt）→ 原始文件（保留元数据）；
+/// - 文件没有参数、且前端确实做过清理重编码 → 已移除生成元数据；
+/// - 其余一律「图片」：保留原文件不代表它原本就有生成参数（webp/jpeg、本来就没参数的 PNG），
+///   前端说保留了但文件里验不出来也不能写「保留元数据」，旧记录没有处理信息更不能猜。
+pub(crate) fn attachment_label(meta_found: bool, handling: MetadataHandling) -> &'static str {
+    if meta_found {
+        "原始文件（保留元数据）"
+    } else if handling == MetadataHandling::Stripped {
+        "已移除生成元数据"
+    } else {
+        "图片"
+    }
+}
+
 pub fn router() -> Router<AppState> {
     Router::new().route("/owl/explore", post(upload))
 }
@@ -171,6 +205,8 @@ async fn upload(State(st): State<AppState>, headers: HeaderMap, req: Request) ->
         .to_string();
     let raw = read_bounded_body(&parts.headers, body, MAX_UPLOAD_BYTES).await?;
     let (image, meta) = parse_form(&content_type, raw).await?;
+    // 前端自报的元数据处理方式只作辅助：卡片标签以服务端对附件字节的验证为准（见 attachment_label）。
+    let handling = MetadataHandling::from_field(meta.get("metadata_state").map(String::as_str));
     let target = meta.get("destination").map(String::as_str).unwrap_or("owl");
     let personal = match target {
         "owl" => {
@@ -264,7 +300,16 @@ async fn upload(State(st): State<AppState>, headers: HeaderMap, req: Request) ->
         })
         .unwrap_or_default();
     if let Some(dest) = personal {
-        post_to_discord(&st, &discord_id, &uploader, &upload, &meta, Some(&dest)).await?;
+        post_to_discord(
+            &st,
+            &discord_id,
+            &uploader,
+            &upload,
+            &meta,
+            handling,
+            Some(&dest),
+        )
+        .await?;
         return Ok(ok_json(
             &json!({"ok":true,"queued":false,"destination":"personal"}),
         ));
@@ -274,7 +319,17 @@ async fn upload(State(st): State<AppState>, headers: HeaderMap, req: Request) ->
     let st2 = st.clone();
     let discord_id2 = discord_id.clone();
     tokio::spawn(async move {
-        match post_to_discord(&st2, &discord_id2, &uploader, &upload, &meta, None).await {
+        match post_to_discord(
+            &st2,
+            &discord_id2,
+            &uploader,
+            &upload,
+            &meta,
+            handling,
+            None,
+        )
+        .await
+        {
             Ok(message_id) => tracing::info!(
                 target: "explore",
                 "Explore 上传：{}（{}）{} 字节，msg={}",
@@ -422,6 +477,7 @@ async fn post_to_discord(
     uploader: &str,
     upload: &Upload,
     meta: &std::collections::HashMap<String, String>,
+    handling: MetadataHandling,
     personal: Option<&crate::discord_share::Destination>,
 ) -> Result<String, ApiError> {
     let channel = st.env.explore_channel_id.trim();
@@ -487,8 +543,11 @@ async fn post_to_discord(
         "image/jpeg" => "JPG",
         _ => "WebP",
     };
+    // 附件标签按服务端验证到的事实写（见 attachment_label），不能沿用以前一刀切的「原图」：
+    // 清理过元数据的文件也标「原图」会让人误以为还能从图里恢复生成参数。
+    let attachment_name = attachment_label(png_meta(&upload.bytes).is_some(), handling);
     fields.push(json!({
-        "name": "原图",
+        "name": attachment_name,
         "value": format!("{format} · {}", human_size(upload.bytes.len())),
         "inline": true
     }));
@@ -649,7 +708,47 @@ mod tests {
 
     #[test]
     fn ignores_images_without_metadata() {
-        assert!(png_meta(b"RIFF    WEBP").is_none());
+        assert!(png_meta(b"RIFF\0\0\0\0WEBP").is_none());
         assert!(png_meta(&png_with_text(&[("Author", "someone")])).is_none());
+    }
+
+    #[test]
+    fn attachment_label_follows_verified_bytes() {
+        let kept = MetadataHandling::Kept;
+        let stripped = MetadataHandling::Stripped;
+        let unknown = MetadataHandling::Unknown;
+        // 文件里验证得到参数 → 保留元数据，与前端自报无关（自报 stripped 但文件带参数属于前端失灵）。
+        assert_eq!(attachment_label(true, stripped), "原始文件（保留元数据）");
+        assert_eq!(attachment_label(true, kept), "原始文件（保留元数据）");
+        // 没验到参数 + 前端确实清理过 → 已移除生成元数据。
+        assert_eq!(attachment_label(false, stripped), "已移除生成元数据");
+        // 没验到参数、处理方式未知（旧客户端）或声称保留但验不出来 → 一律「图片」，不猜。
+        assert_eq!(attachment_label(false, unknown), "图片");
+        assert_eq!(attachment_label(false, kept), "图片");
+    }
+
+    #[test]
+    fn metadata_field_only_trusts_exact_values() {
+        assert_eq!(
+            MetadataHandling::from_field(Some("kept")),
+            MetadataHandling::Kept
+        );
+        assert_eq!(
+            MetadataHandling::from_field(Some("stripped")),
+            MetadataHandling::Stripped
+        );
+        // 缺字段（旧客户端）、乱值都算未知。
+        assert_eq!(
+            MetadataHandling::from_field(None),
+            MetadataHandling::Unknown
+        );
+        assert_eq!(
+            MetadataHandling::from_field(Some("KEEP")),
+            MetadataHandling::Unknown
+        );
+        assert_eq!(
+            MetadataHandling::from_field(Some("")),
+            MetadataHandling::Unknown
+        );
     }
 }

@@ -94,11 +94,23 @@ test("Discord sharing confirmation keeps or removes file and hidden metadata", a
   );
   await page.goto("https://share-fixture.test/");
   await page.evaluate(() => {
-    const w = window as typeof window & { __uploads: FormData[] };
+    const w = window as typeof window & { __uploads: FormData[]; __saved: unknown[] };
     w.__uploads = [];
+    w.__saved = [];
     window.requestIdleCallback = () => 0;
     window.fetch = async (_input, init) => {
-      if (_input === "/public/me/share-destination")
+      const url = String(_input);
+      const method = (init?.method ?? "GET").toUpperCase();
+      if (url === "/public/me/share-preference") {
+        if (method === "GET")
+          return new Response(JSON.stringify({ remembered: null, last: null }), { status: 200 });
+        if (method === "PUT") {
+          w.__saved.push(JSON.parse(String(init?.body)));
+          return new Response(JSON.stringify({ ok: true }), { status: 200 });
+        }
+        return new Response(JSON.stringify({ ok: true }), { status: 200 });
+      }
+      if (url === "/public/me/share-destination")
         return new Response(JSON.stringify({ connected: false }), { status: 200 });
       w.__uploads.push(init?.body as FormData);
       return new Response("{}", { status: 200, headers: { "content-type": "application/json" } });
@@ -109,6 +121,7 @@ test("Discord sharing confirmation keeps or removes file and hidden metadata", a
   for (const format of ["png", "webp", "jpeg"]) {
     await page.evaluate(async (format) => {
       const w = window as typeof window & { __original: Blob; __uploads: FormData[] };
+      w.__uploads = [];
       const canvas = document.createElement("canvas");
       canvas.width = canvas.height = 32;
       const ctx = canvas.getContext("2d");
@@ -181,17 +194,55 @@ test("Discord sharing confirmation keeps or removes file and hidden metadata", a
     await expect(
       dialog.getByText("该分享转发至 owl 服务器进行保存备份，请确认是否有潜在二传违规风险！"),
     ).toBeVisible();
-    const checkbox = dialog.getByRole("checkbox", { name: "包含生成元数据（提示词、种子等）" });
-    await expect(checkbox).not.toBeChecked();
+    const metadata = dialog.getByRole("checkbox", { name: "包含生成元数据（提示词、种子等）" });
+    const remember = dialog.getByRole("checkbox", { name: "记住本次选择，下次不再提示" });
+    // 站点默认：包含生成元数据；记住选择默认不勾。
+    await expect(metadata).toBeChecked();
+    await expect(remember).not.toBeChecked();
     await dialog.getByRole("button", { name: "取消", exact: true }).click();
     await expect(upload).not.toHaveAttribute("data-owl-busy", "1");
     expect(await page.evaluate(() => (window as unknown as { __uploads: FormData[] }).__uploads.length)).toBe(
       0,
     );
     await upload.click();
+    // 弹窗是点击后异步打开的：先等它出现，再按 Esc，避免按键跑在弹窗创建之前。
+    await expect(dialog.getByRole("button", { name: "取消", exact: true })).toBeVisible();
     await page.keyboard.press("Escape");
     await expect(dialog).toHaveCount(0);
+    // 默认（包含元数据）：原图字节原样发出，并把 prompt 等元数据随表单提交。
     await upload.click();
+    await dialog.getByRole("button", { name: "确认转发", exact: true }).click();
+    await expect(upload).not.toHaveAttribute("data-owl-busy", "1");
+    expect(
+      await page.evaluate(async () => {
+        const w = window as typeof window & { __uploads: FormData[]; __original: Blob };
+        const form = w.__uploads.pop();
+        if (!form) throw new Error("no upload");
+        const image = form.get("image") as File;
+        const original = new Uint8Array(await w.__original.arrayBuffer());
+        const sent = new Uint8Array(await image.arrayBuffer());
+        return {
+          type: image.type,
+          sameBytes: original.length === sent.length && original.every((v, i) => v === sent[i]),
+          fields: [...form.keys()].sort(),
+          state: form.get("metadata_state"),
+          hasSecret: new TextDecoder()
+            .decode(await image.arrayBuffer())
+            .includes("PRIVATE_GENERATION_PARAMETERS"),
+          prompt: form.get("prompt"),
+        };
+      }),
+    ).toEqual({
+      type: `image/${format}`,
+      sameBytes: true,
+      fields: ["destination", "image", "metadata_state", "model", "prompt", "seed", "size"].sort(),
+      state: "kept",
+      hasSecret: true,
+      prompt: "private prompt",
+    });
+    // 取消勾选：清理后的 PNG（字节必然重编码），不携带任何生成参数。
+    await upload.click();
+    await metadata.uncheck();
     await dialog.getByRole("button", { name: "确认转发", exact: true }).click();
     await expect(upload).not.toHaveAttribute("data-owl-busy", "1");
     const clean = await page.evaluate(async () => {
@@ -212,6 +263,7 @@ test("Discord sharing confirmation keeps or removes file and hidden metadata", a
         width: pixels.width,
         height: pixels.height,
         fields: [...form.keys()],
+        state: form.get("metadata_state"),
         hasSecret: new TextDecoder()
           .decode(await image.arrayBuffer())
           .includes("PRIVATE_GENERATION_PARAMETERS"),
@@ -222,36 +274,48 @@ test("Discord sharing confirmation keeps or removes file and hidden metadata", a
       type: "image/png",
       width: 32,
       height: 32,
-      fields: ["image", "destination"],
+      fields: ["image", "destination", "metadata_state"],
+      state: "stripped",
       hasSecret: false,
       opaque: true,
     });
+    // 记住本次选择：确认后把目的地与元数据选择存到服务端（保存是旁路请求，轮询等它落地）。
+    // 基数在点击前取：PUT 可能比 busy 清除还早落地。
+    const savedBefore = await page.evaluate(
+      () => (window as unknown as { __saved: unknown[] }).__saved.length,
+    );
     await upload.click();
-    await checkbox.check();
+    await remember.check();
     await dialog.getByRole("button", { name: "确认转发", exact: true }).click();
     await expect(upload).not.toHaveAttribute("data-owl-busy", "1");
+    await expect
+      .poll(() =>
+        page.evaluate(() => (window as unknown as { __saved: unknown[] }).__saved.length),
+      )
+      .toBe(savedBefore + 1);
     expect(
-      await page.evaluate(async () => {
-        const w = window as typeof window & { __uploads: FormData[]; __original: Blob };
-        const form = w.__uploads.pop();
-        if (!form) throw new Error("no upload");
-        const image = form.get("image") as File;
-        const original = new Uint8Array(await w.__original.arrayBuffer());
-        const sent = new Uint8Array(await image.arrayBuffer());
-        return {
-          sameBytes: original.length === sent.length && original.every((v, i) => v === sent[i]),
-          prompt: form.get("prompt"),
-        };
-      }),
-    ).toEqual({ sameBytes: true, prompt: "private prompt" });
+      await page.evaluate(
+        (i) => (window as unknown as { __saved: unknown[] }).__saved[i],
+        savedBefore,
+      ),
+    ).toEqual({
+      destination: "owl",
+      include_metadata: true,
+      binding_id: null,
+    });
   }
   // A failed sanitizer must not submit the original image instead.
+  // 默认包含元数据不走清理路径，这里先取消勾选，验证的才是“清理失败宁可不上传”。
   await page.evaluate(() => {
+    (window as unknown as { __uploads: FormData[] }).__uploads = [];
     HTMLCanvasElement.prototype.toBlob = (callback) => {
       callback(null);
     };
   });
   await page.locator('a[href="/explore/register"]').click();
+  await page
+    .getByRole("checkbox", { name: "包含生成元数据（提示词、种子等）" })
+    .uncheck();
   await page.getByRole("button", { name: "确认转发", exact: true }).click();
   await expect(page.locator('a[href="/explore/register"]')).not.toHaveAttribute("data-owl-busy", "1");
   expect(await page.evaluate(() => (window as unknown as { __uploads: FormData[] }).__uploads.length)).toBe(
@@ -274,13 +338,39 @@ test("personal channel sharing selects the bound destination and never falls bac
   );
   await page.goto("https://personal-share-fixture.test/");
   await page.evaluate(() => {
-    const w = window as typeof window & { __sent: string[]; __failRead: boolean; __failSend: boolean };
+    const w = window as typeof window & {
+      __sent: string[];
+      __saved: unknown[];
+      __failRead: boolean;
+      __failSend: boolean;
+      __remembered: unknown;
+    };
     w.__sent = [];
+    w.__saved = [];
     w.__failRead = false;
     w.__failSend = false;
+    w.__remembered = null;
     window.requestIdleCallback = () => 0;
     window.fetch = async (url, init) => {
-      if (url === "/public/me/share-destination")
+      const u = String(url);
+      const method = (init?.method ?? "GET").toUpperCase();
+      if (u === "/public/me/share-preference") {
+        if (method === "GET")
+          return new Response(
+            JSON.stringify(
+              w.__remembered
+                ? { remembered: w.__remembered, last: w.__remembered }
+                : { remembered: null, last: null },
+            ),
+            { status: 200 },
+          );
+        if (method === "PUT") {
+          w.__saved.push(JSON.parse(String(init?.body)));
+          return new Response(JSON.stringify({ ok: true }), { status: 200 });
+        }
+        return new Response(JSON.stringify({ ok: true }), { status: 200 });
+      }
+      if (u === "/public/me/share-destination")
         return new Response(
           JSON.stringify({
             connected: true,
@@ -328,31 +418,126 @@ test("personal channel sharing selects the bound destination and never falls bac
   await expect(
     dialog.getByText("该分享将转发至你的个人 Discord 频道，请确认是否有潜在二传违规风险！"),
   ).toBeVisible();
-  await dialog.getByRole("checkbox").check();
+  // 切换目的地只改警示文案：元数据勾选是独立的选择，不再被重置。
+  const metadata = dialog.getByRole("checkbox", { name: "包含生成元数据（提示词、种子等）" });
+  await expect(metadata).toBeChecked();
   await destination.selectOption("owl");
-  await expect(dialog.getByRole("checkbox")).not.toBeChecked();
   await expect(
     dialog.getByText("该分享转发至 owl 服务器进行保存备份，请确认是否有潜在二传违规风险！"),
   ).toBeVisible();
+  await expect(metadata).toBeChecked();
   await destination.selectOption("personal");
+  await dialog.getByRole("checkbox", { name: "记住本次选择，下次不再提示" }).check();
   await dialog.getByRole("button", { name: "确认转发", exact: true }).click();
   await expect(share).not.toHaveAttribute("data-owl-busy", "1");
   expect(await page.evaluate(() => (window as unknown as { __sent: string[] }).__sent)).toEqual(["personal"]);
+  await expect
+    .poll(() => page.evaluate(() => (window as unknown as { __saved: unknown[] }).__saved.length))
+    .toBe(1);
+  expect(await page.evaluate(() => (window as unknown as { __saved: unknown[] }).__saved[0])).toEqual({
+    destination: "personal",
+    include_metadata: true,
+    binding_id: "900000000000000081",
+  });
+  // 记住的选择当前可用：下次分享不再弹窗，直接按记住的目的地与元数据发送。
   await page.evaluate(() => {
-    (window as unknown as { __failSend: boolean }).__failSend = true;
+    const w = window as typeof window & { __remembered: unknown };
+    w.__remembered = {
+      destination: "personal",
+      include_metadata: false,
+      binding_id: "900000000000000081",
+    };
   });
   await share.click();
-  await dialog.getByRole("button", { name: "确认转发", exact: true }).click();
+  await expect(dialog).toHaveCount(0);
   await expect(share).not.toHaveAttribute("data-owl-busy", "1");
   expect(await page.evaluate(() => (window as unknown as { __sent: string[] }).__sent)).toEqual([
     "personal",
     "personal",
   ]);
   await page.evaluate(() => {
+    (window as unknown as { __failSend: boolean }).__failSend = true;
+  });
+  await share.click();
+  await expect(share).not.toHaveAttribute("data-owl-busy", "1");
+  expect(await page.evaluate(() => (window as unknown as { __sent: string[] }).__sent)).toEqual([
+    "personal",
+    "personal",
+    "personal",
+  ]);
+  await page.evaluate(() => {
     (window as unknown as { __failRead: boolean }).__failRead = true;
+    (window as unknown as { __remembered: unknown }).__remembered = null;
   });
   await share.click();
   await expect(dialog.getByRole("button", { name: "确认转发", exact: true })).toBeDisabled();
   await expect(dialog.getByRole("button", { name: "重试读取", exact: true })).toBeVisible();
   await dialog.getByRole("button", { name: "取消", exact: true }).click();
+});
+
+test("share settings entry shows remembered choice and can clear it", async ({ page }) => {
+  const bridge = readFileSync(
+    resolve(import.meta.dirname, "../../deploy/nai-mirror-overrides/bridge.js"),
+    "utf8",
+  );
+  await page.route("https://settings-fixture.test/**", (route) =>
+    route.fulfill({
+      contentType: "text/html",
+      body: '<!doctype html><meta charset="utf-8"><img width="256" height="256"><a href="/explore/register">Upload to Explore</a>',
+    }),
+  );
+  await page.goto("https://settings-fixture.test/");
+  let remembered: unknown = {
+    destination: "owl",
+    include_metadata: false,
+    binding_id: null,
+  };
+  let cleared = 0;
+  await page.exposeFunction("__owlTestRemembered", () => remembered);
+  await page.exposeFunction("__owlTestClear", () => {
+    cleared += 1;
+    remembered = null;
+  });
+  await page.evaluate(() => {
+    window.requestIdleCallback = () => 0;
+    window.fetch = async (url, init) => {
+      const u = String(url);
+      const method = (init?.method ?? "GET").toUpperCase();
+      if (u === "/public/me/share-preference") {
+        const state = await (window as unknown as { __owlTestRemembered: () => unknown }).__owlTestRemembered();
+        if (method === "GET")
+          return new Response(
+            JSON.stringify(state ? { remembered: state, last: state } : { remembered: null, last: null }),
+            { status: 200 },
+          );
+        if (method === "DELETE") {
+          await (window as unknown as { __owlTestClear: () => void }).__owlTestClear();
+          return new Response(JSON.stringify({ ok: true }), { status: 200 });
+        }
+        return new Response(JSON.stringify({ ok: true }), { status: 200 });
+      }
+      if (u === "/public/me/share-destination")
+        return new Response(JSON.stringify({ connected: false }), { status: 200 });
+      return new Response("{}", { status: 200 });
+    };
+  });
+  await page.evaluate(bridge);
+  const settings = page.getByRole("button", { name: "分享设置" });
+  await expect(settings).toBeVisible();
+  await settings.click();
+  const dialog = page.getByRole("dialog", { name: "分享设置" });
+  await expect(
+    dialog.getByText("当前记住：OWL 公共频道 · 不包含元数据，分享时不再提示。"),
+  ).toBeVisible();
+  await expect(dialog.getByRole("combobox", { name: "分享目的地" })).toHaveValue("owl");
+  await expect(
+    dialog.getByRole("checkbox", { name: "包含生成元数据（提示词、种子等）" }),
+  ).not.toBeChecked();
+  await dialog.getByRole("button", { name: "清除记忆", exact: true }).click();
+  await expect(
+    dialog.getByText("尚未记住选择：每次分享都会询问。在分享弹窗勾选「记住本次选择」即可跳过。"),
+  ).toBeVisible();
+  expect(cleared).toBe(1);
+  await dialog.getByRole("button", { name: "关闭", exact: true }).click();
+  await expect(dialog).toHaveCount(0);
 });
