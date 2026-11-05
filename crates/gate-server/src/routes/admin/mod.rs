@@ -2,7 +2,6 @@
 //! [`audited`] 写操作日志（谁、何时、做了什么、对象、参数摘要、结果）。未登录的请求不记录（防止被刷），
 //! 登录本身无论成败都记录。
 
-mod abuse;
 mod auth;
 mod jobs;
 mod member_ops;
@@ -31,7 +30,6 @@ const AUDIT_BODY_LIMIT: usize = 64 * 1024;
 
 pub fn router(state: AppState) -> Router<AppState> {
     Router::new()
-        .merge(abuse::router())
         .merge(auth::router())
         .merge(ops::router())
         .merge(jobs::router())
@@ -85,23 +83,15 @@ async fn target_of(state: &AppState, template: &str, path: &str) -> String {
         };
         return format!("Key #{id} {name}");
     }
-    if let Some(id) = param("abuse_id") {
-        return format!("待审 #{id}");
-    }
     if let Some(t) = param("token_id") {
         return format!("上游 {}", gate_core::primitives::take_chars(&t, 24));
     }
-    if let Some(sig) = param("sig") {
-        return format!("Bug {}", gate_core::primitives::take_chars(&sig, 12));
-    }
     let suffix: &[(&str, &str)] = &[
-        ("/errors/resolve-all", "全部未处理 Bug"),
         ("/ops/registration", "自助领 Key 设置"),
         ("/ops/features", "全站功能开关"),
         ("/guard", "账号保护与排队"),
         ("/runtime-limits", "图片排队与冷却"),
         ("/settings", "Anlas 与 V5 预算"),
-        ("/quota-algo", "动态额度参数"),
     ];
     if let Some((_, t)) = suffix.iter().find(|(s, _)| template.ends_with(s)) {
         return (*t).to_string();

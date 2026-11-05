@@ -1,7 +1,5 @@
 /*
  * 全站外框：顶栏、版心、页面转场、滚动显影、页面顶部的天色。
- * 首页 / 问卷（Vite）和独立状态页（网关把 tokens.css + 本文件 + status-page.css 拼成一份样式）共用这一份，
- * 所以这里不能引用任何外部资源（不导入别的样式表、不引图片 / 字体；状态页的 CSP 是 default-src 'none'）。
  * 系统开了「减少动态效果」时，所有动效都不出现。
  */
 
@@ -13,7 +11,7 @@
   padding-left: max(var(--sp-4), env(safe-area-inset-left, 0px));
   padding-right: max(var(--sp-4), env(safe-area-inset-right, 0px));
 }
-/* 游客首页、状态页：所有卡片在同一个 760px 的列里，左右对齐 */
+/* 游客首页：所有卡片在同一个 760px 的列里，左右对齐 */
 .wrap--narrow {
   max-width: 760px;
 }
@@ -35,7 +33,7 @@
   padding-top: var(--sp-3);
   padding-bottom: var(--sp-3);
 }
-/* Logo：两只眼睛 + 站名，整体就是回首页的链接 */
+/* Logo：斜切猫头鹰头像 + 站名，整体就是回首页的链接 */
 .brand {
   display: inline-flex;
   align-items: center;
@@ -50,15 +48,13 @@
 .brand:hover {
   text-decoration: none;
 }
-.brand__eyes {
-  display: inline-flex;
-  gap: 4px;
-}
-.brand__eyes i {
-  width: 10px;
-  height: 10px;
-  border-radius: 50%;
-  background: var(--eye);
+.brand__mark {
+  display: block;
+  width: 32px;
+  height: 32px;
+  flex: 0 0 32px;
+  border-radius: 10px;
+  box-shadow: 0 1px 7px rgb(52 27 48 / 18%);
 }
 .site-top__right {
   margin-left: auto;
@@ -146,11 +142,6 @@
 }
 
 /* ---------- 动效（只在没开「减少动态效果」时） ---------- */
-@media (prefers-reduced-motion: no-preference) {
-  .brand:hover .brand__eyes i {
-    animation: owl-blink 0.32s ease-in-out;
-  }
-}
 @supports (animation-timeline: scroll()) {
   @media (prefers-reduced-motion: no-preference) {
     html {

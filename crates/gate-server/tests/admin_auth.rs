@@ -8,7 +8,6 @@ use serde_json::{Value, json};
 const ENDPOINTS: &[(&str, &str)] = &[
     // 成员 / 邀请 / 黑名单
     ("GET", "/keys"),
-    ("POST", "/keys/invite"),
     ("POST", "/keys/1/regenerate"),
     ("PATCH", "/keys/1"),
     ("POST", "/keys/1/reset-daily-image-quota"),
@@ -30,9 +29,6 @@ const ENDPOINTS: &[(&str, &str)] = &[
     ("GET", "/logs"),
     ("GET", "/actions"),
     ("POST", "/ops/reset-all-keys"),
-    // 待审（防滥用）
-    ("GET", "/abuse"),
-    ("POST", "/abuse/1"),
     // 运营 / 监控
     ("GET", "/overview"),
     ("GET", "/settings"),

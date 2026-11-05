@@ -41,8 +41,6 @@ impl Db {
 
     /// Must commit before the upstream POST is sent. A failed write is a hard dispatch failure.
     #[allow(clippy::too_many_arguments)]
-    /// Must commit before the upstream POST is sent. A failed write is a hard dispatch failure.
-    #[allow(clippy::too_many_arguments)]
     pub async fn dispatch_request_settlement(
         &self,
         request_id: &str,

@@ -16,7 +16,7 @@ use crate::env::{EnvConfig, RegistrationEnv};
 use crate::key::Key;
 use crate::ops::{self, Registration};
 use crate::state::AppState;
-use gate_core::primitives::{strip, take_chars};
+use gate_core::primitives::take_chars;
 use gate_core::snowflake::snowflake_created_at;
 use gate_core::{features, site_flags, validation, values};
 use gate_db::repo::discord::BanInfo;
@@ -263,15 +263,6 @@ pub fn urlencode(pairs: &[(&str, &str)]) -> String {
 }
 
 // ------------------------------------------------------------------ 服务
-
-/// `issue_direct` 的结果。
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub enum Issued {
-    /// 新发的 Key（`key` 只在临时回复里给本人看一次）。
-    Provisioned(Provisioned),
-    /// 填了邀请 Key：绑定到发命令的账号，Key 不变。
-    Bound { key_id: i64, message: String },
-}
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Provisioned {

@@ -61,7 +61,7 @@ fn acked_24h(m: &Obj, now: f64) -> bool {
 
 /// 「需要站长处理」：与 `web/src/pages/admin/sections/members/logic.ts` 的 `needsAttention` 同口径
 /// （两处要一起改）。bad（限流暂停中 / 已过期）点过「没问题」也不豁免；其余（3 天内到期、
-/// 自动标签刷屏、疑似/待查/观察标签、今日被重置 ≥2 次）在「已查看」后 24 小时内不算。
+/// 自动标签刷屏、今日被重置 ≥2 次）在「已查看」后 24 小时内不算。
 /// 停用的 Key 前端列表不显示，也不计入。
 fn attention_needed(m: &Obj, now: f64) -> bool {
     if !m.get("enabled").and_then(Value::as_bool).unwrap_or(false) {
@@ -100,16 +100,6 @@ fn attention_needed(m: &Obj, now: f64) -> bool {
             })
         });
     if loud_auto_tag {
-        return true;
-    }
-    // 站长手动打的「疑似 / 待查 / 观察」标签（「已查看」不算）
-    let flagged = m.get("tags").and_then(Value::as_array).is_some_and(|tags| {
-        tags.iter().any(|t| {
-            let tag = t.get("tag").and_then(Value::as_str).unwrap_or("");
-            tag != ACK_TAG && ["疑似", "待查", "观察"].iter().any(|w| tag.contains(w))
-        })
-    });
-    if flagged {
         return true;
     }
     // 今天被手动重置额度 ≥ 2 次

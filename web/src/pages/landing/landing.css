@@ -1,5 +1,5 @@
 /*
- * 首页布局。颜色、字号、间距一律用 ui/tokens.css 的变量；顶栏、版心、转场、显影在 ui/chrome.css（状态页共用）。
+ * 首页布局。颜色、字号、间距一律用 ui/tokens.css 的变量；顶栏、版心、转场、显影在 ui/chrome.css。
  * 字号手机与桌面完全一致（站长规定），断点只改布局。
  */
 
@@ -622,36 +622,6 @@
 .lp-status {
   padding: var(--sp-2) 0 var(--sp-4);
 }
-.lp-gallery {
-  width: min(1440px, calc(100% - 32px));
-  margin: var(--sp-4) auto 0;
-  scroll-margin-top: 80px;
-}
-.lp-gallery:focus {
-  outline: none;
-}
-.lp-gallery__images {
-  columns: 4;
-  column-gap: var(--sp-3);
-}
-.lp-gallery__item {
-  display: block;
-  margin-bottom: var(--sp-3);
-  break-inside: avoid;
-}
-.lp-gallery__item img {
-  display: block;
-  width: 100%;
-  height: auto;
-  border-radius: var(--radius-sm);
-  background: var(--surface-2);
-}
-
-@media (max-width: 760px) {
-  .lp-gallery__images {
-    columns: 2;
-  }
-}
 @media (prefers-reduced-motion: no-preference) {
   html:has(.lp-main) {
     scroll-behavior: smooth;
@@ -665,15 +635,6 @@
   background: none;
   box-shadow: none;
 }
-.lp-gallery__unavailable {
-  display: grid;
-  place-items: center;
-  aspect-ratio: 832 / 1216;
-  padding: var(--sp-4);
-  color: var(--muted);
-  background: var(--surface-2);
-  font-size: var(--fs-sm);
-}
 
 @media (max-width: 760px) {
   .lp-meter__legend {
@@ -684,50 +645,6 @@
     flex-wrap: nowrap;
     column-gap: var(--sp-1);
     min-width: 0;
-  }
-}
-
-.lp-gallery__copy {
-  position: relative;
-  display: block;
-  width: 100%;
-  padding: 0;
-  border: 0;
-  border-radius: var(--radius-sm);
-  background: none;
-  color: var(--text);
-  cursor: copy;
-  overflow: hidden;
-  transition: transform 0.2s ease;
-}
-.lp-gallery__copy:hover {
-  transform: scale(1.02);
-  z-index: 1;
-}
-.lp-gallery__feedback {
-  position: absolute;
-  inset: 0;
-  display: grid;
-  place-items: center;
-  padding: var(--sp-3);
-  background: #101119a6;
-  color: #fff;
-  font-size: var(--fs-lg);
-  font-weight: 600;
-  opacity: 0;
-  pointer-events: none;
-  transition: opacity 0.2s ease;
-}
-.lp-gallery__feedback.is-visible {
-  opacity: 1;
-}
-@media (prefers-reduced-motion: reduce) {
-  .lp-gallery__copy,
-  .lp-gallery__feedback {
-    transition: none;
-  }
-  .lp-gallery__copy:hover {
-    transform: none;
   }
 }
 

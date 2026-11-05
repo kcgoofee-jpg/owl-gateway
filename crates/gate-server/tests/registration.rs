@@ -10,7 +10,7 @@ use axum::extract::{Request, State};
 use axum::http::{HeaderMap, StatusCode};
 use axum::response::Response;
 use common::{Call, Env, set_setting, setup, setup_registration};
-use gate_server::registration::{DiscordUser, Issued, RegErr};
+use gate_server::registration::{DiscordUser, RegErr};
 use serde_json::{Value, json};
 use std::net::SocketAddr;
 use std::sync::{Arc, Mutex};
@@ -1146,105 +1146,17 @@ async fn unsigned_cookie_state_is_rejected_before_exchange() {
 }
 
 #[tokio::test]
-async fn invite_key_binds_without_minting_and_obeys_the_closed_switch() {
+async fn old_invite_payload_cannot_mint_a_key() {
     let (e, _d) = setup_reg(&[]).await;
-    // 站长发的邀请 Key：带「邀请」标签、没绑定 Discord
-    let invite: gate_db::repo::keys::NewKey = serde_json::from_value(json!({
-        "name": "邀请-朋友", "token": "nai-invite-xyz", "daily_images": 1,
-        "monthly_anlas": 0.0, "daily_text_tokens": 0, "rpm": 5,
-    }))
-    .unwrap();
-    let row = e.state.db.create_key(&invite, e.state.now()).await.unwrap();
-    let key_id = row["id"].as_i64().unwrap();
-    e.state
-        .db
-        .write(move |tx| {
-            tx.execute(
-                "INSERT INTO key_tags(key_id, tag, note, by, ts) VALUES (?, '邀请', '', '站长', 0)",
-                [key_id],
-            )
-            .map(|_| ())
-        })
-        .await
-        .unwrap();
-    assert!(svc(&e).is_unbound_invite(key_id).await.unwrap());
-    let closed = bridge(
-        &e,
-        "/self-register/issue",
-        json!({"discord_id":MEMBER,"guild_id":GUILD,"invite_key":"nai-invite-xyz"}),
-    )
-    .await;
-    assert_eq!(closed.0, 403);
-    assert!(svc(&e).is_unbound_invite(key_id).await.unwrap());
     open_registration(&e).await;
-    // 写错的 Key
-    let wrong = bridge(
+    let res = bridge(
         &e,
         "/self-register/issue",
-        json!({"discord_id": MEMBER, "guild_id": GUILD, "username": "bob", "invite_key": "nai-wrong"}),
+        json!({"discord_id":MEMBER,"guild_id":GUILD,"invite_key":"nai-retired"}),
     )
     .await;
-    assert_eq!(
-        (wrong.0, detail(&wrong)),
-        (
-            403,
-            "这不是一把待绑定的邀请 Key。请检查是否复制完整；普通领取请不填这一项。"
-        )
-    );
-    // 领取开放后绑定已有凭据；回复里没有新 Key
-    let ok = bridge(
-        &e,
-        "/self-register/issue",
-        json!({"discord_id": MEMBER, "guild_id": GUILD, "username": "bob", "global_name": "Bob",
-               "invite_key": "nai-invite-xyz"}),
-    )
-    .await;
-    assert_eq!(ok.0, 200);
-    assert_eq!(
-        ok.2,
-        json!({"message": "✅ 邀请 Key 已绑定到你的 Discord 账号，Key 不变，客户端里不用改。登录网站后可在右上角账户菜单复制 Key、查看额度；Key 泄露可用 /resetkey 重置。"})
-    );
-    assert_eq!(ok.1["cache-control"], "no-store");
-    let bound = e
-        .state
-        .db
-        .key_row_for_discord(MEMBER)
-        .await
-        .unwrap()
-        .unwrap();
-    assert_eq!(bound["id"], key_id);
-    assert_eq!(bound["name"], "Bob (@bob)");
-    assert_eq!(bound["discord_id"], MEMBER);
-    assert!(!svc(&e).is_unbound_invite(key_id).await.unwrap());
-    // 别人不能再绑同一把；已绑过的人不能再绑
-    let thief = bridge(
-        &e,
-        "/self-register/issue",
-        json!({"discord_id": OTHER, "guild_id": GUILD, "invite_key": "nai-invite-xyz"}),
-    )
-    .await;
-    assert_eq!(thief.0, 403);
-    let twice = bridge(
-        &e,
-        "/self-register/issue",
-        json!({"discord_id": MEMBER, "guild_id": GUILD, "invite_key": "nai-invite-xyz"}),
-    )
-    .await;
-    assert_eq!(
-        (twice.0, detail(&twice)),
-        (
-            403,
-            "这个 Discord 账号已经领取过 Key 了。额度在网页登录后查看；Key 找不到的话，用 /resetkey 换一把新的。"
-        )
-    );
-    assert!(e.state.db.get_key(key_id).await.unwrap().is_some());
-    assert!(
-        actions(&e)
-            .await
-            .iter()
-            .map(action_tuple)
-            .any(|a| a.1 == "绑定邀请 Key（/register）" && a.2 == format!("Key #{key_id}"))
-    );
+    assert_eq!(res.0, 422);
+    assert!(svc(&e).key_row_for(MEMBER).await.unwrap().is_none());
 }
 
 // ------------------------------------------------------------------ 桥接：resetkey / revoke（/quota、/help 10-23 删除）
@@ -1673,7 +1585,7 @@ async fn sweep_treats_unreadable_404_as_unknown() {
     let (e, d) = setup_reg(&[]).await;
     let u = user("900000000000000250");
     open_registration(&e).await;
-    svc(&e).issue_direct(&u.id, GUILD, &u, "").await.unwrap();
+    svc(&e).issue_direct(&u.id, GUILD, &u).await.unwrap();
     let path = format!("/guilds/{GUILD}/members/{}", u.id);
     d.state.scripts.lock().unwrap().push(Scripted {
         method: "GET",
@@ -1701,10 +1613,7 @@ async fn profile_backfill_names_default_keys() {
         ..Default::default()
     };
     open_registration(&e).await;
-    svc(&e)
-        .issue_direct(&bare.id, GUILD, &bare, "")
-        .await
-        .unwrap();
+    svc(&e).issue_direct(&bare.id, GUILD, &bare).await.unwrap();
     let before = e
         .state
         .db
@@ -1746,10 +1655,7 @@ async fn background_jobs_do_not_panic_and_report_through_the_service() {
         id: "900000000000000270".into(),
         ..Default::default()
     };
-    svc(&e)
-        .issue_direct(&bare.id, GUILD, &bare, "")
-        .await
-        .unwrap();
+    svc(&e).issue_direct(&bare.id, GUILD, &bare).await.unwrap();
     gate_server::registration::registrar_jobs(&e.state).await;
     // 资料补全了；退群核对也做了（读成员，在服务器）
     let calls = d.calls();
@@ -1782,7 +1688,7 @@ async fn the_gateway_never_opens_a_dm_channel() {
         id: "900000000000000150".into(),
         ..Default::default()
     };
-    svc(&e).issue_direct(&u.id, GUILD, &u, "").await.unwrap();
+    svc(&e).issue_direct(&u.id, GUILD, &u).await.unwrap();
     svc(&e).ban(&u.id, "", "").await.unwrap();
     assert!(svc(&e).revoke(MEMBER, true).await.unwrap());
     let seen = d.seen();
@@ -2189,7 +2095,7 @@ async fn web_login_records_browser_id() {
 
 /// 网页登录时和封禁号用的是同一个浏览器：待审里出一条「封禁号关联」，/register 被拦。
 #[tokio::test]
-async fn web_login_next_to_a_banned_account_is_flagged_and_blocked() {
+async fn shared_browser_does_not_infer_abuse_or_block_registration() {
     let (e, _d) = setup_reg(&[]).await;
     open_registration(&e).await;
     let bid = "0123456789abcdef0123456789abcdef";
@@ -2221,15 +2127,12 @@ async fn web_login_next_to_a_banned_account_is_flagged_and_blocked() {
         "SELECT kind, subject, score, status FROM abuse_signals",
     )
     .await;
-    assert_eq!(
-        rows,
-        vec![
-            json!({"kind": "banned_link", "subject": format!("{MEMBER},{banned}"), "score": 95.0, "status": "open"})
-        ]
-    );
-    assert_eq!(
-        svc(&e).issue_direct(MEMBER, GUILD, &user(MEMBER), "").await,
-        Err(RegErr::Denied(gate_server::ban_link::BLOCK_NOTICE.into()))
+    assert!(rows.is_empty());
+    assert!(
+        svc(&e)
+            .issue_direct(MEMBER, GUILD, &user(MEMBER))
+            .await
+            .is_ok()
     );
 }
 
@@ -2595,12 +2498,12 @@ async fn issue_result_enum_is_provisioned_for_plain_requests() {
     let (e, _d) = setup_reg(&[]).await;
     open_registration(&e).await;
     let r = svc(&e)
-        .issue_direct(MEMBER, GUILD, &user(MEMBER), "")
+        .issue_direct(MEMBER, GUILD, &user(MEMBER))
         .await
         .unwrap();
-    assert!(matches!(r, Issued::Provisioned(_)));
+    assert!(!r.key.is_empty());
     // 非数字 ID 直接拒绝，不查库
-    let bad = svc(&e).issue_direct("12a", GUILD, &user("12a"), "").await;
+    let bad = svc(&e).issue_direct("12a", GUILD, &user("12a")).await;
     assert_eq!(
         bad,
         Err(RegErr::Denied("请在指定服务器使用 /register。".into()))

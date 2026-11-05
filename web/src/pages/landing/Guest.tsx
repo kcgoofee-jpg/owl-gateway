@@ -60,9 +60,6 @@ export function JoinServerCard() {
 /* ---------------- 客户端设置 ---------------- */
 
 function Guides() {
-  const { facts } = useStore();
-  const cycle = facts.value.cycle;
-  const ms = cycle > 0 ? Math.round(cycle * 1000) : 0;
   return (
     <Card class="reveal">
       <Tabs
@@ -83,40 +80,6 @@ function Guides() {
                   <li>接入地址填写站点根地址；连接测试只验证基础连接，不代表所有模型或功能均可用</li>
                   <li>“同时出图数”控制并发，“每次请求图片数”是另一项参数；本站每次最多生成一张</li>
                   <li>V5 不支持 Vibe 参考图；请求历史中的“已取消”表示尚未派发就断开</li>
-                </ol>
-              </div>
-            ),
-          },
-          {
-            id: "chatu8",
-            label: "智绘姬",
-            panel: () => (
-              <div class="stack">
-                <p class="muted small">SillyTavern 生图插件 st-chatu8。</p>
-                <ol class="lp-list">
-                  <li>
-                    「站点」选<b>其他站点</b>，接口地址填<b>完整地址</b>（接口地址后拼{" "}
-                    <code>/ai/generate-image</code>，带路径，<b>不要只填根地址</b>
-                    ）——只填根地址的话，遇到限流插件会多发一个无效请求。
-                  </li>
-                  <li>
-                    「生图间隔时间」从默认 100ms 调大
-                    {ms ? (
-                      <>
-                        到 <b>{ms} 以上</b>（毫秒）——本站每个账号约 {cycle} 秒出一张，默认值会连续撞限流。
-                      </>
-                    ) : (
-                      <>——本站每张出完都要歇几秒，默认值会连续撞限流。</>
-                    )}
-                  </li>
-                  <li>
-                    一条回复尽量只放 1~2 个 image 标签；「自动点击生成」「永久自动点击」保持关闭（默认已关）。
-                  </li>
-                  <li>
-                    「云端队列」保持<b>关闭</b>即可——本站自己排队，不用插件再排一次。
-                    要开的话「队列服务地址」必须一并填（地址以插件作者的说明为准）：
-                    留空时请求会发到不存在的队列接口，直接返回 404。
-                  </li>
                 </ol>
               </div>
             ),

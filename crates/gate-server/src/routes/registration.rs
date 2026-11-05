@@ -8,7 +8,7 @@ use crate::action_log::log_action;
 use crate::auth::{client_ip, header_str};
 use crate::error::{ApiError, ApiResult, HttpError, InternalError, ok_json};
 use crate::multipart::read_bounded_body;
-use crate::registration::{DiscordUser, Issued, RegErr, RegistrationService};
+use crate::registration::{DiscordUser, RegErr, RegistrationService};
 use crate::session::ct_eq;
 use crate::state::AppState;
 use axum::Router;
@@ -236,11 +236,10 @@ async fn issue(State(state): State<AppState>, req: Request) -> ApiResult {
         global_name: take_chars(&global_name, 80).to_string(),
         avatar: take_chars(&avatar, 120).to_string(),
     };
-    let invite = take_chars(&invite_key, 80).to_string();
-    let result = match svc
-        .issue_direct(&discord_id, &guild_id, &user, &invite)
-        .await
-    {
+    if !invite_key.is_empty() {
+        return Err(HttpError::new(422, "邀请 Key 领取已下线，请直接使用 /register。").into());
+    }
+    let result = match svc.issue_direct(&discord_id, &guild_id, &user).await {
         Ok(r) => r,
         Err(RegErr::Denied(msg)) => {
             log_discord(
@@ -255,25 +254,10 @@ async fn issue(State(state): State<AppState>, req: Request) -> ApiResult {
         }
         Err(RegErr::Internal(msg)) => return Err(internal(msg)),
     };
-    match result {
-        Issued::Bound { key_id, message } => {
-            log_discord(
-                &state,
-                &discord_id,
-                "绑定邀请 Key（/register）",
-                &format!("Key #{key_id}"),
-                "",
-            )
-            .await;
-            Ok(no_store(ok_json(&json!({"message": message}))))
-        }
-        Issued::Provisioned(p) => {
-            log_discord(&state, &discord_id, "领取 Key（/register 直发）", "", "").await;
-            Ok(no_store(ok_json(
-                &json!({"key": p.key, "message": p.message}),
-            )))
-        }
-    }
+    log_discord(&state, &discord_id, "领取 Key（/register 直发）", "", "").await;
+    Ok(no_store(ok_json(
+        &json!({"key": result.key, "message": result.message}),
+    )))
 }
 
 /// 机器人每分钟上报一次心跳，后台「机器人状态」据此显示在线 / 离线。

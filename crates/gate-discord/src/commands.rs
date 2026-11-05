@@ -65,12 +65,7 @@ pub fn definitions() -> Vec<Value> {
         command(
             Command::Register.name(),
             "领取你的猫头鹰公益站 API Key",
-            vec![json!({
-                "type": 3,
-                "name": "key",
-                "description": "收到站长发的邀请 Key 时粘贴在这里，绑定到你的账号（可选）",
-                "required": false,
-            })],
+            vec![],
         ),
         command(
             Command::ResetKey.name(),

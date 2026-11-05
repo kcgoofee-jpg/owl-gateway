@@ -347,18 +347,6 @@ test.describe("已登录", () => {
     });
   }
 
-  test("成员：新建邀请 Key 的消息说明用 Discord 登录", async ({ page }) => {
-    await open(page, "/admin/members", PAGES[0]?.ready as never);
-    await page.getByRole("button", { name: "创建邀请 Key", exact: true }).click();
-    const dlg = page.getByRole("dialog", { name: /已创建/ });
-    await expect(dlg).toBeVisible();
-    const msg = dlg.getByRole("textbox");
-    await expect(msg).toHaveValue(/用 Discord 登录/);
-    await expect(msg).not.toHaveValue(/网页登录开放后/);
-    await dlg.getByRole("button", { name: "完成" }).click();
-    await expect(dlg).toBeHidden();
-  });
-
   test("成员：黑名单（添加 → 搜索 → 移出）与加标签", async ({ page }) => {
     await open(page, "/admin/members", PAGES[0]?.ready as never);
     await page.getByRole("button", { name: "更多", exact: true }).first().click();
@@ -480,11 +468,7 @@ test.describe("已登录", () => {
     await expect(all.getByRole("button", { name: "确认重置" })).toBeDisabled();
     await all.getByRole("button", { name: "取消" }).click();
 
-    // 邀请凭据通过单独入口创建，停用不需要任何权限身份组。
-    await page.getByRole("button", { name: "创建邀请 Key", exact: true }).click();
-    const made = page.getByRole("dialog", { name: /已创建/ });
-    await expect(made).toBeVisible();
-    await made.getByRole("button", { name: "完成", exact: true }).click();
+    await expect(page.getByRole("button", { name: "创建邀请 Key" })).toHaveCount(0);
     expect(errs).toEqual([]);
   });
 

@@ -12,17 +12,14 @@ import {
   ListTree,
   LogOut,
   Menu as MenuIcon,
-  Moon,
   Server,
   SlidersHorizontal,
-  Sun,
   Users,
 } from "lucide-preact";
 import type { ComponentChildren, ComponentType } from "preact";
 import { useEffect, useState } from "preact/hooks";
 import { LocationProvider, lazy, Route, Router, useLocation } from "preact-iso";
 import { ApiError, getJSON, sendJSON } from "../../lib/api";
-import { effectiveTheme, themeChoice, toggleTheme } from "../../lib/theme";
 import { Button, cx, Field, Skeleton, toast } from "../../ui";
 import "./admin.css";
 import { SitepaidBanner } from "./SitepaidHints";
@@ -97,9 +94,12 @@ export const tick = signal(0);
 /** 用户正在编辑表单 / 打开对话框时暂停自动刷新，避免把输入冲掉。 */
 export const busy = signal(0);
 
-function startTicker(): () => void {
+export function startTicker(): () => void {
   let es: EventSource | null = null;
   let timer: ReturnType<typeof setInterval> | undefined;
+  let startupTimer: ReturnType<typeof setTimeout> | undefined;
+  let refreshTimer: ReturnType<typeof setTimeout> | undefined;
+  let lastRefresh = Date.now();
   // 暂停期间（编辑 / 对话框）错过的节拍：恢复时补一次，不用等下一条推送
   let missed = false;
   const bump = () => {
@@ -107,6 +107,18 @@ function startTicker(): () => void {
       missed = true;
       return;
     }
+    // 首次 SSE 与首屏加载经常重叠；重连、切回标签页也沿用同一个最小间隔。
+    const delay = 15_000 - (Date.now() - lastRefresh);
+    if (delay > 0) {
+      refreshTimer ??= setTimeout(() => {
+        refreshTimer = undefined;
+        bump();
+      }, delay);
+      return;
+    }
+    clearTimeout(refreshTimer);
+    refreshTimer = undefined;
+    lastRefresh = Date.now();
     missed = false;
     tick.value++;
   };
@@ -123,12 +135,13 @@ function startTicker(): () => void {
     es.onopen = () => {
       clearInterval(timer);
       timer = undefined;
+      clearTimeout(startupTimer);
     };
     es.onerror = () => {
-      if (es?.readyState === EventSource.CLOSED) fallback();
+      fallback();
     };
     // 旧版后端没有 SSE：3 秒内没连上就退回定时刷新
-    setTimeout(() => {
+    startupTimer = setTimeout(() => {
       if (!es || es.readyState !== EventSource.OPEN) fallback();
     }, 3000);
   } catch {
@@ -139,20 +152,34 @@ function startTicker(): () => void {
   return () => {
     es?.close();
     clearInterval(timer);
+    clearTimeout(startupTimer);
+    clearTimeout(refreshTimer);
     stopBusyWatch();
     document.removeEventListener("visibilitychange", onVis);
   };
 }
 
-/** 同一拍里同一个地址只取一次（总览、角标、日志页常常同时要 /errors、/status、/jobs）。 */
-const inflight = new Map<string, { t: number; p: Promise<unknown> }>();
+/** 慢请求跨自动刷新复用；写操作之后必须重新请求。只保留最近 32 个地址的结果。 */
+const inflight = new Map<string, { t: number; edits: number; pending: boolean; p: Promise<unknown> }>();
 export function getShared<T>(url: string, t = tick.value): Promise<T> {
   const hit = inflight.get(url);
-  if (hit && hit.t === t) return hit.p as Promise<T>;
+  if (hit && hit.edits === edits.value && (hit.t === t || hit.pending)) {
+    hit.t = t;
+    return hit.p as Promise<T>;
+  }
   const p = getJSON<T>(url);
-  inflight.set(url, { t, p });
-  // 失败的不留：下一次（同一拍里别的组件）重新取
-  p.catch(() => inflight.get(url)?.p === p && inflight.delete(url));
+  const entry = { t, edits: edits.value, pending: true, p };
+  inflight.delete(url);
+  if (inflight.size >= 32) inflight.delete(inflight.keys().next().value as string);
+  inflight.set(url, entry);
+  p.then(
+    () => {
+      entry.pending = false;
+    },
+    () => {
+      if (inflight.get(url) === entry) inflight.delete(url);
+    },
+  );
   return p;
 }
 
@@ -172,7 +199,15 @@ export function useAdmin<T>(url: string | null): {
     if (!url) return;
     let alive = true;
     getShared<T>(url, t)
-      .then((data) => alive && setState({ data, error: null, loading: false }))
+      .then(
+        (data) =>
+          alive &&
+          setState((current) =>
+            current.data === data && current.error === null && !current.loading
+              ? current
+              : { data, error: null, loading: false },
+          ),
+      )
       .catch((e: unknown) => {
         if (!alive) return;
         if (e instanceof ApiError && e.status === 401) authed.value = false;
@@ -339,8 +374,6 @@ function Shell(props: { children: ComponentChildren; dataLive?: boolean }) {
     if (!dataLive) return;
     return startTicker();
   }, [dataLive]);
-  const dark = themeChoice.value ? themeChoice.value === "dark" : effectiveTheme() === "dark";
-  const ThemeIcon = dark ? Sun : Moon;
   return (
     <div class={cx("admin", drawerOpen.value && "drawer-open")}>
       <aside class="admin-side">
@@ -349,10 +382,6 @@ function Shell(props: { children: ComponentChildren; dataLive?: boolean }) {
         </div>
         <Nav />
         <div class="admin-side__foot">
-          <Button variant="ghost" onClick={toggleTheme}>
-            <ThemeIcon size={16} aria-hidden="true" />
-            {dark ? "浅色" : "深色"}
-          </Button>
           <Button
             variant="ghost"
             onClick={async () => {

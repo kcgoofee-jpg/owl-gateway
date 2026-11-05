@@ -3,7 +3,7 @@ import type { ComponentChildren } from "preact";
 import { useEffect, useId, useState } from "preact/hooks";
 import { getJSON } from "../../../../lib/api";
 import { fullTime, rel, scopeText } from "../../../../lib/format";
-import { Badge, Button, CopyField, copyText, Dialog, Field, Notice, Skeleton } from "../../../../ui";
+import { Badge, Button, CopyField, Dialog, Field, Notice, Skeleton } from "../../../../ui";
 import { Avatar, ConfirmDialog, TableWrap, useBusy } from "../_kit";
 import { addBan, addTag, call, giveCoupon, removeBan, resetDailyQuota } from "./actions";
 import { scopeTextOf } from "./logic";
@@ -77,21 +77,9 @@ const fieldErr = (e: string) =>
   ) : undefined;
 
 /* ---------------- 展示新 Key / 邀请消息 ---------------- */
-export function KeyRevealDialog(props: {
-  title: string;
-  intro: string;
-  token: string;
-  /** 邀请 Key：发给对方的整段消息 */
-  message?: string;
-  onClose: () => void;
-}) {
+export function KeyRevealDialog(props: { title: string; intro: string; token: string; onClose: () => void }) {
   useBusy();
-  const [copied, setCopied] = useState("");
-  const copy = async (what: string, text: string) => {
-    const ok = await copyText(text);
-    setCopied(ok ? what : "复制失败，请手动选中文字复制");
-    setTimeout(() => setCopied(""), 2500);
-  };
+
   return (
     <Dialog
       open
@@ -105,24 +93,7 @@ export function KeyRevealDialog(props: {
     >
       <div class="xa-form">
         <p class="small muted">{props.intro}</p>
-        {props.message ? (
-          <>
-            <Field label="发给对方的完整消息">
-              <textarea class="textarea mb-msg" readOnly rows={11} value={props.message} />
-            </Field>
-            <div class="row">
-              <Button onClick={() => copy("已复制 Key", props.token)}>只复制 Key</Button>
-              <Button variant="primary" onClick={() => copy("已复制整段消息", props.message ?? "")}>
-                复制整段消息
-              </Button>
-            </div>
-          </>
-        ) : (
-          <CopyField value={props.token} label="Key" wrap />
-        )}
-        <p class="small" role="status" aria-live="polite">
-          {copied}
-        </p>
+        <CopyField value={props.token} label="Key" wrap />
       </div>
     </Dialog>
   );
@@ -315,10 +286,7 @@ export function TagDialog(props: {
         return undefined;
       }}
     >
-      <Field
-        label="标签名"
-        hint={fieldErr(err) ?? "最多 12 个字；带「疑似 / 待查 / 观察」的会进「需要处理」"}
-      >
+      <Field label="标签名" hint={fieldErr(err) ?? "最多 12 个字"}>
         <input
           class="input"
           maxLength={12}

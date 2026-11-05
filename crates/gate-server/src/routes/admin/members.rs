@@ -24,7 +24,6 @@ mod view;
 pub fn router() -> Router<AppState> {
     Router::new()
         .route("/admin/api/keys", get(list_keys))
-        .route("/admin/api/keys/invite", post(create_invite_key))
         .route(
             "/admin/api/keys/{key_id}",
             patch(patch_key).delete(delete_key),
@@ -155,13 +154,6 @@ pub(super) async fn full_key_json(
 
 async fn list_keys(State(state): State<AppState>, _s: AdminSession) -> R {
     Ok(ok_json(&member_ops::list_keys_with_counters(&state).await?))
-}
-
-/// 一键新建邀请 Key（10-11 站长）：自动编号「邀请-N」、打「邀请」标签、额度交给算法，其余和 /register 发的一样。
-/// 成员拿到后在 Discord 用 /register 填这把 Key 完成绑定，后台自动认出是谁。
-async fn create_invite_key(State(state): State<AppState>, _s: AdminSession) -> R {
-    let resp = ok_json(&member_ops::create_invite_key(&state).await?);
-    Ok(mark_logged(resp))
 }
 
 async fn regenerate_key(

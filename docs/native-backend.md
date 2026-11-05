@@ -37,7 +37,7 @@ Rollback across this schema change requires both the previous image and a databa
 | `GET/PUT /admin/api/settings` | 完整提交 `{budgets:{daily_v5,daily_anlas,monthly_anlas},v5_paused,v5_medium_mode}`；缺少字段或旧字段返回 422。 |
 | `PUT /admin/api/ops/registration` | 完整提交 `{open,max_users,expires_days,roles:[{guild,role,note}]}`。身份组仅决定领取资格，多条之间为“或”。 |
 | `PATCH /admin/api/keys/{id}` | 仅接受 `name`、`enabled`、`expires_at`；权限改用成员规则接口。 |
-| `POST /admin/api/keys`、`.../{id}/role`、`.../{id}/bind-discord` | 已移除；使用邀请凭据或 Discord 自助领取。 |
+| `POST /admin/api/keys`、`.../{id}/role`、`.../{id}/bind-discord` | 已移除；使用 Discord 自助领取。 |
 
 成员和 Key 后台视图使用 `policy` 返回默认规则、例外和有效规则；`invited` 仅表示邀请来源，替代 `role` 与 `role_label`。成员公开视图的 `policy` 为有效规则。删除 `quota_auto`、`quota_limits`、`image_model_scope`、身份管理员名单和全站预算豁免；客户端不应再提供“手动／自动／继承／不限”选项。订阅视图保留实际数字额度和暂停状态，删除 `*Unlimited`、`quotaLimits` 和 `imageModelScope`。所有成员都受全站预算与暂停约束，排队请求在发送上游前再次核验当前规则。
 

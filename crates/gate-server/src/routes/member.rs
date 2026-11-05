@@ -202,8 +202,6 @@ async fn login_callback(
         {
             tracing::warn!(target: "web-login", "记外部账号失败：{e}");
         }
-        // 和封禁号同浏览器 / 同设备：进待审并记一条「注意」级 Bug（领 Key 时另外现查、拦下）
-        crate::ban_link::on_login(&state, &who.id).await;
     }
     // 已有 Key 的成员无论身份组结果如何都要能进自己的额度页；没有 Key 的人在这里被身份组门槛挡住：
     // 不发会话、不记任何东西，只带着原因回首页（/register 那边还会再查一次核验记录）。

@@ -1,5 +1,4 @@
-//! 监控类接口：上游令牌池、告警 / 生成记录状态、V5 官方额度。
-//! 「系统」页的服务器状态卡片（磁盘、上游健康、暴力破解防护）10-23 删除，`/admin/api/status` 只剩告警渠道和生成记录两块。
+//! 后台上游池摘要与告警通道状态。
 
 use super::upstream;
 use crate::error::{ApiResult, ok_json};
@@ -16,7 +15,7 @@ pub(super) fn router() -> Router<AppState> {
         .route("/admin/api/status", get(server_status))
 }
 
-/// 上游令牌池（掩码后的 Token）。总览页 10-23 删除（站长：日志留全，要看什么让 Claude 查），这个接口只剩「上游」页用的两项。
+/// 上游令牌池（掩码后的 Token）。总览页 10-23 删除（站长：日志留全，要看什么让 Claude 查），保留原接口的两个字段。
 async fn overview(State(state): State<AppState>, _s: AdminSession) -> ApiResult {
     Ok(ok_json(&json!({
         "pool": upstream::pool_status(&state).await?,
@@ -24,7 +23,7 @@ async fn overview(State(state): State<AppState>, _s: AdminSession) -> ApiResult 
     })))
 }
 
-/// 告警与记录功能的当前状态（不含任何密钥）。
+/// 告警通道的当前状态（不含任何密钥）。
 async fn server_status(State(state): State<AppState>, _s: AdminSession) -> ApiResult {
     Ok(ok_json(&json!({
         "alerts": {

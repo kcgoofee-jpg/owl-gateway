@@ -152,81 +152,18 @@ impl RegistrationService {
         Ok(self.db.registrations_since(now - 3600.0).await? as f64 >= cap)
     }
 
-    /// 站长发的邀请 Key（带「邀请」标签）还没绑定 Discord 账号。
-    pub async fn is_unbound_invite(&self, key_id: i64) -> Result<bool, DbError> {
-        self.db.is_unbound_invite(key_id).await
-    }
-
-    /// 绑定已有的邀请凭据。调用方必须先通过与普通领取相同的资格、容量和限流检查。
-    pub async fn bind_invite(
-        &self,
-        user_id: &str,
-        token: &str,
-        user: &DiscordUser,
-        cfg: &Registration,
-    ) -> Result<Issued, RegErr> {
-        let token = strip(token);
-        let row = if token.starts_with("nai-") {
-            self.db.key_id_enabled_by_token(token).await?
-        } else {
-            None
-        };
-        let Some((key_id, enabled)) = row else {
-            return denied(
-                "这不是一把待绑定的邀请 Key。请检查是否复制完整；普通领取请不填这一项。",
-            );
-        };
-        if !self.db.is_unbound_invite(key_id).await? {
-            return denied(
-                "这不是一把待绑定的邀请 Key。请检查是否复制完整；普通领取请不填这一项。",
-            );
-        }
-        if !enabled {
-            return denied("这把邀请 Key 已被停用。");
-        }
-        let (username, display, avatar) = (
-            clip(&user.username),
-            clip(&user.global_name),
-            clip(&user.avatar),
-        );
-        self.db
-            .save_registration(&NewRegistration {
-                discord_id: user_id,
-                key_id,
-                now: crate::time::now(),
-                username: username.as_deref(),
-                display_name: display.as_deref(),
-                avatar: avatar.as_deref(),
-                key_name: &member_label(user),
-                expires_at: (cfg.expires_days > 0)
-                    .then(|| crate::time::now() + cfg.expires_days as f64 * 86400.0),
-                member_role: !self.cfg.member_role_id.is_empty(),
-            })
-            .await?;
-        if !self.cfg.member_role_id.is_empty() {
-            self.set_role(user_id, true).await;
-        }
-        Ok(Issued::Bound {
-            key_id,
-            message: "✅ 邀请 Key 已绑定到你的 Discord 账号，Key 不变，客户端里不用改。\
-                      登录网站后可在右上角账户菜单复制 Key、查看额度；Key 泄露可用 /resetkey 重置。"
-                .into(),
-        })
-    }
-
     /// /register 直接发 Key：斜杠命令的 interaction 已被 Discord 签名验明发起人身份，
     /// 不必再走 OAuth 授权（应用被标记审查期间 OAuth 被封；这条通路同时去掉了批量私信）。
     /// 这是唯一的发 Key 入口（旧的 OAuth 领取 begin/finish 已删除，不能再恢复）。
     ///
-    /// 校验：限服务器 / 账号年龄 / 封禁 / 去重 / 封禁号关联（[`crate::ban_link`]）/ 每小时上限 / 名额 / 可选身份组（机器人 Token 核验）；
+    /// 校验：限服务器 / 账号年龄 / 封禁 / 去重/ 每小时上限 / 名额 / 可选身份组（机器人 Token 核验）；
     /// 通过后交给 [`Self::provision`] 落库。不通过返回 [`RegErr::Denied`]。
     pub async fn issue_direct(
         &self,
         user_id: &str,
         guild_id: &str,
         user: &DiscordUser,
-        invite_key: &str,
-    ) -> Result<Issued, RegErr> {
+    ) -> Result<Provisioned, RegErr> {
         if guild_id != self.cfg.guild_id || !validation::is_decimal(user_id) {
             return denied("请在指定服务器使用 /register。");
         }
@@ -250,10 +187,6 @@ impl RegistrationService {
             return denied(
                 "这个 Discord 账号已经领取过 Key 了。额度在网页登录后查看；Key 找不到的话，用 /resetkey 换一把新的。",
             );
-        }
-        // 和封禁号同浏览器 / 同（非苹果）设备登录过：不发 Key、不绑邀请（站长在待审里忽略那一对 = 放行）
-        if crate::ban_link::blocked(&self.db, user_id).await? {
-            return denied(crate::ban_link::BLOCK_NOTICE);
         }
         if self.issue_rate_blocked(crate::time::now()).await? {
             return denied(
@@ -289,16 +222,11 @@ impl RegistrationService {
                 ));
             }
         }
-        if !invite_key.is_empty() {
-            return self.bind_invite(user_id, invite_key, user, &cfg).await;
-        }
         let user = DiscordUser {
             id: user_id.to_string(),
             ..user.clone()
         };
-        Ok(Issued::Provisioned(
-            self.provision(user_id, &cfg, &user).await?,
-        ))
+        self.provision(user_id, &cfg, &user).await
     }
 
     /// 唯一发 Key 的地方：建 api_keys 行、写 discord_registrations、按成员名改 Key 名、

@@ -1,14 +1,13 @@
 /**
  * 成员首页（/）。三种人看到三种首屏：
- * - 游客：首屏显示实时状态，登录入口位于顶栏，下面是客户端设置、使用须知和示例图瀑布；
- * - 有 Key 的成员：今天的额度圆环，下面状态区、生图工作台（Beta）入口、重置券和请求记录（瀑布只给游客看）；
+ * - 游客：首屏显示实时状态，登录入口位于顶栏，下面是客户端设置和使用须知；
+ * - 有 Key 的成员：今天的额度圆环，下面状态区、生图工作台（Beta）入口、重置券和请求记录；
  * - 登录了还没有 Key：加入服务器的入口排最前，状态区占满整行。
  * 开屏每天播一次，见 Splash.tsx。
  */
 import { useEffect, useState } from "preact/hooks";
 import { Skeleton, toast } from "../../ui";
 import { StoreCtx } from "./ctx";
-import { Gallery } from "./Gallery";
 import { Grain } from "./Grain";
 import { GuestGuides, JoinServerCard, UsageNoticeCard } from "./Guest";
 import { displayName } from "./helpers";
@@ -100,7 +99,6 @@ function GuestHome() {
       <div class="wrap wrap--narrow lp-body">
         <GuestGuides />
       </div>
-      <Gallery />
     </>
   );
 }
@@ -223,7 +221,6 @@ function Page({ store }: { store: Store }) {
             : undefined
         }
         loginOpen={me !== undefined && !member}
-        brandHref="/"
         workbench={Boolean(member?.has_key)}
       />
       {member?.has_key && member.requires_web_login && !loginGateDismissed && (

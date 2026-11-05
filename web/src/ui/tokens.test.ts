@@ -44,23 +44,9 @@ const PAIRS: Array<[string, string]> = [
   ["discord-fg", "discord-hover"],
 ];
 
-const light = block(":root {");
-// 暗色块只写和亮色不同的变量（Discord 色两套通用），没写的沿用亮色
-const darkOverride = block(':root[data-theme="dark"]');
-const dark = { ...light, ...darkOverride };
+const t = block(":root {");
 
-describe("深色变量两处一致", () => {
-  it("跟随系统的深色块和手动深色块必须是同一套", () => {
-    const media = block(':root:not([data-theme="light"])');
-    expect(Object.keys(media).length).toBeGreaterThan(0);
-    expect(media).toEqual(darkOverride);
-  });
-});
-
-describe.each([
-  ["亮色", light],
-  ["暗色", dark],
-])("%s主题对比度（文字 ≥ 4.5:1）", (_name, t) => {
+describe("暗色主题对比度", () => {
   for (const fg of TEXT) {
     for (const bg of BACKGROUNDS) {
       it(`${fg} on ${bg}`, () => {

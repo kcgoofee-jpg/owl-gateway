@@ -57,14 +57,14 @@ test.describe("游客", () => {
 
     // 使用指南：两个客户端与使用须知共用标签，方向键可切换
     const tabs = page.getByRole("tablist", { name: "使用指南" }).getByRole("tab");
-    await expect(tabs).toHaveText(["柏宝绘", "智绘姬", "使用须知"]);
+    await expect(tabs).toHaveText(["柏宝绘", "使用须知"]);
     await tabs.first().focus();
     await page.keyboard.press("ArrowRight");
     await expect(tabs.nth(1)).toHaveAttribute("aria-selected", "true");
-    await expect(page.getByRole("tabpanel")).toContainText("生图间隔时间");
+    await expect(page.getByRole("tabpanel")).toContainText("每日 7 点重置");
 
     // 使用须知：数字来自接口，页面里不再有旧文案
-    await tabs.nth(2).click();
+
     const rules = page.locator(".lp-rules");
     await expect(rules).toContainText("每日 7 点重置");
     await expect(rules).toContainText("模型权限和额度因人而异");
@@ -188,18 +188,10 @@ test.describe("游客", () => {
     expect((r ?? 0) - (l ?? 0)).toBeLessThanOrEqual(760);
   });
 
-  test("主题切换：写入 owl-theme，刷新后保持", async ({ page }) => {
+  test("亮色系统也使用深色", async ({ page }) => {
     await page.emulateMedia({ colorScheme: "light" });
     await page.goto("/");
-    const html = page.locator("html");
-    await page.getByRole("button", { name: "切换到深色主题" }).click();
-    await expect(html).toHaveAttribute("data-theme", "dark");
-    expect(await page.evaluate(() => localStorage.getItem("owl-theme"))).toBe("dark");
-    await expect(page.getByRole("button", { name: "切换到浅色主题" })).toBeVisible();
-    await page.reload();
-    await expect(html).toHaveAttribute("data-theme", "dark");
-    await page.getByRole("button", { name: "切换到浅色主题" }).click();
-    await expect(html).toHaveAttribute("data-theme", "light");
+    await expect(page.locator("html")).toHaveCSS("color-scheme", "dark");
   });
 
   test("?login=failed 提示一次并清掉地址栏参数", async ({ page }) => {
@@ -291,7 +283,7 @@ test.describe("游客", () => {
     await expect(login).toBeVisible();
     expect(await noHorizontalScroll(page)).toBe(true);
     // 顶栏的几个控件都在视口内
-    for (const el of [page.getByRole("button", { name: /切换到/ }), login]) {
+    for (const el of [page.getByRole("banner").getByRole("link", { name: "猫头鹰公益站" }), login]) {
       const box = await el.boundingBox();
       expect(box && box.x >= 0 && box.x + box.width <= 375).toBe(true);
     }
@@ -306,7 +298,7 @@ test.describe("游客", () => {
       await page.locator(".lp-status__text").waitFor();
       expect(await seriousViolations(page)).toEqual([]);
       // 切到另一个客户端标签后再测一遍
-      await page.getByRole("tab", { name: /智绘姬/ }).click();
+      await page.getByRole("tab", { name: /使用须知/ }).click();
       expect(await seriousViolations(page)).toEqual([]);
     });
   }
@@ -377,7 +369,7 @@ test.describe("登录成员", () => {
     const account = page.getByRole("banner").getByRole("button", { name: /月见草/ });
     await account.click();
     const menu = page.getByRole("menu");
-    await expect(menu.getByText("我的 Key")).toBeVisible();
+    await expect(menu.getByText("nai key", { exact: true })).toBeVisible();
     await expect(menu.locator(".copy__value").first()).toHaveText(member.member_key ?? "");
     await menu.getByRole("button", { name: "复制Key" }).click();
     expect(await page.evaluate(() => navigator.clipboard.readText())).toBe(member.member_key);
@@ -525,7 +517,7 @@ test.describe("开屏", () => {
     await expect(splash.locator(".splash__title")).toHaveText(/Drawing\s*fantasy/);
     // 播完自己消失，Logo 的眼睛回来
     await expect(splash).toHaveCount(0, { timeout: 8000 });
-    await expect(page.locator(".brand__eyes i").first()).toHaveCSS("opacity", "1");
+    await expect(page.locator(".brand__mark")).toHaveCSS("opacity", "1");
     expect(await page.evaluate(() => localStorage.getItem("owl-splash"))).toBe(
       await page.evaluate(() => new Date().toLocaleDateString("sv-SE")),
     );

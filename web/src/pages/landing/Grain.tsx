@@ -71,10 +71,6 @@ export function Grain() {
     const ro = new ResizeObserver(size);
     ro.observe(cv);
     // 换主题时颗粒颜色跟着换
-    const mo = new MutationObserver(size);
-    mo.observe(document.documentElement, { attributes: true, attributeFilter: ["data-theme"] });
-    const mq = matchMedia("(prefers-color-scheme: dark)");
-    mq.addEventListener("change", size);
     const io = new IntersectionObserver(([e]) => {
       visible = !!e?.isIntersecting;
     });
@@ -84,9 +80,7 @@ export function Grain() {
     return () => {
       cancelAnimationFrame(raf);
       ro.disconnect();
-      mo.disconnect();
       io.disconnect();
-      mq.removeEventListener("change", size);
     };
   }, []);
 

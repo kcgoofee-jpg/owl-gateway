@@ -11,9 +11,7 @@ use crate::error::ApiError;
 use crate::state::AppState;
 use gate_core::primitives;
 use gate_core::validation;
-use gate_db::repo::INVITE_TAG;
 use gate_db::repo::counters::{Counter, ResetScope};
-use gate_db::repo::keys::NewKey;
 use serde_json::{Value, json};
 use std::collections::HashMap;
 
@@ -185,50 +183,6 @@ pub(super) async fn list_keys_with_counters(state: &AppState) -> Result<Value, A
         ));
     }
     Ok(json!({"keys": out}))
-}
-
-/// 一键新建邀请 Key（10-11 站长）：自动编号「邀请-N」、打「邀请」标签，其余和 /register 发的一样。
-pub(super) async fn create_invite_key(state: &AppState) -> Result<Value, ApiError> {
-    // 「邀请-N」编号：只看名字开头，数字可以是任何 Unicode 十进制数字
-    let max_no = state
-        .db
-        .key_names()
-        .await?
-        .iter()
-        .filter_map(|n| {
-            let rest = n.strip_prefix("邀请-")?;
-            let digits: String = rest.chars().take_while(|c| validation::is_nd(*c)).collect();
-            primitives::parse_int(&digits)
-        })
-        .max()
-        .unwrap_or(0);
-    let name = format!("邀请-{}", max_no + 1);
-    let now = state.now();
-    let new = NewKey {
-        name: name.clone(),
-        token: gen_key(),
-        enabled: true,
-        expires_at: None,
-        discord_id: None,
-    };
-    let row = state.db.create_key(&new, now).await?;
-    let id = row.get("id").and_then(Value::as_i64).unwrap_or(0);
-    state
-        .db
-        .upsert_key_tag(id, INVITE_TAG, "邀请领取", "站长", now)
-        .await?;
-    log_action(
-        &state.db,
-        "站长",
-        "新建邀请 Key",
-        &name,
-        "",
-        true,
-        state.now(),
-    )
-    .await;
-    let row = state.db.get_key(id).await?.unwrap_or(Value::Null);
-    Ok(json!({"key": full_key_json(state, &row, id).await?}))
 }
 
 /// 换一把新 Token（旧 Token 立即失效）。

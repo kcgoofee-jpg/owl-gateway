@@ -74,15 +74,6 @@ impl Db {
         .await
     }
 
-    /// 全部 Key 的名字（给新邀请 Key 编号用）。
-    pub async fn key_names(&self) -> Result<Vec<String>> {
-        self.read(|c| {
-            let mut stmt = c.prepare("SELECT name FROM api_keys")?;
-            stmt.query_map([], |r| value::text_or(r, 0, ""))?.collect()
-        })
-        .await
-    }
-
     /// 打 / 改标签：同一把 Key 同名标签只留一行，改备注、操作者和时间。
     pub async fn upsert_key_tag(
         &self,

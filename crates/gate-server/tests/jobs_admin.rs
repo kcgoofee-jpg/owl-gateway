@@ -9,12 +9,11 @@ use serde_json::{Value, json};
 /// 2026-10-14 12:00:00 +08:00
 const NOW: f64 = 1_791_950_400.0;
 
-const NAMES: [&str; 7] = [
+const NAMES: [&str; 6] = [
     "upstream_snapshot",
     "breaker",
     "key_guard",
     "maintenance",
-    "abuse_scan",
     "anlas_reconcile",
     "idle_recycle",
 ];
@@ -89,10 +88,7 @@ async fn jobs_registry_and_last_run() {
     assert_eq!(by("breaker"), "最近 15 分钟上游失败 0/0：正常");
     assert_eq!(by("key_guard"), "没有 Key 触发");
     assert_eq!(by("idle_recycle"), "最近 60 分钟没出图，本轮跳过");
-    assert_eq!(
-        by("abuse_scan"),
-        "没有新的可疑信号｜设备簇 0 个（0 个账号）、没交指纹 0"
-    );
+    assert!(gate_server::jobs::find("abuse_scan").is_none());
 }
 
 #[tokio::test]

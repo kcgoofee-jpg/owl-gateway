@@ -1,17 +1,8 @@
 import { useMemo, useState } from "preact/hooks";
-import { fullTime, withUnit } from "../../../lib/format";
-import { Badge, Card } from "../../../ui";
+import { Card } from "../../../ui";
 import { act, useAdmin } from "../Admin";
-import { CardPending, SectionHead, TableWrap } from "./_kit";
-import {
-  agoText,
-  dash,
-  type Guard,
-  guardSpecs,
-  type Records,
-  RUNTIME_SPECS,
-  type Settings,
-} from "./limits/core";
+import { CardPending, SectionHead } from "./_kit";
+import { type Guard, guardSpecs, RUNTIME_SPECS, type Settings } from "./limits/core";
 import type { Ops } from "./onboarding/core";
 import { FeaturesCard } from "./onboarding/features";
 import { NumField, SaveBar, Sect, SelectField, SwitchRow, useForm } from "./system/forms";

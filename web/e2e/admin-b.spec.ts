@@ -149,8 +149,6 @@ test("额度与保护：全是手动表单 + 只读记录；没有算法说明",
   await expect(page.getByLabel("V5 全站每天", { exact: true })).toBeVisible();
   await expect(page.getByLabel("V5 模型").locator("option")).toHaveCount(2);
   await expect(page.getByRole("switch", { name: "暂停 V5" })).toBeVisible();
-  await expect(page.getByTestId("guard-pace")).toBeVisible();
-  await expect(page.getByTestId("quota-records")).toBeVisible();
   await expect(page.getByText("额度来源", { exact: true })).toHaveCount(0);
   const budget = page.getByRole("region", { name: "全站预算（0 停用）" });
   const field = budget.getByLabel("Anlas 全站每天", { exact: true });
@@ -164,6 +162,9 @@ test("额度与保护：全是手动表单 + 只读记录；没有算法说明",
   await field.fill(original);
   await budget.getByRole("button", { name: "保存", exact: true }).click();
   await expect(budget.getByRole("button", { name: "保存", exact: true })).toBeDisabled();
+  await visit(page, "upstream", "上游");
+  await expect(page.getByTestId("guard-pace")).toBeVisible();
+  await expect(page.getByTestId("quota-records")).toBeVisible();
 });
 
 test("系统：只剩告警渠道和后台密码；没有服务器状态、定时任务", async ({ page }) => {
@@ -255,7 +256,21 @@ test("系统：改密码先在本地校验；清空原图 / 测试告警有保�
   // 没配置告警渠道时「测试告警」不可点
   await expect(page.getByRole("button", { name: "发送测试告警" })).toBeDisabled();
   await expect(page.getByRole("button", { name: "清空服务器上的全部原图" })).toHaveCount(0);
-  await expect(page.getByRole("spinbutton", { name: "IP / UA 保留天数" })).toBeVisible();
+  const retention = page
+    .getByRole("region")
+    .filter({ has: page.getByRole("heading", { name: "请求来源日志" }) });
+  const days = retention.getByLabel("IP / UA 保留天数", { exact: true });
+  const original = await days.inputValue();
+  const changed = original === "365" ? "364" : "365";
+  await days.fill(changed);
+  await retention.getByRole("button", { name: "保存", exact: true }).click();
+  await expect(page.getByText("日志保留期限已保存").first()).toBeVisible();
+  expect((await (await page.request.get("/admin/api/ops")).json()).log_retention.origin_keep_days).toBe(
+    Number(changed),
+  );
+  await days.fill(original);
+  await retention.getByRole("button", { name: "保存", exact: true }).click();
+  await expect(retention.getByRole("button", { name: "保存", exact: true })).toBeDisabled();
 });
 
 test("领 Key 与功能：改名额直接保存；开放领 Key / 关功能要先确认", async ({ page }) => {
@@ -291,4 +306,33 @@ test("领 Key 与功能：改名额直接保存；开放领 Key / 关功能要�
   await vibe.click();
   await flags.getByRole("button", { name: "保存", exact: true }).click();
   await expect(flags.getByRole("button", { name: "保存", exact: true })).toBeDisabled();
+});
+
+test("维护切换被后端拒绝时保留原状态", async ({ page }) => {
+  await visit(page, "system", "系统");
+  const normal = page.getByRole("switch", { name: "正常开放" });
+  await expect(normal).toBeChecked();
+  await page.route("**/admin/api/ops/maintenance", (route) =>
+    route.fulfill({ status: 422, json: { detail: "维护模式未保存" } }),
+  );
+  await page.getByRole("switch", { name: "只有站长可用" }).click();
+  await expect(page.getByText("维护模式未保存", { exact: true })).toBeVisible();
+  await expect(normal).toBeChecked();
+});
+
+test("官方查询展示逐账号结果", async ({ page }) => {
+  await visit(page, "upstream", "上游");
+  await page.route("**/admin/api/upstream/refresh-info", (route) =>
+    route.fulfill({
+      json: {
+        last_attempt_at: 100,
+        accounts: [
+          { last_success: 100, last_error: null },
+          { last_success: 50, last_error: "timeout" },
+        ],
+      },
+    }),
+  );
+  await page.getByRole("button", { name: "查询官方信息" }).click();
+  await expect(page.getByText("本次查询成功 1/2 个账号", { exact: true })).toBeVisible();
 });

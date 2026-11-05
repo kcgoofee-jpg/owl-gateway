@@ -33,7 +33,10 @@ function InfoRefresh({ data }: { data: UpstreamPage }) {
   const refresh = async () => {
     setRunning(true);
     try {
-      await sendJSON(
+      const info = await sendJSON<{
+        accounts: { last_error: string | null; last_success: number | null }[];
+        last_attempt_at: number;
+      }>(
         "POST",
         "/admin/api/upstream/refresh-info",
         {},
@@ -41,7 +44,10 @@ function InfoRefresh({ data }: { data: UpstreamPage }) {
           "X-NAI-Admin-CSRF": data.csrf_info,
         },
       );
-      toast("上游账号信息已刷新");
+      const fresh = info.accounts.filter(
+        (a) => a.last_success === info.last_attempt_at && !a.last_error,
+      ).length;
+      toast(`本次查询成功 ${fresh}/${info.accounts.length} 个账号`, { error: fresh < info.accounts.length });
     } catch (e) {
       toast(e instanceof Error ? e.message : String(e), { error: true });
     } finally {
@@ -50,7 +56,7 @@ function InfoRefresh({ data }: { data: UpstreamPage }) {
     }
   };
   return (
-    <Button disabled={running || retryAfter > 0} onClick={() => void refresh()}>
+    <Button disabled={running || retryAfter > 0 || data.accounts.length === 0} onClick={() => void refresh()}>
       {running ? "正在查询…" : retryAfter > 0 ? `${retryAfter} 秒后刷新` : "查询官方信息"}
     </Button>
   );
@@ -86,6 +92,9 @@ export default function Upstream() {
           </>
         }
       />
+      <p class="small muted">
+        账号状态显示最近一次官方查询结果。手动查询间隔 5 分钟；页面自动刷新只更新网关读数。
+      </p>
       {loading && !data && <Loading rows={3} />}
       {!data && error && <LoadError error={error} />}
       {data && !data.pool_configured && <Notice tone="danger">尚未配置上游 Token。</Notice>}

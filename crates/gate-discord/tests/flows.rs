@@ -93,7 +93,7 @@ async fn register_hands_the_key_only_to_the_member() {
     assert_eq!(
         bridge[0]["json"].to_string(),
         json!({"discord_id": MEMBER, "guild_id": GUILD, "name": "alice", "username": "alice",
-               "global_name": "Alice", "avatar": "a1b2c3", "invite_key": ""})
+               "global_name": "Alice", "avatar": "a1b2c3"})
         .to_string(),
         "键和顺序都固定"
     );
@@ -101,26 +101,13 @@ async fn register_hands_the_key_only_to_the_member() {
 }
 
 #[tokio::test]
-async fn register_trims_and_truncates_the_invite_key() {
+async fn retired_invite_option_never_issues_a_normal_credential() {
     let server = MockServer::start().await;
     let app = naimei(&server);
-    server.reset(
-        &json!({"/self-register/issue": {"status": 200, "json": {"message": "绑定好了"}}}),
-        &Value::Null,
-    );
-    app.handle_interaction(slash(
-        2,
-        "register",
-        register_options(Some(&format!("  nai-{}  ", "k".repeat(100)))),
-    ))
-    .await;
-    let sent = server.bridge_log()[0]["json"]["invite_key"]
-        .as_str()
-        .unwrap()
-        .to_owned();
-    assert_eq!(sent.chars().count(), 80);
-    assert!(sent.starts_with("nai-k"), "{sent}");
-    assert_eq!(expect_deferred_reply(&server, 2), "绑定好了");
+    app.handle_interaction(slash(2, "register", register_options(Some("retired"))))
+        .await;
+    assert!(server.bridge_log().is_empty());
+    assert!(expect_deferred_reply(&server, 2).contains("邀请 Key 已停用"));
 }
 
 #[tokio::test]

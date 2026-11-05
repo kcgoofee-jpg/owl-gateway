@@ -104,35 +104,12 @@ async fn keys_list_shape_invitation_source_and_counters() {
 }
 
 #[tokio::test]
-async fn invite_keys_are_numbered_and_tagged() {
-    let (e, a) = ready().await;
-    mk_key(&e.state, "邀请-4 的朋友", "nai-t-2").await;
-    mk_key(&e.state, "邀请-x", "nai-t-3").await;
-    let r = a.post(&format!("{A}/keys/invite"), json!({})).await;
-    assert_eq!(r.status, 200, "{}", r.text());
-    let key = &r.json()["key"];
-    assert_eq!(key["name"], "邀请-5");
-    assert_eq!(key["policy"]["effective"]["daily_images"], 150);
-    assert_eq!(key["policy"]["effective"]["v5"], false);
-    assert!(key["expires_at"].is_null());
-    let id = key["id"].as_i64().unwrap();
-    let tags = query(
-        &e.state.db,
-        &format!("SELECT tag, by FROM key_tags WHERE key_id={id}"),
-    )
-    .await;
-    assert_eq!(tags, [json!({"tag": "邀请", "by": "站长"})]);
-    let r2 = a.post(&format!("{A}/keys/invite"), json!({})).await;
-    assert_eq!(r2.json()["key"]["name"], "邀请-6");
-    // 列表里认出「邀请」身份组；操作日志只记处理函数那一条可读的（通用包装不再重复记原样请求体）
-    let l = a.get(&format!("{A}/keys")).await.json();
-    assert_eq!(l["keys"][0]["invited"], true);
-    let acts = a.actions().await;
-    assert!(
-        acts.iter()
-            .any(|(act, t, ..)| act == "新建邀请 Key" && t == "邀请-5")
+async fn invite_creation_is_retired() {
+    let (_e, a) = ready().await;
+    assert_eq!(
+        a.post(&format!("{A}/keys/invite"), json!({})).await.status,
+        405
     );
-    assert!(!acts.iter().any(|(act, ..)| act == "POST /keys/invite"));
 }
 
 #[tokio::test]
@@ -699,8 +676,8 @@ async fn members_filter_attention_trims_rows_and_counts() {
             all["total"].clone(),
             all["attention"].clone()
         ),
-        (json!("all"), json!(9), json!(5)),
-        "k2 快到期、k3 已过期、k5 疑似、k8 角色太多、k9 重置两次 → 5 个要处理"
+        (json!("all"), json!(9), json!(4)),
+        "k2 快到期、k3 已过期、k8 角色太多、k9 重置两次 → 4 个要处理"
     );
     assert_eq!(
         all["members"].as_array().unwrap().len(),
@@ -722,7 +699,7 @@ async fn members_filter_attention_trims_rows_and_counts() {
             att["total"].clone(),
             att["attention"].clone()
         ),
-        (json!("attention"), json!(9), json!(5)),
+        (json!("attention"), json!(9), json!(4)),
         "attention 模式只裁 members，total/attention 仍是全量口径"
     );
     let names: Vec<&str> = att["members"]
@@ -733,7 +710,7 @@ async fn members_filter_attention_trims_rows_and_counts() {
         .collect();
     assert_eq!(
         names,
-        ["重置两次", "角色太多", "疑似小号", "已过期", "快到期"],
+        ["重置两次", "角色太多", "已过期", "快到期"],
         "id 倒序；停用的 k4、已查看的 k6、只有「请求过快」的 k7 不在里面"
     );
     assert_eq!(att["members"][0]["today"]["images"], 0);

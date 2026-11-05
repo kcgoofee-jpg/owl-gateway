@@ -60,6 +60,8 @@ The script refuses runs that did not fully succeed and skips if that build is al
 
 `tools/deploy.sh --wait` reports CI state and its GitHub run URL every minute, and stops waiting after one hour by default (`OWL_CI_WAIT_TIMEOUT_SECONDS` changes that limit). The cutover stops the old gateway and waits for its accepted requests to finish before starting the new process.
 
+After cutover, check job timestamps and error logs for five minutes. Verify the scheduled jobs start advancing and investigate missing tables, missing columns or new 5xx responses.
+
 Rollback: `ssh` in and run `/opt/owl/cutover.sh previous`.
 
 Changes that need follow-up on the host (cron, scripts under `deploy/v3/ops/`) are listed in the commit body and applied by hand after the deploy.

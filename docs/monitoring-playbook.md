@@ -54,3 +54,6 @@ docker exec owl-gate nai-ops smoke http://127.0.0.1:8000 | tail -3    # 每 3 �
 
 - **2026-10-30**：`cutover.sh` 的实测子进程在父脚本被中断后变成孤儿，每 0.5 秒打 `/healthz` 和 `/`，两天把 Caddy 访问日志刷到 10 分钟一轮转，巡检时误判成"外部探针太多"。已修：父进程没了子进程自己退 + `EXIT/INT/TERM` kill。**日志被刷爆时先 `ps -eo pid,etime,args | grep connect-to` 查孤儿。**
 - **2026-10-23**：`nai-ops get|set` 容器内默认连 `127.0.0.1:3003`（那是宿主端口），容器里应连 8000；现在 compose 里已设 `ADMIN_API_BASE`。
+
+- 排查镜像页 404 时，分别检查网关的账户接口和外置镜像中的图标、Wasm 文件。核对实际请求路径及部署目录。
+- 运行 `nai-ops traffic --log /var/log/caddy/access.log` 时，在能读取 Caddy 日志的宿主机执行。

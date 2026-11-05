@@ -2,7 +2,7 @@
  * 成员：列表（今日 / 近 7 天 / 累计用量）、筛选搜索排序、展开详情与全部 Key 操作。
  * 支持 ?filter=<筛选 id>（总览的「成员要处理」）。
  */
-import { ChevronDown, Plus, Search } from "lucide-preact";
+import { ChevronDown, Search } from "lucide-preact";
 import { useMemo, useRef, useState } from "preact/hooks";
 import { useLocation } from "preact-iso";
 import { usedOf, withUnit } from "../../../lib/format";
@@ -14,7 +14,6 @@ import {
   addTag,
   call,
   clearShare,
-  createInvite,
   disableKey,
   type Res,
   regenerateKey,
@@ -31,7 +30,6 @@ import {
   TagDialog,
 } from "./members/Dialogs";
 import { FilterBar } from "./members/FilterBar";
-import { inviteMessage } from "./members/invite";
 import { KeyDialog } from "./members/KeyDialog";
 import {
   ACK_TAG,
@@ -56,7 +54,7 @@ import "./members.css";
 
 type Dlg =
   | { t: "edit"; id: number }
-  | { t: "reveal"; title: string; intro: string; token: string; message?: string }
+  | { t: "reveal"; title: string; intro: string; token: string }
   | {
       t: "metadata" | "coupon" | "tag" | "disable" | "regen" | "reset" | "delete" | "ban";
       id: number;
@@ -83,7 +81,6 @@ export default function Members() {
   const [open, setOpen] = useState<Set<number>>(new Set());
   const [limit, setLimit] = useState(PAGE);
   const [dlg, setDlg] = useState<Dlg | null>(null);
-  const [inviting, setInviting] = useState(false);
 
   const now = Date.now() / 1000;
   const idleDays = mem.data?.inactivity_days ?? 3;
@@ -186,22 +183,6 @@ export default function Members() {
     remove: (m, ban) => setDlg({ t: ban ? "ban" : "delete", id: m.id }),
   };
 
-  const newInvite = async () => {
-    if (inviting) return;
-    setInviting(true);
-    const r = await createInvite();
-    setInviting(false);
-    if (!r.ok) return toast(r.error, { error: true });
-    const t = r.data.key.token;
-    setDlg({
-      t: "reveal",
-      title: `${r.data.key.name} 已创建`,
-      intro: "下面是发给对方的完整消息，复制后直接私信对方。",
-      token: t,
-      message: inviteMessage(`${location.origin}/`, t),
-    });
-  };
-
   const close = () => setDlg(null);
   const target = dlg && "id" in dlg && dlg.id !== null ? byId(dlg.id) : undefined;
 
@@ -223,15 +204,7 @@ export default function Members() {
         );
       }
       case "reveal":
-        return (
-          <KeyRevealDialog
-            title={dlg.title}
-            intro={dlg.intro}
-            token={dlg.token}
-            {...(dlg.message ? { message: dlg.message } : {})}
-            onClose={close}
-          />
-        );
+        return <KeyRevealDialog title={dlg.title} intro={dlg.intro} token={dlg.token} onClose={close} />;
       case "metadata":
         if (!target) return null;
         return (
@@ -391,10 +364,6 @@ export default function Members() {
         title="成员"
         actions={
           <div class="xa-toolbar">
-            <Button variant="primary" disabled={inviting} onClick={() => void newInvite()}>
-              <Plus size={15} aria-hidden="true" />
-              创建邀请 Key
-            </Button>
             <Menu
               button={(p) => (
                 <Button {...p}>
@@ -478,7 +447,7 @@ export default function Members() {
                 }
               >
                 {activeId === "attention"
-                  ? "风险信号、到期、被拒过多的成员会出现在这里。"
+                  ? "到期、被拒过多的成员会出现在这里。"
                   : rows.length
                     ? "换个筛选或关键词试试。"
                     : "成员在 Discord 领取 Key 后会出现在这里。"}

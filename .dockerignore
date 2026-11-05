@@ -18,3 +18,8 @@ exports/
 docs/
 deploy/
 crates/*/tests
+mirror/
+novelai-image-snapshot/
+novelai-image-rebuild/
+novelai-rebuild/
+.codex-attachments/

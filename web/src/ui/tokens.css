@@ -1,58 +1,44 @@
-/*
- * 猫头鹰公益站 · 设计令牌（全站唯一来源：首页与后台共用）
- *
- * 规则（站长定）：
- * - 字号手机与桌面完全一致，只有布局随屏宽变化；
- * - 不出现钥匙图标；
- * - 所有文字与背景的对比度 ≥ 4.5:1（tokens.test.ts 自动校验）。
- *
- * 颜色：Radix Colors 12 级（灰 sand · 强调 iris · 成功 jade · 警告 amber · 错误 tomato · 信息 blue · V5 cyan）。
- * 取色规则见 docs/UI色板与排版经验.md；状态文字（ok / warn / danger / info / v5）取 11 级，过不了 4.5:1 的向 12 级靠到刚好达标；亮色取 sand-2 做页面底、sand-1 做卡片，暗色取 sand-dark-1 / 2。
- *
- * 主题：跟随系统（prefers-color-scheme），用户手动切换后写 data-theme="light|dark"，
- * 存在 localStorage 的 owl-theme 里（theme-init.js 在 <head> 里同步应用，避免闪烁）。
- */
-
+/* OWL 首页与管理后台共用的深色主题。 */
 :root {
-  color-scheme: light;
+  color-scheme: dark;
 
   /* 表面 */
-  --bg: #f9f9f8;
-  --surface: #fdfdfc;
-  --surface-2: #f1f0ef;
-  --surface-3: #e9e8e6;
-  --border: #dad9d6;
-  --border-strong: #cfceca;
+  --bg: #111110;
+  --surface: #191918;
+  --surface-2: #222221;
+  --surface-3: #2a2a28;
+  --border: #3b3a37;
+  --border-strong: #494844;
 
   /* 文字 */
-  --text: #21201c;
-  --text-2: #63635e;
-  --muted: #63635e;
+  --text: #eeeeec;
+  --text-2: #b5b3ad;
+  --muted: #b5b3ad;
 
   /* 强调色（Radix iris） */
   --accent: #5b5bd6;
-  --accent-hover: #5151cd;
+  --accent-hover: #6262dc;
   --accent-fg: #ffffff;
-  --accent-soft: #f0f1fe;
-  --accent-text: #5753c6;
+  --accent-soft: #202248;
+  --accent-text: #b1a9ff;
 
   /* 状态 */
-  --ok: #207860;
-  --ok-soft: #e6f7ed;
-  --warn: #9d5d05;
-  --warn-soft: #fff7c2;
-  --danger: #c53316;
-  --danger-soft: #feebe7;
-  --info: #0d6dc3;
-  --info-soft: #e6f4fe;
-  --v5: #10738c;
+  --ok: #1fd8a4;
+  --ok-soft: #0f2e22;
+  --warn: #ffca16;
+  --warn-soft: #302008;
+  --danger: #ff977d;
+  --danger-soft: #391714;
+  --info: #70b8ff;
+  --info-soft: #0d2847;
+  --v5: #4ccce6;
 
   /* 额度类型色（V4.5 / V5 / Anlas）：圆环、进度条按类型区分。换配色只改这三对（亮 / 暗） */
-  --c-v45: #5b5bd6;
-  --c-v5: #10738c;
-  --c-anlas: #ab6400;
-  --c-site: #946b32;
-  --c-site-v5: #397682;
+  --c-v45: #8d8cf2;
+  --c-v5: #4ccce6;
+  --c-anlas: #ffca16;
+  --c-site: #d5ad6a;
+  --c-site-v5: #78aeb8;
 
   /* Discord 官方 Blurple（白字 4.61:1） */
   --discord: #5865f2;
@@ -60,12 +46,12 @@
   --discord-fg: #ffffff;
 
   /* 开屏夜空、猫头鹰眼睛；首屏背后颗粒的颜色（r, g, b）；页面顶部的天色（滚动时由夜转晓） */
-  --night: #0e0f1a;
+  --night: #08090f;
   --night-fg: #d9d8f0;
   --eye: #ffc53d;
-  --grain-rgb: 33, 32, 28;
-  --sky-night: #ecebf8;
-  --sky-dawn: #fbefe4;
+  --grain-rgb: 238, 238, 236;
+  --sky-night: #12132a;
+  --sky-dawn: #2b1e26;
 
   /* 焦点环 */
   --focus: #5b5bd6;
@@ -74,8 +60,8 @@
   --radius-sm: 6px;
   --radius: 10px;
   --radius-lg: 14px;
-  --shadow-1: 0 1px 2px rgb(33 32 28 / 7%), 0 1px 1px rgb(33 32 28 / 5%);
-  --shadow-2: 0 8px 24px rgb(33 32 28 / 11%), 0 2px 6px rgb(33 32 28 / 7%);
+  --shadow-1: 0 1px 2px rgb(0 0 0 / 40%);
+  --shadow-2: 0 10px 30px rgb(0 0 0 / 45%);
 
   /* 字号四档制（手机与桌面一致）：12 辅助 / 14 正文 / 18 标题 / 26 首屏主标题。
      六个 token 名保留（老样式不用改），值收敛到四档：xs=sm=12，lg=xl=18；26 只给首屏主标题 / 开屏。 */
@@ -113,84 +99,4 @@
   --control-h-sm: 30px;
   --control-h-lg: 44px;
   --control-px: 12px;
-}
-
-@media (prefers-color-scheme: dark) {
-  :root:not([data-theme="light"]) {
-    color-scheme: dark;
-    --bg: #111110;
-    --surface: #191918;
-    --surface-2: #222221;
-    --surface-3: #2a2a28;
-    --border: #3b3a37;
-    --border-strong: #494844;
-    --text: #eeeeec;
-    --text-2: #b5b3ad;
-    --muted: #b5b3ad;
-    --accent: #5b5bd6;
-    --accent-hover: #6262dc;
-    --accent-fg: #ffffff;
-    --accent-soft: #202248;
-    --accent-text: #b1a9ff;
-    --ok: #1fd8a4;
-    --ok-soft: #0f2e22;
-    --warn: #ffca16;
-    --warn-soft: #302008;
-    --danger: #ff977d;
-    --danger-soft: #391714;
-    --info: #70b8ff;
-    --info-soft: #0d2847;
-    --v5: #4ccce6;
-    --c-v45: #8d8cf2;
-    --c-v5: #4ccce6;
-    --c-anlas: #ffca16;
-    --c-site: #d5ad6a;
-    --c-site-v5: #78aeb8;
-    --night: #08090f;
-    --grain-rgb: 238, 238, 236;
-    --sky-night: #12132a;
-    --sky-dawn: #2b1e26;
-    --focus: #5b5bd6;
-    --shadow-1: 0 1px 2px rgb(0 0 0 / 40%);
-    --shadow-2: 0 10px 30px rgb(0 0 0 / 45%);
-  }
-}
-
-:root[data-theme="dark"] {
-  color-scheme: dark;
-  --bg: #111110;
-  --surface: #191918;
-  --surface-2: #222221;
-  --surface-3: #2a2a28;
-  --border: #3b3a37;
-  --border-strong: #494844;
-  --text: #eeeeec;
-  --text-2: #b5b3ad;
-  --muted: #b5b3ad;
-  --accent: #5b5bd6;
-  --accent-hover: #6262dc;
-  --accent-fg: #ffffff;
-  --accent-soft: #202248;
-  --accent-text: #b1a9ff;
-  --ok: #1fd8a4;
-  --ok-soft: #0f2e22;
-  --warn: #ffca16;
-  --warn-soft: #302008;
-  --danger: #ff977d;
-  --danger-soft: #391714;
-  --info: #70b8ff;
-  --info-soft: #0d2847;
-  --v5: #4ccce6;
-  --c-v45: #8d8cf2;
-  --c-v5: #4ccce6;
-  --c-anlas: #ffca16;
-  --c-site: #d5ad6a;
-  --c-site-v5: #78aeb8;
-  --night: #08090f;
-  --grain-rgb: 238, 238, 236;
-  --sky-night: #12132a;
-  --sky-dawn: #2b1e26;
-  --focus: #5b5bd6;
-  --shadow-1: 0 1px 2px rgb(0 0 0 / 40%);
-  --shadow-2: 0 10px 30px rgb(0 0 0 / 45%);
 }

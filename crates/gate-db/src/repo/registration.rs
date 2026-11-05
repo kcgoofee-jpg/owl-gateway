@@ -3,7 +3,6 @@
 //! 领取记录的查询与写入。「几条语句 + 一次 commit」= 这里一个事务；
 //! 中间夹着 Discord 请求的地方分成几个方法（不能在持有未提交写事务时等网络）。
 
-use super::INVITE_TAG;
 use crate::{Db, Result, value};
 use rusqlite::{OptionalExtension, params};
 
@@ -15,7 +14,7 @@ pub struct RegistrationProfile {
     pub avatar: Option<String>,
 }
 
-/// 新 Key 的领取记录与改名（`_provision` / `bind_invite` 落库的那几条语句）。
+/// 新 Key 的领取记录与改名。
 #[derive(Debug, Clone)]
 pub struct NewRegistration<'a> {
     pub discord_id: &'a str,
@@ -353,21 +352,6 @@ impl Db {
 
     // ------------------------------------------------------------------ 邀请 Key / 发 Key
 
-    /// 站长发的邀请 Key（带「邀请」标签）还没绑定 Discord 账号。
-    pub async fn is_unbound_invite(&self, key_id: i64) -> Result<bool> {
-        self.read(move |c| {
-            c.query_row(
-                "SELECT 1 FROM key_tags WHERE key_id=? AND tag=? \
-                 AND NOT EXISTS (SELECT 1 FROM discord_registrations WHERE key_id=?)",
-                params![key_id, INVITE_TAG, key_id],
-                |_| Ok(()),
-            )
-            .optional()
-            .map(|r| r.is_some())
-        })
-        .await
-    }
-
     /// 按 token 找 Key：`(id, enabled)`。
     pub async fn key_id_enabled_by_token(&self, token: &str) -> Result<Option<(i64, bool)>> {
         let token = token.to_string();
@@ -382,7 +366,7 @@ impl Db {
         .await
     }
 
-    /// 领取 / 绑定邀请 Key 落库：登记领取、Key 改名、写 `api_keys.discord_id`、身份组标志（一个事务）。
+    /// 领取 Key 落库：登记领取、Key 改名、写 `api_keys.discord_id`、身份组标志（一个事务）。
     /// Key 本身由调用方先建好；`discord_id` 在建 Key 时已带上的话，这里再写一次是幂等的。
     pub async fn save_registration(&self, r: &NewRegistration<'_>) -> Result<()> {
         let (id, username, display, avatar, name) = (

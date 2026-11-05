@@ -91,7 +91,7 @@ cd /opt/owl && docker compose -p owl --env-file /opt/service-tools/.env -f compo
 ## 配置：只有两层
 
 - **环境变量**（`/opt/service-tools/.env`）：只放密钥和基础设施（上游 Token、Discord Token / ID、站点地址、数据目录、网络……），清单见仓库 `.env.example`；改完怎么生效见上面「改密钥」。
-- **后台设置**（`site_settings`，在后台页面里改，不用重启）：额度、名额、新成员默认值、有效期、记录开关、账号保护、排队与冷却、Anlas 预算……没设过的项用代码里的默认值，逐项说明见 `deploy/ops/SYSTEM-FACTS.md`。「额度与保护」页管全部手动额度（V4.5 / V5 每人每天、V5 全站与暂停、Anlas）、账号保护与排队、出图节奏（每张出完后歇 N～M 秒）与冷却，外加只读的「记录」；10-23 起没有自动额度算法。「领 Key」页管开放、名额、新成员有效期 / 功能 / 模型范围、限定身份组、生成记录开关。后台手动新建 Key 和一键邀请 Key 读的是「领 Key」页同一份「新成员默认」。
+- **后台设置**（`site_settings`，在后台页面里改，不用重启）：额度、名额、新成员默认值、有效期、记录开关、账号保护、排队与冷却、Anlas 预算……没设过的项用代码里的默认值，逐项说明见 `deploy/ops/SYSTEM-FACTS.md`。「额度与保护」页管全部手动额度（V4.5 / V5 每人每天、V5 全站与暂停、Anlas）、账号保护与排队、出图节奏（每张出完后歇 N～M 秒）与冷却，外加只读的「记录」；10-23 起没有自动额度算法。「领 Key」页管开放、名额、新成员有效期 / 功能 / 模型范围、限定身份组、生成记录开关。成员通过 Discord 的 /register 领取 Key。
 - **没有第三层**：2.x 的私密参数文件 `data/private_params.json` 3.0 不再读（文件如果还留在原处就不用管，备份脚本已不再带它）。
 - **代码常量**：时区 Asia/Shanghai、服务日 07:00 重置、标签补全并发 1、无效 Key 防爆破和后台登录限流的几个数、新 Key 的每分钟请求数等，没有后台入口也没有环境变量，要改只能改代码（`gate-core/src/clock.rs`、`gate-server/src/env.rs`、`gate-server/src/defaults.rs`）。
 

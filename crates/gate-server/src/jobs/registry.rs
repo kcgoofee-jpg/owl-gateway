@@ -24,7 +24,7 @@ pub const SUMMARY_CHARS: usize = 300;
 // 登记表
 // ---------------------------------------------------------------------------
 
-/// 一轮任务：返回一句摘要（写进后台「系统」页的「定时任务」卡片）。
+/// 一轮任务：返回一句摘要（写入 job_last）。
 pub type RunFn = for<'a> fn(&'a AppState) -> BoxFuture<'a, Result<String, JobError>>;
 
 pub struct Job {
@@ -50,9 +50,6 @@ fn run_key_guard(s: &AppState) -> BoxFuture<'_, Result<String, JobError>> {
 fn run_maintenance(s: &AppState) -> BoxFuture<'_, Result<String, JobError>> {
     Box::pin(maintenance_job(s))
 }
-fn run_abuse_scan(s: &AppState) -> BoxFuture<'_, Result<String, JobError>> {
-    Box::pin(super::abuse_scan::run(s))
-}
 fn run_anlas_reconcile(s: &AppState) -> BoxFuture<'_, Result<String, JobError>> {
     Box::pin(super::reconcile::run(s))
 }
@@ -60,8 +57,8 @@ fn run_idle_recycle(s: &AppState) -> BoxFuture<'_, Result<String, JobError>> {
     Box::pin(idle_recycle_job(s))
 }
 
-/// 全部定时任务，按后台显示顺序。周期和抖动沿用内核时代的值。
-pub const JOBS: [Job; 7] = [
+/// 全部定时任务，按启动顺序。周期和抖动沿用内核时代的值。
+pub const JOBS: [Job; 6] = [
     Job {
         name: "upstream_snapshot",
         title: "上游 V5 快照",
@@ -93,14 +90,6 @@ pub const JOBS: [Job; 7] = [
         every_secs: 300.0,
         jitter: 0.2,
         run: run_maintenance,
-    },
-    Job {
-        name: "abuse_scan",
-        title: "小号扫描",
-        every: "每 6 小时",
-        every_secs: 21600.0,
-        jitter: 0.1,
-        run: run_abuse_scan,
     },
     Job {
         name: "anlas_reconcile",
@@ -203,17 +192,6 @@ impl From<JobError> for ApiError {
 // 运行记录
 // ---------------------------------------------------------------------------
 
-/// 一轮结果从哪来（决定记 Bug 和写库的方式）。
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum Origin {
-    /// 定时循环（以及 [`run_once`]）：失败记 Bug（来源 `job:<名字>`），整份记录立即写库。
-    Loop,
-    /// 操作触发的即时记录：只更新内存，随下一次定时任务一起落库；
-    /// 出错由调用方的接口自己记 Bug；落库跟着下一次任何定时任务记结果一起写（最多约一个维护周期）。
-    /// 这样后台改 Key、改参数的接口不会顺带多写一行设置。
-    Manual,
-}
-
 /// 定时任务的共享状态，放在 [`AppState`] 里。
 pub struct JobsState {
     /// 每个任务最近一轮的结果（也就是设置 `job_last` 的内容）。写库时一直持锁，保证库里的是最新的一份。
@@ -262,15 +240,14 @@ impl JobsState {
         self.last.lock().await.clone()
     }
 
-    /// 记一轮结果，见 [`Origin`]。
-    pub async fn record(
+    /// 记一轮定时任务的结果并持久化。
+    async fn record(
         &self,
         state: &AppState,
         name: &str,
         at: f64,
         ms: i64,
         result: &Result<String, JobError>,
-        origin: Origin,
     ) {
         let (ok, summary) = match result {
             Ok(s) => (true, s.clone()),
@@ -283,7 +260,6 @@ impl JobsState {
             "summary": take_chars(&summary, SUMMARY_CHARS),
         });
         if let Err(e) = result
-            && origin == Origin::Loop
             && !e.reported
         {
             let source = format!("job:{name}");
@@ -295,9 +271,6 @@ impl JobsState {
         }
         let mut last = self.last.lock().await;
         last.insert(name.to_string(), entry);
-        if origin == Origin::Manual {
-            return;
-        }
         let text = Value::Object(last.clone()).to_string();
         if let Err(e) = state.db.set_setting(STATE_KEY, &text).await {
             tracing::warn!(job = name, "定时任务运行记录写库失败：{e}");
@@ -333,10 +306,7 @@ pub async fn run_once(state: &AppState, job: &Job) -> Result<String, JobError> {
     let t0 = Instant::now();
     let r = guarded((job.run)(state)).await;
     let ms = i64::try_from(t0.elapsed().as_millis()).unwrap_or(i64::MAX);
-    state
-        .jobs
-        .record(state, job.name, at, ms, &r, Origin::Loop)
-        .await;
+    state.jobs.record(state, job.name, at, ms, &r).await;
     r
 }
 

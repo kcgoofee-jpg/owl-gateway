@@ -8,15 +8,13 @@
 //! | `breaker` 全站熔断 | 10 分钟 ±20% | 15 分钟内上游失败 ≥ 5 次、≥ 30%、来自 ≥ 2 把 Key → 停 5 分钟 |
 //! | `key_guard` 单 Key 限流 | 10 分钟 ±20% | 1 小时被拒 ≥ 120 次 → 暂停这把 Key 1 小时 |
 //! | `maintenance` 维护 | 5 分钟 ±20% | 设置了保留期的记录才清（线上全部永久保留）/ 注册服务的三个同步（`registration::registrar_jobs`）/ 磁盘自检 |
-//! | `abuse_scan` 小号扫描 | 6 小时 ±10% | 行为相似 / 同设备 / 设备相近 / 指纹异常 / 新号 / 共享 Key，以及关联扫描（同 IP 换号 / 同时异地 / 同参考图 / 同外部账号 / 服务器重合 / 电量相同）写进待审队列（[`abuse_scan`]），不自动封号 |
 //! | `anlas_reconcile` Anlas 自动核对 | 1 小时 ±10% | 和后台「Anlas 消耗核对」同一套（[`reconcile`]）；忙时等不到空档就跳过，差距偏大记一条「注意」Bug |
 //! | `idle_recycle` 闲置回收 | 1 小时 | 长期不用的 Key 删除（不拉黑，之后还能再 /register；站点出不了图的服务日不算，见 [`idle_recycle_window`]）；`KEY_INACTIVITY_DELETE_DAYS=0` 时**什么都不做** |
 //!
-//! 每轮的结果记进设置 `job_last`，后台「系统」页的「定时任务」卡片显示（[`registry`]）。
+//! 每轮的结果记进设置 `job_last`，启动时据此判断最近一次任务完成时间（[`registry`]）。
 //! 同一个库同一时刻只有一个进程跑这些任务（部署交接时新旧网关会同时在线，见 [`leader`]）。
 //! 一轮工作做到底才响应关停（只在睡觉时被打断）：额度重算这类多步写入不能被拦腰切断。
 
-mod abuse_scan;
 mod autopilot;
 mod capacity;
 pub mod leader;
@@ -24,7 +22,7 @@ mod reconcile;
 pub mod registry;
 mod support;
 
-pub use registry::{JOBS, Job, JobError, JobsState, Origin, find, guarded, run_once, spawn_job};
+pub use registry::{JOBS, Job, JobError, JobsState, find, guarded, run_once, spawn_job};
 
 use crate::action_log::log_action;
 use crate::bugs::Report;

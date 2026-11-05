@@ -128,8 +128,7 @@ pub fn resetkey_text(data: &Value) -> Result<String, HandlerError> {
 // ---------- /register ----------
 
 /// `/register` 发给 `/self-register/issue` 的 JSON。
-/// `invite_key` 是已经去掉首尾空白的 /register 选项。
-pub fn register_payload(it: &Interaction, invite_key: &str) -> Result<Value, HandlerError> {
+pub fn register_payload(it: &Interaction) -> Result<Value, HandlerError> {
     let user = it
         .actor()
         .ok_or_else(|| HandlerError::Malformed("交互里没有用户".into()))?;
@@ -150,7 +149,6 @@ pub fn register_payload(it: &Interaction, invite_key: &str) -> Result<Value, Han
         "username": name,
         "global_name": clip(global_name, 80),
         "avatar": clip(avatar, 120),
-        "invite_key": clip(invite_key, 80),
     }))
 }
 
@@ -279,10 +277,10 @@ mod tests {
             json!({"id": "900000000000000005", "username": "alice", "global_name": "Alice", "avatar": "abc123"}),
             Value::Null,
         );
-        let p = register_payload(&it, "邀请码").unwrap();
+        let p = register_payload(&it).unwrap();
         assert_eq!(
             p.to_string(),
-            r#"{"discord_id":"900000000000000005","guild_id":"900000000000000001","name":"alice","username":"alice","global_name":"Alice","avatar":"abc123","invite_key":"邀请码"}"#
+            r#"{"discord_id":"900000000000000005","guild_id":"900000000000000001","name":"alice","username":"alice","global_name":"Alice","avatar":"abc123"}"#
         );
     }
 
@@ -293,14 +291,14 @@ mod tests {
             json!({"id": "900000000000000005", "username": "alice", "global_name": null, "avatar": null}),
             json!("昵称"),
         );
-        let p = register_payload(&it, "").unwrap();
+        let p = register_payload(&it).unwrap();
         assert_eq!(p["global_name"], "昵称");
         assert_eq!(p["avatar"], "");
         let it = interaction(
             json!({"id": "900000000000000005", "username": "alice"}),
             Value::Null,
         );
-        assert_eq!(register_payload(&it, "").unwrap()["global_name"], "alice");
+        assert_eq!(register_payload(&it).unwrap()["global_name"], "alice");
     }
 
     #[test]
@@ -309,9 +307,8 @@ mod tests {
             json!({"id": "900000000000000005", "username": "名".repeat(100), "avatar": "a".repeat(200)}),
             Value::Null,
         );
-        let p = register_payload(&it, &"k".repeat(100)).unwrap();
+        let p = register_payload(&it).unwrap();
         assert_eq!(p["name"].as_str().unwrap().chars().count(), 80);
         assert_eq!(p["avatar"].as_str().unwrap().len(), 120);
-        assert_eq!(p["invite_key"].as_str().unwrap().len(), 80);
     }
 }

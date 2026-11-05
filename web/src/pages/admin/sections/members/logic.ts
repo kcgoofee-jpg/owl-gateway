@@ -98,16 +98,6 @@ export function memberIssues(m: Member, now: number): Issue[] {
       actions: loud ? [{ kind: "ack" }] : [],
     });
   }
-  for (const t of userTags(m).filter((x) => /疑似|待查|观察|风险/.test(x.tag))) {
-    out.push({
-      id: `tag:${t.tag}`,
-      level: "warn",
-      title: `站长标记：${t.tag}`,
-      detail: `${t.note || ""}${t.ts ? ` · ${rel(t.ts, now)}` : ""}`,
-      need: true,
-      actions: [{ kind: "tag-del", tag: t.tag }],
-    });
-  }
   if (m.reset_today && m.reset_today.count >= 2) {
     out.push({
       id: "reset-many",
@@ -217,7 +207,7 @@ export function buildFilters(now: number, idleDays: number): FilterSet {
       id: "reclaim",
       label: `快被回收（满 ${idleDays} 天）`,
       hint: `满 ${idleDays} 天没生过图就会被自动删除（不拉黑，之后可以再领）`,
-      // 与后端回收口径一致：只看最近一次成功生图（没生过图的从创建时间算），邀请 Key 豁免
+      // 与后端回收口径一致：只看最近一次成功生图（没生过图的从创建时间算）
       test: (m) => now - (m.last_image_at ?? m.created_at) > (idleDays - 1) * DAY,
     });
   }
@@ -225,7 +215,7 @@ export function buildFilters(now: number, idleDays: number): FilterSet {
     {
       id: "invite",
       label: "邀请 Key",
-      hint: "带「邀请」标签的 Key（站长发出的邀请，不参与自动回收）",
+      hint: "历史邀请凭据，按普通成员凭据管理",
       test: (m) => m.invited,
     },
     { id: "attention", label: "需要处理", test: (m) => needsAttention(m, now) },

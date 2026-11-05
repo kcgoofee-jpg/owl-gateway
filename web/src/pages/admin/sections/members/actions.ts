@@ -6,7 +6,7 @@
 import { ApiError, sendJSON } from "../../../../lib/api";
 import { tick } from "../../Admin";
 import { edits } from "../live";
-import type { Coupon, KeyRow } from "./types";
+import type { Coupon } from "./types";
 
 export type Res<T = unknown> = { ok: true; data: T } | { ok: false; error: string };
 
@@ -57,15 +57,10 @@ export const giveCoupon = (id: number, days: number, note: string, scope: ResetS
     scope: scopeList(scope),
   });
 
-export const createInvite = () => call<{ key: KeyRow }>("POST", `${A}/keys/invite`, {});
-
 export const resetAllKeys = () =>
   call<{ message?: string }>("POST", `${A}/ops/reset-all-keys`, { confirm: "确认重置" });
 
 export const addBan = (discordId: string, reason: string) =>
   call("POST", `${A}/bans`, { discord_id: discordId, reason });
 
-/** 人工复核一条风险线索。确认只给涉及的 Key 打「风险线索」标签，不封禁。 */
-export const reviewSignal = (id: number, action: "dismiss" | "confirm" | "reopen") =>
-  call<{ id: number; status: string; tagged: number }>("POST", `${A}/abuse/${id}`, { action });
 export const removeBan = (discordId: string) => call("DELETE", `${A}/bans/${encodeURIComponent(discordId)}`);

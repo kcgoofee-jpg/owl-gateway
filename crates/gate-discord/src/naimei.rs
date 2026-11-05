@@ -258,10 +258,6 @@ impl Naimei {
 
     /// `/register`。
     async fn cmd_register(&self, it: &Interaction, r: &Responder<'_>) -> Result<(), CmdError> {
-        let invite = string_option_opt(it, "key")
-            .unwrap_or_default()
-            .trim()
-            .to_owned();
         let same_guild = it
             .guild_id
             .as_deref()
@@ -271,7 +267,12 @@ impl Naimei {
             return Ok(r.send_message(handlers::REGISTER_WRONG_GUILD).await?);
         }
         r.defer().await?;
-        let payload = handlers::register_payload(it, &invite)?;
+        if it.option("key").is_some() {
+            return Ok(r
+                .followup("邀请 Key 已停用，请重新输入 /register 领取普通 Key。")
+                .await?);
+        }
+        let payload = handlers::register_payload(it)?;
         // 直发：斜杠命令已由 Discord 验明身份，不走 OAuth，Key 只在本人可见的临时消息里给
         let message = match self.bridge.issue(&payload).await {
             Some((status, body)) => handlers::register_message(status, &body)?,
@@ -924,13 +925,6 @@ impl<'a> Responder<'a> {
 }
 
 // ---------- 选项解析 ----------
-
-fn string_option_opt(it: &Interaction, name: &str) -> Option<String> {
-    it.option(name)
-        .and_then(|o| o.value.as_ref())
-        .and_then(Value::as_str)
-        .map(str::to_owned)
-}
 
 /// 是否触发 AI 对话：被 @、回复的对象是奶妹本人，或正文里喊了「奶妹」。
 /// 喊名字触发是 10-31 加的自然唤起方式（不用学 @ 语法）；其余消息不触发。

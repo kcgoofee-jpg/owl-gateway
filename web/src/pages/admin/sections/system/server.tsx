@@ -2,8 +2,9 @@
 import { useState } from "preact/hooks";
 import { Badge, Button, Card } from "../../../../ui";
 import { act, useAdmin } from "../../Admin";
-import { actOrError, ConfirmDialog } from "../_kit";
-import { SwitchRow, withTone } from "./forms";
+import { actOrError, CardPending, ConfirmDialog } from "../_kit";
+import type { Ops } from "../onboarding/core";
+import { NumField, SaveBar, SwitchRow, useForm, withTone } from "./forms";
 
 export type ServerStatus = {
   alerts: { configured: boolean; sent: number };
@@ -13,22 +14,18 @@ type MaintenanceMode = "off" | "all" | "owner";
 
 export function MaintenanceCard() {
   const { data } = useAdmin<{ maintenance: { enabled: boolean; mode?: MaintenanceMode } }>("/admin/api/ops");
-  const [override, setOverride] = useState<MaintenanceMode | null>(null);
   const [saving, setSaving] = useState(false);
   if (!data) return null;
-  const current: MaintenanceMode =
-    override ?? data.maintenance.mode ?? (data.maintenance.enabled ? "all" : "off");
+  const current: MaintenanceMode = data.maintenance.mode ?? (data.maintenance.enabled ? "all" : "off");
   const change = async (next: MaintenanceMode) => {
     if (saving || next === current) return;
-    setOverride(next);
     setSaving(true);
-    const result = await act<{ enabled: boolean; mode?: MaintenanceMode }>(
+    await act<{ enabled: boolean; mode?: MaintenanceMode }>(
       "PUT",
       "/admin/api/ops/maintenance",
       { mode: next },
       next === "off" ? "全站服务已恢复" : next === "all" ? "全站服务已暂停" : "维护中：只有站长账号可用",
     );
-    setOverride(result?.mode ?? next);
     setSaving(false);
   };
   const options: Array<{ id: MaintenanceMode; title: string; desc: string }> = [
@@ -97,6 +94,45 @@ export function AlertsCard() {
       >
         <p>会向告警渠道发一条真实的测试消息（10 秒内只能发一次）。</p>
       </ConfirmDialog>
+    </Card>
+  );
+}
+
+export function RetentionCard() {
+  const { data, loading, error } = useAdmin<Ops>("/admin/api/ops");
+  const form = useForm(
+    {
+      origin_keep_days: {
+        kind: "int",
+        label: "IP / UA 保留天数",
+        min: 0,
+        max: 365,
+        hint: "0 表示永久保留。缩短期限后，维护任务会清除过期的来源信息。",
+      },
+    },
+    data?.log_retention ?? null,
+  );
+  const [saving, setSaving] = useState(false);
+  if (!data) return <CardPending title="请求来源日志" loading={loading} error={error} />;
+  const save = async () => {
+    if (saving || !form.valid || !form.dirty) return;
+    setSaving(true);
+    const result = await act("PUT", "/admin/api/ops/log-retention", form.changes(), "日志保留期限已保存");
+    setSaving(false);
+    if (result) form.commit();
+  };
+  return (
+    <Card title="请求来源日志">
+      <form
+        {...form.formProps}
+        onSubmit={(e) => {
+          e.preventDefault();
+          void save();
+        }}
+      >
+        <NumField form={form} name="origin_keep_days" />
+        <SaveBar form={form} onSave={save} saving={saving} />
+      </form>
     </Card>
   );
 }

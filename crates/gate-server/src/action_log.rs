@@ -31,7 +31,6 @@ pub const ADMIN_ACTIONS: &[(&str, &str, &str)] = &[
         "/keys/{key_id}/reset-daily-image-quota",
         "重置今日额度",
     ),
-    ("POST", "/keys/{key_id}/bind-discord", "手动绑定 Discord"),
     ("DELETE", "/keys/{key_id}", "删除 Key"),
     ("PUT", "/keys/{key_id}/tags", "成员标签"),
     ("POST", "/keys/{key_id}/coupons", "发重置券"),
@@ -47,11 +46,6 @@ pub const ADMIN_ACTIONS: &[(&str, &str, &str)] = &[
     ),
     (
         "PUT",
-        "/upstream-tokens/{token_id}/image-concurrency",
-        "修改上游 Token 图片并发",
-    ),
-    (
-        "PUT",
         "/upstream-tokens/{token_id}/enabled",
         "启用/停用上游 Token",
     ),
@@ -63,13 +57,8 @@ pub const ADMIN_ACTIONS: &[(&str, &str, &str)] = &[
     ("PUT", "/ops/features", "修改全局功能开关"),
     ("PUT", "/ops/log-retention", "修改请求来源保留设置"),
     ("PUT", "/guard", "修改账号保护与排队设置"),
-    ("POST", "/errors/{sig}/resolve", "标记 Bug 已处理"),
-    ("POST", "/errors/resolve-all", "全部标记 Bug 已处理"),
-    ("PUT", "/quota-algo", "修改动态额度参数"),
     ("POST", "/keys/{key_id}/share-clear", "防分享清零（误判）"),
-    ("PUT", "/share-guard", "修改防分享模式"),
     ("POST", "/ops/reset-all-keys", "全站杀头重置"),
-    ("POST", "/abuse/{abuse_id}", "处理待审"),
 ];
 
 /// 操作名；表里没有的写成「方法 路径」。
