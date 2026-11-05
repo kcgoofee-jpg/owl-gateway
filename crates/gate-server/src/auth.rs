@@ -341,7 +341,9 @@ pub async fn require_feature(state: &AppState, key: &Key, name: &str) -> Result<
         .await?;
     let flags = gate_core::features::parse_global_flags(global.as_deref())
         .map_err(|e| InternalError(e.to_string()))?;
-    if !flags.get(name).copied().unwrap_or(false) || !key.policy.allows(name) {
+    if (!key.owner_image_full && !flags.get(name).copied().unwrap_or(false))
+        || !key.policy.allows(name)
+    {
         let label = gate_core::features::FEATURES
             .iter()
             .find(|(id, _)| *id == name)

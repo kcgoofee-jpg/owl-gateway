@@ -58,7 +58,10 @@ pub fn subscription_payload(
             "anlasEnabled":policy.paid_parameters,"anlasLeft":anlas_left,
             "anlasMonthlyLimit":policy.monthly_anlas,
             "v5LeftToday":v5_left,"v5DailyLimit":v5_limit,
-            "v5Paused":data.v5_paused,"v5Allowed":allowed,"account":null
+            "v5Paused":data.v5_paused,"v5Allowed":allowed,"account":null,
+            "features":{"image":policy.image,"v5":policy.v5,"vibe":policy.vibe,"tags":policy.tags,
+                "upscale":policy.upscale,"augment":policy.augment,"img2img":policy.img2img,"paid_parameters":policy.paid_parameters},
+            "limits":{"dailyImages":policy.daily_images,"dailyAnlas":policy.daily_anlas,"monthlyAnlas":policy.monthly_anlas,"rpm":policy.rpm}
         }
     })
 }

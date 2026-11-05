@@ -49,7 +49,7 @@ export function KeyDialog(props: {
       onClose={close.tryClose}
       footer={
         <>
-          <Button onClick={reset}>全部恢复默认</Button>
+          {!snapshot.owner_image && <Button onClick={reset}>全部恢复默认</Button>}
           <span class="spacer" />
           <Button onClick={close.tryClose}>取消</Button>
           <Button
@@ -82,7 +82,16 @@ export function KeyDialog(props: {
           void save();
         }}
       >
-        <PolicyFields form={form} defaults={snapshot.defaults} />
+        {snapshot.owner_image?.enabled && (
+          <p class="small muted">
+            全部图片功能已开启；这里只修改个人额度和限速。普通测试请在成员详情点“恢复普通默认”。
+          </p>
+        )}
+        <PolicyFields
+          form={form}
+          defaults={snapshot.defaults}
+          fullImage={snapshot.owner_image?.enabled === true}
+        />
         {error && (
           <p class="xa-formerr" role="alert">
             {error}

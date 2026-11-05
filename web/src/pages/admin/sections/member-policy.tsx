@@ -20,12 +20,20 @@ export const POLICY_SPECS: Record<keyof MemberPolicy, FieldSpec> = {
   img2img: { kind: "bool", label: "图生图与局部重绘" },
   upscale: { kind: "bool", label: "放大" },
   augment: { kind: "bool", label: "导演工具" },
-  paid_parameters: { kind: "bool", label: "高规格生图" },
+  paid_parameters: { kind: "bool", label: "高规格生图（大图、多步数与批量）" },
 };
 export function policyFromForm(base: MemberPolicy, form: Form): MemberPolicy {
   return { ...base, ...form.changes() } as MemberPolicy;
 }
-export function PolicyFields({ form, defaults }: { form: Form; defaults?: MemberPolicy }) {
+export function PolicyFields({
+  form,
+  defaults,
+  fullImage = false,
+}: {
+  form: Form;
+  defaults?: MemberPolicy;
+  fullImage?: boolean;
+}) {
   const source = (name: keyof MemberPolicy) => {
     if (!defaults) return null;
     const parsed = parseField(POLICY_SPECS[name], form.raw(name));
@@ -60,12 +68,16 @@ export function PolicyFields({ form, defaults }: { form: Form; defaults?: Member
       <div class="form-section mr-features">
         {FEATURE_FIELDS.map((name) => (
           <div key={name} class="mr-feature">
-            <SwitchRow
-              title={POLICY_SPECS[name].label}
-              checked={form.raw(name) === true}
-              onChange={(value) => form.set(name, value)}
-            />
-            {source(name)}
+            {fullImage ? (
+              <div>{POLICY_SPECS[name].label} · 已开启</div>
+            ) : (
+              <SwitchRow
+                title={POLICY_SPECS[name].label}
+                checked={form.raw(name) === true}
+                onChange={(value) => form.set(name, value)}
+              />
+            )}
+            {!fullImage && source(name)}
           </div>
         ))}
       </div>

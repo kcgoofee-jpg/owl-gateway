@@ -49,6 +49,11 @@ pub const ADMIN_ACTIONS: &[(&str, &str, &str)] = &[
         "/upstream-tokens/{token_id}/enabled",
         "启用/停用上游 Token",
     ),
+    (
+        "PUT",
+        "/members/{discord_id}/image-access",
+        "切换站长生图权限",
+    ),
     ("PUT", "/settings", "修改预算"),
     ("POST", "/ops/manual", "手动改设置"),
     ("POST", "/sitepaid-hints/dismiss", "关闭站付 V5 到期提醒"),

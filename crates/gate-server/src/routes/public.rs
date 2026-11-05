@@ -617,12 +617,36 @@ async fn subscription(state: &AppState, key: &Key) -> Result<Value, InternalErro
         global_v5_total: state.db.day_v5_total(&day).await?,
         v5_paused: crate::ops::v5_paused(&state.db).await?,
     };
-    Ok(gate_core::client_views::subscription_payload(
+    let mut view = gate_core::client_views::subscription_payload(
         &key.policy,
         key.expires_at(),
         state.now(),
         &data,
-    ))
+    );
+    view["naiGate"]["ownerImageFull"] = json!(key.owner_image_full);
+    view["naiGate"]["remaining"] = json!({
+        "v45Images": (i64::from(key.policy.daily_images) - day_counter.legacy_free_images).max(0),
+        "v5Images": view["naiGate"]["v5LeftToday"],
+        "anlas": view["naiGate"]["anlasLeft"]
+    });
+    if !key.owner_image_full {
+        let raw = state
+            .db
+            .get_setting(gate_core::features::GLOBAL_KEY)
+            .await?;
+        let flags = gate_core::features::parse_global_flags(raw.as_deref())
+            .map_err(|e| InternalError(e.to_string()))?;
+        for (name, _) in gate_core::features::FEATURES {
+            if !flags.get(name).copied().unwrap_or(false) {
+                view["naiGate"]["features"][name] = json!(false);
+            }
+        }
+        if view["naiGate"]["features"]["image"] == false {
+            view["naiGate"]["features"]["v5"] = json!(false);
+            view["naiGate"]["features"]["img2img"] = json!(false);
+        }
+    }
+    Ok(view)
 }
 
 /// 官方 /user/priority 的形状（2026-10-13 实测 image.novelai.net 返回 200）：
@@ -1030,6 +1054,9 @@ pub(super) async fn me_payload(
     out.insert("name".into(), json!(key.name()));
     out.insert("expires_at".into(), json!(key.expires_at()));
     out.insert("policy".into(), json!(&key.policy));
+    if key.owner_image_full {
+        out.insert("owner_image_full".into(), json!(true));
+    }
     out.insert(
         "today".into(),
         json!({

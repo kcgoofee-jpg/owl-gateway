@@ -14,7 +14,12 @@ export type MemberPolicy = {
   paid_parameters: boolean;
 };
 export type MemberOverrides = { [K in keyof MemberPolicy]?: MemberPolicy[K] | null };
-export type PolicySnapshot = { defaults: MemberPolicy; overrides: MemberOverrides; effective: MemberPolicy };
+export type PolicySnapshot = {
+  defaults: MemberPolicy;
+  overrides: MemberOverrides;
+  effective: MemberPolicy;
+  owner_image?: { enabled: boolean };
+};
 export const NUMBER_FIELDS = ["daily_images", "daily_v5", "daily_anlas", "monthly_anlas", "rpm"] as const;
 export const FEATURE_FIELDS = [
   "image",

@@ -26,6 +26,7 @@ x-gate: &gate
     - STATIC_DIR=/app/static
     # 「只有站长可用」维护模式放行的成员；站点 .env 里配，不写进仓库
     - MAINTENANCE_OWNER_IDS=${MAINTENANCE_OWNER_IDS:-}
+    - OWNER_IMAGE_SUBJECT=${OWNER_IMAGE_SUBJECT:-}
     # 容器里的 nai-ops 走这里连后台接口（宿主端口 3003，容器内是 8000）
     - ADMIN_API_BASE=http://127.0.0.1:8000/admin/api
     - TZ=Asia/Shanghai

@@ -4,6 +4,7 @@ import { useState } from "preact/hooks";
 import { dayOf, fullTime, rel, usedOf } from "../../../../lib/format";
 import { Badge, Button, copyText, Menu, toast } from "../../../../ui";
 import { exceptionCount, FEATURE_FIELDS, POLICY_SPECS } from "../member-policy";
+import { call } from "./actions";
 import { type Issue, type IssueAction, memberIssues, memberLabel, memberVerdict, userTags } from "./logic";
 import type { MemberRow } from "./types";
 
@@ -88,6 +89,17 @@ export function MemberDetail(props: { m: MemberRow; now: number; act: DetailActi
         {verdict.sub && <p class="small muted">{verdict.sub}</p>}
       </div>
 
+      {k.policy.owner_image && (
+        <section class="mb-sec" aria-label="站长生图权限">
+          <h4 class="mb-h4">站长生图权限</h4>
+          <p>
+            {k.policy.owner_image.enabled
+              ? "全部生图功能已启用，保留个人额度和全站预算。"
+              : "普通测试：实时使用普通成员默认规则，站长配置已保留。"}
+          </p>
+          <OwnerImageButtons subject={dcId || ""} enabled={k.policy.owner_image.enabled} />
+        </section>
+      )}
       {issues.length > 0 && <IssueList m={m} issues={issues} act={act} />}
 
       <div class="mb-cols">
@@ -117,7 +129,7 @@ export function MemberDetail(props: { m: MemberRow; now: number; act: DetailActi
             <dt>成员例外</dt>
             <dd class="mb-key">
               {exceptions ? `${exceptions} 项` : "无"}
-              {exceptions > 0 && (
+              {exceptions > 0 && !k.policy.owner_image && (
                 <Button size="sm" variant="ghost" onClick={() => act.resetRules(m)}>
                   恢复默认
                 </Button>
@@ -236,7 +248,11 @@ export function MemberDetail(props: { m: MemberRow; now: number; act: DetailActi
           发重置券
         </Button>
         <span class="spacer" />
-        <Button size="sm" disabled={!dcId} onClick={() => act.edit(m)}>
+        <Button
+          size="sm"
+          disabled={!dcId || k.policy.owner_image?.enabled === false}
+          onClick={() => act.edit(m)}
+        >
           成员例外
         </Button>
         <Menu
@@ -260,5 +276,35 @@ export function MemberDetail(props: { m: MemberRow; now: number; act: DetailActi
         />
       </div>
     </div>
+  );
+}
+
+export function OwnerImageButtons({ subject, enabled }: { subject: string; enabled: boolean }) {
+  const [pending, setPending] = useState(false);
+  const [error, setError] = useState("");
+  const change = async (next: boolean) => {
+    setPending(true);
+    setError("");
+    const result = await call("PUT", `/admin/api/members/${encodeURIComponent(subject)}/image-access`, {
+      enabled: next,
+    });
+    setPending(false);
+    if (!result.ok) setError(result.error);
+    else toast(next ? "全部生图功能已启用" : "已恢复普通默认");
+  };
+  return (
+    <>
+      <Button size="sm" disabled={pending || enabled} onClick={() => void change(true)}>
+        启用全部生图功能
+      </Button>
+      <Button size="sm" disabled={pending || !enabled} onClick={() => void change(false)}>
+        恢复普通默认
+      </Button>
+      {error && (
+        <p role="alert" class="xa-formerr">
+          {error}
+        </p>
+      )}
+    </>
   );
 }

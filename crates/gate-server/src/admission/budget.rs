@@ -12,6 +12,8 @@ use std::time::Duration;
 pub struct DispatchRequirements {
     feature: &'static str,
     img2img: bool,
+    v5: bool,
+    vibe: bool,
     paid_parameters: bool,
 }
 
@@ -20,6 +22,8 @@ impl DispatchRequirements {
         Self {
             feature,
             img2img: false,
+            v5: false,
+            vibe: false,
             paid_parameters: false,
         }
     }
@@ -40,6 +44,15 @@ impl DispatchRequirements {
         });
         Ok(Self {
             feature: "image",
+            v5: body
+                .get("model")
+                .and_then(serde_json::Value::as_str)
+                .is_some_and(gate_core::policy::is_v5_model),
+            vibe: gate_core::policy::REFERENCE_FIELDS.iter().any(|name| {
+                body.get("parameters")
+                    .and_then(|p| p.get(*name))
+                    .is_some_and(gate_core::values::enabled)
+            }),
             img2img,
             paid_parameters: !notes.is_empty() || problem.is_some(),
         })
@@ -119,7 +132,28 @@ impl Reserved {
         if let Some(error) = crate::auth::key_status_error(&current, self.state.now()) {
             return Err(error.into());
         }
+        if current.owner_image_full != self.key.owner_image_full {
+            return Err(GateError::with_code(
+                403,
+                "生图权限已切换，请按当前规则重新提交，未扣费。",
+                reasons::FEATURE_OFF,
+            )
+            .into());
+        }
         crate::auth::require_feature(&self.state, &current, self.requirements.feature).await?;
+        if self.requirements.v5
+            && (!current.policy.v5 || crate::ops::v5_paused(&self.state.db).await?)
+        {
+            return Err(GateError::with_code(
+                403,
+                "V5 当前不可用，未扣费。",
+                reasons::V5_EXHAUSTED,
+            )
+            .into());
+        }
+        if self.requirements.vibe {
+            crate::auth::require_feature(&self.state, &current, "vibe").await?;
+        }
         if (self.requirements.img2img && !current.policy.img2img)
             || (self.requirements.paid_parameters && !current.policy.paid_parameters)
         {
