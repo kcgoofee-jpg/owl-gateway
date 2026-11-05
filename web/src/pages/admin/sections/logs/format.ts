@@ -60,3 +60,18 @@ export const STATUS_TEXT: Record<string, string> = {
 export const statusText = (s: string | null | undefined): string => STATUS_TEXT[s ?? ""] ?? (s || "错误");
 export const statusTone = (s: string): "ok" | "warn" | "danger" =>
   s === "ok" ? "ok" : s === "rejected" || s === "cancelled" ? "warn" : "danger";
+
+/** 交付徽标只显示异常态：完成不显示（服务端无法确认客户端真的收到）。 */
+export function deliveryLabel(state: string | null | undefined): {
+  text: string;
+  tone: "warn" | "danger";
+} | null {
+  switch (state) {
+    case "transport_interrupted":
+      return { text: "传输中断", tone: "danger" };
+    case "pending":
+      return { text: "传输中", tone: "warn" };
+    default:
+      return null;
+  }
+}

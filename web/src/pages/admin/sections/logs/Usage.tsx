@@ -11,7 +11,7 @@ import { FreshBar, useFrozenList, useScrolledPast } from "../live";
 import { memberKeyOptions, memberLabel } from "../members/logic";
 import { Empty, MemberIdent, NARROW, Pager, useDebounced, useMedia, usePageData } from "../members/shared";
 import type { Member } from "../members/types";
-import { kindLabel, STATUS_TEXT, shortModel, statusText, statusTone, timing } from "./format";
+import { deliveryLabel, kindLabel, STATUS_TEXT, shortModel, statusText, statusTone, timing } from "./format";
 import { intParam, useQueryState } from "./query";
 import type { LogSummary, LogsResp, UsageLog } from "./types";
 import { uaLabel } from "./ua";
@@ -24,6 +24,7 @@ type Filter = (patch: Record<string, string | null>) => void;
 function Status(props: { l: UsageLog; onFilter: (patch: Record<string, string | null>) => void }) {
   const { l } = props;
   const label = l.status === "rejected" ? l.reason_label : "";
+  const delivery = l.status === "ok" ? deliveryLabel(l.delivery_state) : null;
   return (
     <span class="lg-status">
       <Badge tone={statusTone(l.status)}>{statusText(l.status)}</Badge>
@@ -41,6 +42,14 @@ function Status(props: { l: UsageLog; onFilter: (patch: Record<string, string | 
           <span class="small muted">{label}</span>
         ))}
       {l.status === "error" && l.up_status > 0 && <span class="small muted">上游 {l.up_status}</span>}
+      {delivery && (
+        <Badge
+          tone={delivery.tone}
+          title="只表示网关没有完整交付响应，不能据此判断由浏览器、插件或网络哪一端断开。"
+        >
+          {delivery.text}
+        </Badge>
+      )}
     </span>
   );
 }
@@ -172,6 +181,7 @@ function Summary(props: { s: LogSummary }) {
       <span>成功 {num(s.ok)}</span>
       <span>拒绝 {num(s.rejected)}</span>
       <span>错误 {num(s.error)}</span>
+      <span>已取消 {num(s.cancelled)}</span>
     </p>
   );
 }

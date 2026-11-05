@@ -3048,7 +3048,7 @@ async fn my_requests_show_only_my_recent_rows_without_private_columns() {
     assert_eq!(r.2["next"], Value::Null);
     assert_eq!(
         r.2["summary"],
-        json!({"total": 3, "ok": 2, "rejected": 1, "error": 0})
+        json!({"total": 3, "ok": 2, "rejected": 1, "error": 0, "cancelled": 0})
     );
     let only = get("?status=rejected").await;
     assert_eq!(only.2["items"].as_array().unwrap().len(), 1);

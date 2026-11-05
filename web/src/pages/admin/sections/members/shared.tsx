@@ -5,7 +5,7 @@
 import { ChevronLeft, ChevronRight } from "lucide-preact";
 import type { ComponentChildren } from "preact";
 import { useEffect, useId, useRef, useState } from "preact/hooks";
-import { usedOf } from "../../../../lib/format";
+import { num, usedOf } from "../../../../lib/format";
 import { Button, cx } from "../../../../ui";
 import { useAdmin } from "../../Admin";
 import { Avatar } from "../_kit";
@@ -221,10 +221,12 @@ export function MemberIdent(props: {
   );
 }
 
-/** 一条用量小条：文字写明数字，条本身只是装饰。max=0 表示不限。 */
+/** 一条用量小条：文字写明数字，条本身只是装饰。max=0 表示停用（不是不限）。 */
 export function MiniBar(props: { label: string; used: number; max: number; tone?: "v5" | "warn" }) {
   const pct = props.max > 0 ? Math.min(100, (props.used / props.max) * 100) : 0;
   const full = props.max > 0 && props.used >= props.max;
+  const text =
+    props.max > 0 ? usedOf(props.used, props.max) : props.used > 0 ? `${num(props.used)} · 停用` : "停用";
   return (
     <div class="xa-minibar">
       <span class="xa-minibar__l">{props.label}</span>
@@ -234,7 +236,7 @@ export function MiniBar(props: { label: string; used: number; max: number; tone?
           style={{ width: `${pct}%` }}
         />
       </span>
-      <span class="xa-minibar__n tabular">{usedOf(props.used, props.max)}</span>
+      <span class="xa-minibar__n tabular">{text}</span>
     </div>
   );
 }

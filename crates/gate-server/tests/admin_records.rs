@@ -133,7 +133,7 @@ async fn usage_logs_filter_and_paginate() {
     );
     assert_eq!(
         v["summary"],
-        json!({"total": 45, "ok": 45, "rejected": 0, "error": 0})
+        json!({"total": 45, "ok": 45, "rejected": 0, "error": 0, "cancelled": 0})
     );
     // 状态 / 来源 IP / 原因码 / 多把 Key；行里带 UA（client）
     a.sql(
@@ -147,7 +147,7 @@ async fn usage_logs_filter_and_paginate() {
     assert_eq!(v["total"], 2);
     assert_eq!(
         v["summary"],
-        json!({"total": 48, "ok": 45, "rejected": 2, "error": 1}),
+        json!({"total": 48, "ok": 45, "rejected": 2, "error": 1, "cancelled": 0}),
         "summary 不受 status 自己影响"
     );
     assert_eq!(v["logs"][0]["client"], "curl/8");
@@ -170,6 +170,19 @@ async fn usage_logs_filter_and_paginate() {
     assert_eq!(
         a.get(&format!("{A}/logs?key_id=1,2")).await.json()["total"],
         47
+    );
+    // 已取消：既能筛，也单独计数（不能只藏进 total）
+    a.sql(
+        "INSERT INTO usage_log(ts, key_id, key_name, kind, model, status) \
+         VALUES (2003.0, 1, 'k1', 'image', 'm', 'cancelled');",
+    )
+    .await;
+    let v = a.get(&format!("{A}/logs?status=cancelled")).await.json();
+    assert_eq!(v["total"], 1);
+    assert_eq!(v["logs"][0]["status"], "cancelled");
+    assert_eq!(
+        v["summary"],
+        json!({"total": 49, "ok": 45, "rejected": 2, "error": 1, "cancelled": 1})
     );
     for (q, msg) in [
         ("status=oops", "未知状态"),

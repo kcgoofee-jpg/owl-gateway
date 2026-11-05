@@ -18,6 +18,8 @@ export type UsageLog = {
   reason: string;
   /** 拒绝原因的短说明（服务端算好） */
   reason_label: string;
+  /** 交付状态：pending / transport_complete / transport_interrupted（老记录为空） */
+  delivery_state?: string;
   wait_ms: number;
   dur_ms: number;
   up_status: number;
@@ -38,7 +40,13 @@ export type UsageLog = {
   origin?: string | null;
 };
 /** 同一组筛选条件下各状态的条数（不受 status 筛选影响） */
-export type LogSummary = { total: number; ok: number; rejected: number; error: number };
+export type LogSummary = {
+  total: number;
+  ok: number;
+  rejected: number;
+  error: number;
+  cancelled: number;
+};
 export type LogsResp = Paged & {
   logs: UsageLog[];
   summary: LogSummary;

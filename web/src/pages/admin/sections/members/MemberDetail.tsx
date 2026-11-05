@@ -109,7 +109,7 @@ export function MemberDetail(props: { m: MemberRow; now: number; act: DetailActi
             <dt>V5 每天</dt>
             <dd>{policy.image && policy.v5 && policy.daily_v5 > 0 ? `${policy.daily_v5} 张` : "停用"}</dd>
             <dt>Anlas 每天</dt>
-            <dd>{usedOf(Math.round(k.used.anlas), policy.daily_anlas)}</dd>
+            <dd>{policy.daily_anlas > 0 ? usedOf(Math.round(k.used.anlas), policy.daily_anlas) : "停用"}</dd>
             <dt>Anlas 每月</dt>
             <dd>{policy.monthly_anlas}</dd>
             <dt>每分钟请求</dt>

@@ -88,7 +88,10 @@ async fn logs(State(state): State<AppState>, _s: AdminSession, q: AdminQuery) ->
     {
         return Err(http(422, "未知文生图版本"));
     }
-    if !matches!(status.as_str(), "" | "ok" | "rejected" | "error") {
+    if !matches!(
+        status.as_str(),
+        "" | "ok" | "rejected" | "error" | "cancelled"
+    ) {
         return Err(http(422, "未知状态"));
     }
     if reason.len() > 24
@@ -124,6 +127,7 @@ async fn logs(State(state): State<AppState>, _s: AdminSession, q: AdminQuery) ->
         "ok" => summary.ok,
         "rejected" => summary.rejected,
         "error" => summary.error,
+        "cancelled" => summary.cancelled,
         _ => summary.total,
     };
     filter.status = status;

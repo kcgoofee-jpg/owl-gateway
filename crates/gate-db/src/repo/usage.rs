@@ -140,13 +140,14 @@ pub struct LogFilter {
     pub reason: String,
 }
 
-/// 按状态分的条数（`log_summary`）：`total` 含状态不是这三种的行。
+/// 按状态分的条数（`log_summary`）：`total` 含状态不是这四种的行。
 #[derive(Debug, Clone, Default, PartialEq, Serialize)]
 pub struct LogSummary {
     pub total: i64,
     pub ok: i64,
     pub rejected: i64,
     pub error: i64,
+    pub cancelled: i64,
 }
 
 impl LogSummary {
@@ -156,6 +157,7 @@ impl LogSummary {
             "ok" => self.ok += n,
             "rejected" => self.rejected += n,
             "error" => self.error += n,
+            "cancelled" => self.cancelled += n,
             _ => {}
         }
     }
@@ -306,7 +308,7 @@ impl Db {
         args.push(SqlValue::Integer(offset));
         self.read(move |c| {
             let mut stmt = c.prepare(&format!(
-                "SELECT {LOG_COLUMNS}, COALESCE((SELECT s.correlation_id FROM usage_request_links u JOIN request_settlements s ON s.request_id=u.request_id WHERE u.usage_log_id=usage_log.id),'') AS correlation_id FROM usage_log{where_} ORDER BY id DESC LIMIT ? OFFSET ?"
+                "SELECT {LOG_COLUMNS}, COALESCE((SELECT s.correlation_id FROM usage_request_links u JOIN request_settlements s ON s.request_id=u.request_id WHERE u.usage_log_id=usage_log.id),'') AS correlation_id, COALESCE((SELECT s.delivery_state FROM usage_request_links u JOIN request_settlements s ON s.request_id=u.request_id WHERE u.usage_log_id=usage_log.id),'') AS delivery_state FROM usage_log{where_} ORDER BY id DESC LIMIT ? OFFSET ?"
             ))?;
             stmt.query_map(rusqlite::params_from_iter(args.iter()), value::row_json)?
                 .collect()
