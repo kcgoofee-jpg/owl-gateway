@@ -1,7 +1,7 @@
 /* owl ⇄ NovelAI 生图页桥：把官网前端的 API 调用改到本站网关。
    只做三件事：改 base、带 Key、隐藏账号横幅。 */
 (function () {
-  window.__BRIDGE_VERSION__ = "2026-11-01-a";
+  window.__BRIDGE_VERSION__ = "2026-11-06-share-confirm";
   var CFG = window.__NAI_BRIDGE__ || {};
   var GATE = CFG.gate || "";
   var KEY = CFG.key || "";
@@ -428,6 +428,7 @@
     if (link.getAttribute("data-owl-busy") === "1") return;
     var img = currentImage();
     if (!img) { toast("没找到当前这张图，先出图再上传。", true); return; }
+    if (!window.confirm("该分享转发至 owl 服务器进行保存备份，请确认是否有潜在二传违规风险！")) return;
     var meta = metaFor(img);
     link.setAttribute("data-owl-busy", "1");
     toast("正在提交到 Discord…");
