@@ -155,7 +155,7 @@ function splashLanding(store: Store): () => Promise<SplashLanding> {
             if (me?.logged_in && me.has_key && rings.length === 2) resolve({ targets: rings, rings: true });
             else
               resolve({
-                targets: [...document.querySelectorAll<HTMLElement>(".brand__eyes i")],
+                targets: [...document.querySelectorAll<HTMLElement>(".brand__landing-eye")],
                 rings: false,
               });
           }),

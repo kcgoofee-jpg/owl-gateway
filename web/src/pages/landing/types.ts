@@ -125,6 +125,18 @@ export interface MyRequest {
 export interface MyRequests {
   items: MyRequest[];
   next: number | null;
-  summary: { total: number; ok: number; rejected: number; error: number };
+  summary: { total: number; ok: number; rejected: number; error: number; cancelled?: number };
   since: number;
+}
+
+/** Complete service-day aggregates; independent of history pagination. */
+export interface MyRequestStats {
+  since: number;
+  summary: MyRequests["summary"];
+  images: number;
+  anlas: number;
+  avg_wait_s: number | null;
+  avg_dur_s: number | null;
+  uncertain_requests: number;
+  breakdown: Array<{ kind: string; model: string; requests: number }>;
 }

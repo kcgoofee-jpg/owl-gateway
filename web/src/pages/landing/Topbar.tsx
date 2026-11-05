@@ -125,7 +125,11 @@ export function Topbar(props: {
     <header class="site-top">
       <div class="wrap site-top__in">
         <a class="brand" href="/">
-          <img class="brand__mark" src="/_owl/favicon.svg" alt="" width="32" height="32" />
+          <span class="brand__mark-anchor" aria-hidden="true">
+            <img class="brand__mark" src="/_owl/favicon.svg" alt="" width="32" height="32" />
+            <i class="brand__landing-eye" />
+            <i class="brand__landing-eye" />
+          </span>
           <span class="brand__name">猫头鹰公益站</span>
         </a>
         <div class="site-top__right">

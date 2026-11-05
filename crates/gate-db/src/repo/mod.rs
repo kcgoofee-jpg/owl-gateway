@@ -22,6 +22,7 @@ pub mod guard;
 pub mod kernel;
 pub mod keys;
 pub mod member_policy;
+pub mod member_stats;
 pub mod public;
 pub mod reconciliation;
 pub mod registration;

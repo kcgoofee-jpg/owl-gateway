@@ -1,0 +1,118 @@
+/* Compact metric grid and categorical bars, inspired by Strato SingleValue. */
+.lp-request-stats {
+  font-variant-numeric: tabular-nums;
+}
+.lp-request-stats__range {
+  margin: 4px 0 24px;
+}
+.lp-metrics {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 24px 32px;
+  margin: 0 0 32px;
+}
+.lp-metric {
+  min-width: 0;
+  border-top: 1px solid var(--border);
+  padding-top: 14px;
+}
+.lp-metric dt {
+  color: var(--muted);
+  font-size: 13px;
+  margin-bottom: 8px;
+}
+.lp-metric dd {
+  margin: 0;
+  font-size: clamp(25px, 3vw, 34px);
+  line-height: 1.2;
+  font-weight: 600;
+  letter-spacing: -0.025em;
+}
+.lp-metric__unit {
+  margin-left: 6px;
+  color: var(--muted);
+  font-size: 13px;
+  font-weight: 400;
+  letter-spacing: normal;
+}
+.lp-request-stats__charts {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 32px;
+  margin-bottom: 24px;
+}
+.lp-request-stats__charts h3 {
+  margin: 0 0 16px;
+  font-size: 14px;
+  font-weight: 600;
+}
+.lp-stat-bars {
+  display: grid;
+  gap: 16px;
+  padding: 0;
+  margin: 0;
+  list-style: none;
+}
+.lp-stat-bars__label {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 6px;
+  font-size: 13px;
+}
+.lp-stat-bars__label > :last-child {
+  color: var(--muted);
+  white-space: nowrap;
+}
+.lp-stat-bars__track {
+  height: 6px;
+  border-radius: 3px;
+  background: var(--border);
+  overflow: hidden;
+}
+.lp-stat-bars__track > span {
+  display: block;
+  height: 100%;
+  border-radius: inherit;
+  background: var(--accent);
+}
+.lp-stat-bars__track > [data-tone="ok"] {
+  background: var(--ok);
+}
+.lp-stat-bars__track > [data-tone="warn"] {
+  background: var(--warn);
+}
+.lp-stat-bars__track > [data-tone="danger"] {
+  background: var(--danger);
+}
+.lp-stat-bars__track > [data-tone="muted"] {
+  background: var(--muted);
+}
+.lp-request-stats__note {
+  margin-bottom: 0;
+  line-height: 1.7;
+}
+.lp-request-stats__empty {
+  padding: 24px 0;
+}
+.lp-request-stats__uncertain {
+  color: var(--warn);
+  font-size: 13px;
+}
+.lp-request-stats__error {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  font-size: 13px;
+}
+@media (max-width: 600px) {
+  .lp-metrics {
+    grid-template-columns: 1fr 1fr;
+    gap: 20px 16px;
+  }
+  .lp-request-stats__charts {
+    grid-template-columns: 1fr;
+    gap: 28px;
+  }
+}

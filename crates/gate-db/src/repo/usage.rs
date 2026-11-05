@@ -151,7 +151,7 @@ pub struct LogSummary {
 }
 
 impl LogSummary {
-    fn add(&mut self, status: &str, n: i64) {
+    pub(super) fn add(&mut self, status: &str, n: i64) {
         self.total += n;
         match status {
             "ok" => self.ok += n,

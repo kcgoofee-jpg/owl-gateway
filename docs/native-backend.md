@@ -51,3 +51,7 @@ Rollback across this schema change requires both the previous image and a databa
 每个账号 60 秒内只接受一次查询，重复请求返回 429 和 `Retry-After`。服务端只保留查询时间，不缓存完整响应；正文不写入数据库或日志。各接口分别返回状态、完整元数据与错误，保留未知字段，隐藏凭据和密钥材料，不回显上游错误正文。返回使用 `Cache-Control: no-store`。
 
 “上游”页每个账号的“完整信息”打开独立弹窗，展示账号、订阅和优先级分类。关闭、切换账号或退出后台后清除弹窗状态，不写入 localStorage、sessionStorage 或应用查询缓存。页面现有运营读数仍使用允许字段的投影缓存。
+
+## Member request statistics
+
+`GET /public/me/request-stats` requires the same member session as request history. It aggregates the authenticated key's complete current service day (Asia/Shanghai, 07:00 reset), independently of history pagination and filters. The response includes `since`, `summary` (total/ok/rejected/error/cancelled), successful `images`, confirmed member `anlas`, `avg_wait_s`, `avg_dur_s`, `uncertain_requests`, and `breakdown` entries (`kind`, `model`, `requests`). Zero waiting time is valid when generation timing exists; unavailable timing is null. Site-paid Anlas and unresolved reservations are excluded from member spend. The endpoint is read-only, returns `Cache-Control: no-store`, and exposes no request content, source addresses or upstream account identifiers.

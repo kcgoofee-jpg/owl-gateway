@@ -88,9 +88,9 @@
 }
 
 /* 开屏期间，眼睛的落点先藏起来，落地时再出现 */
-html[data-splash="pending"] .brand__eyes i,
+html[data-splash="pending"] .brand__mark,
 html[data-splash="pending"] .ring-item,
-html[data-splash="logo"] .brand__eyes i,
+html[data-splash="logo"] .brand__mark,
 html[data-splash="rings"] .ring-item {
   opacity: 0;
 }

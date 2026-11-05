@@ -3,7 +3,7 @@
 use super::registration::{internal, log_discord, no_store};
 use crate::action_log::log_action;
 use crate::auth::client_ip;
-use crate::error::{ApiResult, HttpError, ok_json};
+use crate::error::{ApiResult, HttpError, InternalError, ok_json};
 use crate::registration::{RegErr, RoleCheck};
 use crate::session::{
     LoginMode, MEMBER_COOKIE, MEMBER_SESSION_DAYS, STATE_COOKIE, cookie, ct_eq,
@@ -28,6 +28,7 @@ pub fn router() -> Router<AppState> {
         .route("/logout", post(logout))
         .route("/public/me", get(public_me))
         .route("/public/me/requests", get(my_requests))
+        .route("/public/me/request-stats", get(my_request_stats))
         .route("/public/me/coupons/{coupon_id}/use", post(use_my_coupon))
 }
 
@@ -337,6 +338,21 @@ async fn my_requests(
         "summary": summary,
         "since": since,
     }))))
+}
+
+/// Aggregate the complete current service day, independently of history pagination.
+async fn my_request_stats(State(state): State<AppState>, headers: HeaderMap) -> ApiResult {
+    let Some((_, key)) = member_state(&state, &headers).await? else {
+        return Err(HttpError::new(401, "未登录或登录已过期，请刷新页面后重新登录。").into());
+    };
+    let Some(key) = key else {
+        return Err(HttpError::new(404, "你还没有 Key").into());
+    };
+    let since = state.clock.day_start(state.now());
+    let stats = state.db.member_request_stats(key.id(), since).await?;
+    let mut data = serde_json::to_value(stats).map_err(|e| InternalError(e.to_string()))?;
+    data["since"] = json!(since);
+    Ok(no_store(ok_json(&data)))
 }
 
 /// 一行请求日志 → 成员看到的一条（`rid` = 请求编号，与错误响应的 request_id / x-request-id、后台请求日志的「编号」同一个）：拒绝 / 失败的说明去掉开头的状态码另放；站付的图成员花的 Anlas 记 0。

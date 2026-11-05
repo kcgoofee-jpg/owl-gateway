@@ -2959,3 +2959,132 @@ async fn my_requests_show_only_my_recent_rows_without_private_columns() {
     let older = get(&format!("?before={before}")).await;
     assert_eq!(older.2["items"].as_array().unwrap().len(), 2);
 }
+
+/// Statistics use the complete service day and the authenticated key, not a page of history.
+#[tokio::test]
+async fn my_request_stats_cover_full_day_costs_outcomes_and_missing_timings() {
+    let (e, _d) = setup_reg(&[]).await;
+    open_registration(&e).await;
+    assert_eq!(
+        parse(
+            Call::new("GET", "/public/me/request-stats")
+                .send(&e.state)
+                .await
+        )
+        .0,
+        401
+    );
+    issue(&e, MEMBER).await;
+    issue(&e, OTHER).await;
+    let mine = e
+        .state
+        .db
+        .key_row_for_discord(MEMBER)
+        .await
+        .unwrap()
+        .unwrap()["id"]
+        .as_i64()
+        .unwrap();
+    let theirs = e
+        .state
+        .db
+        .key_row_for_discord(OTHER)
+        .await
+        .unwrap()
+        .unwrap()["id"]
+        .as_i64()
+        .unwrap();
+    let cookie = login_member(&e, MEMBER).await;
+    let get = || {
+        let cookie = cookie.clone();
+        let state = e.state.clone();
+        async move {
+            parse(
+                Call::new("GET", "/public/me/request-stats")
+                    .header("cookie", cookie)
+                    .send(&state)
+                    .await,
+            )
+        }
+    };
+    let empty = get().await;
+    assert_eq!(empty.0, 200);
+    assert_eq!(empty.2["summary"]["total"], 0);
+    assert_eq!(empty.2["avg_wait_s"], Value::Null);
+    assert_eq!(empty.2["avg_dur_s"], Value::Null);
+    let since = e.state.clock.day_start(e.state.now());
+    e.state.db.write(move |tx| {
+        for i in 0..55 {
+            tx.execute("INSERT INTO usage_log (ts,key_id,kind,model,status,images,anlas,wait_ms,dur_ms,detail) VALUES (?1,?2,'image_stream','nai-diffusion-5-full','ok',2,3,0,4000,'confirmed output')", (since,mine))?;
+            if i == 0 {
+                tx.execute("INSERT INTO usage_log (ts,key_id,kind,status,images,anlas,wait_ms,dur_ms,detail) VALUES (?1,?2,'image','ok',1,90,2000,8000,'站付V5')", (since,mine))?;
+            }
+        }
+        tx.execute("INSERT INTO usage_log (ts,key_id,kind,status,anlas,wait_ms,dur_ms) VALUES (?1,?2,'vibe_encode','ok',2,90000,90000)",(since,mine))?;
+        for status in ["rejected","error","cancelled"] {
+            tx.execute("INSERT INTO usage_log (ts,key_id,kind,status,anlas,wait_ms,dur_ms) VALUES (?1,?2,'image',?3,99,90000,90000)",(since,mine,status))?;
+        }
+        tx.execute("INSERT INTO usage_log (ts,key_id,kind,status) VALUES (?1,?2,'image','ok')",(since,mine))?;
+        for (key, ts) in [(mine,since-0.001),(theirs,since)] {
+            tx.execute("INSERT INTO usage_log (ts,key_id,kind,status,images,anlas) VALUES (?1,?2,'image','ok',999,999)",(ts,key))?;
+        }
+        Ok(())
+    }).await.unwrap();
+    // An uncertain remainder is visible as pending work, never added to confirmed spend.
+    e.state
+        .db
+        .reserve_request_settlement(
+            "stats-uncertain",
+            "stats-rid",
+            mine,
+            "2026-10-25",
+            "2026-10",
+            false,
+            500.0,
+            0,
+            0,
+            since,
+        )
+        .await
+        .unwrap();
+    e.state.db.write(move |tx| {
+        tx.execute("UPDATE request_settlements SET status='uncertain' WHERE request_id='stats-uncertain'", [])?;
+        tx.execute("INSERT INTO usage_request_links (usage_log_id,request_id) SELECT MIN(id),'stats-uncertain' FROM usage_log WHERE key_id=?",[mine])?;
+        Ok(())
+    }).await.unwrap();
+    let r = get().await;
+    assert_eq!(r.0, 200, "{}", r.2);
+    assert_eq!(r.1["cache-control"], "no-store");
+    assert_eq!(r.2["since"], since);
+    assert_eq!(
+        r.2["summary"],
+        json!({"total":61,"ok":58,"rejected":1,"error":1,"cancelled":1})
+    );
+    assert_eq!(r.2["images"], 111);
+    assert_eq!(r.2["anlas"], 167.0);
+    assert_eq!(r.2["uncertain_requests"], 1);
+    assert!((r.2["avg_wait_s"].as_f64().unwrap() - 2.0 / 56.0).abs() < 0.000001);
+    assert!((r.2["avg_dur_s"].as_f64().unwrap() - 228.0 / 56.0).abs() < 0.000001);
+    assert_eq!(
+        r.2["breakdown"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|x| x["requests"].as_i64().unwrap())
+            .sum::<i64>(),
+        61
+    );
+    for private in [
+        "src",
+        "client",
+        "token_id",
+        "key_name",
+        "detail",
+        "request_id",
+    ] {
+        assert!(
+            !r.2.to_string().contains(&format!("\"{private}\"")),
+            "{private} leaked"
+        );
+    }
+}

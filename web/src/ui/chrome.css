@@ -177,3 +177,24 @@
     transform: none;
   }
 }
+
+/* Invisible landing bounds match the two pupils in the favicon's 64-unit viewBox. */
+.brand__mark-anchor {
+  position: relative;
+  display: inline-flex;
+  flex: 0 0 32px;
+  width: 32px;
+  height: 32px;
+}
+.brand__landing-eye {
+  position: absolute;
+  visibility: hidden;
+  left: 33.59375%;
+  top: 52.65625%;
+  width: 7.8125%;
+  height: 10.3125%;
+}
+.brand__landing-eye + .brand__landing-eye {
+  left: 74.21875%;
+  top: 49.53125%;
+}

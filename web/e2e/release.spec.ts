@@ -15,6 +15,7 @@ test("guest landing renders and member APIs require credentials", async ({ page,
   await page.goto("/");
   await expect(page.locator(".lp-status__text")).not.toBeEmpty();
   expect((await request.get("/v1/me")).status()).toBe(401);
+  expect((await request.get("/public/me/request-stats")).status()).toBe(401);
   expect(errors).toEqual([]);
 });
 
@@ -53,4 +54,27 @@ test("retired status routes are absent and health remains available", async ({ r
     expect(response.status(), path).toBe(200);
     expect((await response.json()).ok).toBe(true);
   }
+});
+
+test("member statistics match the full service day on desktop and mobile", async ({ page, context }) => {
+  await asMember(context);
+  const response = await context.request.get("/public/me/request-stats?before=1&status=error");
+  expect(response.status()).toBe(200);
+  const data = await response.json();
+  await page.goto("/");
+  await page.getByRole("tab", { name: "统计", exact: true }).click();
+  const panel = page.getByRole("tabpanel", { name: "统计", exact: true });
+  await expect(panel.locator(".lp-metric").first()).toHaveText(
+    `请求总数${data.summary.total.toLocaleString("zh-CN")}次`,
+  );
+  await expect(panel.getByText("请求结果", { exact: true })).toBeVisible();
+  await page.setViewportSize({ width: 390, height: 844 });
+  await expect(panel.getByText("模型与工具", { exact: true })).toBeVisible();
+  expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
+  await page.getByRole("tab", { name: /^全部/ }).click();
+  await expect(page.locator(".lp-req").first()).toBeVisible();
+  await page.getByRole("tab", { name: "统计", exact: true }).click();
+  await expect(panel.locator(".lp-metric").first()).toHaveText(
+    `请求总数${data.summary.total.toLocaleString("zh-CN")}次`,
+  );
 });
