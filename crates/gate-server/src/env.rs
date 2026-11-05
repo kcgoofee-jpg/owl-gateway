@@ -133,6 +133,7 @@ pub struct EnvConfig {
     pub key_inactivity_delete_days: i64,
     /// 「只有站长可用」维护模式下放行的 Discord 成员 ID（逗号分隔）。空 = 该模式等同全站关闭。
     pub maintenance_owner_ids: Vec<String>,
+    pub owner_image_subject: String,
     // Discord / 告警
     pub discord_bot_token: String,
     pub site_url: String,
@@ -245,6 +246,7 @@ impl EnvConfig {
             login_window_seconds: LOGIN_WINDOW_SECONDS,
             key_inactivity_delete_days: r.nonneg("KEY_INACTIVITY_DELETE_DAYS", 3),
             maintenance_owner_ids: split_list("MAINTENANCE_OWNER_IDS", ""),
+            owner_image_subject: r.str("OWNER_IMAGE_SUBJECT", ""),
             discord_bot_token: r.str("DISCORD_BOT_TOKEN", ""),
             site_url: r.str("SITE_URL", ""),
             alert_user_id: r.str("ALERT_USER_ID", ""),

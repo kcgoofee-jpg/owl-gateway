@@ -3,21 +3,96 @@
 use crate::{Db, DbError, Result};
 use gate_core::member_policy::{ClaimRules, MemberOverrides, MemberPolicy, SharedBudgets};
 use rusqlite::{Connection, OptionalExtension, params};
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 
 pub const DEFAULTS_KEY: &str = "member_policy_defaults";
 pub const BUDGETS_KEY: &str = "runtime_budgets";
 pub const CLAIM_KEY: &str = "claim_rules";
+const OWNER_IMAGE_KEY: &str = "owner_image_profile";
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct OwnerImageProfile {
+    subject: String,
+    enabled: bool,
+    saved: Option<MemberPolicy>,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize)]
+pub struct OwnerImageState {
+    pub enabled: bool,
+}
+
+fn owner_profile(conn: &Connection) -> Result<Option<OwnerImageProfile>> {
+    let raw: Option<String> = conn
+        .query_row(
+            "SELECT value FROM site_settings WHERE key=?",
+            [OWNER_IMAGE_KEY],
+            |r| r.get(0),
+        )
+        .optional()?;
+    let profile: Option<OwnerImageProfile> = raw
+        .map(|s| serde_json::from_str(&s).map_err(invalid))
+        .transpose()?;
+    if let Some(p) = &profile {
+        valid_subject(&p.subject)?;
+        if let Some(saved) = &p.saved {
+            saved.validate().map_err(invalid)?;
+        }
+        if p.enabled && p.saved.is_none() {
+            return Err(invalid("站长生图配置缺失"));
+        }
+    }
+    Ok(profile)
+}
+
+fn store_owner(conn: &Connection, profile: &OwnerImageProfile) -> rusqlite::Result<()> {
+    let encoded = serde_json::to_string(profile)
+        .map_err(|e| rusqlite::Error::ToSqlConversionFailure(Box::new(e)))?;
+    conn.execute("INSERT INTO site_settings(key,value) VALUES(?,?) ON CONFLICT(key) DO UPDATE SET value=excluded.value", params![OWNER_IMAGE_KEY, encoded])?;
+    Ok(())
+}
+
+fn apply_owner(
+    mut snapshot: PolicySnapshot,
+    subject: Option<&str>,
+    owner: Option<&OwnerImageProfile>,
+) -> PolicySnapshot {
+    if let Some(owner) = owner.filter(|p| Some(p.subject.as_str()) == subject) {
+        snapshot.owner_image = Some(OwnerImageState {
+            enabled: owner.enabled,
+        });
+        snapshot.effective = if owner.enabled {
+            let mut p = owner.saved.as_ref().expect("validated profile").clone();
+            p.image = true;
+            p.v5 = true;
+            p.vibe = true;
+            p.tags = true;
+            p.upscale = true;
+            p.augment = true;
+            p.img2img = true;
+            p.paid_parameters = true;
+            p
+        } else {
+            snapshot.defaults.clone()
+        };
+        snapshot.overrides = snapshot.defaults.differences(&snapshot.effective);
+    }
+    snapshot
+}
 
 #[derive(Debug, Clone, PartialEq, Serialize)]
 pub struct PolicySnapshot {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub owner_image: Option<OwnerImageState>,
     pub defaults: MemberPolicy,
     pub overrides: MemberOverrides,
     pub effective: MemberPolicy,
 }
 
 pub struct PolicyDirectory {
+    owner: Option<OwnerImageProfile>,
     defaults: MemberPolicy,
     overrides: BTreeMap<String, MemberOverrides>,
 }
@@ -31,11 +106,16 @@ impl PolicyDirectory {
             }
             None => MemberOverrides::default(),
         };
-        Ok(PolicySnapshot {
-            effective: self.defaults.resolve(&overrides).map_err(invalid)?,
-            defaults: self.defaults.clone(),
-            overrides,
-        })
+        Ok(apply_owner(
+            PolicySnapshot {
+                owner_image: None,
+                effective: self.defaults.resolve(&overrides).map_err(invalid)?,
+                defaults: self.defaults.clone(),
+                overrides,
+            },
+            subject,
+            self.owner.as_ref(),
+        ))
     }
 }
 
@@ -75,14 +155,85 @@ fn snapshot(conn: &Connection, subject: &str) -> Result<PolicySnapshot> {
         .transpose()?
         .unwrap_or_default();
     let effective = defaults.resolve(&overrides).map_err(invalid)?;
-    Ok(PolicySnapshot {
-        defaults,
-        overrides,
-        effective,
-    })
+    Ok(apply_owner(
+        PolicySnapshot {
+            owner_image: None,
+            defaults,
+            overrides,
+            effective,
+        },
+        Some(subject),
+        owner_profile(conn)?.as_ref(),
+    ))
 }
 
 impl Db {
+    /// Server configuration binds one identity; the HTTP API cannot bind or reassign it.
+    pub async fn bind_image_owner(&self, subject: &str) -> Result<()> {
+        valid_subject(subject)?;
+        let subject = subject.to_owned();
+        self.write(move |tx| {
+            let old = owner_profile(tx)
+                .map_err(|e| rusqlite::Error::ToSqlConversionFailure(Box::new(e)))?;
+            if let Some(old) = old {
+                if old.subject != subject {
+                    return Err(rusqlite::Error::InvalidParameterName(
+                        "站长生图身份与持久绑定不一致".into(),
+                    ));
+                }
+            } else {
+                store_owner(
+                    tx,
+                    &OwnerImageProfile {
+                        subject: subject.clone(),
+                        enabled: false,
+                        saved: None,
+                    },
+                )?;
+            }
+            Ok(())
+        })
+        .await
+    }
+
+    pub async fn set_owner_image_enabled(&self, subject: &str, enabled: bool) -> Result<bool> {
+        valid_subject(subject)?;
+        let subject = subject.to_owned();
+        self.write(move |tx| {
+            let mut owner = owner_profile(tx)
+                .map_err(|e| rusqlite::Error::ToSqlConversionFailure(Box::new(e)))?;
+            let Some(ref mut owner) = owner.as_mut().filter(|p| p.subject == subject) else {
+                return Ok(false);
+            };
+            if enabled && owner.saved.is_none() {
+                // Capture personal limits before applying the full-feature overlay.
+                let policy = defaults(tx)
+                    .map_err(|e| rusqlite::Error::ToSqlConversionFailure(Box::new(e)))?;
+                let raw: Option<String> = tx
+                    .query_row(
+                        "SELECT overrides FROM member_rules WHERE discord_id=?",
+                        [&subject],
+                        |r| r.get(0),
+                    )
+                    .optional()?;
+                let overrides: MemberOverrides = raw
+                    .map(|s| serde_json::from_str(&s))
+                    .transpose()
+                    .map_err(|e| rusqlite::Error::ToSqlConversionFailure(Box::new(e)))?
+                    .unwrap_or_default();
+                owner.saved = Some(
+                    policy
+                        .resolve(&overrides)
+                        .map_err(|e| rusqlite::Error::InvalidParameterName(e.into()))?,
+                );
+            }
+            owner.enabled = enabled;
+            store_owner(tx, owner)?;
+            Ok(true)
+        })
+        .await
+    }
+
     pub async fn claim_rules(&self) -> Result<ClaimRules> {
         let raw = self
             .get_setting(CLAIM_KEY)
@@ -118,8 +269,11 @@ impl Db {
                     .map_err(|e| rusqlite::Error::ToSqlConversionFailure(Box::new(invalid(e))))?;
                 overrides.insert(subject, parsed);
             }
+            let owner = owner_profile(&transaction)
+                .map_err(|e| rusqlite::Error::ToSqlConversionFailure(Box::new(e)))?;
             transaction.commit()?;
             Ok(PolicyDirectory {
+                owner,
                 defaults,
                 overrides,
             })
@@ -214,6 +368,19 @@ impl Db {
             let effective = policy
                 .resolve(&overrides)
                 .map_err(|e| rusqlite::Error::ToSqlConversionFailure(Box::new(invalid(e))))?;
+            if let Some(mut owner) = owner_profile(transaction)
+                .map_err(|e| rusqlite::Error::ToSqlConversionFailure(Box::new(e)))?
+                .filter(|p| p.subject == subject)
+            {
+                if !owner.enabled {
+                    return Err(rusqlite::Error::InvalidParameterName(
+                        "普通测试状态下请修改默认规则，或先启用全部生图功能".into(),
+                    ));
+                }
+                owner.saved = Some(effective);
+                store_owner(transaction, &owner)?;
+                return Ok(());
+            }
             let normalized = policy.differences(&effective);
             let encoded = serde_json::to_string(&normalized)
                 .map_err(|e| rusqlite::Error::ToSqlConversionFailure(Box::new(e)))?;

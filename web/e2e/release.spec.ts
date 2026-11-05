@@ -21,10 +21,10 @@ test("guest landing renders and member APIs require credentials", async ({ page,
 // 镜像页由网关直接渲染（静态资源在 STATIC_DIR，不进仓库）；CI 里没有镜像时跳过。
 const GATE = process.env.E2E_GATE ?? "http://127.0.0.1:18000";
 
-test("member entry lands on the mirrored image page", async ({ page, context, request }) => {
-  const mirror = await request.get(`${GATE}/image`);
-  test.skip(mirror.status() !== 200, "镜像资源未就绪（需要 STATIC_DIR 指向 mirror/）");
+test("member entry lands on the mirrored image page", async ({ page, context }) => {
   await asMember(context, GATE);
+  const mirror = await context.request.get(`${GATE}/image`, { maxRedirects: 0 });
+  test.skip(mirror.status() !== 200, "镜像资源未就绪（需要 STATIC_DIR 指向 mirror/）");
   await page.goto(`${GATE}/workbench`);
   await expect(page).toHaveURL(/\/image$/);
   // 官网镜像页的最小信号：模型行 + 生成按钮

@@ -19,6 +19,7 @@ struct Credential {
 pub struct Key {
     credential: Credential,
     pub policy: MemberPolicy,
+    pub owner_image_full: bool,
 }
 
 impl std::fmt::Debug for Key {
@@ -36,11 +37,22 @@ impl Key {
         if credential.id <= 0 || !matches!(credential.enabled, 0 | 1) {
             return Err(DbError::Invalid("Key 凭据值无效".into()));
         }
-        let policy = match credential.discord_id.as_deref().filter(|s| !s.is_empty()) {
-            Some(subject) => db.member_policy(subject).await?.effective,
-            None => db.member_defaults().await?,
-        };
-        Ok(Self { credential, policy })
+        let (policy, owner_image_full) =
+            match credential.discord_id.as_deref().filter(|s| !s.is_empty()) {
+                Some(subject) => {
+                    let snapshot = db.member_policy(subject).await?;
+                    (
+                        snapshot.effective,
+                        snapshot.owner_image.is_some_and(|p| p.enabled),
+                    )
+                }
+                None => (db.member_defaults().await?, false),
+            };
+        Ok(Self {
+            credential,
+            policy,
+            owner_image_full,
+        })
     }
 
     pub async fn refresh_policy(&self, db: &Db) -> Result<MemberPolicy, DbError> {

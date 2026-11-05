@@ -106,6 +106,14 @@ pub(super) async fn prepare(
         )
         .into());
     }
+    if tier == "v5" && crate::ops::v5_paused(&state.db).await? {
+        return Err(GateError::with_code(
+            403,
+            gate_core::quota::V5_PAUSED_TEXT,
+            reasons::V5_EXHAUSTED,
+        )
+        .into());
+    }
     // 客户端的「连接测试」（小图、几步、短提示词）：Key 已验证有效，在这里直接答复，不出图、不占额度 / 队列 / 上游。
     // 拦截会经错误路径以 reason=test_request 落库，可审计。
     if policy::is_connection_test(&body) {
@@ -166,6 +174,7 @@ pub(super) async fn prepare(
     if tier == "v5" {
         // 站长临时降档：V5 Full（含局部重绘）改走 Medium，放在整理参数和费用估算之前，这样价格和免费额度都按 Medium 算。
         if let Some(medium) = policy::v5_medium_of(&text(body.get("model").unwrap_or(&Value::Null)))
+            && !key.owner_image_full
             && crate::v5_medium::active(state).await
         {
             body["model"] = Value::String(medium.into());
@@ -215,9 +224,8 @@ pub(super) async fn prepare(
             "生图参数有误，无法计算费用，未扣费。请检查客户端中的参数设置。",
         )
     })?);
-    // 站长 10-22：V5 不再花成员的 Anlas。单张超规格时估价里根本没有免费额度（v5 = 0），
-    // 不会走到 V5 额度确认那一步，所以在入口就拒；多张等情况在确认时也会再拦一次
-    if tier == "v5" && est.anlas > 0.0 {
+    // 普通成员仍限制为免费 V5；绑定站长的完整权限允许在现有预算内支付高规格费用。
+    if tier == "v5" && est.anlas > 0.0 && !key.owner_image_full {
         reject(&model, "V5 超出免费规格");
         return Err(
             GateError::with_code(403, super::settle::V5_PAID_REFUSED, reasons::PARAM).into(),

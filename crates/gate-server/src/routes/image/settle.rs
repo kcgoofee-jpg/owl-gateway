@@ -64,7 +64,7 @@ async fn site_paid_cost(
     Ok(fits.then_some(cost))
 }
 
-/// V5 只开放免费规格：要花成员 Anlas 的 V5（超尺寸、超步数、多张、局部重绘等）一律拒绝（站长 10-22）。
+/// 普通成员 V5 保持免费规格限制；绑定站长可用现有 Anlas 预算。
 pub(super) const V5_PAID_REFUSED: &str =
     "V5 仅支持免费规格（单张、28 步以内、不超过 832×1216 面积），未扣费。";
 
@@ -87,6 +87,7 @@ pub(super) fn resolve_v5(
         prep.notes.clone(),
         prep.detail.clone(),
     );
+    let owner_full = prep.key.owner_image_full;
     let state = state.clone();
     Box::new(move |exhausted: bool, token_id: String, can_switch: bool| {
         let (body, notes, billing, reserved, state, detail0) = (
@@ -107,6 +108,28 @@ pub(super) fn resolve_v5(
                 b.detail = detail0;
                 held
             };
+            // Full owner access may pay from the same personal and shared budgets.
+            if owner_full && exhausted {
+                if can_switch {
+                    return Ok(true);
+                }
+                if previously_held {
+                    state
+                        .db
+                        .clear_site_paid(reserved.request_id())
+                        .await
+                        .map_err(|_| UpstreamError::local(500, "无法更新站付预算预留", ""))?;
+                }
+                let updated = Est::from_cost(
+                    policy::estimate_image_cost(&body, true, false)
+                        .map_err(|e| UpstreamError::local(400, e.message().to_string(), ""))?,
+                );
+                reserved.update(&updated, legacy).await.map_err(local)?;
+                let mut b = billing.lock().expect("billing");
+                b.est = updated;
+                b.detail = format!("{} {} Anlas", size_text(&body), updated.anlas as i64);
+                return Ok(false);
+            }
             // 站付优先（账号自己的 Anlas，不论成员有没有 Anlas 权限）：先用掉快到期账号的 Anlas，
             // 别的账号的免费 V5 留着
             if exhausted
@@ -152,7 +175,7 @@ pub(super) fn resolve_v5(
             }
             let cost = policy::estimate_image_cost(&body, true, true)
                 .map_err(|e| UpstreamError::local(400, e.message().to_string(), ""))?;
-            if cost.anlas > 0 {
+            if cost.anlas > 0 && !owner_full {
                 // 超出免费规格（大图、步数多、多张、局部重绘等）的 V5 要花成员的 Anlas：同样不开放
                 return Err(UpstreamError::local(403, V5_PAID_REFUSED, reasons::PARAM));
             }
@@ -289,6 +312,7 @@ pub(super) async fn perform_generation(
         state.record_upstream(resp.status < 500);
         return Err(
             GateError::new(resp.status, upstream_error_message(i64::from(resp.status)))
+                .uncertain(resp.status >= 500)
                 .from_upstream(true)
                 .into(),
         );

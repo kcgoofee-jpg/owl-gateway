@@ -140,6 +140,9 @@ impl AppState {
         std::fs::create_dir_all(&env.data_dir)?;
         let now = crate::time::now();
         let db = Db::open_for_gateway(env.db_path(), now, env.key_inactivity_delete_days)?;
+        if !env.owner_image_subject.is_empty() {
+            db.bind_image_owner(&env.owner_image_subject).await?;
+        }
         let clock = Clock::service();
         let alerter = Arc::new(Alerter::owner(&env));
         let tasks = TaskTracker::new();
