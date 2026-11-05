@@ -312,8 +312,8 @@ pub(super) async fn perform_generation(
         state.record_upstream(resp.status < 500);
         return Err(
             GateError::new(resp.status, upstream_error_message(i64::from(resp.status)))
-                .uncertain(resp.status >= 500)
                 .from_upstream(true)
+                .uncertain(resp.status >= 500)
                 .into(),
         );
     }
