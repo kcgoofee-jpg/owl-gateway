@@ -199,16 +199,6 @@ impl JobsState {
         Ok(())
     }
 
-    /// 运行记录里最近一次有任务跑完的时间；`raw` 是库里的 `job_last`，读不懂或为空时 None。
-    /// 启动时的停机检测用：维护任务每 5 分钟跑一次，比请求日志更能说明网关是不是一直开着。
-    pub fn latest_run_at(raw: Option<&str>) -> Option<f64> {
-        let v: Value = serde_json::from_str(raw?).ok()?;
-        v.as_object()?
-            .values()
-            .filter_map(|j| j.get("at")?.as_f64())
-            .reduce(f64::max)
-    }
-
     /// 当前的运行记录（`job_last`）。
     pub async fn last(&self) -> Map<String, Value> {
         self.last.lock().await.clone()

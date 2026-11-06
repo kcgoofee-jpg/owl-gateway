@@ -37,26 +37,4 @@ impl Db {
         })
         .await
     }
-
-    /// 成功请求记下的 Anlas，按账号汇总（None = 日志没记账号）。`id > min_id` 且 `ts > since`。
-    pub async fn anlas_by_token(
-        &self,
-        min_id: i64,
-        since: f64,
-    ) -> Result<Vec<(Option<String>, f64)>> {
-        self.read(move |c| {
-            let mut stmt = c.prepare(
-                "SELECT token_id, COALESCE(SUM(anlas), 0) FROM usage_log \
-                 WHERE id>? AND ts>? AND status='ok' GROUP BY token_id",
-            )?;
-            stmt.query_map(rusqlite::params![min_id, since], |r| {
-                Ok((
-                    r.get::<_, Option<String>>(0)?.filter(|t| !t.is_empty()),
-                    value::f64_or(r, 1, 0.0)?,
-                ))
-            })?
-            .collect()
-        })
-        .await
-    }
 }

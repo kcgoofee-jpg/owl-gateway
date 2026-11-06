@@ -352,20 +352,6 @@ impl Db {
 
     // ------------------------------------------------------------------ 邀请 Key / 发 Key
 
-    /// 按 token 找 Key：`(id, enabled)`。
-    pub async fn key_id_enabled_by_token(&self, token: &str) -> Result<Option<(i64, bool)>> {
-        let token = token.to_string();
-        self.read(move |c| {
-            c.query_row(
-                "SELECT id, enabled FROM api_keys WHERE token=?",
-                [token],
-                |r| Ok((value::i64_or(r, 0, 0)?, value::flag(r, 1)?)),
-            )
-            .optional()
-        })
-        .await
-    }
-
     /// 领取 Key 落库：登记领取、Key 改名、写 `api_keys.discord_id`、身份组标志（一个事务）。
     /// Key 本身由调用方先建好；`discord_id` 在建 Key 时已带上的话，这里再写一次是幂等的。
     pub async fn save_registration(&self, r: &NewRegistration<'_>) -> Result<()> {

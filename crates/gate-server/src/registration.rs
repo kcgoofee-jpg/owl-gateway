@@ -198,7 +198,7 @@ pub fn welcome_message(w: &Welcome) -> String {
     }
     rules.push("• 每把 Key 同时生成 1 张、最多再排 2 张，多发的会被退回，等前面的出完再发".into());
     let v5_sizes = if w.v5 {
-        "；V5 只有 832×1216、1216×832、1024×1024 三种尺寸，其他尺寸会自动换成最接近的一种"
+        "；V5 的尺寸超出 832×1216、1216×832、1024×1024 时会换成最接近的一个"
     } else {
         ""
     };
@@ -402,21 +402,6 @@ pub async fn registrar_jobs(state: &AppState) {
     }
 }
 
-/// `GET /users/@me/guilds` 的结果 → `(id, 名字)`。
-pub fn parse_guilds(v: &Value) -> Vec<(String, String)> {
-    v.as_array()
-        .map(|a| {
-            a.iter()
-                .filter_map(|g| {
-                    let id = g.get("id")?.as_str()?.to_string();
-                    let name = g.get("name").and_then(Value::as_str).unwrap_or("");
-                    Some((id, name.to_string()))
-                })
-                .collect()
-        })
-        .unwrap_or_default()
-}
-
 /// `GET /users/@me/connections` 的结果 → 外部账号列表（type / id / name / verified）。
 pub fn parse_connections(v: &Value) -> Vec<DiscordConnection> {
     v.as_array()
@@ -527,9 +512,7 @@ mod tests {
             "{t}"
         );
         assert!(
-            t.contains(
-                "V5 只有 832×1216、1216×832、1024×1024 三种尺寸，其他尺寸会自动换成最接近的一种"
-            ),
+            t.contains("V5 的尺寸超出 832×1216、1216×832、1024×1024 时会换成最接近的一个"),
             "{t}"
         );
         // 能用 V5 但个人上限是 0（10-27 语义 = 停用）：明说停用，不写张数
@@ -541,7 +524,7 @@ mod tests {
             t.contains("每人每天最多 V4.5 及以下 30 张；V5 已停用，全站共用额度池"),
             "{t}"
         );
-        assert!(t.contains("V5 只有 832×1216"), "{t}");
+        assert!(t.contains("V5 的尺寸超出 832×1216"), "{t}");
         // 没有已开通功能
         let t = welcome_message(&Welcome {
             opened: "",

@@ -3,7 +3,7 @@
 //!
 //! 已删除功能（`anlas_auto` 自动分配、`v5_pinned`）的列仍留在表里，这里一律不读不写。
 
-use super::{INVITE_TAG, SqlValue};
+use super::INVITE_TAG;
 use crate::{Db, Result, value};
 use rusqlite::{OptionalExtension, params};
 
@@ -232,38 +232,6 @@ impl Db {
         .await
     }
 
-    /// 自动标签：`since` 之后被拒 / 失败的请求里，`detail` 命中 `patterns`（(标签, LIKE 模式)，先命中先得）的次数。
-    /// 返回 (key_id, 标签, 次数)。
-    pub async fn auto_tag_counts(
-        &self,
-        since: f64,
-        patterns: &[(&str, &str)],
-    ) -> Result<Vec<(i64, String, i64)>> {
-        let lit = |s: &str| s.replace('\'', "''");
-        let whens: Vec<String> = patterns
-            .iter()
-            .map(|(label, pat)| format!("WHEN detail LIKE '{}' THEN '{}'", lit(pat), lit(label)))
-            .collect();
-        let sql = format!(
-            "SELECT key_id, CASE {} END AS label, COUNT(*) FROM usage_log WHERE ts>? \
-             AND status IN ('rejected','error') AND key_id IS NOT NULL \
-             GROUP BY key_id, label HAVING label IS NOT NULL",
-            whens.join(" ")
-        );
-        self.read(move |c| {
-            let mut stmt = c.prepare(&sql)?;
-            stmt.query_map([since], |r| {
-                Ok((
-                    value::i64_or(r, 0, 0)?,
-                    value::text_or(r, 1, "")?,
-                    value::i64_or(r, 2, 0)?,
-                ))
-            })?
-            .collect()
-        })
-        .await
-    }
-
     /// `since` 之后成功的「重置今日额度」操作：(时间, 对象)。
     pub async fn quota_reset_marks(&self, since: f64) -> Result<Vec<(f64, String)>> {
         self.read(move |c| {
@@ -274,56 +242,6 @@ impl Db {
                 Ok((value::f64_or(r, 0, 0.0)?, value::text_or(r, 1, "")?))
             })?
             .collect()
-        })
-        .await
-    }
-
-    /// 某服务日每把 Key 的原始计数 (key_id, images, v5, anlas, text_tokens, requests)（不扣「重置额度」基线）。
-    pub async fn counter_rows(&self, day: &str) -> Result<Vec<(i64, i64, i64, f64, i64, i64)>> {
-        let day = day.to_string();
-        self.read(move |c| {
-            let mut stmt = c.prepare(
-                "SELECT key_id, images, v5, anlas, text_tokens, requests FROM counters WHERE day=?",
-            )?;
-            stmt.query_map([day], |r| {
-                Ok((
-                    value::i64_or(r, 0, 0)?,
-                    value::i64_or(r, 1, 0)?,
-                    value::i64_or(r, 2, 0)?,
-                    value::f64_or(r, 3, 0.0)?,
-                    value::i64_or(r, 4, 0)?,
-                    value::i64_or(r, 5, 0)?,
-                ))
-            })?
-            .collect()
-        })
-        .await
-    }
-
-    /// 生图速率：`hour0` 起每把 Key 逐小时的成功生图数 (key_id, 第几个小时, 张数)。
-    pub async fn hourly_image_counts(&self, hour0: i64) -> Result<Vec<(i64, i64, i64)>> {
-        self.read(move |c| {
-            let mut stmt = c.prepare(
-                "SELECT key_id, CAST((ts - ?) / 3600 AS INT) b, COUNT(*) FROM usage_log \
-                 WHERE ts >= ? AND status='ok' AND (kind LIKE 'image%' OR kind IN ('upscale','augment-image','vibe_encode')) \
-                 GROUP BY key_id, b",
-            )?;
-            let rows = stmt.query_map(params![hour0, hour0], |r| {
-                Ok((
-                    value::i64_opt(r, 0)?,
-                    value::i64_or(r, 1, 0)?,
-                    value::i64_or(r, 2, 0)?,
-                ))
-            })?;
-            let mut out = Vec::new();
-            for row in rows {
-                let (key_id, bucket, n) = row?;
-                // key_id 为空的成功生图不存在（成功日志一定有 Key），跳过以防万一
-                if let Some(k) = key_id {
-                    out.push((k, bucket, n));
-                }
-            }
-            Ok(out)
         })
         .await
     }
@@ -339,26 +257,6 @@ impl Db {
             transaction.execute("DELETE FROM key_tags", [])?;
             transaction.execute("DELETE FROM share_state", [])?;
             Ok(disabled)
-        })
-        .await
-    }
-
-    /// 按 id 批量取 Key 名字 (id, name)。
-    pub async fn key_names_for(&self, ids: &[i64]) -> Result<Vec<(i64, String)>> {
-        if ids.is_empty() {
-            return Ok(Vec::new());
-        }
-        let args: Vec<SqlValue> = ids.iter().map(|i| SqlValue::Integer(*i)).collect();
-        let sql = format!(
-            "SELECT id, name FROM api_keys WHERE id IN ({})",
-            super::marks(ids.len())
-        );
-        self.read(move |c| {
-            let mut stmt = c.prepare(&sql)?;
-            stmt.query_map(rusqlite::params_from_iter(args.iter()), |r| {
-                Ok((value::i64_or(r, 0, 0)?, value::text_or(r, 1, "")?))
-            })?
-            .collect()
         })
         .await
     }

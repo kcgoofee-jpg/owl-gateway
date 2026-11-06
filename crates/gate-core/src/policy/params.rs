@@ -218,13 +218,24 @@ pub fn fit_size(width: i128, height: i128, max_pixels: i128) -> ValidationResult
     };
     let mut w2 = snap(width);
     let mut h2 = snap(height);
+    // 取整到 64 的倍数之后可能仍然略超上限：一档一档（64）缩长的那一边。
+    // 两边相等时同时缩——只缩一边会把 4096×4096 变成 1408×1472 这种歪掉的尺寸。
     while w2.saturating_mul(h2) > max_pixels && (w2 > 64 || h2 > 64) {
-        if w2 >= h2 && w2 > 64 {
+        if w2 == h2 {
+            if w2 <= 64 {
+                break;
+            }
+            (w2, h2) = (w2 - 64, h2 - 64);
+        } else if w2 > h2 {
+            if w2 <= 64 {
+                break;
+            }
             w2 -= 64;
-        } else if h2 > 64 {
-            h2 -= 64;
         } else {
-            break;
+            if h2 <= 64 {
+                break;
+            }
+            h2 -= 64;
         }
     }
     Ok((w2, h2))
@@ -274,24 +285,25 @@ pub fn clamp_image_params(
         notes.push(format!("steps 已钳制到 {max_steps}"));
     }
 
-    // 老模型保留免费面积内的自定义尺寸；V5 继续使用预设边界。
+    // 尺寸：两条规则，分开走，不叠着用。
+    //
+    // - V5：上游只认三个 Normal 预设。落在某个预设的框内就照原样发（文档口径是「之内」），
+    //   超出框才按长宽比吸附到最接近的预设。
+    // - V4.5 及以下：支持任意 64 的倍数，所以只按面积等比缩小，**不吸附 V5 预设**——
+    //   吸附会把 1920×1080 变成 1216×832、把 65536×64 变成 1216×832，那是换了个构图，不是缩小。
     let w = int_or(p.get("width"), 0, 0)?;
     let h = int_or(p.get("height"), 0, 0)?;
     if w > 0 && h > 0 {
-        let eligible = if is_v5_model(&str_of_get(&out, "model")) {
-            V5_NORMAL_PRESETS
+        let (pw, ph) = if is_v5_model(&str_of_get(&out, "model")) {
+            let inside = V5_NORMAL_PRESETS
                 .iter()
-                .any(|&(pw, ph)| w <= i128::from(pw) && h <= i128::from(ph))
+                .any(|&(pw, ph)| w <= i128::from(pw) && h <= i128::from(ph));
+            let (pw, ph) = if inside { (w, h) } else { snap_v5_preset(w, h) };
+            // 预设本身都在面积上限以内，这一步只是兜底
+            fit_size(pw, ph, i128::from(max_pixels))?
         } else {
-            w.saturating_mul(h) <= i128::from(FREE_MAX_PIXELS)
+            fit_size(w, h, i128::from(max_pixels))?
         };
-        let (pw, ph) = if eligible {
-            (w, h)
-        } else {
-            snap_v5_preset(w, h)
-        };
-        // 先保留原有预设限制，再缩到站点面积上限内，避免预设调整反而超限。
-        let (pw, ph) = fit_size(pw, ph, i128::from(max_pixels))?;
         if (w, h) != (pw, ph) {
             p.insert("width".into(), json_int(pw));
             p.insert("height".into(), json_int(ph));

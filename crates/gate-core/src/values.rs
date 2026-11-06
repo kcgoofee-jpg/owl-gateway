@@ -22,9 +22,6 @@ pub fn number(v: &Value) -> Option<f64> {
 pub fn strict_number(v: &Value) -> Option<f64> {
     v.as_f64()
 }
-pub fn equal(a: &Value, b: &Value) -> bool {
-    a == b
-}
 pub fn get<'a>(v: &'a Value, k: &str) -> Option<&'a Value> {
     v.get(k)
 }
