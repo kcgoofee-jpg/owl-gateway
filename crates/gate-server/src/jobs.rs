@@ -6,7 +6,7 @@
 //! |---|---|---|
 //! | `upstream_snapshot` 上游 V5 快照 | 10 分钟 ±20%，满 1 小时才记 | 主动读一次订阅，写 `upstream_snapshots`（后台「额度记录」页估算 V5 实测恢复速度用） |
 //! | `breaker` 全站熔断 | 10 分钟 ±20% | 15 分钟内上游失败 ≥ 5 次、占比 ≥ 30%、来自 ≥ 2 把 Key → 全站暂停出图 5 分钟（阈值是常量，不是自适应） |
-//! | `maintenance` 维护 | 5 分钟 ±20% | 注册服务的三个同步（`registration::registrar_jobs`）/ 磁盘自检 |
+//! | `maintenance` 维护 | 5 分钟 ±20% | 注册服务的三个同步（`registration::registrar_jobs`）/ 结算账本只留未决行 / 磁盘自检 |
 //! | `idle_recycle` 闲置回收 | 1 小时 | 长期不用的 Key 删除（不拉黑，之后还能再 /register；站点出不了图的服务日不算，见 [`idle_recycle_window`]）；`KEY_INACTIVITY_DELETE_DAYS=0` 时**什么都不做** |
 //!
 //! 单 Key 限流（按 1 小时被拒次数推断「客户端在死循环」）、Anlas 自动核对、日志保留清理都已删除。
@@ -126,6 +126,7 @@ pub async fn maintenance_once(state: &AppState) -> Vec<(&'static str, JobError)>
         return failed;
     }
     crate::registration::registrar_jobs(state).await;
+    step!("settlements", "结算账本清理", prune_settled(state));
     step!("disk", "磁盘检查", disk_check(state));
     failed
 }
@@ -144,6 +145,20 @@ pub(crate) async fn maintenance_job(state: &AppState) -> Result<String, JobError
         return Ok("正在关停，本轮没做完".to_string());
     }
     Ok("全部完成".to_string())
+}
+
+/// 结算账本只留未决行：已终结的行与用量日志重复，留着等于同一件事存两份。
+async fn prune_settled(state: &AppState) -> Result<(), JobError> {
+    let before = state.now() - gate_db::repo::settlement::SETTLED_KEEP_SECS;
+    let n = state
+        .db
+        .prune_settled_requests(before)
+        .await
+        .map_err(|e| JobError::new("DbError", e.to_string()))?;
+    if n > 0 {
+        tracing::info!(deleted = n, "pruned settled request rows");
+    }
+    Ok(())
 }
 
 /// 磁盘剩余不足 10% 提醒站长（同一条 6 小时一次）。

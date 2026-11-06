@@ -10,6 +10,10 @@ use crate::{Db, Result};
 use gate_core::primitives;
 use rusqlite::{OptionalExtension, params};
 
+/// 已终结（`committed` / `released` / `released_manual`）的结算行保留多久。
+/// 结算行的用处是「请求在途时占住额度」和「崩溃后恢复」，两者都在秒级；1 小时足够覆盖提交重试。
+pub const SETTLED_KEEP_SECS: f64 = 3600.0;
+
 impl Db {
     /// Create a durable reservation before a generation is allowed to leave the gateway.
     #[allow(clippy::too_many_arguments)]
@@ -169,7 +173,6 @@ impl Db {
                 if status == "committed" { return Ok(()); }
                 if status != "result_saved" { return Err(rusqlite::Error::InvalidQuery); }
             }
-            let h = s.hints.columns();
             tx.execute(
                 INSERT_LOG,
                 params![
@@ -192,12 +195,6 @@ impl Db {
                     s.token_id,
                     primitives::take_chars(&s.client, 160),
                     primitives::take_chars(&s.ip, 64),
-                    h[0],
-                    h[1],
-                    h[2],
-                    h[3],
-                    h[4],
-                    h[5],
                 ],
             )?;
             if let Some(id) = request_id.as_deref() {
@@ -374,6 +371,25 @@ impl Db {
                 params![token_id, pattern],
                 |r| r.get(0),
             )
+        })
+        .await
+    }
+
+    /// 账本只留未决行：`committed` / `released` / `released_manual` 与用量日志重复
+    /// （成功的已写 usage_log，失败的也已写 usage_log），留着只是同一件事的两份数据。
+    /// 保留 [`SETTLED_KEEP_SECS`] 是为了提交重试的幂等判断还能读到上一状态。
+    /// 指向已删结算的 `usage_request_links` 一并清掉——它只用来从 request_id 找回用量日志。
+    pub async fn prune_settled_requests(&self, before: f64) -> Result<usize> {
+        self.write(move |tx| {
+            let n = tx.execute(
+                "DELETE FROM request_settlements WHERE status IN ('committed','released','released_manual') AND updated_at<?",
+                [before],
+            )?;
+            tx.execute(
+                "DELETE FROM usage_request_links WHERE request_id NOT IN (SELECT request_id FROM request_settlements)",
+                [],
+            )?;
+            Ok(n)
         })
         .await
     }
