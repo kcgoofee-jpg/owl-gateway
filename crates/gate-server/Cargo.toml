@@ -52,7 +52,6 @@ base64.workspace = true
 # asn.rs：解 iptoasn 的 .tsv.gz（版本已在 Cargo.lock 里，zip 的 deflate 带进来的）
 flate2 = "1"
 reqwest.workspace = true
-rustix = { version = "1", default-features = false, features = ["std", "fs"] }
 # 只给 nai-gate 二进制当全局分配器用（src/main.rs）
 mimalloc.workspace = true
 

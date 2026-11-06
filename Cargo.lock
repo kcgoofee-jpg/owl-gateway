@@ -1023,7 +1023,6 @@ dependencies = [
  "rmpv",
  "rusqlite",
  "rust-embed",
- "rustix",
  "scrypt",
  "serde",
  "serde_json",

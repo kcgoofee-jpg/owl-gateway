@@ -274,7 +274,8 @@ impl Db {
         limit: i64,
     ) -> Result<Vec<Value>> {
         let status = status.to_string();
-        let limit = limit.clamp(1, 200);
+        // 上界要容得下「多要一条」的翻页判断（调用方拿 limit = 页大小 + 1）
+        let limit = limit.clamp(1, 201);
         self.read(move |c| {
             let mut stmt = c.prepare(
                 "SELECT l.id, l.rid, l.ts, l.kind, l.model, l.status, l.images, l.anlas, l.wait_ms, l.dur_ms, l.reason, l.detail, l.client, \

@@ -22,7 +22,6 @@
     "preact-iso": "2.12.2"
   },
   "devDependencies": {
-    "@axe-core/playwright": "4.13.0",
     "@babel/core": "8.0.7",
     "@biomejs/biome": "2.5.15",
     "@playwright/test": "1.64.0",

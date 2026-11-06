@@ -2,6 +2,10 @@ import { defineConfig, devices } from "@playwright/test";
 
 /**
  * 端到端测试：连的是已经在跑的前端（默认 Vite 开发服务 http://localhost:5174），不在这里启动服务。
+ *
+ * 只有 `release.spec.ts` 一个 spec：它测的是只有真浏览器 + 真网关才能测的东西（真实 Cookie、路由、
+ * 镜像页、Discord 分享流程）。2026-11-06 删掉了其余九个 spec——CI 从来没跑过它们，而它们在界面改动后
+ * 一路腐烂（上一次跑 13 个用例失败，全是因为断言的功能已经删了）。UI 细节用 vitest 在 `src/` 里测。
  * 后端是 `cargo xtask dev`（真实的 Rust 网关 + 假上游 + 合成演示数据，端口 18000 / 18001）。
  *
  *   cargo xtask dev                                           # 终端 1：网关 + 假上游，Ctrl-C 退出
@@ -24,8 +28,7 @@ export default defineConfig({
   use: {
     baseURL: process.env.E2E_BASE ?? "http://localhost:5174",
     trace: "retain-on-failure",
-    // 默认按「减少动态效果」跑：开屏不播（不挡点击）、滚动显影直接是最终状态（排版和对比度检查看到的就是成品）。
-    // 动效本身由 landing.spec.ts 里的「开屏」用例单独打开来测。
+    // 默认按「减少动态效果」跑：开屏不播（不挡点击）、滚动显影直接是最终状态（看到的就是成品）。
     reducedMotion: "reduce",
   },
   projects: [{ name: "chromium", use: { ...devices["Desktop Chrome"] } }],

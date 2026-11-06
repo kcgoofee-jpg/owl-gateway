@@ -1,5 +1,3 @@
-import { useEffect, useState } from "preact/hooks";
-import { ApiError, getJSON } from "../../lib/api";
 import { fullTime, num } from "../../lib/format";
 import { Button, Skeleton } from "../../ui";
 import { modelLabel } from "./request-model";
@@ -105,43 +103,13 @@ export function RequestStatsView({ data }: { data: MyRequestStats }) {
   );
 }
 
-export function RequestStatsPanel({ onSummary }: { onSummary: (s: MyRequests["summary"]) => void }) {
-  const [data, setData] = useState<MyRequestStats | null>(null);
-  const [error, setError] = useState("");
-  const [retry, setRetry] = useState(0);
-  useEffect(() => {
-    let alive = true;
-    let pending = false;
-    const load = async () => {
-      if (pending || document.visibilityState === "hidden") return;
-      pending = true;
-      try {
-        const result = await getJSON<MyRequestStats>("/public/me/request-stats");
-        if (alive) {
-          setData(result);
-          setError("");
-          onSummary(result.summary);
-        }
-      } catch (e) {
-        if (alive) setError(e instanceof ApiError ? e.message : "统计读取失败，请稍后重试");
-      } finally {
-        pending = false;
-      }
-    };
-    void load();
-    const timer = setInterval(() => void load(), 60_000);
-    const visible = () => {
-      if (document.visibilityState === "visible") void load();
-    };
-    document.addEventListener("visibilitychange", visible);
-    window.addEventListener("focus", visible);
-    return () => {
-      alive = false;
-      clearInterval(timer);
-      document.removeEventListener("visibilitychange", visible);
-      window.removeEventListener("focus", visible);
-    };
-  }, [retry, onSummary]);
+/** 统计面板：数据由卡片持有（第一次点开才读、切走再回来不重读），这里只负责显示和重试。 */
+export function RequestStatsPanel(props: {
+  data: MyRequestStats | null;
+  error: string;
+  onRetry: () => void;
+}) {
+  const { data, error, onRetry } = props;
   return (
     <>
       {error && (
@@ -150,7 +118,7 @@ export function RequestStatsPanel({ onSummary }: { onSummary: (s: MyRequests["su
             {error}
             {data && "；当前显示上次读取的数据。"}
           </p>
-          <Button variant="ghost" onClick={() => setRetry((n) => n + 1)}>
+          <Button variant="ghost" onClick={onRetry}>
             重试
           </Button>
         </div>

@@ -4,7 +4,7 @@ import { secTime } from "../../lib/format";
 import { Badge, Button, Card, Skeleton, Tabs } from "../../ui";
 import { RequestStatsPanel } from "./RequestStats";
 import { modelLabel, TOOL_KINDS } from "./request-model";
-import type { MyRequest, MyRequests } from "./types";
+import type { MyRequest, MyRequestStats, MyRequests } from "./types";
 
 type Status = "" | "ok" | "rejected" | "error";
 
@@ -116,58 +116,15 @@ export function RequestRow({ r }: { r: MyRequest }) {
   );
 }
 
-/** 一种状态下的列表：先拿第一页，「再看 50 条」往回翻。 */
-function List({ status, onSummary }: { status: Status; onSummary: (s: MyRequests["summary"]) => void }) {
-  const [items, setItems] = useState<MyRequest[] | null>(null);
-  const [next, setNext] = useState<number | null>(null);
-  const [busy, setBusy] = useState(false);
-  const [err, setErr] = useState("");
-  /** 点过「再看 50 条」就不再自动刷新，避免打乱正在看的历史位置 */
-  const paged = useRef(false);
-
-  const load = async (before?: number) => {
-    setBusy(true);
-    setErr("");
-    if (before) paged.current = true;
-    try {
-      const q = new URLSearchParams();
-      if (status) q.set("status", status);
-      if (before) q.set("before", String(before));
-      const qs = q.toString();
-      const d = await getJSON<MyRequests>(`/public/me/requests${qs ? `?${qs}` : ""}`);
-      setItems((old) => (before && old ? [...old, ...d.items] : d.items));
-      setNext(d.next);
-      onSummary(d.summary);
-    } catch (e) {
-      setErr(e instanceof ApiError ? e.message : "读取失败，请稍后重试");
-    } finally {
-      setBusy(false);
-    }
-  };
-
-  useEffect(() => {
-    void load();
-  }, [status]);
-
-  // 自动刷新（站长 10-27）：页面可见时每 60 秒重读第一页；切回标签页 / 窗口聚焦时立刻读一次。
-  useEffect(() => {
-    let alive = true;
-    const refresh = () => {
-      if (!alive || paged.current || busy || document.visibilityState !== "visible") return;
-      void load();
-    };
-    const timer = setInterval(refresh, 60_000);
-    const onVis = () => document.visibilityState === "visible" && refresh();
-    document.addEventListener("visibilitychange", onVis);
-    window.addEventListener("focus", refresh);
-    return () => {
-      alive = false;
-      clearInterval(timer);
-      document.removeEventListener("visibilitychange", onVis);
-      window.removeEventListener("focus", refresh);
-    };
-  }, [status]);
-
+/** 一屏列表：数据由卡片统一持有，切 tab 只换筛选条件，不再发请求。 */
+function RequestList(props: {
+  items: MyRequest[] | null;
+  next: number | null;
+  busy: boolean;
+  err: string;
+  onMore: () => void;
+}) {
+  const { items, next, busy, err, onMore } = props;
   if (items === null && !err) return <Skeleton h="120px" />;
   return (
     <>
@@ -181,37 +138,145 @@ function List({ status, onSummary }: { status: Status; onSummary: (s: MyRequests
         </ul>
       )}
       {next != null && (
-        <Button variant="ghost" class="lp-reqs__more" onClick={() => load(next)} disabled={busy}>
-          {busy ? "读取中…" : "再看 50 条"}
+        <Button variant="ghost" class="lp-reqs__more" onClick={onMore} disabled={busy}>
+          {busy ? "读取中…" : "再看 200 条"}
         </Button>
       )}
     </>
   );
 }
 
+/** 一张卡里的一个 tab：只记 id、标题、按哪个状态筛。 */
+type TabSpec = { id: string; text: string; key: keyof MyRequests["summary"]; status: Status };
+
+const TABS: TabSpec[] = [
+  { id: "all", text: "全部", key: "total", status: "" },
+  { id: "ok", text: "成功", key: "ok", status: "ok" },
+  { id: "rejected", text: "被拒", key: "rejected", status: "rejected" },
+  { id: "error", text: "失败", key: "error", status: "error" },
+];
+
 /**
  * 「我的请求」：自己上次重置（每日 7 点）以来每一次请求的结果和原因。客户端把报错改写了（比如显示成「需要订阅」）时，
  * 来这里能看到本站给的原话。
+ *
+ * 一次拉整个服务日（最多 200 条，够覆盖一天），四个结果 tab 在本地筛：切 tab 是纯前端的事，
+ * 不发请求、不闪骨架。统计另算一个请求，第一次点开才发，之后用缓存。
  */
 export function MyRequestsCard() {
+  const [rows, setRows] = useState<MyRequest[] | null>(null);
+  const [next, setNext] = useState<number | null>(null);
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState("");
   const [sum, setSum] = useState<MyRequests["summary"] | null>(null);
+  const [stats, setStats] = useState<MyRequestStats | null>(null);
+  const [statsErr, setStatsErr] = useState("");
+  const [statsOpened, setStatsOpened] = useState(false);
+  /** 「重试」只递增这个：统计那个 effect 按它重跑一次 */
+  const [statsRetry, setStatsRetry] = useState(0);
+  /** 点过「再看 200 条」就不再自动刷新，避免打乱正在看的历史位置 */
+  const paged = useRef(false);
+
+  const load = async (before?: number) => {
+    setBusy(true);
+    setErr("");
+    if (before) paged.current = true;
+    try {
+      const d = await getJSON<MyRequests>(`/public/me/requests${before ? `?before=${before}` : ""}`);
+      // 翻页时追加；否则整替换（自动刷新走这条）
+      setRows((old) => (before && old ? [...old, ...d.items] : d.items));
+      setNext(d.next);
+      setSum(d.summary);
+    } catch (e) {
+      setErr(e instanceof ApiError ? e.message : "读取失败，请稍后重试");
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  useEffect(() => {
+    void load();
+  }, []);
+
+  // 自动刷新（站长 10-27）：页面可见时每 60 秒重读第一页；切回标签页 / 窗口聚焦时立刻读一次。
+  useEffect(() => {
+    const refresh = () => {
+      if (paged.current || document.visibilityState !== "visible") return;
+      void load();
+    };
+    const timer = setInterval(refresh, 60_000);
+    const onVis = () => document.visibilityState === "visible" && refresh();
+    document.addEventListener("visibilitychange", onVis);
+    window.addEventListener("focus", refresh);
+    return () => {
+      clearInterval(timer);
+      document.removeEventListener("visibilitychange", onVis);
+      window.removeEventListener("focus", refresh);
+    };
+  }, []);
+
+  // 统计：第一次点开才读，之后留在 state 里（切走再回来不发请求）；60 秒重读一次只在可见时。
+  const openStats = () => setStatsOpened(true);
+  useEffect(() => {
+    if (!statsOpened) return;
+    let alive = true;
+    const loadStats = async () => {
+      if (document.visibilityState === "hidden") return;
+      try {
+        const result = await getJSON<MyRequestStats>("/public/me/request-stats");
+        if (!alive) return;
+        setStats(result);
+        setStatsErr("");
+        setSum(result.summary);
+      } catch (e) {
+        if (alive) setStatsErr(e instanceof ApiError ? e.message : "统计读取失败，请稍后重试");
+      }
+    };
+    void loadStats();
+    const timer = setInterval(() => void loadStats(), 60_000);
+    return () => {
+      alive = false;
+      clearInterval(timer);
+    };
+  }, [statsOpened, statsRetry]);
+
   const n = (k: keyof MyRequests["summary"]) => (sum ? ` ${sum[k]}` : "");
-  const tab = (id: string, text: string, k: keyof MyRequests["summary"], status: Status) => ({
-    id,
-    label: `${text}${n(k)}`,
-    panel: () => <List status={status} onSummary={setSum} />,
-  });
+  const tabs = TABS.map((t) => ({
+    id: t.id,
+    label: `${t.text}${n(t.key)}`,
+    panel: () => (
+      <RequestList
+        items={rows === null ? null : t.status ? rows.filter((r) => r.status === t.status) : rows}
+        next={rows === null ? null : next}
+        busy={busy}
+        err={err}
+        onMore={() => void load(next ?? undefined)}
+      />
+    ),
+  }));
   return (
     // 不加 reveal：显影按「整块滚进来多少」算，长列表要滚很久才清楚
     <Card title="我的请求">
       <Tabs
         label="按结果筛选"
+        onSelect={(id) => id === "stats" && openStats()}
         tabs={[
-          tab("all", "全部", "total", ""),
-          tab("ok", "成功", "ok", "ok"),
-          tab("rejected", "被拒", "rejected", "rejected"),
-          tab("error", "失败", "error", "error"),
-          { id: "stats", label: "统计", panel: () => <RequestStatsPanel onSummary={setSum} /> },
+          ...tabs,
+          {
+            id: "stats",
+            label: "统计",
+            panel: () => (
+              <RequestStatsPanel
+                data={stats}
+                error={statsErr}
+                onRetry={() => {
+                  setStats(null);
+                  setStatsErr("");
+                  setStatsRetry((n) => n + 1);
+                }}
+              />
+            ),
+          },
         ]}
       />
     </Card>

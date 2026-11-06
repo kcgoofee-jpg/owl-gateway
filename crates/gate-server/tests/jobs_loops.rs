@@ -11,20 +11,6 @@ use serde_json::{Value, json};
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::time::{Duration, Instant};
 
-// ------------------------------------------------------------------ 维护里一步出错
-
-#[tokio::test]
-async fn a_failing_maintenance_step_is_shown_but_filed_only_once() {
-    let e = setup(&[]).await;
-    let s = &e.state;
-    // 数据目录消失 → 磁盘检查那一步失败；任务整体报错，但结果照常记进 job_last
-    std::fs::remove_dir_all(&s.env.data_dir).ok();
-    let err = run_job(s, "maintenance").await.unwrap_err();
-    assert!(err.to_string().contains("出错："), "{err}");
-    let last = Value::Object(s.jobs.last().await);
-    assert_eq!(last["maintenance"]["ok"], false);
-}
-
 // ------------------------------------------------------------------ 启动 / 关停
 
 #[tokio::test]

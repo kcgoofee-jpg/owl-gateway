@@ -124,7 +124,6 @@ pub async fn maintenance_once(state: &AppState) -> Vec<(&'static str, JobError)>
     }
     crate::registration::registrar_jobs(state).await;
     step!("settlements", "结算账本清理", prune_settled(state));
-    step!("disk", "磁盘检查", disk_check(state));
     failed
 }
 
@@ -154,25 +153,6 @@ async fn prune_settled(state: &AppState) -> Result<(), JobError> {
         .map_err(|e| JobError::new("DbError", e.to_string()))?;
     if n > 0 {
         tracing::info!(deleted = n, "pruned settled request rows");
-    }
-    Ok(())
-}
-
-/// 磁盘剩余不足 10% 提醒站长（同一条 6 小时一次）。
-async fn disk_check(state: &AppState) -> Result<(), JobError> {
-    let st = rustix::fs::statvfs(&state.env.data_dir)
-        .map_err(|e| JobError::new("OSError", e.to_string()))?;
-    // shutil.disk_usage：free = f_bavail * f_frsize，total = f_blocks * f_frsize
-    let free = st.f_bavail.saturating_mul(st.f_frsize);
-    let total = st.f_blocks.saturating_mul(st.f_frsize);
-    if total == 0 {
-        return Err(JobError::new("division_by_zero", "division by zero"));
-    }
-    if (free as f64) / (total as f64) < 0.10 {
-        tracing::warn!(
-            "服务器磁盘剩余不足 10%（剩 {} MB），请清理或扩容。",
-            free / (1 << 20)
-        );
     }
     Ok(())
 }

@@ -298,7 +298,9 @@ async fn public_me(State(state): State<AppState>, headers: HeaderMap) -> ApiResu
 }
 
 /// 「我的请求」每页条数。
-const MY_REQUESTS_PAGE: i64 = 50;
+/// 一次给多少条。一个服务日一个成员很少超过这个数（线上最多的成员一天一百多条），
+/// 「全部 / 成功 / 被拒 / 失败」四个 tab 因此只发一次请求，切换在本地筛。
+const MY_REQUESTS_PAGE: i64 = 200;
 
 /// 成员自己上次重置（服务日起点）以来的请求（首页「我的请求」）：`?before=<id>` 翻页，`?status=ok|rejected|error` 筛选。
 /// 只回成员自己能看的东西：不含 IP、客户端、上游账号；站付的 Anlas 不算成员花的。

@@ -204,8 +204,14 @@ export function Toaster() {
 export function Tabs(props: {
   tabs: Array<{ id: string; label: ComponentChildren; panel: () => ComponentChildren }>;
   label: string;
+  /** 切到某个 tab 时通知一次（面板内容自己按需加载时用） */
+  onSelect?: (id: string) => void;
 }) {
   const [active, setActive] = useState(props.tabs[0]?.id ?? "");
+  const select = (id: string) => {
+    setActive(id);
+    props.onSelect?.(id);
+  };
   const base = useId();
   const onKey = (e: KeyboardEvent) => {
     const i = props.tabs.findIndex((t) => t.id === active);
@@ -214,7 +220,7 @@ export function Tabs(props: {
     e.preventDefault();
     const next = props.tabs[(i + step + props.tabs.length) % props.tabs.length];
     if (next) {
-      setActive(next.id);
+      select(next.id);
       document.getElementById(`${base}-tab-${next.id}`)?.focus();
     }
   };
@@ -232,7 +238,7 @@ export function Tabs(props: {
             aria-selected={t.id === active}
             aria-controls={`${base}-panel`}
             tabIndex={t.id === active ? 0 : -1}
-            onClick={() => setActive(t.id)}
+            onClick={() => select(t.id)}
           >
             {t.label}
           </button>
