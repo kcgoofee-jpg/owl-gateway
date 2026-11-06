@@ -199,7 +199,14 @@ impl JobsState {
                 _ => None,
             })
             .unwrap_or_default();
-        *self.last.lock().await = parsed;
+        // 只认当前登记的任务：库里留着已删任务（abuse_scan / key_guard / anlas_reconcile …）的记录时，
+        // 原样装进内存会让它跟着下一次写回落库，永远清不掉。
+        let known: std::collections::HashSet<&str> = JOBS.iter().map(|j| j.name).collect();
+        let filtered = parsed
+            .into_iter()
+            .filter(|(name, _)| known.contains(name.as_str()))
+            .collect();
+        *self.last.lock().await = filtered;
         Ok(())
     }
 
