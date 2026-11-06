@@ -546,6 +546,19 @@
       change.style.display = "none";
       disconnect.style.display = "none";
       connActions.append(connect, change, disconnect);
+      var backupCap = document.createElement("p");
+      backupCap.className = "owl-cap owl-section";
+      backupCap.textContent = "自动备份";
+      var backupRow = dialogCheckbox("生成的图片自动转发到个人频道");
+      backupRow.label.style.cssText = "display:flex;align-items:center;gap:10px;cursor:pointer;";
+      var backupHelp = document.createElement("p");
+      backupHelp.className = "owl-help";
+      backupHelp.style.marginTop = "10px";
+      backupHelp.textContent = "出图成功后由服务器转发到已连接的个人频道；不包含生成参数，不备份到公共频道。开关独立于「记住分享选择」，需要在这里单独打开。";
+      var backupState = document.createElement("p");
+      backupState.className = "owl-help";
+      backupState.setAttribute("role", "status");
+      backupState.style.marginTop = "6px";
       var actions = document.createElement("div");
       actions.style.cssText = "display:flex;justify-content:flex-end;margin-top:24px;";
       var close = dialogButton("关闭", false);
@@ -587,8 +600,37 @@
           connect.style.display = binding ? "none" : "inline-block";
           change.style.display = binding ? "inline-block" : "none";
           disconnect.style.display = binding ? "inline-block" : "none";
+          fetch("/public/me/backup-settings", { credentials: "same-origin", cache: "no-store" })
+            .then(function (r) { return r.ok ? r.json() : null; })
+            .catch(function () { return null; })
+            .then(function (b) {
+              backupRow.box.disabled = !binding;
+              backupRow.box.checked = !!(b && b.enabled && binding);
+              if (!binding) backupRow.box.checked = false;
+              backupState.textContent = !binding
+                ? "连接个人频道后才能开启自动备份。"
+                : b && b.enabled
+                  ? "已开启：出图成功后自动转发到个人频道。"
+                  : "未开启。";
+            });
         });
       }
+      backupRow.box.addEventListener("change", function () {
+        backupRow.box.disabled = true;
+        fetch("/public/me/backup-settings", {
+          method: "PUT",
+          credentials: "same-origin",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({ enabled: backupRow.box.checked }),
+        })
+          .then(function (r) { return r.json().then(function (j) { return { ok: r.ok, j: j }; }); })
+          .then(function (res) {
+            if (res.ok) toast(backupRow.box.checked ? "自动备份已开启。" : "自动备份已关闭。");
+            else toast((res.j && (res.j.detail || res.j.message)) || "设置失败，请稍后再试。", true);
+          })
+          .catch(function () { toast("设置失败，请稍后再试。", true); })
+          .then(function () { refresh(); });
+      });
       save.addEventListener("click", function () {
         if (!select.value) return;
         save.disabled = true;
@@ -625,7 +667,7 @@
           .then(function () { disconnect.disabled = false; refresh(); });
       });
       close.addEventListener("click", function () { h.finish(null); });
-      h.dialog.append(title, choiceCap, destLabel, choiceRow, stateLine, connCap, connLine, connActions, actions);
+      h.dialog.append(title, choiceCap, destLabel, choiceRow, stateLine, connCap, connLine, connActions, backupCap, backupRow.label, backupHelp, backupState, actions);
       refresh();
     });
   }

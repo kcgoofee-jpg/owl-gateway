@@ -337,13 +337,18 @@ pub(super) async fn perform_generation(
         )
         .await;
     state.record_upstream(true);
+    // 工作台自动备份：响应体已完整收到（MAX_RESPONSE_BYTES 内），先按 ZIP/单图提取，
+    // 再交 on_generation_ok 异步确认开关与 workbench 资格后入队；不阻塞这里的响应返回。
+    let images = crate::backup::extract_images(&resp.body);
     let media = resp
         .headers
         .get("content-type")
         .and_then(|v| v.to_str().ok())
         .unwrap_or("application/octet-stream")
         .to_string();
-    Ok(track_delivery(binary(resp.body, &media, false), state, ctx))
+    let response = track_delivery(binary(resp.body, &media, false), state, ctx);
+    crate::backup::on_generation_ok(state, ctx, key.subject(), images).await;
+    Ok(response)
 }
 
 /// 这次请求的形态摘要（只用我们自己发出的数据，绝不碰上游响应体）。上游 5xx 时记下，

@@ -7,6 +7,7 @@ pub mod alerts;
 pub mod allowance;
 pub mod asn;
 pub mod auth;
+pub mod backup;
 pub mod body;
 pub mod bugs;
 pub mod client_hints;

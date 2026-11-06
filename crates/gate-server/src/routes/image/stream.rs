@@ -338,6 +338,20 @@ async fn perform_stream(
     let est0 = prep.est;
     let mut tracker =
         ImageEventTracker::new(image_count, wire).map_err(|e| InternalError(e.to_string()))?;
+    // 工作台自动备份：成员开启后，从 final 事件收下服务端已验证的完整图片（request_id + 序号去重
+    // 在 BackupCenter 里做）。只挂到符合条件的请求上：workbench 标记 + 成员 Key + 开关已开。
+    if crate::backup::applies_to(&ctx.origin().2, key.subject()) {
+        let backup_state = state.clone();
+        let member = key.subject().to_string();
+        let request_id = ctx.internal_id();
+        if crate::backup::enabled(state, &member).await {
+            tracker.set_image_sink(move |index, bytes| {
+                backup_state
+                    .backup
+                    .enqueue(&member, &request_id, index, bytes.to_vec());
+            });
+        }
+    }
     let mut failure: Option<String> = None;
     let mut billing_uncertain = false;
     let mut local_reject = false;

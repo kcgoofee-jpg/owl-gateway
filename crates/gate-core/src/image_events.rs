@@ -154,6 +154,17 @@ pub struct InvalidExpectedImages;
 /// 内部：校验失败的标记，由 `frames` 统一转成 `_reject()`。
 struct Reject;
 
+/// 校验通过的 `final` 事件图片回调（newtype 为了手写 Debug：字节不该进日志）。
+type ImageSink = Box<dyn FnMut(i64, &[u8]) + Send>;
+
+struct NamedSink(ImageSink);
+
+impl std::fmt::Debug for NamedSink {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str("image_sink")
+    }
+}
+
 #[derive(Debug)]
 pub struct ImageEventTracker {
     expected_images: i64,
@@ -167,6 +178,8 @@ pub struct ImageEventTracker {
     binary: Vec<u8>,
     total_bytes: u64,
     closed: bool,
+    /// 服务端自动备份用它收集已完成图片；转发路径不受影响。
+    image_sink: Option<NamedSink>,
 }
 
 impl ImageEventTracker {
@@ -197,7 +210,13 @@ impl ImageEventTracker {
             binary: Vec::new(),
             total_bytes: 0,
             closed: false,
+            image_sink: None,
         })
+    }
+
+    /// 收集校验通过的 `final` 事件图片（samp_ix → 字节）。自动备份用；不设置则行为不变。
+    pub fn set_image_sink(&mut self, sink: impl FnMut(i64, &[u8]) + Send + 'static) {
+        self.image_sink = Some(NamedSink(Box::new(sink)));
     }
 
     pub fn failed(&self) -> bool {
@@ -394,7 +413,12 @@ impl ImageEventTracker {
         if !image_envelope(&decoded) {
             return Err(Reject);
         }
-        self.completed.insert(sample);
+        // 每个 samp_ix 只交一次：重复的 final 帧不再回调（自动备份按它去重）。
+        if self.completed.insert(sample)
+            && let Some(sink) = self.image_sink.as_mut()
+        {
+            (sink.0)(sample, &decoded);
+        }
         Ok(())
     }
 }
@@ -449,6 +473,32 @@ mod tests {
         assert_eq!(out.frames.len(), 2);
         assert_eq!(out.frames[0].completed_after, 1);
         assert_eq!(t.completed_images(), 1);
+    }
+
+    #[test]
+    fn image_sink_receives_each_final_exactly_once() {
+        use std::sync::Mutex;
+        // 自动备份的钩子：每个 samp_ix 只交一次字节，重复 final 帧不重复回调。
+        let mut t = ImageEventTracker::new(3, WireFormat::Sse).unwrap();
+        let seen: std::sync::Arc<Mutex<Vec<(i64, usize)>>> = Default::default();
+        let sink_seen = std::sync::Arc::clone(&seen);
+        t.set_image_sink(move |index, bytes| {
+            sink_seen.lock().unwrap().push((index, bytes.len()));
+        });
+        t.frames(&[sse_final(0), sse_final(1), sse_final(1)].concat());
+        assert_eq!(
+            *seen.lock().unwrap(),
+            vec![(0, png().len()), (1, png().len())]
+        );
+        // error 事件之后没有 final，sink 不再收到东西。
+        let mut t2 = ImageEventTracker::new(1, WireFormat::Sse).unwrap();
+        let got: std::sync::Arc<Mutex<Vec<i64>>> = Default::default();
+        let sink_got = std::sync::Arc::clone(&got);
+        t2.set_image_sink(move |index, _| sink_got.lock().unwrap().push(index));
+        let mut stream = sse_final(0);
+        stream.extend_from_slice(b"event: error\ndata: {\"message\":\"boom\"}\n\n");
+        t2.frames(&stream);
+        assert_eq!(*got.lock().unwrap(), vec![0]);
     }
 
     #[test]

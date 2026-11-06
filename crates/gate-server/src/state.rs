@@ -80,6 +80,8 @@ pub struct Inner {
     pub cooldown: ImageCooldown,
     pub pauses: KeyPauses,
     pub tags: TagQueue,
+    /// 工作台自动备份（成员主动开启）：内存队列 + 投递 worker 的共享中心。
+    pub backup: crate::backup::BackupCenter,
     /// 后台运营接口的进程内状态（测试告警节流、运行期限制写锁、Anlas 核对互斥）。
     pub ops: crate::ops::Shared,
     /// V5 官方免费额度缓存（只有真实出图会刷新）。
@@ -212,6 +214,7 @@ impl AppState {
             cooldown: ImageCooldown::default(),
             pauses: KeyPauses::default(),
             tags: TagQueue::default(),
+            backup: crate::backup::BackupCenter::default(),
             ops: crate::ops::Shared::default(),
             allowance,
             health: UpstreamHealth::default(),
@@ -238,6 +241,8 @@ impl AppState {
 
     async fn startup(&self, now: f64) -> anyhow::Result<()> {
         self.load_runtime_limits().await?;
+        // 自动备份 worker：内存队列投递，重启即清（不恢复、不重发）。
+        crate::backup::spawn_worker(self.clone());
         // Recover only durable local state. Never replay an upstream generation POST.
         let pending = self.db.recover_request_settlements(now).await?;
         for row in pending.iter().filter(|r| r.status == "result_saved") {

@@ -1,7 +1,7 @@
 //! 路由表。按接口分组：公开页面与状态、成员接口（出图 / 工具 / 补全 / 查询自己的额度）、成员页、机器人桥接、后台。
 
 pub mod admin;
-mod explore;
+pub(crate) mod explore;
 mod image;
 mod me;
 mod member;
@@ -25,6 +25,7 @@ pub fn router(state: AppState) -> Router {
         .merge(pages::router())
         .merge(image::router())
         .merge(explore::router())
+        .merge(crate::backup::router())
         .merge(public::router())
         .merge(me::router())
         .merge(registration::router())
