@@ -96,12 +96,26 @@ log "⑥ 删已下线功能的表与设置"
 sqlite3 "$DB" "DROP TABLE IF EXISTS abuse_signals;"
 sqlite3 "$DB" "DROP TABLE IF EXISTS anlas_reconciliations;"
 sqlite3 "$DB" <<'SQL'
+-- 只删「代码里已经 0 引用」的设置键：已下线功能留下的残留状态。
+-- 判断方法：逐键 grep 源码（含动态拼接的 runtime_* 要排除），确认无人再读。
 DELETE FROM site_settings WHERE key IN (
+  -- 日志保留 / Anlas 核对 / 全站功能开关
   'usage_origin_keep_days','anlas_reconciliation_retry_at','features_global',
+  'sitepaid_hint_dismissed',
+  -- 自动驾驶（已删；熔断的 autopilot_breaker_until 是新代码在用，不在此列）
   'autopilot_breaker','autopilot_economy','autopilot_economy_at','autopilot_history',
-  'autopilot_key_guard','autopilot_last','autopilot_slots','kernel_last',
+  'autopilot_key_guard','autopilot_last','autopilot_slots','kernel_last','economy_mode',
+  -- 额度算法实验（影子对比 / 动态额度）
   'quota_shadow_history','quota_shadow_state','quota_algo_history','quota_algo_last',
-  'sitepaid_hint_dismissed'
+  'quota_algo_day','quota_base_now','quota_ceiling','quota_ceiling_max','quota_step',
+  'quota_v5_day_plan',
+  -- Anlas 自动分配（anlas_auto 早下线）
+  'anlas_member_daily_cap','anlas_min_key_age_days',
+  -- 防分享打分 / 网页登录暂停开关 / 一次性确认
+  'share_guard_mode','web_login_paused','global_daily_anlas_until',
+  'ack_registration_ready','ack_v5_oversell',
+  -- 成员规则迁移标记（迁移代码已整体删除，标记只剩占位）
+  'member_policy_v1_migrated'
 );
 SQL
 

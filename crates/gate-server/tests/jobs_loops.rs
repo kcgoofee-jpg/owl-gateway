@@ -78,6 +78,9 @@ fn role_removals(discord: &MockUpstream) -> Vec<String> {
 
 #[tokio::test]
 async fn idle_recycle_switched_off_never_deletes_anything() {
+    // 时钟是全局的：本用例要按真实时间算「闲置天数」，先解冻并独占，
+    // 免得别的用例冻着时钟时把它算歪（CI 上并行跑会碰到）。
+    let _clock = clock(None).await;
     // 关掉回收（KEY_INACTIVITY_DELETE_DAYS=0；线上 10-13 起是 3，开着）
     let discord = MockUpstream::start().await;
     let e = setup(&discord_env(&discord.url(), "0")).await;
@@ -134,6 +137,9 @@ async fn idle_recycle_switched_off_never_deletes_anything() {
 
 #[tokio::test]
 async fn idle_recycle_deletes_and_logs_without_banning_when_switched_on() {
+    // 时钟是全局的：本用例要按真实时间算「闲置天数」，先解冻并独占，
+    // 免得别的用例冻着时钟时把它算歪（CI 上并行跑会碰到）。
+    let _clock = clock(None).await;
     let discord = MockUpstream::start().await;
     let e = setup(&discord_env(&discord.url(), "3")).await;
     let now = e.state.now();
@@ -242,6 +248,9 @@ async fn idle_recycle_deletes_and_logs_without_banning_when_switched_on() {
 
 #[tokio::test]
 async fn idle_recycle_negative_days_is_off_too() {
+    // 时钟是全局的：本用例要按真实时间算「闲置天数」，先解冻并独占，
+    // 免得别的用例冻着时钟时把它算歪（CI 上并行跑会碰到）。
+    let _clock = clock(None).await;
     let e = setup(&[("KEY_INACTIVITY_DELETE_DAYS", "-5")]).await;
     let id = key(&e, 1, 400.0, &[]).await;
     assert_eq!(jobs::delete_inactive_keys(&e.state).await.unwrap(), 0);
