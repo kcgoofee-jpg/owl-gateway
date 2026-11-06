@@ -277,7 +277,7 @@ async fn a_failing_maintenance_step_is_shown_but_filed_only_once() {
 async fn startup_runs_every_job_and_shutdown_finishes_promptly() {
     let e = setup(&[]).await;
     let s = &e.state;
-    // 上次的运行记录在启动时读回来（包括已经不存在的任务）
+    // 上次的运行记录在启动时读回来；已经不存在的任务记录直接丢掉，不让它跟着写回落库
     s.db.set_setting(
         "job_last",
         &json!({"retired_job": {"at": 1.0, "ok": true, "ms": 0, "summary": "旧"}}).to_string(),
@@ -285,13 +285,17 @@ async fn startup_runs_every_job_and_shutdown_finishes_promptly() {
     .await
     .unwrap();
     jobs::startup(s).await.unwrap();
-    assert!(s.jobs.last().await.contains_key("retired_job"));
+    assert!(!s.jobs.last().await.contains_key("retired_job"));
     // 每个任务的第一轮都立即执行（不等一个周期）
     let start = Instant::now();
     loop {
         let raw = setting(s, "job_last").await.unwrap_or_default();
         let saved: Value = serde_json::from_str(&raw).unwrap_or(Value::Null);
-        if JOBS.iter().all(|j| saved.get(j.name).is_some()) && saved.get("retired_job").is_some() {
+        if JOBS.iter().all(|j| saved.get(j.name).is_some()) {
+            assert!(
+                saved.get("retired_job").is_none(),
+                "已删任务的记录不该留在库里"
+            );
             break;
         }
         assert!(
