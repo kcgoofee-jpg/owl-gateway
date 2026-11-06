@@ -44,7 +44,7 @@ mkdir -p "$ARCHIVE"
 chmod 700 "$ARCHIVE"
 
 log "② 整库快照 → $ARCHIVE/nai_gate.db.full.gz"
-/opt/owl/nai-ops snapshot "$ARCHIVE/nai_gate.db.full.gz"
+/opt/owl/nai-ops snapshot "$ARCHIVE/nai_gate.db.full.gz" --db "$DB"
 
 dump_table() {
   local table=$1

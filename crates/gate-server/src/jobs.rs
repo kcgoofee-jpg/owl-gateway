@@ -234,6 +234,15 @@ pub async fn idle_recycle_window(
         }
     }
     let counts = state.db.ok_image_counts(ranges.clone()).await?;
+    // 整段历史里一张成功图都没有：不是"站点一直没出图"，而是这段时间的日志不在了
+    // （例如维护时归档并删掉了旧日志）。历史不可考时不做跳过，按自然日算——
+    // 否则会把每一历史天都当成"站点没在服务"，闲置回收要空转满一个月。
+    if counts.iter().all(|c| *c == 0) {
+        return Ok(Some(idle::IdleWindow {
+            cutoff: now - days.max(0) as f64 * 86400.0,
+            skipped_days: 0,
+        }));
+    }
     let served: Vec<idle::ServedDay> = ranges
         .into_iter()
         .zip(counts)
