@@ -467,6 +467,7 @@
     ]);
   }
 
+  // 返回 true/false 而不是抛错：调用方要据此回滚勾选框。
   function savePreference(choice) {
     return fetch("/public/me/share-preference", {
       method: "PUT",
@@ -479,15 +480,24 @@
       }),
     }).then(function (r) {
       if (!r.ok) throw new Error("save failed");
-      toast("已记住，下次分享会带入这些选择。");
+      toast("已记住，下次分享直接发送。");
+      return true;
     }).catch(function () {
       toast("这次选择没能记住，下次会再询问。", true);
+      return false;
     });
   }
 
   function clearPreference() {
     return fetch("/public/me/share-preference", { method: "DELETE", credentials: "same-origin" })
-      .then(function (r) { if (!r.ok) throw new Error("clear failed"); });
+      .then(function (r) {
+        if (!r.ok) throw new Error("clear failed");
+        return true;
+      })
+      .catch(function () {
+        toast("清除失败，请稍后再试。", true);
+        return false;
+      });
   }
 
   function destinationName(value) {
@@ -514,21 +524,8 @@
 
     var metaRow = dialogCheckbox("附带生成参数（提示词、种子）");
     metaRow.label.style.marginTop = "14px";
-    var metaHelp = document.createElement("p");
-    metaHelp.className = "owl-help";
-    metaHelp.style.marginTop = "6px";
-    metaHelp.textContent = "勾选后连同提示词、种子一起发送；取消会先清除图片里的生成参数。";
-
-    var stateLine = document.createElement("p");
-    stateLine.className = "owl-help";
-    stateLine.setAttribute("role", "status");
-    stateLine.style.marginTop = "12px";
-
-    var choiceActions = document.createElement("div");
-    choiceActions.style.cssText = "display:flex;gap:8px;margin-top:10px;flex-wrap:wrap;";
-    var save = dialogButton("保存", true, true);
-    var clear = dialogButton("忘记", false, true);
-    choiceActions.append(save, clear);
+    var rememberRow = dialogCheckbox("记住分享选择");
+    rememberRow.label.style.marginTop = "12px";
 
     var connCap = document.createElement("p");
     connCap.className = "owl-cap owl-block";
@@ -555,10 +552,6 @@
     backupCap.className = "owl-cap owl-block";
     backupCap.textContent = "自动备份";
     var backupRow = dialogCheckbox("出图后自动转发到个人频道");
-    var backupState = document.createElement("p");
-    backupState.className = "owl-help";
-    backupState.setAttribute("role", "status");
-    backupState.style.marginTop = "6px";
 
     var actions = document.createElement("div");
     actions.className = "owl-actions";
@@ -566,13 +559,22 @@
     actions.append(back);
 
     root.append(
-      destLabel, metaRow.label, metaHelp, stateLine, choiceActions,
+      destLabel, metaRow.label, rememberRow.label,
       connCap, connLine, connActions,
-      backupCap, backupRow.label, backupState,
+      backupCap, backupRow.label,
       actions
     );
 
     var binding = null;
+
+    function save() {
+      return savePreference({
+        destination: select.value,
+        includeMetadata: metaRow.box.checked,
+        bindingId: binding && binding.binding_id,
+      });
+    }
+
     function refresh() {
       fetchShareState().then(function (s) {
         var pref = s && s[0], dest = s && s[1];
@@ -591,15 +593,11 @@
         if (remembered) {
           select.value = remembered.destination;
           metaRow.box.checked = remembered.include_metadata;
-          stateLine.textContent = "已记住：" + destinationName(remembered.destination) +
-            (remembered.include_metadata ? " · 带生成参数" : " · 不带生成参数") + "。";
         } else {
           select.value = binding ? "personal" : "owl";
           metaRow.box.checked = last ? last.include_metadata : true;
-          stateLine.textContent = last
-            ? "记住的选择已失效，下次分享会重新询问。"
-            : "未记住：每次分享都会确认。";
         }
+        rememberRow.box.checked = !!remembered;
         connText.textContent = binding ? "已连接" : "未连接";
         channelLink.style.display = binding ? "inline" : "none";
         if (binding) channelLink.href = binding.channel_url;
@@ -613,14 +611,32 @@
             backupRow.box.disabled = !binding;
             backupRow.box.checked = !!(b && b.enabled && binding);
             if (!binding) backupRow.box.checked = false;
-            backupState.textContent = !binding
-              ? "连接个人频道后才能开启。"
-              : b && b.enabled
-                ? "已开启：新出的图会自动发送。"
-                : "未开启。";
           });
       });
     }
+
+    rememberRow.box.addEventListener("change", function () {
+      rememberRow.box.disabled = true;
+      var want = rememberRow.box.checked;
+      var done = want
+        ? save()
+        : clearPreference().then(function (ok) {
+            if (ok) toast("已忘掉记住的选择，下次分享会再问一次。");
+            return ok;
+          });
+      done.then(function (ok) {
+        if (!ok) rememberRow.box.checked = !want;
+        rememberRow.box.disabled = false;
+        refresh();
+      });
+    });
+    // 已记住时改目的地或参数：直接更新记住的选择，不用再点一次保存。
+    select.addEventListener("change", function () {
+      if (rememberRow.box.checked) save().then(refresh);
+    });
+    metaRow.box.addEventListener("change", function () {
+      if (rememberRow.box.checked) save().then(refresh);
+    });
     backupRow.box.addEventListener("change", function () {
       backupRow.box.disabled = true;
       fetch("/public/me/backup-settings", {
@@ -637,29 +653,6 @@
         .catch(function () { toast("设置失败，请稍后再试。", true); })
         .then(function () { refresh(); });
     });
-    save.addEventListener("click", function () {
-      if (!select.value) return;
-      save.disabled = true;
-      savePreference({
-        destination: select.value,
-        includeMetadata: metaRow.box.checked,
-        bindingId: binding && binding.binding_id,
-      }).catch(function () {}).then(function () {
-        save.disabled = false;
-        refresh();
-      });
-    });
-    clear.addEventListener("click", function () {
-      clear.disabled = true;
-      clearPreference().then(function () {
-        toast("已忘掉记住的选择，下次分享会重新询问。");
-      }).catch(function () {
-        toast("清除失败，请稍后再试。", true);
-      }).then(function () {
-        clear.disabled = false;
-        refresh();
-      });
-    });
     connect.addEventListener("click", startPersonalChannelConnect);
     change.addEventListener("click", startPersonalChannelConnect);
     disconnect.addEventListener("click", function () {
@@ -675,6 +668,16 @@
     back.addEventListener("click", function () { onBack(); });
     refresh();
     return root;
+  }
+
+  // 记住过选择时点分享是直发的（没有一级弹窗），设置入口由成功 toast 提供：这里开一个独立弹窗，
+  // 内容和分享弹窗里的二级视图是同一块面板。
+  function openShareSettings() {
+    if (document.querySelector(".owl-share-dialog")) return;
+    openOwlDialog(function (h) {
+      h.dialog.setAttribute("aria-labelledby", "owl-share-settings-title");
+      h.dialog.appendChild(buildShareSettingsPanel(function () { h.finish(null); }));
+    });
   }
 
   // 个人频道授权：先占一个窗口再发起 OAuth（和之前一致，弹窗拦截给出提示）。
@@ -705,7 +708,7 @@
           : true;
 
       dialog.setAttribute("aria-labelledby", "owl-share-title");
-      dialog.setAttribute("aria-describedby", "owl-share-warning owl-share-help");
+      dialog.setAttribute("aria-describedby", "owl-share-warning");
       var confirmView = document.createElement("div");
       var title = document.createElement("h2");
       title.id = "owl-share-title";
@@ -738,11 +741,6 @@
       var metaRow = dialogCheckbox("附带生成参数（提示词、种子）");
       metaRow.label.style.marginTop = "18px";
       metaRow.box.checked = metaPref;
-      var metaHelp = document.createElement("p");
-      metaHelp.id = "owl-share-help";
-      metaHelp.className = "owl-help";
-      metaHelp.style.marginTop = "6px";
-      metaHelp.textContent = "勾选后连同提示词、种子一起发送；取消会先清除图片里的生成参数。";
 
       var rememberRow = dialogCheckbox("记住这次选择");
       rememberRow.label.style.marginTop = "14px";
@@ -765,7 +763,7 @@
 
       confirmView.append(
         title, warning, destinationLabel, connection,
-        metaRow.label, metaHelp, rememberRow.label, actions
+        metaRow.label, rememberRow.label, actions
       );
 
       var settingsView = document.createElement("div");
@@ -788,7 +786,7 @@
         confirmView.style.display = "";
         settingsView.style.display = "none";
         dialog.setAttribute("aria-labelledby", "owl-share-title");
-        dialog.setAttribute("aria-describedby", "owl-share-warning owl-share-help");
+        dialog.setAttribute("aria-describedby", "owl-share-warning");
         settingsBtn.focus();
         // 二级里改过记住的选择：回到一级时按最新状态回填。
         fetchShareState().then(function (s) {
@@ -873,7 +871,7 @@
     return u;
   };
 
-  function toast(text, bad) {
+  function toast(text, bad, action) {
     var el = document.createElement("div");
     el.textContent = text;
     el.setAttribute("data-owl-toast", "1");
@@ -883,10 +881,20 @@
       "font:600 14px/1.5 system-ui,-apple-system,'Segoe UI',sans-serif", "color:#fff",
       "background:" + (bad ? "#7a2c2c" : "#2f2a56"),
       "border:1px solid " + (bad ? "#d16060" : "#5b52a8"),
-      "box-shadow:0 8px 28px rgba(0,0,0,.45)", "text-align:center", "pointer-events:none",
+      "box-shadow:0 8px 28px rgba(0,0,0,.45)", "text-align:center",
+      action ? "pointer-events:auto" : "pointer-events:none",
     ].join(";");
+    if (action) {
+      var btn = document.createElement("button");
+      btn.type = "button";
+      btn.textContent = action.label;
+      btn.style.cssText = "margin-left:12px;padding:2px 0;border:0;background:none;font:inherit;color:" +
+        T.heading + ";text-decoration:underline;text-underline-offset:3px;cursor:pointer";
+      btn.addEventListener("click", function () { el.remove(); action.onClick(); });
+      el.appendChild(btn);
+    }
     document.body.appendChild(el);
-    setTimeout(function () { el.remove(); }, bad ? 6000 : 4000);
+    setTimeout(function () { el.remove(); }, bad ? 6000 : 5000);
   }
 
   // 画布里当前显示的那张图（最大的一张 img，blob:/data: 都算）
@@ -985,11 +993,28 @@
     var img = currentImage();
     if (!img) { toast("没找到当前这张图，先出图再上传。", true); return; }
     link.setAttribute("data-owl-busy", "1");
-    // 「记住的选择」只用来预填：入口（分享设置）在弹窗里，所以每次分享都先开弹窗，
-    // 不再静默直发——静默发完就没有地方能改设置了。
+    // 记住过就直接按记住的选择发；没记住才弹确认。分享设置入口在一级弹窗里，
+    // 直发这条路走完后用 5 秒的 toast 补一个入口，否则设置就没地方改了。
     fetchShareState().then(function (s) {
       // 读取的异步间隙里可能已经开了另一个弹窗（连点 / 前一个没关完）：这次点击作废。
       if (document.querySelector(".owl-share-dialog")) return;
+      var remembered = s && s[0] && s[0].remembered;
+      if (remembered) {
+        return doUpload(img, {
+          includeMetadata: remembered.include_metadata,
+          destination: remembered.destination,
+          bindingId: remembered.binding_id,
+        }).then(function (res) {
+          if (res.ok) {
+            toast(remembered.destination === "personal" ? "已发送到你的个人频道 ✅" : "已收到，正在发到图乐园频道 ✅", false, {
+              label: "分享设置",
+              onClick: openShareSettings,
+            });
+          } else {
+            toast((res.j && (res.j.detail || res.j.message)) || "提交失败，稍后再试。", true);
+          }
+        });
+      }
       return confirmShare(s && s[0]).then(function (choice) {
         if (choice === null) return;
         if (choice.remember) savePreference(choice);
