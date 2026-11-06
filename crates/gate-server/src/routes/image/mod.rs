@@ -412,12 +412,6 @@ async fn generate(state: AppState, req: Request, streaming: bool) -> ApiResult {
     check_rpm(&state, &key)?;
     require_feature(&key, "image")?;
     let body = read_image_payload(&parts.headers, body, IMAGE_BODY_LIMIT).await?;
-    // 参考图哈希：参数校验之前记，被拒的请求也留证据
-    state.record_ref_images(
-        &ctx,
-        key.id(),
-        crate::ref_images::images_in_params(body.get("parameters")),
-    );
     let prep = params::prepare(&state, &ctx, key, body).await?;
     if streaming {
         return stream::stream(state, ctx, prep).await;

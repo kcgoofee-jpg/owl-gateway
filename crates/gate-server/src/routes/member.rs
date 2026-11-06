@@ -203,12 +203,7 @@ async fn login_callback(
         {
             tracing::warn!(target: "web-login", "记电量快照失败：{e}");
         }
-        // 所在服务器 / 绑定的外部账号（scope guilds / connections；站长 10-23 防一人多号 / 共用 Key）
-        if let Some(g) = &who.guilds
-            && let Err(e) = state.db.record_discord_guilds(&who.id, g, now).await
-        {
-            tracing::warn!(target: "web-login", "记服务器列表失败：{e}");
-        }
+        // 绑定的外部账号（scope connections；站长 10-23 防一人多号 / 共用 Key）
         if let Some(c) = &who.connections
             && let Err(e) = state.db.record_discord_connections(&who.id, c, now).await
         {

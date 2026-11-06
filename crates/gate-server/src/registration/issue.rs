@@ -114,12 +114,7 @@ impl RegistrationService {
     /// 删除该用户的 Key 和领取记录，名额释放，用户可重新领取。`remove_role=false` 时只登记待办，
     /// 由后台同步稍后执行，避免在锁内等 Discord。
     pub async fn revoke(&self, discord_id: &str, remove_role: bool) -> Result<bool, DbError> {
-        if self
-            .db
-            .revoke_registration(discord_id)
-            .await?
-            .is_none()
-        {
+        if self.db.revoke_registration(discord_id).await?.is_none() {
             return Ok(false);
         }
         if remove_role {

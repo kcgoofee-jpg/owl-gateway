@@ -231,9 +231,6 @@ pub(super) async fn vibe(state: AppState, req: Request) -> Result<Response, ApiE
     if let Some(problem) = policy::validate_vibe_encoding(&body) {
         return Err(GateError::with_code(400, problem, reasons::PARAM).into());
     }
-    if let Some(img) = body["image"].as_str().filter(|s| !s.is_empty()) {
-        state.record_ref_images(&ctx, key.id(), vec![("vibe_encode", img.to_string())]);
-    }
     let model = text(&body["model"]);
     let payload = json!({
         "image": body["image"],

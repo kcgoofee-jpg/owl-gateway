@@ -1,6 +1,5 @@
-//! 防一人多号 / 共用 Key 的「足迹」（站长 10-23）：网页登录时读到的 Discord 服务器列表和绑定的外部账号。
-//! 设备指纹补充项和电量快照。
-//! 只记录、不自动处理；关联由每 6 小时的扫描任务写进 `abuse_signals`。永久保留。
+//! 防一人多号 / 共用 Key 的「足迹」：网页登录时读到的绑定外部账号、设备指纹补充项、电量快照。
+//! 只记录、不处理（关联扫描已删除）。
 
 use crate::{Db, Result};
 use gate_core::primitives::take_chars;
@@ -18,16 +17,6 @@ pub struct DiscordConnection {
     pub verified: bool,
 }
 
-/// 一张参考图的哈希（`ref_images` 一行）。
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct RefImage {
-    /// img2img / vibe / precise_ref / vibe_encode
-    pub kind: &'static str,
-    pub sha256: String,
-    /// 16 位十六进制；解不出图为 None
-    pub dhash: Option<String>,
-}
-
 /// 电量快照：level 0–1，是否在充电。
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct Battery {
@@ -36,30 +25,6 @@ pub struct Battery {
 }
 
 impl Db {
-    /// 记下一次请求里的参考图哈希。
-    pub async fn record_ref_images(
-        &self,
-        rid: &str,
-        key_id: i64,
-        images: &[RefImage],
-        now: f64,
-    ) -> Result<()> {
-        if images.is_empty() {
-            return Ok(());
-        }
-        let (rid, images) = (rid.to_string(), images.to_vec());
-        self.write(move |tx| {
-            let mut st = tx.prepare(
-                "INSERT INTO ref_images(rid, key_id, ts, kind, sha256, dhash) VALUES (?,?,?,?,?,?)",
-            )?;
-            for i in &images {
-                st.execute(params![rid, key_id, now, i.kind, i.sha256, i.dhash])?;
-            }
-            Ok(())
-        })
-        .await
-    }
-
     /// 存设备指纹补充项（同一个设备指纹 + 浏览器标记只留最新一份）；带了电量就一起记下电量和时刻。
     pub async fn upsert_device_extra(
         &self,
@@ -124,39 +89,6 @@ impl Db {
                 params![d, ts, level, charging],
             )?;
             Ok(true)
-        })
-        .await
-    }
-
-    /// 记下这次登录看到的服务器列表 `(guild_id, name)`：已有的刷新名字和 last_ts，新的补一行。
-    pub async fn record_discord_guilds(
-        &self,
-        discord_id: &str,
-        guilds: &[(String, String)],
-        now: f64,
-    ) -> Result<()> {
-        let d = discord_id.to_string();
-        let rows: Vec<(String, String)> = guilds
-            .iter()
-            .filter(|(g, _)| !g.is_empty())
-            .take(500)
-            .map(|(g, n)| {
-                (
-                    take_chars(g, 32).to_string(),
-                    take_chars(n, 100).to_string(),
-                )
-            })
-            .collect();
-        self.write(move |tx| {
-            let mut st = tx.prepare(
-                "INSERT INTO discord_user_guilds(discord_id, guild_id, name, first_ts, last_ts) \
-                 VALUES (?1,?2,?3,?4,?4) ON CONFLICT(discord_id, guild_id) \
-                 DO UPDATE SET name=excluded.name, last_ts=excluded.last_ts",
-            )?;
-            for (g, n) in &rows {
-                st.execute(params![d, g, n, now])?;
-            }
-            Ok(())
         })
         .await
     }

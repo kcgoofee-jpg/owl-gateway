@@ -104,7 +104,7 @@ pub(super) async fn delete_member_key(
         }
         return Ok(json!({"ok": true, "discord_id": discord_id, "banned": ban}));
     }
-    state.db.delete_key(key_id, state.now()).await?;
+    state.db.delete_key(key_id).await?;
     Ok(json!({"ok": true}))
 }
 

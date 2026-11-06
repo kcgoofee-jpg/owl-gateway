@@ -210,6 +210,8 @@ CREATE TABLE IF NOT EXISTS key_settings (    -- 官网生图页的客户端设�
     updated_at REAL NOT NULL
 );
 
+-- 健康检查的写探针：每次 health 提交一行（bit 取反），证明写线程和提交路径都活着。
+-- 不是业务数据，只有一行；删了它 healthcheck 就只剩读检查，写线程卡死看不出来。
 CREATE TABLE IF NOT EXISTS gateway_health_probe (id INTEGER PRIMARY KEY, bit INTEGER NOT NULL);
 
 CREATE TABLE IF NOT EXISTS member_rules (    -- 成员规则例外（默认值在 site_settings）
@@ -249,10 +251,6 @@ CREATE TABLE IF NOT EXISTS web_profiles (
     discord_id TEXT PRIMARY KEY, username TEXT NOT NULL DEFAULT '', display_name TEXT NOT NULL DEFAULT '',
     avatar TEXT NOT NULL DEFAULT '', updated_at REAL NOT NULL);
 
--- 删 Key 前留下的归属（Key 编号 → Discord 账号 + 显示名）。
-CREATE TABLE IF NOT EXISTS deleted_key_owners (
-    key_id INTEGER PRIMARY KEY, discord_id TEXT, name TEXT NOT NULL DEFAULT '', deleted_at REAL NOT NULL);
-
 -- 网页登录时的浏览器设备指纹（前端 Canvas/WebGL/屏幕/时区等合成的短哈希）。
 CREATE TABLE IF NOT EXISTS device_logins (
     discord_id TEXT NOT NULL, device_id TEXT NOT NULL, ip TEXT NOT NULL DEFAULT '', ts REAL NOT NULL, first_ts REAL,
@@ -278,12 +276,6 @@ CREATE TABLE IF NOT EXISTS browser_logins (
     PRIMARY KEY (discord_id, browser_id));
 CREATE INDEX IF NOT EXISTS idx_browser_logins_bid ON browser_logins (browser_id);
 
--- 网页登录时（OAuth scope `guilds`）读到的成员所在服务器列表。
-CREATE TABLE IF NOT EXISTS discord_user_guilds (
-    discord_id TEXT NOT NULL, guild_id TEXT NOT NULL, name TEXT NOT NULL DEFAULT '',
-    first_ts REAL NOT NULL, last_ts REAL NOT NULL, PRIMARY KEY (discord_id, guild_id));
-CREATE INDEX IF NOT EXISTS idx_discord_user_guilds_guild ON discord_user_guilds (guild_id);
-
 -- 网页登录时（OAuth scope `connections`）读到的绑定外部账号（Steam / GitHub / Twitch …）。
 CREATE TABLE IF NOT EXISTS discord_user_connections (
     discord_id TEXT NOT NULL, type TEXT NOT NULL, ext_id TEXT NOT NULL, name TEXT NOT NULL DEFAULT '',
@@ -303,9 +295,3 @@ CREATE TABLE IF NOT EXISTS device_battery (
     discord_id TEXT NOT NULL, ts REAL NOT NULL, level REAL NOT NULL, charging INTEGER NOT NULL);
 CREATE INDEX IF NOT EXISTS idx_device_battery_ts ON device_battery (ts);
 
--- 成员上传的参考图（图生图 / Vibe / 精确参考 / Vibe 编码）的哈希：sha256 和 64 位 dHash。不存图片本身。
-CREATE TABLE IF NOT EXISTS ref_images (
-    rid TEXT NOT NULL DEFAULT '', key_id INTEGER NOT NULL, ts REAL NOT NULL, kind TEXT NOT NULL,
-    sha256 TEXT NOT NULL, dhash TEXT);
-CREATE INDEX IF NOT EXISTS idx_ref_images_sha ON ref_images (sha256);
-CREATE INDEX IF NOT EXISTS idx_ref_images_ts ON ref_images (ts);

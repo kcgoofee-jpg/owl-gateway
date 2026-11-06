@@ -63,14 +63,30 @@ v2_to_v3() {
     echo "  usage_log 重建完成：$(q "SELECT count(*) FROM usage_log") 行，$(q "SELECT count(*) FROM pragma_table_info('usage_log')") 列"
 }
 
-MIGRATIONS=(v2_to_v3)
+# v3 → v4：删掉三张只写不读的表。
+# - discord_user_guilds：成员所在 Discord 服务器列表，没有任何查询读过它，占了全库 38%；
+# - deleted_key_owners：为已删除的周报留的「Key → Discord 账号」；
+# - ref_images：成员参考图的 sha256 / dHash，读它的是已删除的关联扫描。
+v3_to_v4() {
+    local gone=0
+    for t in discord_user_guilds deleted_key_owners ref_images; do
+        if [ "$(q "SELECT count(*) FROM sqlite_master WHERE type='table' AND name='$t'")" = "1" ]; then
+            echo "  删表 $t（$(q "SELECT count(*) FROM $t") 行，$(q "SELECT COALESCE(SUM(pgsize),0)/1024 FROM dbstat WHERE name LIKE '${t}%' OR name LIKE 'idx_${t}%'") KB）"
+            q "DROP TABLE $t;"
+            gone=$((gone + 1))
+        fi
+    done
+    echo "  删掉 $gone 张表"
+}
+
+MIGRATIONS=(v2_to_v3 v3_to_v4)
 
 before=$(q "PRAGMA user_version")
 echo "库：$DB"
 echo "当前结构版本：$before"
 while :; do
     v=$(q "PRAGMA user_version")
-    if [ "$v" -ge 3 ]; then
+    if [ "$v" -ge 4 ]; then
         break
     fi
     fn="v${v}_to_v$((v + 1))"

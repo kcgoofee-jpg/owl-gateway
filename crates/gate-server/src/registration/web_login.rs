@@ -97,29 +97,15 @@ impl RegistrationService {
             None
         };
         let u = DiscordUser::from_json(&user);
-        let (guilds, connections) = tokio::join!(
-            self.list_user_guilds(&bearer),
-            self.list_user_connections(&bearer)
-        );
+        let connections = self.list_user_connections(&bearer).await;
         Ok(WebIdentity {
             id,
             username: u.username,
             global_name: u.global_name,
             avatar: u.avatar,
             role,
-            guilds,
             connections,
         })
-    }
-
-    /// 用成员自己的授权查他所在的服务器（scope `guilds`）。任何失败都返回 None。
-    pub async fn list_user_guilds(&self, bearer: &str) -> Option<Vec<(String, String)>> {
-        let r = self
-            .send(Method::GET, "/users/@me/guilds", bearer, 8, None)
-            .await
-            .ok()
-            .filter(|r| r.status == 200)?;
-        Some(parse_guilds(&r.json()?))
     }
 
     /// 用成员自己的授权查他绑定的外部账号（scope `connections`）。任何失败都返回 None。

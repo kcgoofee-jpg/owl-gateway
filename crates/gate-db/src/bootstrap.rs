@@ -8,7 +8,7 @@ use rusqlite::Connection;
 const SCHEMA: &str = include_str!("sql/schema.sql");
 
 /// 结构版本。改 `schema.sql` 之后必须同时 +1，并给 `deploy/ops/migrate-schema.sh` 补一条迁移。
-pub const SCHEMA_VERSION: i64 = 3;
+pub const SCHEMA_VERSION: i64 = 4;
 
 /// 连接级设置：WAL + synchronous=NORMAL + 锁等待 15 秒。
 pub fn configure(conn: &Connection) -> rusqlite::Result<()> {
