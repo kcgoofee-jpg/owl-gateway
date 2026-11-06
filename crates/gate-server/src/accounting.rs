@@ -142,7 +142,6 @@ impl AppState {
         self.live_note(&e.status);
         let t = ctx.snapshot();
         let (client, ip) = self.origin_of(ctx);
-        let hints = ctx.hints();
         let state = self.clone();
         let ctx = ctx.clone();
         self.tasks.spawn(async move {
@@ -173,7 +172,6 @@ impl AppState {
                     token_id: t.token_id,
                     client,
                     ip,
-                    hints,
                     site_paid_anlas: e.site_paid_anlas,
                 };
                 if ctx.has_settlement_reservation() {
@@ -204,7 +202,6 @@ impl AppState {
                     token_id: t.token_id,
                     client,
                     ip,
-                    hints,
                 };
                 if settlement_reserved {
                     state
@@ -306,7 +303,6 @@ pub async fn error_ledger(State(state): State<AppState>, req: Request, next: Nex
         {
             let t = ctx.snapshot();
             let (client, ip) = state.origin_of(&ctx);
-            let hints = ctx.hints();
             let db = state.db.clone();
             let now = state.now();
             let kind = kind_for_path(&path).to_string();
@@ -323,7 +319,6 @@ pub async fn error_ledger(State(state): State<AppState>, req: Request, next: Nex
                             token_id: t.token_id,
                             client,
                             ip,
-                            hints,
                             ..Default::default()
                         },
                         now,

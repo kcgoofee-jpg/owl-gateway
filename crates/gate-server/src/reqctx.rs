@@ -53,7 +53,6 @@ struct Inner {
     xff: String,
     ua: String,
     /// 其余客户端特征（App 包名、语言、Sec-CH-UA、请求头指纹、浏览器标记哈希、Origin），保留期同 UA / IP。
-    hints: gate_db::repo::usage::ClientHints,
     /// 第一次发往上游时调用一次（实时图把这张图从「排队」移到「生成中」）。
     on_sent: Option<Box<dyn FnOnce() + Send>>,
     /// 上游客户端估计这一张何时开始（墙钟）：排队位次按它排。
@@ -103,7 +102,6 @@ impl ReqCtx {
                 peer: String::new(),
                 xff: String::new(),
                 ua: String::new(),
-                hints: Default::default(),
                 on_sent: None,
                 on_queued: None,
                 share: 0,
@@ -306,15 +304,6 @@ impl ReqCtx {
             i.xff = xff;
             i.ua = ua;
         });
-    }
-
-    /// 登记其余客户端特征（站长 10-23：防一人多号 / 共用 Key；见 `crate::client_hints`）。
-    pub fn set_hints(&self, hints: gate_db::repo::usage::ClientHints) {
-        self.with(|i| i.hints = hints);
-    }
-
-    pub fn hints(&self) -> gate_db::repo::usage::ClientHints {
-        self.with(|i| i.hints.clone())
     }
 
     /// `(直连对端, X-Forwarded-For, User-Agent)`

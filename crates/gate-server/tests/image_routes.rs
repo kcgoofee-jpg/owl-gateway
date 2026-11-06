@@ -2754,19 +2754,15 @@ async fn member_subscription_has_the_shape_clients_read() {
     assert_eq!(status, 401);
 }
 
-/// 站长 10-23：防一人多号 / 共用 Key，请求日志多记几项客户端特征；Authorization / Cookie 原文不落库。
+/// 请求日志只留 UA 与来源 IP：Authorization / Cookie 原文一律不落库，也不存客户端提示头。
 #[tokio::test]
-async fn client_hints_are_stored_with_the_usage_row() {
+async fn usage_row_keeps_no_secrets_and_no_client_hints() {
     let e = setup(&[]).await;
     let bid = "0123456789abcdef0123456789abcdef";
     let (status, _, body) = Call::new("POST", "/ai/generate-image")
         .bearer(TOKEN)
         .header("user-agent", "Mozilla/5.0 (Linux; Android 14; wv)")
         .header("x-requested-with", "com.example.tavern")
-        .header("accept-language", "zh-CN,zh;q=0.9")
-        .header("sec-ch-ua", "\"Chromium\";v=\"130\"")
-        .header("sec-ch-ua-platform", "\"Android\"")
-        .header("sec-ch-ua-mobile", "?1")
         .header("origin", "https://app.example/ignored-path")
         .header("cookie", format!("owl_bid={bid}; other=1"))
         .json(image_body("nai-diffusion-4-5-full", 1))
@@ -2774,26 +2770,19 @@ async fn client_hints_are_stored_with_the_usage_row() {
         .await;
     assert_eq!(status, 200, "{}", String::from_utf8_lossy(&body));
     tokio::time::sleep(std::time::Duration::from_millis(300)).await;
-    let rows = common::query(
-        &e.state.db,
-        "SELECT xrw, lang, chua, hfp, bid, origin FROM usage_log",
-    )
-    .await;
+    let rows = common::query(&e.state.db, "SELECT * FROM usage_log").await;
     assert_eq!(rows.len(), 1);
-    let r = &rows[0];
-    assert_eq!(r["xrw"], "com.example.tavern");
-    assert_eq!(r["lang"], "zh-CN,zh;q=0.9");
-    assert_eq!(r["chua"], "\"Chromium\";v=\"130\" | \"Android\" | ?1");
-    assert_eq!(r["origin"], "https://app.example");
-    let hfp = r["hfp"].as_str().unwrap();
-    assert_eq!(hfp.len(), 16);
-    let b = r["bid"].as_str().unwrap();
-    assert_eq!(b.len(), 16);
-    assert_ne!(b, &bid[..16], "只存哈希，不存 Cookie 原值");
-    // 整行里找不到 Key 和 Cookie 原文
-    let all = common::query(&e.state.db, "SELECT * FROM usage_log").await;
-    let dump = serde_json::to_string(&all).unwrap();
-    assert!(!dump.contains(TOKEN) && !dump.contains(bid));
+    let dump = serde_json::to_string(&rows).unwrap();
+    assert!(
+        !dump.contains(TOKEN) && !dump.contains(bid),
+        "Key 与 Cookie 原文不落库"
+    );
+    for gone in ["xrw", "lang", "chua", "hfp", "bid", "origin"] {
+        assert!(
+            !rows[0].as_object().unwrap().contains_key(gone),
+            "{gone} 列已删除"
+        );
+    }
 }
 
 /// 站长 10-23：参考图（图生图底图 / Vibe / 精确参考）记 sha256 和 dHash，不存图片；参数校验之前就记，被拒的也留证据。

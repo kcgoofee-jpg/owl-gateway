@@ -1,14 +1,14 @@
 //! 建库与版本校验。
 //!
 //! 只有一条路径：`sql/schema.sql` 建出最终形态。没有「老库补列」「老库重建」「下线表清理」
-//! 这类兼容分支——库不是当前形态就直接报错，不做在线迁移（迁移用 `deploy/ops/purge-legacy-logs.sh`）。
+//! 这类兼容分支——库不是当前形态就直接报错，不做在线迁移（迁移用 `deploy/ops/migrate-schema.sh`）。
 
 use rusqlite::Connection;
 
 const SCHEMA: &str = include_str!("sql/schema.sql");
 
-/// 结构版本。改 `schema.sql` 之后必须同时 +1，并给维护脚本补一条迁移。
-pub const SCHEMA_VERSION: i64 = 2;
+/// 结构版本。改 `schema.sql` 之后必须同时 +1，并给 `deploy/ops/migrate-schema.sh` 补一条迁移。
+pub const SCHEMA_VERSION: i64 = 3;
 
 /// 连接级设置：WAL + synchronous=NORMAL + 锁等待 15 秒。
 pub fn configure(conn: &Connection) -> rusqlite::Result<()> {
@@ -38,7 +38,7 @@ pub fn run(conn: &mut Connection) -> rusqlite::Result<()> {
         return Err(rusqlite::Error::SqliteFailure(
             rusqlite::ffi::Error::new(rusqlite::ffi::SQLITE_MISMATCH),
             Some(format!(
-                "库结构版本 {version}，本版要求 {SCHEMA_VERSION}：先跑 deploy/ops/purge-legacy-logs.sh 升级，不做在线迁移"
+                "库结构版本 {version}，本版要求 {SCHEMA_VERSION}：先跑 deploy/ops/migrate-schema.sh 升级，不做在线迁移"
             )),
         ));
     }

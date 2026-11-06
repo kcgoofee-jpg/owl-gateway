@@ -443,34 +443,6 @@ async fn ban_revokes_the_key_and_blocks_reissue_until_unban() {
     assert_eq!(issue(&e, MEMBER).await.0, 200);
 }
 
-/// 闲置回收拉黑的人再来领：说清原因（连续几天没出图、Key 已被自动回收），不说「站长停用」，也不提解封。
-#[tokio::test]
-async fn idle_recycled_member_is_told_why_when_registering_again() {
-    let (e, _d) = setup_reg(&[]).await;
-    open_registration(&e).await;
-    let info = gate_db::repo::discord::BanInfo {
-        reason: gate_core::idle::ban_reason(3),
-        banned_by: "系统".into(),
-        ..Default::default()
-    };
-    e.state
-        .db
-        .ban_discord(MEMBER, &info, e.state.now())
-        .await
-        .unwrap();
-    let again = issue(&e, MEMBER).await;
-    assert_eq!(
-        (again.0, detail(&again)),
-        (
-            403,
-            "你之前的 Key 连续 3 天没有出图，已被自动回收，这个 Discord 账号不能再领取 Key。"
-        )
-    );
-}
-
-// ------------------------------------------------------------------ 桥接：发 Key
-
-/// 没配 `REGISTER_EXPIRES_DAYS`：新 Key 不过期，欢迎私信里也没有「有效期」那一行
 #[tokio::test]
 async fn issued_key_never_expires_by_default() {
     let (e, _d) = setup_reg_with(&[], false).await;

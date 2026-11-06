@@ -29,7 +29,7 @@ curl -s "$A/queue-status"
 docker exec owl-gate nai-ops smoke http://127.0.0.1:8000 | tail -3    # 每 3 轮跑一次即可
 ```
 
-`usage_log` 列：`id ts key_id key_name kind model status images anlas tokens unconfirmed_anlas detail wait_ms dur_ms client up_status rid src ver reason token_id xrw lang chua hfp bid origin`。
+`usage_log` 列：`id ts key_id key_name kind model status images anlas tokens unconfirmed_anlas detail wait_ms dur_ms client up_status rid src reason token_id`。
 
 ## 判定阈值（触发即告警）
 

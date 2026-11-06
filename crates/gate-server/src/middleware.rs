@@ -56,7 +56,6 @@ pub async fn request_context(mut req: Request, next: Next) -> Response {
         ua = format!("{} ({})", kind.trim(), ua);
     }
     ctx.set_origin(&peer, &xff, &ua);
-    ctx.set_hints(crate::client_hints::from_headers(req.headers()));
     req.extensions_mut().insert(ctx.clone());
     let rid = ctx.rid();
     let mut resp = ctx.clone().scope(next.run(req)).await;

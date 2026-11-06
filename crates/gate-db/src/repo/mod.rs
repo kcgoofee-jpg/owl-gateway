@@ -38,15 +38,12 @@ pub const INVITE_TAG: &str = "邀请";
 /// 后台请求日志列表读出的列：usage_log 的全部列。
 /// `client` = 原始 User-Agent、`src` = 来源 IP，长期保留。
 pub(crate) const LOG_COLUMNS: &str = "id, ts, key_id, key_name, kind, model, status, images, anlas, tokens, \
-unconfirmed_anlas, detail, reason, wait_ms, dur_ms, up_status, rid, src, token_id, client, \
-xrw, lang, chua, hfp, bid, origin";
+unconfirmed_anlas, detail, reason, wait_ms, dur_ms, up_status, rid, src, token_id, client";
 /// 写 usage_log 一行（成功记账传空串 reason——和列默认值一样）。
 /// `client` = 请求的 User-Agent（截到 160 字符），`src` = 来源 IP（原文，长期保留）。
-/// 末尾六列是 `usage::ClientHints`。
 pub(crate) const INSERT_LOG: &str = "INSERT INTO usage_log (ts, key_id, key_name, kind, model, status, \
-images, anlas, tokens, detail, unconfirmed_anlas, wait_ms, dur_ms, up_status, rid, reason, token_id, client, src, \
-xrw, lang, chua, hfp, bid, origin) \
-VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)";
+images, anlas, tokens, detail, unconfirmed_anlas, wait_ms, dur_ms, up_status, rid, reason, token_id, client, src) \
+VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)";
 /// 计数器累加（列顺序：key_id, day, images, anlas, text_tokens, requests, v5, legacy_free_images）。
 pub(crate) const UPSERT_COUNTERS: &str = "INSERT INTO counters \
 (key_id, day, images, anlas, text_tokens, requests, v5, legacy_free_images) \

@@ -142,6 +142,14 @@ restart_container() {
   probe_start
   log "停 $GATE：不再接新请求，在途和已排队的图收尾（最多 120 秒）；这期间网站显示维护页"
   "${COMPOSE[@]}" stop -t 120 gate
+  # 库结构和镜像必须配套：网关已经停了，这时把库升到当前 SCHEMA_VERSION（幂等，已是最新版就什么都不做）
+  if [[ -x $OWL_DIR/ops/migrate-schema.sh ]]; then
+    log "升级库结构（网关已停）"
+    "$OWL_DIR/ops/migrate-schema.sh" "$LEGACY_DIR/data/nai_gate.db" ||
+      die "库结构升级失败：库和镜像不配套，别起新网关，先看上面输出"
+  else
+    log "没有 $OWL_DIR/ops/migrate-schema.sh：跳过库结构升级"
+  fi
   log "起新的 $GATE"
   if ! "${COMPOSE[@]}" up -d --remove-orphans || ! wait_healthy 90 || ! smoke; then
     "${COMPOSE[@]}" logs --tail 80 gate || true

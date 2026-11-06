@@ -112,12 +112,14 @@ scp -q "${KEY[@]}" "${files[@]}" "root@$OWL_IP:/opt/owl/" 2>&1 | mask
 # 服务器上的定时脚本（cron 和 systemd timer 调的那几个）也要跟着版本走。
 # 以前它们只存在于 /opt/owl/ops/，仓库里没有：close-stale-deliveries.sh 在线上每 5 分钟跑，
 # 却既没进仓库、也没进 S3 备份包，改坏了或丢了都没处找。
-# 只同步 /opt/owl/ops/ 里真正被调度的三个；naigate-* 和 asn-update.sh 由 harden.sh 装到 /usr/local/bin，不在这。
+# 只同步 /opt/owl/ops/ 里真正会被调度的几个（含 cutover 停机窗口里跑的 migrate-schema.sh）；
+# naigate-* 和 asn-update.sh 由 harden.sh 装到 /usr/local/bin，不在这。
 say "syncing server-side ops scripts"
-runtime_ops=(nightly_backup.sh close-stale-deliveries.sh)
+runtime_ops=(nightly_backup.sh close-stale-deliveries.sh migrate-schema.sh)
 local_ops=() remote_ops=()
 for f in "${runtime_ops[@]}"; do
-  local_ops+=("deploy/v3/ops/$f")
+  # migrate-schema.sh 放在 deploy/ops/（和 purge-legacy-logs.sh 一起），其余在 deploy/v3/ops/
+  if [[ $f == migrate-schema.sh ]]; then local_ops+=("deploy/ops/$f"); else local_ops+=("deploy/v3/ops/$f"); fi
   remote_ops+=("/opt/owl/ops/$f")
 done
 remote "mkdir -p /opt/owl/ops" >/dev/null

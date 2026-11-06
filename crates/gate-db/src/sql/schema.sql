@@ -86,13 +86,7 @@ CREATE TABLE IF NOT EXISTS usage_log (
     rid TEXT NOT NULL DEFAULT '',         -- 请求编号（响应头 X-Request-Id），成员报错时据此定位
     src TEXT NOT NULL DEFAULT '',         -- 来源 IP 原文
     reason TEXT NOT NULL DEFAULT '',      -- 拒绝原因码（gate_core::reasons）：统计按它数，不再 LIKE 中文 detail
-    token_id TEXT,                        -- 这条请求最后由哪个上游账号处理；鉴权 / 准入阶段被拒为 NULL
-    xrw TEXT,                             -- App 包名（X-Requested-With）
-    lang TEXT,                            -- Accept-Language
-    chua TEXT,                            -- Sec-CH-UA 三项
-    hfp TEXT,                             -- 请求头指纹
-    bid TEXT,                             -- 浏览器标记哈希
-    origin TEXT                           -- Origin
+    token_id TEXT                         -- 这条请求最后由哪个上游账号处理；鉴权 / 准入阶段被拒为 NULL
 );
 CREATE INDEX IF NOT EXISTS idx_log_ts ON usage_log (ts DESC);
 CREATE INDEX IF NOT EXISTS idx_log_key ON usage_log (key_id, ts DESC);

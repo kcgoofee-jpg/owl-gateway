@@ -31,13 +31,6 @@ export type UsageLog = {
   client: string;
   /** 处理这条请求的上游账号；没选号就被拒为 null */
   token_id: string | null;
-  /** 客户端特征（防一人多号）：X-Requested-With、Accept-Language、Sec-CH-UA、请求头指纹、浏览器标记哈希、Origin；没有为 null */
-  xrw?: string | null;
-  lang?: string | null;
-  chua?: string | null;
-  hfp?: string | null;
-  bid?: string | null;
-  origin?: string | null;
 };
 /** 同一组筛选条件下各状态的条数（不受 status 筛选影响） */
 export type LogSummary = {

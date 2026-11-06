@@ -34,8 +34,6 @@ pub struct Success {
     /// 请求的 User-Agent / 来源 IP（原文，长期保留）。
     pub client: String,
     pub ip: String,
-    /// Extra client headers (anti-abuse; 长期保留，与 `client` / `src` 一致).
-    pub hints: ClientHints,
     /// Anlas the site paid from the upstream account itself (not charged to the member's counters):
     /// written to `usage_log.anlas` together with `anlas`, left out of `counters`.
     pub site_paid_anlas: f64,
@@ -80,45 +78,6 @@ pub struct NewLog {
     /// 请求的 User-Agent / 来源 IP（原文，长期保留）。
     pub client: String,
     pub ip: String,
-    /// Extra client headers (anti-abuse; 长期保留，与 `client` / `src` 一致).
-    pub hints: ClientHints,
-}
-
-/// 请求里除 UA / IP 之外的客户端特征（站长 10-23：防一人多号 / 共用 Key，要能从日志里举证）。
-/// 都不含 Authorization / Cookie 原文；与 `client` / `src` 一样长期保留。
-/// 空串写成 NULL。
-#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, serde::Deserialize)]
-pub struct ClientHints {
-    /// X-Requested-With（安卓 WebView 套壳 App 的包名），截到 80 个码点。
-    pub xrw: String,
-    /// Accept-Language，截到 80。
-    pub lang: String,
-    /// Sec-CH-UA / -Platform / -Mobile 拼成一行，截到 160。
-    pub chua: String,
-    /// 请求头指纹：16 位十六进制（见 gate-server `client_hints::header_fingerprint`）。
-    pub hfp: String,
-    /// 浏览器标记 Cookie `owl_bid` 的 sha256 前 16 位十六进制（不存原值）。
-    pub bid: String,
-    /// Origin（只留 scheme://host[:port]），截到 120。
-    pub origin: String,
-}
-
-impl ClientHints {
-    /// 写库用：按列长截断，空串 → NULL。顺序同 `INSERT_LOG` 末尾的 xrw, lang, chua, hfp, bid, origin。
-    pub(crate) fn columns(&self) -> [Option<String>; 6] {
-        let col = |s: &str, n: usize| {
-            let t = primitives::take_chars(s.trim(), n);
-            (!t.is_empty()).then(|| t.to_string())
-        };
-        [
-            col(&self.xrw, 80),
-            col(&self.lang, 80),
-            col(&self.chua, 160),
-            col(&self.hfp, 16),
-            col(&self.bid, 16),
-            col(&self.origin, 120),
-        ]
-    }
 }
 
 /// 日志筛选条件。
@@ -210,7 +169,6 @@ pub(super) fn insert_usage_log(
     l: &NewLog,
     now: f64,
 ) -> rusqlite::Result<()> {
-    let h = l.hints.columns();
     tx.execute(
         INSERT_LOG,
         params![
@@ -232,13 +190,7 @@ pub(super) fn insert_usage_log(
             primitives::take_chars(&l.reason, 24),
             l.token_id,
             primitives::take_chars(&l.client, 160),
-            primitives::take_chars(&l.ip, 64),
-            h[0],
-            h[1],
-            h[2],
-            h[3],
-            h[4],
-            h[5]
+            primitives::take_chars(&l.ip, 64)
         ],
     )?;
     Ok(())

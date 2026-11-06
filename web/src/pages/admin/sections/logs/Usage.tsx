@@ -1,6 +1,6 @@
 /** 请求日志：每次请求一行；按成员 / 功能 / 文生图版本 / 状态 / 编号筛选，服务端分页。完整 IP 放在展开详情中。 */
 import { ChevronDown } from "lucide-preact";
-import { Fragment } from "preact";
+
 import { useEffect, useRef, useState } from "preact/hooks";
 import { fullTime, num, withUnit } from "../../../../lib/format";
 import { Badge, Button, CopyField, cx, SearchSelect, Skeleton } from "../../../../ui";
@@ -129,17 +129,7 @@ function What(props: { l: UsageLog }) {
   );
 }
 
-/** 展开后的客户端特征：字段名 → 标签 */
-const HINTS = [
-  ["xrw", "App 包名"],
-  ["lang", "语言"],
-  ["chua", "浏览器标识"],
-  ["hfp", "请求头指纹"],
-  ["bid", "浏览器标记"],
-  ["origin", "来源页"],
-] as const;
-
-/** 展开后的详情：编号、上游账号、完整 UA、客户端特征、说明 */
+/** 展开后的详情：编号、上游账号、完整 UA、来源 IP、说明 */
 function More(props: { l: UsageLog }) {
   const { l } = props;
   return (
@@ -161,12 +151,6 @@ function More(props: { l: UsageLog }) {
       <dd class="mono">{l.src || <span class="muted">—</span>}</dd>
       <dt>UA 原文</dt>
       <dd class="lg-wrap">{l.client || <span class="muted">—</span>}</dd>
-      {HINTS.map(([k, label]) => (
-        <Fragment key={k}>
-          <dt>{label}</dt>
-          <dd class="lg-wrap mono">{l[k] || <span class="muted">—</span>}</dd>
-        </Fragment>
-      ))}
       <dt>说明</dt>
       <dd class="lg-wrap">{l.detail || <span class="muted">—</span>}</dd>
     </dl>

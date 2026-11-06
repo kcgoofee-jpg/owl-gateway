@@ -179,8 +179,8 @@ impl RegistrationService {
             }
         }
         let _g = self.lock.lock().await;
-        if let Some(reason) = self.ban_reason(user_id).await? {
-            return denied(gate_core::idle::banned_notice(&reason));
+        if self.ban_reason(user_id).await?.is_some() {
+            return denied("这个 Discord 账号已被站长停用，无法领取 Key。");
         }
         self.release_if_expired(user_id, true).await?;
         if self.db.registration_key_id(user_id).await?.is_some() {
