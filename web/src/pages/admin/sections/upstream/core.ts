@@ -56,20 +56,15 @@ export type WindowStats = {
 };
 
 /** 由对账快照 + 之后的账本用量推算的 Anlas 余额。 */
+/** 上游账号余额：来自 upstream_snapshots 的实测读数（不推算）。 */
 export type AnlasEstimate = {
-  cycle_rolled: boolean;
   balance: number | null;
   fixed: number | null;
-  purchased: number | null;
-  expires_at: number | null;
-  days_left: number | null;
-  avg_daily: number;
-  projection: "unknown" | "runs_out" | "waste";
-  projection_value: number | null;
+  v5_percent: number | null;
+  /** 这条读数的时刻（Unix 秒） */
+  at: number;
   snapshot_age_days: number;
   stale: boolean;
-  approximate: boolean;
-  unattributed_anlas: number;
 };
 
 /** 「上游」页的一行账号：令牌池状态 + 官方读数 + 本站观测，按 token_id 合并。 */
@@ -110,10 +105,9 @@ export type UpstreamPage = {
   pool_configured: boolean;
   accounts: UpstreamAccount[];
   threshold: number;
-  reconciliation: Recon;
   settlements: Settlement[];
   info_refresh: { last_attempt_at: number | null; cooldown_seconds: number; retry_after: number };
-  /** 核对（POST /admin/api/reconciliation）与释放未知预留共用的会话 CSRF */
+  /** 释放未知预留用的会话 CSRF */
   csrf_token: string;
   /** 手动查官方信息（POST /admin/api/upstream/refresh-info）的会话 CSRF */
   csrf_info: string;
@@ -152,31 +146,7 @@ export function tokenFormatProblem(t: string): string | null {
 export const anlasText = (n: number | null | undefined): string =>
   n == null ? "—" : n.toLocaleString("zh-CN", { maximumFractionDigits: 2 });
 
-export const daysLeftText = (b: AnlasEstimate): string =>
-  b.days_left == null ? "—" : b.days_left < 1 ? "不到 1 天" : `${Math.floor(b.days_left)} 天`;
-
-export const ageText = (days: number): string => (days < 1 ? "今天核对过" : `${Math.round(days)} 天前核对`);
-
-/** Anlas 核对（POST /admin/api/reconciliation）。 */
-export type Comparison = {
-  reason: string | null;
-  since?: number;
-  balance_decrease?: number;
-  recorded?: number;
-  /** 其中账号自己付的站付 V5（不进成员计数） */
-  site_paid?: number;
-  difference?: number;
-  unconfirmed_anlas?: number;
-  unconfirmed_requests?: number;
-};
-export type ReconRecord = {
-  id: number;
-  checked_at: number;
-  accounts: Record<string, unknown>;
-  balance: number;
-  comparison: Comparison;
-};
-export type Recon = { history: ReconRecord[]; retry_after: number; running: boolean };
+export const ageText = (days: number): string => (days < 1 ? "刚刚" : `${Math.round(days)} 天前`);
 
 export const RECON_REASONS: Record<string, string> = {
   first: "首次记录",
@@ -214,10 +184,3 @@ export function duration(seconds: number | null | undefined): string {
 
 export const answer = (v: boolean | null | undefined, yes: string, no: string): string =>
   v == null ? "—" : v ? yes : no;
-
-export function projectionText(b: AnlasEstimate | null): string {
-  if (!b || b.projection_value == null || b.cycle_rolled) return "—";
-  if (b.projection === "runs_out") return `约 ${reading(b.projection_value)} 天用完固定额度`;
-  if (b.projection === "waste") return `到期剩余约 ${anlasText(b.projection_value)} 固定 Anlas`;
-  return "—";
-}

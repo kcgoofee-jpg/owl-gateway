@@ -4,9 +4,7 @@ import {
   ageText,
   anlasText,
   answer,
-  daysLeftText,
   duration,
-  projectionText,
   reading,
   tokenFormatProblem,
   tokenState,
@@ -36,28 +34,19 @@ describe("readings text", () => {
     expect(anlasText(null)).toBe("—");
     expect(anlasText(1234.567)).toBe("1,234.57");
   });
-  it("核对推算的续费与核对时间", () => {
-    const est = (over: Partial<AnlasEstimate>): AnlasEstimate => ({
-      cycle_rolled: false,
+  it("余额读数的时刻文案", () => {
+    const bal = (over: Partial<AnlasEstimate>): AnlasEstimate => ({
       balance: null,
       fixed: null,
-      purchased: null,
-      expires_at: null,
-      days_left: null,
-      avg_daily: 0,
-      projection: "unknown",
-      projection_value: null,
+      v5_percent: null,
+      at: 0,
       snapshot_age_days: 0,
       stale: false,
-      approximate: false,
-      unattributed_anlas: 0,
       ...over,
     });
-    expect(daysLeftText(est({ days_left: 0.4 }))).toBe("不到 1 天");
-    expect(daysLeftText(est({ days_left: 9.8 }))).toBe("9 天");
-    expect(daysLeftText(est({}))).toBe("—");
-    expect(ageText(0.2)).toBe("今天核对过");
-    expect(ageText(3.4)).toBe("3 天前核对");
+    expect(bal({ balance: 970 }).balance).toBe(970);
+    expect(ageText(0.2)).toBe("刚刚");
+    expect(ageText(3.4)).toBe("3 天前");
   });
 });
 
@@ -69,5 +58,4 @@ it("读数保留零与否定值，缺失值留空", () => {
   expect(duration(0)).toBe("0 秒");
   expect(duration(null)).toBe("—");
   expect(duration(3660)).toBe("1 小时 1 分钟");
-  expect(projectionText(null)).toBe("—");
 });

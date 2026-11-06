@@ -10,9 +10,7 @@ import {
   ageText,
   anlasText,
   answer,
-  daysLeftText,
   duration,
-  projectionText,
   reading,
   TOKEN_SPECS,
   tokenState,
@@ -226,25 +224,13 @@ export function AccountCard(props: {
           />
           {v?.error && <Notice tone="warn">{v.error}</Notice>}
         </Block>
-        <Block title="余额推算" updated={b ? ageText(b.snapshot_age_days) : "未核对"}>
+        <Block title="余额读数" updated={b ? ageText(b.snapshot_age_days) : "还没有快照"}>
           <Facts
             rows={[
-              ["推算总额", anlasText(b?.balance)],
-              ["固定 Anlas", anlasText(b?.fixed)],
-              ["购买 Anlas", anlasText(b?.purchased)],
-              ["日均 · 近 3 天", b ? reading(b.avg_daily, " Anlas") : "—"],
-              ["订阅剩余", b ? daysLeftText(b) : "—"],
-              ["核对到期日", accountTime(b?.expires_at)],
-              ["到期预测", projectionText(b)],
-              ["未归属消耗", anlasText(b?.unattributed_anlas)],
-              [
-                "推算状态",
-                !b
-                  ? "未核对"
-                  : [b.cycle_rolled && "周期已滚动", b.stale && "已陈旧", b.approximate && "近似值"]
-                      .filter(Boolean)
-                      .join(" · ") || "已更新",
-              ],
+              ["Anlas 余额", anlasText(b?.balance)],
+              ["V5 剩余", reading(b?.v5_percent, "%")],
+              ["读数时刻", b ? accountTime(b.at) : "—"],
+              ["读数状态", !b ? "还没有快照" : b.stale ? "已陈旧" : "最新"],
             ]}
           />
         </Block>
