@@ -168,10 +168,7 @@ test.describe("已登录", () => {
   });
 
   /** 拦下成员接口，在真实数据上改一改（让列表里的极端情形可预期） */
-  async function mockMembers(
-    page: Page,
-    edit: (body: { members: Array<Record<string, unknown>> }) => void,
-  ) {
+  async function mockMembers(page: Page, edit: (body: { members: Array<Record<string, unknown>> }) => void) {
     await page.route("**/admin/api/members", async (route) => {
       const res = await route.fetch();
       const body = await res.json();
