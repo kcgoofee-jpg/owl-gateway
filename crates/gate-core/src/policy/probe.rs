@@ -9,8 +9,6 @@ use super::*;
 /// 另有客户端发提示词 `test`、64x64、1 步。7 天里没有任何正常请求同时满足「步数 ≤ 5 且面积 ≤ 512x512」，
 /// 正常提示词平均约 1000 字符。三个阈值必须同时满足（再加「普通生图、单张、无角色」）才算测试。
 pub const TEST_REQUEST_MAX_STEPS: i64 = 5;
-/// 见 [`TEST_REQUEST_MAX_STEPS`]：宽 × 高不超过 512 × 512。
-pub const TEST_REQUEST_MAX_PIXELS: i64 = 512 * 512;
 /// 见 [`TEST_REQUEST_MAX_STEPS`]：提示词（去首尾空白后）不超过 40 个字符。
 pub const TEST_REQUEST_MAX_PROMPT_CHARS: usize = 40;
 

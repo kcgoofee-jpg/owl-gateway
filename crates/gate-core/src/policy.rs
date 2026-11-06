@@ -83,6 +83,10 @@ pub const TOOL_MAX_PIXELS: u64 = 3_145_728;
 /// 任何一边的像素上限（解码与校验用）。
 pub const MAX_SIDE: u32 = 8192;
 
+/// 「连接测试」请求的面积线（512×512）：步数、面积、提示词长度三条同时满足才算测试请求，
+/// 见 `probe::is_connection_test`。依据是线上 7 天没有任何正常请求同时满足这三条。
+pub const TEST_REQUEST_MAX_PIXELS: i64 = 512 * 512;
+
 /// 两个长方形 V5 预设的面积（832×1216 = 1_011_712，也是三个预设里最小的）。
 /// 图片工具把「比这还小的图」先放大到 [`FREE_MAX_PIXELS`] 再处理，与官方网页端一致。
 pub const NORMAL_PIXELS: u64 = 832 * 1216;
