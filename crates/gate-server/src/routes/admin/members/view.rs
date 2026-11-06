@@ -61,15 +61,14 @@ fn acked_24h(m: &Obj, now: f64) -> bool {
 
 /// 「需要站长处理」：与 `web/src/pages/admin/sections/members/logic.ts` 的 `needsAttention` 同口径
 /// （两处要一起改）。bad（限流暂停中 / 已过期）点过「没问题」也不豁免；其余（3 天内到期、
-/// 自动标签刷屏、今日被重置 ≥2 次）在「已查看」后 24 小时内不算。
+/// 今日被重置 ≥2 次）在「已查看」后 24 小时内不算。
 /// 停用的 Key 前端列表不显示，也不计入。
 fn attention_needed(m: &Obj, now: f64) -> bool {
     if !m.get("enabled").and_then(Value::as_bool).unwrap_or(false) {
         return false;
     }
     let paused = m
-        .get("share")
-        .and_then(|s| s.get("paused_until"))
+        .get("paused_until")
         .and_then(Value::as_f64)
         .is_some_and(|until| until > now);
     let expires_at = m.get("expires_at").and_then(Value::as_f64);
@@ -229,12 +228,10 @@ pub(super) async fn members_view(state: &AppState, filter_raw: &str) -> Result<V
             "last_image_at",
             json!(image_stats.get(&id).and_then(|m| m.last_image_at)),
         );
-        // 字段名沿用 2.x 的 "share"（前端和 admin_snapshot 按这个名字读）；内容只剩 Key 临时暂停的到期时间
+        // Key 临时暂停的到期时间（0 / 缺省 = 没暂停）
         put(
-            "share",
-            pause_map
-                .get(&id)
-                .map_or(Value::Null, |p| json!({"paused_until": p})),
+            "paused_until",
+            pause_map.get(&id).map_or(Value::Null, |p| json!(*p)),
         );
         put(
             "reset_today",

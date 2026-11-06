@@ -25,9 +25,9 @@ async fn maintenance_put(
     let body = read_json_body(&parts.headers, body, super::super::BODY_LIMIT).await?;
     use crate::ops::Maintenance;
     // 只接受 {mode} 或旧的 {enabled}，多带字段一律 422（后台表单不会这么发，挡住手滑/试探）
-    let exact = body.len() == 1 && (body.contains_key("mode") || body.contains_key("enabled"));
+    let exact = body.len() == 1 && body.contains_key("mode");
     if !exact {
-        return Err(HttpError::new(422, "只接受 {mode} 或 {enabled} 单字段").into());
+        return Err(HttpError::new(422, "只接受 {mode} 单字段").into());
     }
     let mode = match (
         body.get("mode").and_then(serde_json::Value::as_str),
@@ -36,14 +36,8 @@ async fn maintenance_put(
         (Some("off"), None) => Maintenance::Off,
         (Some("all"), None) => Maintenance::All,
         (Some("owner"), None) => Maintenance::OwnerOnly,
-        (None, Some(true)) => Maintenance::All,
-        (None, Some(false)) => Maintenance::Off,
         _ => {
-            return Err(HttpError::new(
-                422,
-                "mode 必须是 off / all / owner（兼容旧的 enabled 布尔）",
-            )
-            .into());
+            return Err(HttpError::new(422, "mode 必须是 off / all / owner").into());
         }
     };
     if mode == Maintenance::OwnerOnly && state.env.maintenance_owner_ids.is_empty() {

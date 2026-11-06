@@ -125,7 +125,7 @@ function Rule(props: { k: string; children: ComponentChildren }) {
 function Rules() {
   const { meta } = useStore();
   const m = meta.value;
-  const extra = m.limits?.key_image_queue ?? 0;
+  const extra = m.limits?.queue_per_member ?? 0;
   return (
     <dl class="lp-rules">
       <Rule k="服务">

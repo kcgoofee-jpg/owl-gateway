@@ -25,7 +25,8 @@ export type Member = {
   registered_at: number | null;
   first_image_at: number | null;
   last_image_at: number | null;
-  share: { paused_until: number } | null;
+  /** Key 临时暂停的到期时间；null = 没暂停 */
+  paused_until: number | null;
   reset_today: { count: number; last_ts: number } | null;
   tags: Tag[];
   key_count: number;

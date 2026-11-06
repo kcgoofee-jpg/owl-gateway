@@ -253,8 +253,7 @@ pub async fn build(state: &AppState, now: f64) -> Result<Map<String, Value>, Int
         // `anlas`（早已下线的 Anlas 自动分配占位）、`daily_cap` / `quota`（10-27 删除：
         // 额度与上限只在 guard 拒绝时通过 429 原文出现，看板不再重复展示）
         json!({
-            // 字段名沿用旧的 key_queue（客户端兼容）；值是每人排队上限 queue_per_member
-            "key_queue": gv("queue_per_member"),
+            "queue_per_member": gv("queue_per_member"),
             "queue_cap": queue_cap,
             "rest": [rest_min, rest_max], // 每张出完后这个账号歇 N～M 秒
         }),
@@ -312,8 +311,7 @@ async fn build_meta(state: &AppState) -> Result<Map<String, Value>, InternalErro
 fn public_limits(state: &AppState) -> Value {
     let v = state.guard.with(|g| g.values.clone());
     let get = |k: &str| v.get(k).copied().unwrap_or(0);
-    // 字段名沿用旧的 key_image_queue（首页 / 客户端兼容）；值是每人排队上限 queue_per_member
-    json!({"key_image_queue": get("queue_per_member")})
+    json!({"queue_per_member": get("queue_per_member")})
 }
 
 /// 首页元信息的公开响应：不含任何密钥、成员信息或计数细节。

@@ -262,7 +262,7 @@ async fn public_live_shape_and_key_order() {
     // 一个账号平均多久开始一张：还没有出图耗时样本（测试环境也不歇）→ 默认 10 秒
     assert_eq!(v["cycle"], json!(10.0));
     // 保底 `base`、空闲借用 `borrow_open`、Anlas 自动分配占位 `anlas`、`daily_cap` / `quota` 已删除
-    assert_eq!(keys(&v["rules"]), ["key_queue", "queue_cap", "rest"]);
+    assert_eq!(keys(&v["rules"]), ["queue_per_member", "queue_cap", "rest"]);
     let rules = &v["rules"];
     // 全站排队上限 = min(账号排队 5, 排队超时内真能开始的张数)：测试环境还估不出周期 → 只按 5
     assert_eq!(rules["queue_cap"], 5);
@@ -483,7 +483,7 @@ async fn public_status_exposes_only_safe_fields() {
     assert_eq!(
         v["limits"],
         // 保底 `base_daily_images` 已删除
-        json!({"key_image_queue": 2})
+        json!({"queue_per_member": 2})
     );
     assert_eq!(v["image_jobs"], 0);
     assert_eq!(v["stability"], json!({"ok": 0, "error": 0}));

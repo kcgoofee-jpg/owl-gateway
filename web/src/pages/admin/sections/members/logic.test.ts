@@ -69,7 +69,7 @@ function mk(p: Partial<Member> = {}): Member {
     registered_at: NOW - 10 * DAY,
     first_image_at: NOW - 9 * DAY,
     last_image_at: NOW - 3600,
-    share: null,
+    paused_until: null,
     reset_today: null,
     tags: [],
     key_count: 1,
@@ -114,8 +114,8 @@ describe("memberIssues / needsAttention", () => {
   });
 
   it("被限流暂停给出「误判，解除」动作", () => {
-    const m = mk({ share: { paused_until: NOW + 600 } });
-    const i = memberIssues(m, NOW).find((x) => x.id === "share-paused");
+    const m = mk({ paused_until: NOW + 600 });
+    const i = memberIssues(m, NOW).find((x) => x.id === "paused");
     expect(i?.actions).toEqual([{ kind: "share-clear" }]);
     expect(memberStatus(m, NOW)?.text).toBe("已限流");
   });

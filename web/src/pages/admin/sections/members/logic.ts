@@ -56,12 +56,12 @@ export type Issue = {
 
 export function memberIssues(m: Member, now: number): Issue[] {
   const out: Issue[] = [];
-  if (m.share && m.share.paused_until > now) {
+  if (m.paused_until && m.paused_until > now) {
     out.push({
-      id: "share-paused",
+      id: "paused",
       level: "bad",
       title: "Key 已被限流暂停",
-      detail: `到 ${fullTime(m.share.paused_until)} 自动恢复（多半是客户端死循环重试触发）`,
+      detail: `到 ${fullTime(m.paused_until)} 自动恢复（多半是客户端死循环重试触发）`,
       actions: [{ kind: "share-clear" }],
     });
   }
@@ -133,7 +133,7 @@ export type StatusBadge = {
 };
 /** 列表里每行只放一个最重要的状态 */
 export function memberStatus(m: Member, now: number): StatusBadge | null {
-  if (m.share && m.share.paused_until > now) return { tone: "danger", text: "已限流" };
+  if (m.paused_until && m.paused_until > now) return { tone: "danger", text: "已限流" };
   if (m.expires_at && m.expires_at < now) return { tone: "danger", text: "已过期" };
   if (needsAttention(m, now)) {
     return {

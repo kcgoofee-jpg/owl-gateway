@@ -114,8 +114,9 @@ async fn maintenance_switch_pauses_public_routes_and_keeps_admin_and_health_avai
 
     for invalid in [
         json!({}),
-        json!({"enabled": "true"}),
-        json!({"enabled": true, "extra": 1}),
+        json!({"enabled": true}), // 旧的布尔写法已删除，只认 mode
+        json!({"mode": "yes"}),
+        json!({"mode": "all", "extra": 1}),
     ] {
         assert_eq!(admin.put("/ops/maintenance", invalid).await.status, 422);
     }
@@ -123,7 +124,7 @@ async fn maintenance_switch_pauses_public_routes_and_keeps_admin_and_health_avai
 
     assert_eq!(
         admin
-            .put("/ops/maintenance", json!({"enabled": true}))
+            .put("/ops/maintenance", json!({"mode": "all"}))
             .await
             .json(),
         json!({"enabled": true, "mode": "all"})
@@ -178,7 +179,7 @@ async fn maintenance_switch_pauses_public_routes_and_keeps_admin_and_health_avai
     );
     assert_eq!(
         after_restart
-            .put("/ops/maintenance", json!({"enabled": false}))
+            .put("/ops/maintenance", json!({"mode": "off"}))
             .await
             .json(),
         json!({"enabled": false, "mode": "off"})

@@ -599,9 +599,7 @@ async fn members_view_shape_and_dropped_fields() {
     assert_eq!(m[1]["discord_id"], "900000000000000002");
     assert_eq!(m[1]["tags"][0]["tag"], "观察");
     assert_eq!(
-        m[1]["share"]["paused_until"]
-            .as_f64()
-            .map(|p| p > e.state.now()),
+        m[1]["paused_until"].as_f64().map(|p| p > e.state.now()),
         Some(true)
     );
     assert_eq!(
@@ -612,7 +610,7 @@ async fn members_view_shape_and_dropped_fields() {
         m[0].get("hours24").is_none(),
         "hours24 是前端 0 读取的重字段（每轮 13.9KB），已从成员列表删掉"
     );
-    assert_eq!(m[0]["share"], Value::Null);
+    assert_eq!(m[0]["paused_until"], Value::Null);
 }
 
 /// `?filter=attention`：只回需要处理的行，`total`/`attention`/`filter` 三个键给出计数；
