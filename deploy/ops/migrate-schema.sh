@@ -83,5 +83,7 @@ while :; do
 done
 q "PRAGMA wal_checkpoint(TRUNCATE)" >/dev/null || true
 q "VACUUM"
-echo "完成：结构版本 $(q "PRAGMA user_version")，库大小 $(du -h "$DB" | cut -f1)"
-[ "$before" = "$(q "PRAGMA user_version")" ] && echo "（本来就是这个版本，没有改动结构）"
+after=$(q "PRAGMA user_version")
+echo "完成：结构版本 $after，库大小 $(du -h "$DB" | cut -f1)"
+[ "$before" = "$after" ] && echo "（本来就是这个版本，没有改动结构）"
+exit 0

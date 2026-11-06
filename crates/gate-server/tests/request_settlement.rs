@@ -173,3 +173,94 @@ async fn stream_missing_final_frame_holds_unknown_request_without_replay() {
     assert_eq!(status, "uncertain");
     assert_eq!(e.mock.requests_to("/ai/generate-image-stream").len(), 1);
 }
+
+/// 账本只留未决行：已终结（committed / released / released_manual）的行过期后清掉，
+/// uncertain 永远留着，指向被清行的 usage_request_links 一并删掉。
+#[tokio::test]
+async fn pruning_keeps_only_unresolved_settlements() {
+    let e = setup(&[]).await;
+    let now = e.state.now();
+    for (n, (id, status)) in [
+        ("old-committed", "committed"),
+        ("old-released", "released"),
+        ("old-manual", "released_manual"),
+        ("still-uncertain", "uncertain"),
+    ]
+    .into_iter()
+    .enumerate()
+    {
+        e.state
+            .db
+            .reserve_request_settlement(
+                id,
+                "rid",
+                1,
+                &e.state.day(),
+                &e.state.month(),
+                false,
+                0.0,
+                0,
+                1,
+                now,
+            )
+            .await
+            .unwrap();
+        e.state
+            .db
+            .write({
+                let (id, status) = (id.to_string(), status.to_string());
+                move |tx| {
+                    tx.execute(
+                        "UPDATE request_settlements SET status=?, updated_at=? WHERE request_id=?",
+                        rusqlite::params![status, now - 7200.0, id],
+                    )?;
+                    Ok(())
+                }
+            })
+            .await
+            .unwrap();
+        e.state
+            .db
+            .write({
+                let id = id.to_string();
+                let usage_log_id = n as i64 + 1;
+                move |tx| {
+                    tx.execute(
+                        "INSERT INTO usage_request_links(request_id, usage_log_id) VALUES(?,?)",
+                        rusqlite::params![id, usage_log_id],
+                    )?;
+                    Ok(())
+                }
+            })
+            .await
+            .unwrap();
+    }
+    let deleted = e
+        .state
+        .db
+        .prune_settled_requests(now - gate_db::repo::settlement::SETTLED_KEEP_SECS)
+        .await
+        .unwrap();
+    assert_eq!(deleted, 3);
+    let left: Vec<String> = e
+        .state
+        .db
+        .read(|c| {
+            let mut s =
+                c.prepare("SELECT request_id FROM request_settlements ORDER BY request_id")?;
+            s.query_map([], |r| r.get(0))?.collect()
+        })
+        .await
+        .unwrap();
+    assert_eq!(left, vec!["still-uncertain"]);
+    let links: Vec<String> = e
+        .state
+        .db
+        .read(|c| {
+            let mut s = c.prepare("SELECT request_id FROM usage_request_links")?;
+            s.query_map([], |r| r.get(0))?.collect()
+        })
+        .await
+        .unwrap();
+    assert_eq!(links, vec!["still-uncertain"]);
+}
