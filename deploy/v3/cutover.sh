@@ -10,6 +10,9 @@
 # 改 Caddy 配置用 deploy/v3/caddy-reload.sh（不要 docker exec caddy caddy reload，原因见那个脚本）。
 #   deploy/v3/cutover.sh status
 #
+# 换版成功后会自动清掉本机不再需要的产物，避免磁盘被部署次数慢慢吃满：
+#   · owl-gate 的旧构建标签（只留 current / previous / failed）
+#
 # 站长 10-27：等安全窗口的流程整个删除——部署就是停机维护，由 Caddy 的维护页兜住访问。
 set -euo pipefail
 
@@ -108,6 +111,28 @@ cmd_install_ops() {
   log "✓ $OWL_DIR/nai-ops = $("$OWL_DIR/nai-ops" --version)"
 }
 
+# 只保留 :current / :previous / :failed 三个标签，其余 owl-gate:* 全部删掉。
+#
+# CI 每次构建都打一个 owl-gate:<40 位 sha> 的**有名标签**（tools/deploy.sh 下载的就是这个 tar）。
+# 换版后原来的做法只跑 `docker image prune -f`，而它只清「悬空镜像」（无任何标签的层），
+# 有名标签永远不算悬空——于是每部署一次就永久留下一个 98MB 的镜像。
+# 10-28 到 11-06 攒了 112 个镜像 / 7.2G，就是这么来的。
+# 回滚链路只需要三个标签：current 在跑、previous 回退、failed 留着排查上一版为什么坏。
+prune_image_tags() {
+  local tag kept=0 removed=0
+  while read -r tag; do
+    [[ -z $tag || $tag == "$IMAGE:<none>" ]] && continue
+    case $tag in
+      "$IMAGE:current" | "$IMAGE:previous" | "$IMAGE:failed") kept=$((kept + 1)) ; continue ;;
+    esac
+    if docker image rm "$tag" >/dev/null 2>&1; then
+      log "✓ 清掉旧镜像标签 $tag"
+      removed=$((removed + 1))
+    fi
+  done < <(docker images --format '{{.Repository}}:{{.Tag}}' "$IMAGE" 2>/dev/null || true)
+  log "· 镜像标签：保留 $kept 个（current / previous / failed），清掉 $removed 个旧构建"
+}
+
 # 先停后起换版本：任何时刻只有一个网关进程在给 NovelAI 发图。
 # 每个账号「有没有图在出、下一张什么时候能发」只记在网关进程的内存里，两个网关同时在线时互相看不到，
 # 会让同一账号同时出两张而被上游回 429，所以部署不再让新旧网关重叠。
@@ -125,10 +150,8 @@ restart_container() {
   fi
   # 停站是预期的：这里只是把实测的中断时长报出来
   probe_report || true
-  # docker load 每次都会留一层旧的悬空镜像；换版成功后顺手清掉，别让磁盘慢慢被吃满
-  if pruned=$(docker image prune -f 2>/dev/null | tail -1) && [[ -n $pruned && $pruned != "Total reclaimed space: 0B" ]]; then
-    log "✓ 清理悬空镜像：$pruned"
-  fi
+  # 换版成功后清掉本机不再需要的旧构建：镜像标签 + 迁移前整库快照
+  prune_image_tags
   log "$GATE = $(docker inspect -f '{{.Image}}' "$GATE" | cut -c8-19)"
 }
 

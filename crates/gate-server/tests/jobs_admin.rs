@@ -9,12 +9,10 @@ use serde_json::{Value, json};
 /// 2026-10-14 12:00:00 +08:00
 const NOW: f64 = 1_791_950_400.0;
 
-const NAMES: [&str; 6] = [
+const NAMES: [&str; 4] = [
     "upstream_snapshot",
     "breaker",
-    "key_guard",
     "maintenance",
-    "anlas_reconcile",
     "idle_recycle",
 ];
 
@@ -85,35 +83,33 @@ async fn jobs_registry_and_last_run() {
     }
     let by = |name: &str| last[name]["summary"].clone();
     assert_eq!(by("maintenance"), "全部完成");
-    assert_eq!(by("breaker"), "最近 15 分钟上游失败 0/0：正常");
-    assert_eq!(by("key_guard"), "没有 Key 触发");
     assert_eq!(by("idle_recycle"), "最近 60 分钟没出图，本轮跳过");
-    assert!(gate_server::jobs::find("abuse_scan").is_none());
+    for gone in ["key_guard", "anlas_reconcile", "abuse_scan"] {
+        assert!(gate_server::jobs::find(gone).is_none(), "{gone}");
+    }
 }
 
 #[tokio::test]
 async fn one_failing_job_does_not_affect_the_others() {
     let _clock = clock(Some(NOW)).await;
     let e = setup(&[]).await;
-    // 快照表坏了：「上游 V5 快照」这一轮失败，别的任务照常
+    // 快照表坏了：「上游 V5 快照」这一轮失败，维护任务照常
     run_sql(&e, vec!["DROP TABLE upstream_snapshots".into()]).await;
-    for name in ["upstream_snapshot", "breaker", "key_guard"] {
+    for name in ["upstream_snapshot", "maintenance"] {
         let _ = run_job(&e.state, name).await;
     }
     let last = Value::Object(e.state.jobs.last().await);
     assert_eq!(last["upstream_snapshot"]["ok"], false, "{last}");
-    for name in ["breaker", "key_guard"] {
-        assert_eq!(last[name]["ok"], true, "{name} {last}");
-    }
+    assert_eq!(last["maintenance"]["ok"], true, "{last}");
 }
 
 #[tokio::test]
 async fn the_run_record_survives_a_restart() {
     let _clock = clock(Some(NOW)).await;
     let e = setup(&[]).await;
-    run_job(&e.state, "breaker").await.unwrap();
+    run_job(&e.state, "maintenance").await.unwrap();
     let saved: Value = serde_json::from_str(&setting(&e.state, "job_last").await.unwrap()).unwrap();
-    assert_eq!(saved["breaker"]["ok"], true);
+    assert_eq!(saved["maintenance"]["ok"], true);
     // 同一个数据目录重新建一份 AppState，启动时读回
     let s2 = e.restart().await;
     assert!(s2.jobs.last().await.is_empty(), "启动序列之前还是空的");

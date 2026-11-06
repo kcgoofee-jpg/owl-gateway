@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Ubuntu/Debian 服务器基础加固（需 root，可重复执行）：
-# 防火墙(22/80/443)、SSH 仅密钥登录 + fail2ban、自动安全更新、1GB 交换分区、SQLite 每晚 03:30 本机备份（GFS 14/8/6：每日 14 份、每周 8 份、每月 6 份）。
+# 防火墙(22/80/443)、SSH 仅密钥登录 + fail2ban、自动安全更新、1GB 交换分区、SQLite 每晚 03:30 本机备份（本地快速回滚层：每日 3 份、每周 2 份、每月 2 份）。
 # 运行前请确认你已经能用密钥登录——脚本会在 authorized_keys 为空时跳过关闭密码登录，避免把自己锁在外面。
 set -euo pipefail
 [ "$(id -u)" = 0 ] || { echo "请用 root 运行"; exit 1; }
@@ -50,10 +50,10 @@ mkdir -p /opt/backups
 REPO_DIR=$(cd "$(dirname "$0")/.." && pwd)
 install -m 755 "$REPO_DIR/deploy/v3/ops/naigate-snapshot" /usr/local/bin/naigate-snapshot
 install -m 755 "$REPO_DIR/deploy/v3/ops/naigate-backup" /usr/local/bin/naigate-backup
-install -m 755 "$REPO_DIR/deploy/v3/ops/naigate-strip-prompts" /usr/local/bin/naigate-strip-prompts
 echo '30 3 * * * root /usr/local/bin/naigate-backup >> /var/log/naigate-backup.log 2>&1' > /etc/cron.d/naigate-backup
 install -m 755 "$REPO_DIR/deploy/v3/ops/asn-update.sh" /usr/local/bin/naigate-asn-update
 echo '50 4 * * 1 root /usr/local/bin/naigate-asn-update >> /var/log/naigate-asn.log 2>&1' > /etc/cron.d/naigate-asn
+
 
 # Docker 日志轮转，避免日志撑满磁盘（修改后需重启 docker 并重建容器）
 if command -v docker >/dev/null && [ ! -f /etc/docker/daemon.json ]; then

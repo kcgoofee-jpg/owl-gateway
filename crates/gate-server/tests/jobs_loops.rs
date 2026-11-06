@@ -248,54 +248,16 @@ async fn idle_recycle_negative_days_is_off_too() {
     assert!(key_exists(&e, id).await);
 }
 
-// ------------------------------------------------------------------ 维护循环一轮
-
-#[tokio::test]
-async fn maintenance_round_purges_expired_usage() {
-    let e = setup(&[("USAGE_LOG_RETENTION_DAYS", "10")]).await;
-    let s = &e.state;
-    let now = s.now();
-    s.db.run_script(vec![
-        format!("INSERT INTO usage_log (ts, key_id, key_name, kind, status) VALUES ({}, NULL, '', 'text', 'ok')", now - 20.0 * DAY),
-        format!("INSERT INTO usage_log (ts, key_id, key_name, kind, status) VALUES ({}, NULL, '', 'text', 'ok')", now - 2.0 * DAY),
-        format!("INSERT INTO admin_actions (ts, actor, action, target, detail, ok) VALUES ({}, 'a', '旧', '', '', 1)", now - 200.0 * DAY),
-        format!("INSERT INTO admin_actions (ts, actor, action, target, detail, ok) VALUES ({}, 'a', '新', '', '', 1)", now - 2.0 * DAY),
-    ])
-    .await
-    .unwrap();
-
-    assert_eq!(run_job(s, "maintenance").await.unwrap(), "全部完成");
-    settle().await;
-
-    // 明细日志按 USAGE_LOG_RETENTION_DAYS 只留 10 天内（设置了才清）；操作日志保留
-    let (usage_rows, actions) =
-        s.db.read(|c| {
-            let usage_rows: i64 =
-                c.query_row("SELECT COUNT(*) FROM usage_log", [], |r| r.get(0))?;
-            let actions = c
-                .prepare("SELECT action FROM admin_actions ORDER BY rowid")?
-                .query_map([], |r| r.get::<_, String>(0))?
-                .collect::<Result<Vec<_>, _>>()?;
-            Ok((usage_rows, actions))
-        })
-        .await
-        .unwrap();
-    assert_eq!(usage_rows, 1);
-    assert_eq!(actions, ["旧", "新"]);
-}
-
 // ------------------------------------------------------------------ 维护里一步出错
 
 #[tokio::test]
 async fn a_failing_maintenance_step_is_shown_but_filed_only_once() {
-    let e = setup(&[("USAGE_LOG_RETENTION_DAYS", "10")]).await;
+    let e = setup(&[]).await;
     let s = &e.state;
-    // 让过期日志清理失败，验证维护任务仍会记录错误。
-    s.db.run_script(vec!["DROP TABLE usage_log".into()])
-        .await
-        .unwrap();
+    // 数据目录消失 → 磁盘检查那一步失败；任务整体报错，但结果照常记进 job_last
+    std::fs::remove_dir_all(&s.env.data_dir).ok();
     let err = run_job(s, "maintenance").await.unwrap_err();
-    assert!(err.to_string().starts_with("清理过期记录出错："), "{err}");
+    assert!(err.to_string().contains("出错："), "{err}");
     let last = Value::Object(s.jobs.last().await);
     assert_eq!(last["maintenance"]["ok"], false);
 }

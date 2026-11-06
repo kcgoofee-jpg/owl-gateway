@@ -4,12 +4,10 @@
 //! 用 `tests/snapshots/` 里的快照和手写规则测试守住行为。
 //! 时间一律由调用方传入（Unix 秒，f64），不在这里读时钟。
 
-pub mod abuse;
 pub mod actor;
 pub mod allowance;
-pub mod anlas_estimate;
-pub mod autopilot;
 pub mod bot_config;
+pub mod breaker;
 pub mod clock;
 pub mod discord_ua;
 pub mod features;
@@ -17,6 +15,7 @@ pub mod guard;
 pub mod idle;
 pub mod json;
 pub mod key_status;
+pub mod member_flags;
 pub mod member_policy;
 pub mod paid_v5;
 pub mod policy;

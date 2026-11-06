@@ -1,8 +1,14 @@
-# root 定时任务配置。脚本安装在 /opt/owl/ops/，实际启用项用 crontab -l 核对。
-# 不在这里的：每晚 03:30 的本机 GFS 备份是 /etc/cron.d/naigate-backup（deploy/harden.sh 装的）。
-# 备份和快照的说明见 docs/OPERATIONS.md。（巡检定时器 10-27 删除。）
+# root 定时任务配置。脚本安装在 /opt/owl/ops/（由 tools/deploy.sh 每次部署时同步），
+# 实际启用项用 crontab -l 核对。
+# 不在这里的：
+#   · 每晚 03:30 的本机 GFS 备份是 /etc/cron.d/naigate-backup（deploy/harden.sh 装的）
+#   · 每周一 04:50 的 ASN 库更新是 /etc/cron.d/naigate-asn（同上）
+# 备份和快照的说明见 docs/OPERATIONS.md。
 
-# 每天 05:10：脱敏只读快照 → /opt/backups/ro/（保留 7 份，本机用 deploy/ops/pull-ro-snapshot.sh 拉取）
-10 5 * * * bash /opt/owl/ops/ro-snapshot.sh >> /var/log/ro-snapshot.log 2>&1
-# 每天 04:30：加密异地备份 → S3（库快照 + .env + secret_key + 3.0 部署文件；口令在服务器 /root/.backup_pass）
+# 每天 04:30：加密异地备份 → S3（库快照 + .env + secret_key + 3.0 部署文件 + /opt/owl/ops；
+# 口令在服务器 /root/.backup_pass）
 30 4 * * * /opt/owl/ops/nightly_backup.sh >> /var/log/nai-backup.log 2>&1
+
+# 每 5 分钟：把响应体没送完的请求标成 interrupted，别让门户一直显示「传输中」
+*/5 * * * * /opt/owl/ops/close-stale-deliveries.sh >> /var/log/owl-delivery-sweep.log 2>&1
+

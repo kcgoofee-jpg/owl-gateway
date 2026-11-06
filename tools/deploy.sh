@@ -12,7 +12,7 @@
 # tag -> promote the staged image and stop-then-start immediately (a maintenance page covers the
 # 1-2 minute window; the old gateway finishes accepted work while shutting down, and only one
 # gateway ever sends to an upstream account) -> healthcheck + smoke inside the container -> public
-# /healthz -> optional Discord notice (export DISCORD_ALERT_WEBHOOK in owl.env).
+# /healthz.
 # Rollback on failure: ssh in and run `/opt/owl/cutover.sh previous`.
 #
 # Needs: gh (logged in), ~/.config/owl/owl.env exporting OWL_IP (never printed),
@@ -33,11 +33,10 @@ mask() { sed -E 's/[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}/x.x.x.x/g'; }
 remote() { ssh "${KEY[@]}" "root@$OWL_IP" "$@" 2>&1 | mask; return "${PIPESTATUS[0]}"; }
 say() { printf '\033[1m==> %s\033[0m\n' "$*"; }
 die() { printf '\033[31mxx %s\033[0m\n' "$*" >&2; exit 1; }
-run_id="" wait=0 notify=1 mirror_only=0
+run_id="" wait=0 mirror_only=0
 for a in "$@"; do
   case $a in
     --wait) wait=1 ;;
-    --no-notify) notify=0 ;;
     --mirror-only) mirror_only=1 ;;
     [0-9]*) run_id=$a ;;
     *) die "unknown argument: $a" ;;
@@ -110,6 +109,21 @@ files=("$tmp/nai-ops-linux-musl/nai-ops" deploy/v3/cutover.sh deploy/v3/caddy-re
 [[ $have_image == yes ]] || files=("$tmp/owl-gate-image/owl-gate.tar.gz" "${files[@]}")
 scp -q "${KEY[@]}" "${files[@]}" "root@$OWL_IP:/opt/owl/" 2>&1 | mask
 
+# 服务器上的定时脚本（cron 和 systemd timer 调的那几个）也要跟着版本走。
+# 以前它们只存在于 /opt/owl/ops/，仓库里没有：close-stale-deliveries.sh 在线上每 5 分钟跑，
+# 却既没进仓库、也没进 S3 备份包，改坏了或丢了都没处找。
+# 只同步 /opt/owl/ops/ 里真正被调度的三个；naigate-* 和 asn-update.sh 由 harden.sh 装到 /usr/local/bin，不在这。
+say "syncing server-side ops scripts"
+runtime_ops=(nightly_backup.sh close-stale-deliveries.sh)
+local_ops=() remote_ops=()
+for f in "${runtime_ops[@]}"; do
+  local_ops+=("deploy/v3/ops/$f")
+  remote_ops+=("/opt/owl/ops/$f")
+done
+remote "mkdir -p /opt/owl/ops" >/dev/null
+rsync -a --checksum -e "ssh ${KEY[*]}" "${local_ops[@]}" "root@$OWL_IP:/opt/owl/ops/" 2>&1 | mask
+remote "chmod 755 ${remote_ops[*]}" >/dev/null
+
 # 官网生图页镜像：59MB 静态资源不进仓库也不进镜像，cutover 之前同步到宿主机只读挂载点。
 tools/sync-mirror.sh
 
@@ -144,11 +158,3 @@ ssh "${KEY[@]}" "root@$OWL_IP" "bash -s -- $(printf %q "$DOMAIN")" < tools/deplo
 curl -fsS -m 10 "https://$DOMAIN/healthz" | grep -q '"ok":true' || die "public /healthz not ok"
 say "live: owl-gate:${sha:0:7} ($((SECONDS - start))s total)"
 
-# 可选：部署完成通知。owl.env 里 export DISCORD_ALERT_WEBHOOK 即开启；发不出去不影响部署结果。
-if [[ $notify == 1 && -n ${DISCORD_ALERT_WEBHOOK:-} ]]; then
-  now=$(TZ=Asia/Shanghai date '+%m-%d %H:%M')
-  curl -fsS -m 15 -H 'Content-Type: application/json' \
-    -d "{\"content\":\"🚀 猫头鹰公益站已上线 ${sha:0:7}（${now} 北京时间，部署用时 $((SECONDS - start))s）。出问题时：ssh 上服务器执行 /opt/owl/cutover.sh previous 回上一版。\"}" \
-    "$DISCORD_ALERT_WEBHOOK" >/dev/null 2>&1 ||
-    say "Discord 通知发送失败（不影响部署）"
-fi

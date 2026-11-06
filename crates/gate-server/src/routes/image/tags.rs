@@ -29,7 +29,7 @@ pub(super) async fn tags(state: AppState, req: Request) -> Result<Response, ApiE
     // 它仍然是轻请求，所以只按每把 Key 的每分钟次数算，不占图片队列、不占出图额度。
     check_rpm(&state, &key)?;
     check_image_cooldown(&state)?;
-    require_feature(&state, &key, "tags").await?;
+    require_feature(&key, "tags")?;
     struct Finish<'a>(&'a AppState, i64, bool);
     impl Drop for Finish<'_> {
         fn drop(&mut self) {

@@ -51,6 +51,11 @@ case "$1" in
         ;;
     esac
     ;;
+  images)
+    # docker images --format '...' <repo>：cutover.sh 的 prune_image_tags 用它列出现有标签
+    repo=${@: -1}
+    awk -F '\t' -v p="$repo:" 'index($1,p)==1 {print $1}' "$state"
+    ;;
   compose) ;;
   exec) ;;
   inspect) printf '%s\n' "$(get_image owl-gate:current)" ;;
@@ -70,7 +75,8 @@ esac
 MOCK_CURL
 
 chmod +x "$tmp/bin/docker" "$tmp/bin/curl"
-printf 'owl-gate:current\tsha256:old\nowl-gate:previous\tsha256:older\n' >"$DOCKER_STATE"
+# 线上真实状态：除了 current / previous，还留着每次 CI 构建的 owl-gate:<sha> 标签（曾攒到 112 个 / 7.2G）
+printf 'owl-gate:current\tsha256:old\nowl-gate:previous\tsha256:older\nowl-gate:deadbeef\tsha256:stale1\nowl-gate:cafebabe\tsha256:stale2\n' >"$DOCKER_STATE"
 printf 'test image\n' | gzip >"$tmp/image.tar.gz"
 
 # Loading an image while the gateway has traffic only stages it; rollback/current tags stay intact.
@@ -88,6 +94,14 @@ if awk -F '\t' '$1=="owl-gate:staged" {found=1} END {exit !found}' "$DOCKER_STAT
   exit 1
 fi
 grep -Fq '实测：经 Caddy 探测' "$tmp/restart.log"
+
+# 部署后只留 current / previous / failed：旧的 owl-gate:<sha> 标签必须被清掉，
+# 否则每部署一次就永久多一个 98MB 镜像（10-28～11-06 攒了 112 个 / 7.2G）。
+if awk -F '\t' '$1 ~ /^owl-gate:(deadbeef|cafebabe)$/ {found=1} END {exit !found}' "$DOCKER_STATE"; then
+  echo 'stale owl-gate:<sha> tags survived the deploy' >&2
+  exit 1
+fi
+grep -Fq '清掉旧镜像标签 owl-gate:deadbeef' "$tmp/restart.log"
 
 # Restaging the already-current image and restarting must not replace the last-good rollback tag.
 bash "$repo/deploy/v3/cutover.sh" load "$tmp/image.tar.gz" >/dev/null

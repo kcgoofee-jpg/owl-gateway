@@ -132,15 +132,6 @@ async fn plugin_captions_parameters_and_response_formats_survive_gateway() {
             .unwrap();
         e.state
             .db
-            .set_setting(
-                gate_core::features::GLOBAL_KEY,
-                &json!({"image":false,"vibe":false,"tags":false,"upscale":false,"augment":false})
-                    .to_string(),
-            )
-            .await
-            .unwrap();
-        e.state
-            .db
             .set_setting("v5_medium_mode", "on")
             .await
             .unwrap();

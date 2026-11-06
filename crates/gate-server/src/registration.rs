@@ -64,7 +64,7 @@ fn denied<T>(msg: impl Into<String>) -> Result<T, RegErr> {
 // ------------------------------------------------------------------ 进服时间 / 成员标记位
 
 /// `GuildMember` 标记位：退群后又重新加入（DID_REJOIN）。
-pub use gate_core::abuse::MEMBER_FLAG_DID_REJOIN;
+pub use gate_core::member_flags::MEMBER_FLAG_DID_REJOIN;
 
 /// 从 Discord 的成员对象里读到的进服时间与标记位（防小号用）。
 #[derive(Debug, Clone, Copy, PartialEq, Default)]

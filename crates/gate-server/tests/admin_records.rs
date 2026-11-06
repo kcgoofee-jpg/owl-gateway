@@ -379,25 +379,3 @@ async fn reset_all_keys_disables_everyone_including_invites() {
         && d == "已失效 4 把 Key 并清空 Discord 绑定"
         && *ok));
 }
-
-#[tokio::test]
-async fn creative_content_records_are_removed() {
-    let (e, a) = ready().await;
-    for path in [
-        "/prompts",
-        "/audit",
-        "/audit/1/image",
-        "/audit/1/thumb",
-        "/audit/export?key_id=1",
-        "/ops/audit",
-    ] {
-        assert_eq!(a.get(&format!("{A}{path}")).await.status, 404, "{path}");
-    }
-    gate_server::jobs::purge(&e.state).await.unwrap();
-    let rows = query(
-        &e.state.db,
-        "SELECT name FROM sqlite_master WHERE name IN ('generation_audit','audit_request_links')",
-    )
-    .await;
-    assert!(rows.is_empty());
-}

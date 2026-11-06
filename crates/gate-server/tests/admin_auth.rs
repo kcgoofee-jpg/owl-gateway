@@ -42,16 +42,11 @@ const ENDPOINTS: &[(&str, &str)] = &[
     ("PUT", "/upstream-tokens/token-x/v5-limit"),
     ("GET", "/quota-records"),
     ("PUT", "/upstream-tokens/token-x/enabled"),
-    ("POST", "/alerts/test"),
     ("GET", "/ops"),
     ("PUT", "/ops/registration"),
-    ("PUT", "/ops/features"),
-    ("PUT", "/ops/log-retention"),
     ("GET", "/guard"),
     ("PUT", "/guard"),
     ("GET", "/discord-bot"),
-    ("GET", "/sitepaid-hints"),
-    ("POST", "/reconciliation"),
 ];
 
 #[tokio::test]

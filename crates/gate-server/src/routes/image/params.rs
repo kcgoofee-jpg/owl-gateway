@@ -86,7 +86,7 @@ pub(super) async fn prepare(
         })
     };
     if params_has(&body, &REFERENCE_FIELDS) {
-        require_feature(state, &key, "vibe").await?; // 参考图 / Vibe 经由 generate-image 传入时同样受功能开关约束
+        require_feature(&key, "vibe")?; // 参考图 / Vibe 经由 generate-image 传入时同样受功能开关约束
     }
     let Some(tier) = policy::image_model_tier(&model) else {
         reject(&model, "未列入本站图片模型白名单");

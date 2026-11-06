@@ -8,8 +8,6 @@
 //! - 需要「映射」语义的查询返回 `Vec<(K, V)>`，保持插入顺序。
 //!
 
-pub mod abuse;
-pub mod abuse_scan;
 pub mod account_stats;
 pub mod admin_actions;
 pub mod admin_members;
@@ -19,16 +17,15 @@ pub mod coupons;
 pub mod discord;
 pub mod footprint;
 pub mod guard;
-pub mod kernel;
 pub mod keys;
 pub mod member_policy;
 pub mod member_stats;
 pub mod public;
-pub mod reconciliation;
 pub mod registration;
 pub mod settings;
 pub mod settlement;
 pub mod share_state;
+pub mod tasks;
 pub mod upstream;
 pub mod usage;
 pub mod usage_stats;
@@ -38,14 +35,14 @@ use rusqlite::types::Value as SqlValue;
 /// 由邀请凭据领取的来源标签，不提供权限或生命周期豁免。
 pub const INVITE_TAG: &str = "邀请";
 
-/// 后台请求日志列表读出的列：usage_log 的全部列，顺序同 schema.sql（`client` 放在最后）。
-/// `client` = 原始 User-Agent、`src` = 来源 IP，保留期（`usage_origin_keep_days`）过后被清成空串。
+/// 后台请求日志列表读出的列：usage_log 的全部列。
+/// `client` = 原始 User-Agent、`src` = 来源 IP，长期保留。
 pub(crate) const LOG_COLUMNS: &str = "id, ts, key_id, key_name, kind, model, status, images, anlas, tokens, \
-unconfirmed_anlas, detail, reason, wait_ms, dur_ms, up_status, rid, src, ver, token_id, client, \
+unconfirmed_anlas, detail, reason, wait_ms, dur_ms, up_status, rid, src, token_id, client, \
 xrw, lang, chua, hfp, bid, origin";
 /// 写 usage_log 一行（成功记账传空串 reason——和列默认值一样）。
-/// `client` = 请求的 User-Agent（截到 160 字符），`src` = 来源 IP（原文；站长 10-18 决定：为筛脚本撞限速 / 转售等滥用，
-/// 保留天数按后台设置 usage_origin_keep_days（0 = 永久，默认永久），到期由维护任务清成空串，见 `Db::purge_usage_origin`）。末尾六列是 `usage::ClientHints`（保留期相同）。`ver`（网关版本）还在表里，3.0 不再写。
+/// `client` = 请求的 User-Agent（截到 160 字符），`src` = 来源 IP（原文，长期保留）。
+/// 末尾六列是 `usage::ClientHints`。
 pub(crate) const INSERT_LOG: &str = "INSERT INTO usage_log (ts, key_id, key_name, kind, model, status, \
 images, anlas, tokens, detail, unconfirmed_anlas, wait_ms, dur_ms, up_status, rid, reason, token_id, client, src, \
 xrw, lang, chua, hfp, bid, origin) \

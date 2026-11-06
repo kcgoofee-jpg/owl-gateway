@@ -410,7 +410,7 @@ async fn generate(state: AppState, req: Request, streaming: bool) -> ApiResult {
     // 安静时段 / 熔断这类全站拒绝排在每分钟次数之前：重试拿到的是真正的原因，不算成 key_rate
     guard_hard_block(&state).await?;
     check_rpm(&state, &key)?;
-    require_feature(&state, &key, "image").await?;
+    require_feature(&key, "image")?;
     let body = read_image_payload(&parts.headers, body, IMAGE_BODY_LIMIT).await?;
     // 参考图哈希：参数校验之前记，被拒的请求也留证据
     state.record_ref_images(

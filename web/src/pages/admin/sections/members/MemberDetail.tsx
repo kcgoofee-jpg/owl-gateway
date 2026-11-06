@@ -31,13 +31,12 @@ const ISSUE_BTN: Record<IssueAction["kind"], string> = {
   "tag-del": "查完了，移除标记",
 };
 
-const mask = (t: string): string => `${t.slice(0, 8)}····${t.slice(-4)}`;
-
 function IssueList(props: { m: MemberRow; issues: Issue[]; act: DetailActions }) {
-  const serious = props.issues.some((x) => x.level !== "info");
+  // 只有真的需要动手的事项才显示；纯提示（info）不再占一块地方。
+  if (!props.issues.some((x) => x.level !== "info")) return null;
   return (
-    <section class="mb-sec" aria-label={serious ? "要处理" : "注意到"}>
-      <h4 class="mb-h4">{serious ? "要处理" : "注意到"}</h4>
+    <section class="mb-sec" aria-label="要处理">
+      <h4 class="mb-h4">要处理</h4>
       <ul class="mb-issues">
         {props.issues.map((i) => (
           <li key={i.id} class={`mb-issue is-${i.level}`}>
@@ -69,7 +68,6 @@ export function MemberDetail(props: { m: MemberRow; now: number; act: DetailActi
   const detail = useAdmin<{ key: KeyRow }>(m.key_count > 0 ? `/admin/api/keys/${m.id}` : null);
   const k = m.k ?? detail.data?.key;
   const verdict = memberVerdict(m, now);
-  const [reveal, setReveal] = useState(false);
   const dc = m.discord;
   const dcId = dc ? String(dc.id) : m.discord_id ? String(m.discord_id) : "";
   const tags = userTags(m);
@@ -185,17 +183,14 @@ export function MemberDetail(props: { m: MemberRow; now: number; act: DetailActi
             <dt>Key</dt>
             <dd>
               <span class="mb-key">
-                <code class="mb-key__v">{reveal ? k.token : mask(k.token)}</code>
-                <Button size="sm" variant="ghost" aria-pressed={reveal} onClick={() => setReveal(!reveal)}>
-                  {reveal ? "隐藏" : "显示"}
-                </Button>
+                <code class="mb-key__v">{k.token}</code>
                 <Button
                   size="sm"
                   variant="ghost"
                   aria-label={`复制 ${memberLabel(m)} 的 Key`}
                   onClick={async () => {
                     const ok = await copyText(k.token);
-                    toast(ok ? "Key 已复制" : "复制失败，请点「显示」后手动复制", { error: !ok });
+                    toast(ok ? "Key 已复制" : "复制失败，请手动选中复制", { error: !ok });
                   }}
                 >
                   复制

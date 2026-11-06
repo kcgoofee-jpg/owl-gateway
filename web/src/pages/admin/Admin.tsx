@@ -23,7 +23,6 @@ import { LocationProvider, lazy, Route, Router, useLocation } from "preact-iso";
 import { ApiError, getJSON, sendJSON } from "../../lib/api";
 import { Button, cx, Field, Skeleton, toast } from "../../ui";
 import "./admin.css";
-import { SitepaidBanner } from "./SitepaidHints";
 import { edits } from "./sections/live";
 
 /* ---------------- 分区注册表 ---------------- */
@@ -431,10 +430,7 @@ function Shell(props: { children: ComponentChildren; dataLive?: boolean }) {
           <span class="admin-brand">🦉 猫头鹰公益站</span>
           <span class="spacer" />
         </header>
-        <main class="admin-content">
-          {dataLive && <SitepaidBanner />}
-          {props.children}
-        </main>
+        <main class="admin-content">{props.children}</main>
       </div>
     </div>
   );

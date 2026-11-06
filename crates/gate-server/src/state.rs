@@ -2,7 +2,6 @@
 //! 启动顺序：建表迁移 → 运行期限制 → 上游 Token 标识迁移 → Token 设置 →
 //! 账号保护 → 回填最近 3 小时出图 → Key 暂停 → 全站冷却 → 停机检测 → 后台密码。
 
-use crate::alerts::Alerter;
 use crate::bugs::Bugs;
 use crate::env::EnvConfig;
 use crate::guard::Guard;
@@ -68,7 +67,6 @@ pub struct Inner {
     pub db: Db,
     pub clock: Clock,
     pub assets: Assets,
-    pub alerter: Arc<Alerter>,
     pub bugs: Arc<Bugs>,
     pub guard: Arc<Guard>,
     pub nai: NaiClient<GateHooks>,
@@ -141,12 +139,11 @@ impl AppState {
     pub async fn build(env: EnvConfig, assets: Assets) -> anyhow::Result<Self> {
         std::fs::create_dir_all(&env.data_dir)?;
         let now = crate::time::now();
-        let db = Db::open_for_gateway(env.db_path(), now, env.key_inactivity_delete_days)?;
+        let db = Db::open(env.db_path())?;
         if !env.owner_image_subject.is_empty() {
             db.bind_image_owner(&env.owner_image_subject).await?;
         }
         let clock = Clock::service();
-        let alerter = Arc::new(Alerter::owner(&env));
         let tasks = TaskTracker::new();
         let bugs = Arc::new(Bugs::new());
         let guard = Arc::new(Guard::new(
@@ -181,7 +178,7 @@ impl AppState {
                 })
                 .collect(),
         };
-        let hooks = GateHooks::new(db.clone(), clock.clone(), guard.clone(), alerter.clone());
+        let hooks = GateHooks::new(db.clone(), clock.clone(), guard.clone());
         let invalid_token_save = hooks.invalid_token_save.clone();
         let nai = NaiClient::new(
             UpConfig {
@@ -202,7 +199,6 @@ impl AppState {
         let state = Self(Arc::new(Inner {
             clock,
             assets,
-            alerter,
             bugs,
             guard,
             nai,

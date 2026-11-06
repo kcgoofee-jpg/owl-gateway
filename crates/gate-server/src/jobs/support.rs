@@ -1,9 +1,8 @@
 //! 上游读数和运行保护任务共用的 I/O。
 
 use super::JobError;
-use crate::action_log::log_action;
 use crate::state::AppState;
-use gate_core::quota::{AccountAllowance, Effect};
+use gate_core::quota::AccountAllowance;
 use serde_json::Value;
 
 /// 上游账号 V5 缓存里的读数（`allowance.snapshot(pool)["accounts"]`；只读缓存，不发请求）。
@@ -57,53 +56,4 @@ pub(crate) async fn allowance_accounts(
         accounts = allowance_snapshot(state).await?;
     }
     Ok(accounts)
-}
-
-/// 把 gate-core 给出的写入按顺序执行（动态额度与自动驾驶共用）。
-pub(crate) async fn apply_effects(state: &AppState, effects: Vec<Effect>) -> Result<(), JobError> {
-    for e in effects {
-        match e {
-            Effect::Set { key, value } => state.db.set_setting(&key, &value).await?,
-            Effect::Bulk { pairs } => state.db.set_settings_bulk(&pairs).await?,
-            Effect::Log {
-                actor,
-                action,
-                target,
-                detail,
-            } => {
-                log_action(
-                    &state.db,
-                    &actor,
-                    &action,
-                    &target,
-                    &detail,
-                    true,
-                    state.now(),
-                )
-                .await;
-            }
-            Effect::TripBreaker {
-                seconds,
-                reason,
-                now,
-            } => {
-                state
-                    .guard
-                    .with(|g| g.trip_breaker(seconds as f64, &reason, now))
-                    .map_err(|e| JobError::new("invalid_value", format!("{e:?}")))?;
-            }
-            // 临时暂停单把 Key：写 share_state 表（现在只存这个，表名为兼容旧库保留）并更新内存里的暂停表
-            Effect::PauseKey {
-                key_id,
-                seconds,
-                reason,
-                now,
-            } => {
-                let until = now + (seconds as f64).max(0.0);
-                state.db.upsert_pause(key_id, until, &reason).await?;
-                state.pauses.set(key_id, until, reason);
-            }
-        }
-    }
-    Ok(())
 }

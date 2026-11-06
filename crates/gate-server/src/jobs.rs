@@ -1,24 +1,24 @@
 //! 定时任务与启动 / 关停序列。
 //!
-//! 每件事一个循环，全部挂在 `state.tasks` 上，启动后立即跑第一轮，睡觉时听 `state.shutdown`：
+//! 只剩四件事，全部挂在 `state.tasks` 上，启动后立即跑第一轮，睡觉时听 `state.shutdown`：
 //!
 //! | 任务 | 周期 | 做什么 |
 //! |---|---|---|
 //! | `upstream_snapshot` 上游 V5 快照 | 10 分钟 ±20%，满 1 小时才记 | 主动读一次订阅，写 `upstream_snapshots`（后台「额度记录」页估算 V5 实测恢复速度用） |
-//! | `breaker` 全站熔断 | 10 分钟 ±20% | 15 分钟内上游失败 ≥ 5 次、≥ 30%、来自 ≥ 2 把 Key → 停 5 分钟 |
-//! | `key_guard` 单 Key 限流 | 10 分钟 ±20% | 1 小时被拒 ≥ 120 次 → 暂停这把 Key 1 小时 |
-//! | `maintenance` 维护 | 5 分钟 ±20% | 设置了保留期的记录才清（线上全部永久保留）/ 注册服务的三个同步（`registration::registrar_jobs`）/ 磁盘自检 |
-//! | `anlas_reconcile` Anlas 自动核对 | 1 小时 ±10% | 和后台「Anlas 消耗核对」同一套（[`reconcile`]）；忙时等不到空档就跳过，差距偏大记一条「注意」Bug |
+//! | `breaker` 全站熔断 | 10 分钟 ±20% | 15 分钟内上游失败 ≥ 5 次、占比 ≥ 30%、来自 ≥ 2 把 Key → 全站暂停出图 5 分钟（阈值是常量，不是自适应） |
+//! | `maintenance` 维护 | 5 分钟 ±20% | 注册服务的三个同步（`registration::registrar_jobs`）/ 磁盘自检 |
 //! | `idle_recycle` 闲置回收 | 1 小时 | 长期不用的 Key 删除（不拉黑，之后还能再 /register；站点出不了图的服务日不算，见 [`idle_recycle_window`]）；`KEY_INACTIVITY_DELETE_DAYS=0` 时**什么都不做** |
+//!
+//! 单 Key 限流（按 1 小时被拒次数推断「客户端在死循环」）、Anlas 自动核对、日志保留清理都已删除。
+//! 熔断保留：它的阈值写死在 `gate_core::breaker` 里，作用是不让上游账号被打死。
 //!
 //! 每轮的结果记进设置 `job_last`，启动时据此判断最近一次任务完成时间（[`registry`]）。
 //! 同一个库同一时刻只有一个进程跑这些任务（部署交接时新旧网关会同时在线，见 [`leader`]）。
 //! 一轮工作做到底才响应关停（只在睡觉时被打断）：额度重算这类多步写入不能被拦腰切断。
 
-mod autopilot;
+mod breaker;
 mod capacity;
 pub mod leader;
-mod reconcile;
 pub mod registry;
 mod support;
 
@@ -121,7 +121,6 @@ pub async fn maintenance_once(state: &AppState) -> Vec<(&'static str, JobError)>
             }
         };
     }
-    step!("purge", "清理过期记录", purge(state));
     // 同步身份组 / 补全资料 / 退群回收（注册服务自己逐步记错；没配齐就什么都不做）
     if state.shutdown.is_cancelled() {
         return failed;
@@ -147,27 +146,6 @@ pub(crate) async fn maintenance_job(state: &AppState) -> Result<String, JobError
     Ok("全部完成".to_string())
 }
 
-/// Apply request log retention.
-pub async fn purge(state: &AppState) -> Result<(), JobError> {
-    let db = &state.db;
-    let keep = state.env.usage_log_retention_days;
-    if keep > 0 {
-        db.purge_usage_log(state.now() - std::cmp::max(7, keep) as f64 * 86400.0)
-            .await?;
-    }
-    // 请求日志里的 UA / IP：后台设置了天数才清（0 = 永久）
-    let origin_days = crate::settings::usage_origin_keep_days(db).await?;
-    if origin_days > 0 {
-        let cleared = db
-            .purge_usage_origin(state.now() - origin_days as f64 * 86400.0)
-            .await?;
-        if cleared > 0 {
-            tracing::info!("[purge] 已清掉 {cleared} 条日志里超过 {origin_days} 天的 UA / IP");
-        }
-    }
-    Ok(())
-}
-
 /// 磁盘剩余不足 10% 提醒站长（同一条 6 小时一次）。
 async fn disk_check(state: &AppState) -> Result<(), JobError> {
     let st = rustix::fs::statvfs(&state.env.data_dir)
@@ -179,13 +157,9 @@ async fn disk_check(state: &AppState) -> Result<(), JobError> {
         return Err(JobError::new("division_by_zero", "division by zero"));
     }
     if (free as f64) / (total as f64) < 0.10 {
-        state.alerter.notify(
-            "disk_low",
-            &format!(
-                "服务器磁盘剩余不足 10%（剩 {} MB），请清理或扩容。",
-                free / (1 << 20)
-            ),
-            6.0 * 3600.0,
+        tracing::warn!(
+            "服务器磁盘剩余不足 10%（剩 {} MB），请清理或扩容。",
+            free / (1 << 20)
         );
     }
     Ok(())

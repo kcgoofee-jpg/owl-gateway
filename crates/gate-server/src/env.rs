@@ -68,15 +68,6 @@ impl Reader<'_> {
             .map(|s| s.trim().to_string())
             .unwrap_or_default()
     }
-    fn int(&self, name: &str, default: i64) -> i64 {
-        let raw = self.0.get(name).unwrap_or_default();
-        let raw = raw.trim();
-        if raw.is_empty() {
-            default
-        } else {
-            primitives::parse_int(raw).unwrap_or(default)
-        }
-    }
     /// registration.py 的 `number()`：`max(0, int(os.getenv(name, default)))`，解析失败用默认值（不夹 0）。
     fn nonneg(&self, name: &str, default: i64) -> i64 {
         match self.0.get(name) {
@@ -137,7 +128,6 @@ pub struct EnvConfig {
     // Discord / 告警
     pub discord_bot_token: String,
     pub site_url: String,
-    pub alert_user_id: String,
     pub discord_invite_url: String,
     pub discord_guild_id: String,
     /// Discord REST 基地址（测试指向本地假服务）。
@@ -145,7 +135,6 @@ pub struct EnvConfig {
     /// 工作台「上传到 Explore」的转发频道（机器人把原图 + 提交者 ID + 时间发到这里）。
     pub explore_channel_id: String,
     // 记录
-    pub usage_log_retention_days: i64,
     pub registration: Option<RegistrationEnv>,
 }
 
@@ -249,12 +238,10 @@ impl EnvConfig {
             owner_image_subject: r.str("OWNER_IMAGE_SUBJECT", ""),
             discord_bot_token: r.str("DISCORD_BOT_TOKEN", ""),
             site_url: r.str("SITE_URL", ""),
-            alert_user_id: r.str("ALERT_USER_ID", ""),
             discord_invite_url: r.str("DISCORD_INVITE_URL", ""),
             discord_guild_id: r.str("DISCORD_GUILD_ID", ""),
             discord_api_base: r.str("DISCORD_API_BASE", "https://discord.com/api/v10"),
             explore_channel_id: r.str("EXPLORE_CHANNEL_ID", DEFAULT_EXPLORE_CHANNEL_ID),
-            usage_log_retention_days: r.int("USAGE_LOG_RETENTION_DAYS", 0),
             forwarded_allow_ips: split_list("FORWARDED_ALLOW_IPS", "127.0.0.1"),
             registration,
         }

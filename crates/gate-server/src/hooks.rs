@@ -1,6 +1,5 @@
 //! 网关给上游客户端注入的能力：服务日、告警、账号保护、上游计数、结果校验。
 
-use crate::alerts::Alerter;
 use crate::guard::Guard;
 use bytes::Bytes;
 use gate_core::clock::Clock;
@@ -19,19 +18,17 @@ pub struct GateHooks {
     db: Db,
     clock: Clock,
     guard: Arc<Guard>,
-    alerter: Arc<Alerter>,
     /// 冷却存库串行化：读出 → 合并 → 写回 必须一次做完，不然两次 403 挨得近时后一次会被覆盖。
     cooldown_save: Arc<tokio::sync::Mutex<()>>,
     pub(crate) invalid_token_save: Arc<tokio::sync::Mutex<()>>,
 }
 
 impl GateHooks {
-    pub fn new(db: Db, clock: Clock, guard: Arc<Guard>, alerter: Arc<Alerter>) -> Self {
+    pub fn new(db: Db, clock: Clock, guard: Arc<Guard>) -> Self {
         Self {
             db,
             clock,
             guard,
-            alerter,
             cooldown_save: Arc::default(),
             invalid_token_save: Arc::default(),
         }
@@ -101,13 +98,9 @@ impl Hooks for GateHooks {
         crate::time::now()
     }
 
-    /// 上游客户端报的事件：Token 失效（401）和连续 403 进入冷却会私信站长；单次 402 / 403 只写日志。
-    fn event(&self, kind: &str, message: &str, cooldown: f64) {
-        if matches!(kind, "upstream_401" | "upstream_403_cooldown") {
-            self.alerter.notify(kind, message, cooldown);
-        } else {
-            tracing::info!(target: "upstream", kind, "{message}");
-        }
+    /// 上游客户端报的事件：一律只写日志（告警渠道已下线）。
+    fn event(&self, kind: &str, message: &str, _cooldown: f64) {
+        tracing::info!(target: "upstream", kind, "{message}");
     }
 
     fn cooldown_changed(&self, token_id: &str, cooldown: Cooldown) {

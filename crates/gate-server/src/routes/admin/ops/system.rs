@@ -1,4 +1,4 @@
-//! 测试告警、Discord 机器人（奶妹）在线状态（总览的「奶妹离线」提醒用）。
+//! Discord 机器人（奶妹）在线状态（总览的「奶妹离线」提醒用）与维护模式。
 
 use crate::body::read_json_body;
 use crate::error::{ApiResult, HttpError, InternalError, ok_json};
@@ -6,16 +6,12 @@ use crate::session::AdminSession;
 use crate::state::AppState;
 use axum::Router;
 use axum::extract::{Request, State};
-use axum::routing::{get, post, put};
+use axum::routing::{get, put};
 use gate_core::bot_config::{self, BotConfigError};
 use serde_json::json;
 
-/// 两次测试告警至少间隔这么多秒。
-const ALERT_TEST_GAP: f64 = 10.0;
-
 pub(super) fn router() -> Router<AppState> {
     Router::new()
-        .route("/admin/api/alerts/test", post(alerts_test))
         .route("/admin/api/discord-bot", get(discord_bot_get))
         .route("/admin/api/ops/maintenance", put(maintenance_put))
 }
@@ -61,36 +57,6 @@ async fn maintenance_put(
     Ok(ok_json(
         &json!({"enabled": mode != Maintenance::Off, "mode": mode.as_str()}),
     ))
-}
-
-// ------------------------------------------------------------------ 测试告警
-
-async fn alerts_test(State(state): State<AppState>, _s: AdminSession) -> ApiResult {
-    let shared = &state.ops;
-    let now = state.now();
-    let last = *shared.alert_test_at.lock().expect("alert_test_at");
-    if now - last < ALERT_TEST_GAP {
-        return Err(HttpError::new(
-            429,
-            format!(
-                "测试告警发送过于频繁，请等待 {} 秒后再试",
-                (ALERT_TEST_GAP - (now - last)) as i64
-            ),
-        )
-        .into());
-    }
-    if !state.alerter.configured() {
-        return Err(HttpError::new(
-            409,
-            "尚未配置告警私信（DISCORD_BOT_TOKEN 与 ALERT_USER_ID）",
-        )
-        .into());
-    }
-    *shared.alert_test_at.lock().expect("alert_test_at") = now;
-    state
-        .alerter
-        .notify("test", "这是一条测试告警，收到说明告警渠道正常。", 0.0);
-    Ok(ok_json(&json!({"ok": true})))
 }
 
 // ------------------------------------------------------------------ Discord 机器人

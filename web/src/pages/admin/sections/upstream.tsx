@@ -1,6 +1,6 @@
 /**
  * 上游：一次取全（GET /admin/api/upstream），然后组装。
- * 按需查询官方信息、账号完整详情与 Anlas 核对；完整详情只存在打开的弹窗中。
+ * 按需查询官方信息与账号完整详情；完整详情只存在打开的弹窗中。
  */
 
 import { Plus } from "lucide-preact";
@@ -13,7 +13,6 @@ import { Sect } from "./system/forms";
 import { AccountCard } from "./upstream/accounts";
 import type { UpstreamAccount, UpstreamPage } from "./upstream/core";
 import { AccountDetails } from "./upstream/details";
-import ReconcileCard from "./upstream/reconcile";
 import { UpstreamStatus } from "./upstream/status";
 import { TokenDialog } from "./upstream/tokens";
 import "./upstream.css";
@@ -121,16 +120,6 @@ export default function Upstream() {
             />
           ))}
       </div>
-      {data && (
-        <ReconcileCard
-          recon={data.reconciliation}
-          settlements={data.settlements}
-          csrf={data.csrf_token}
-          loading={loading}
-          error={error}
-        />
-      )}
-
       {details && data && (
         <AccountDetails
           key={details.token_id}

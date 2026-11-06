@@ -1,6 +1,6 @@
 //! 成员接口的鉴权与准入前检查（鉴权 / 功能开关 / 每分钟次数 / 出图冷却）。
 
-use crate::error::{ApiError, GateError, InternalError};
+use crate::error::{ApiError, GateError};
 use crate::key::Key;
 use crate::reqctx::ReqCtx;
 use crate::state::AppState;
@@ -333,17 +333,12 @@ pub fn record_auth_failure(state: &AppState, ip: &str, now: f64) {
 pub async fn site_flag(state: &AppState, spec: &Spec) -> Result<Value, gate_db::DbError> {
     crate::settings::site_value(&state.db, spec).await
 }
-/// 功能开关（站长全局开关 + 这把 Key 的功能列表）。
-pub async fn require_feature(state: &AppState, key: &Key, name: &str) -> Result<(), ApiError> {
-    let global = state
-        .db
-        .get_setting(gate_core::features::GLOBAL_KEY)
-        .await?;
-    let flags = gate_core::features::parse_global_flags(global.as_deref())
-        .map_err(|e| InternalError(e.to_string()))?;
-    if (!key.owner_image_full && !flags.get(name).copied().unwrap_or(false))
-        || !key.policy.allows(name)
-    {
+/// 功能准入：只看成员规则（`MemberPolicy`）。
+///
+/// 站点级 `features_global` 开关已删除——成员能开哪些功能在「成员规则」里逐项配，
+/// 站长号（`owner_image_full`）本来就是全功能。
+pub fn require_feature(key: &Key, name: &str) -> Result<(), ApiError> {
+    if !key.owner_image_full && !key.policy.allows(name) {
         let label = gate_core::features::FEATURES
             .iter()
             .find(|(id, _)| *id == name)

@@ -5,9 +5,7 @@
 //! 3.0 有意不同的只有一处：`over_base`（V4.5 保底用完后全站不空闲）整个机制已经删除，常量和短说明都不在了；
 //! 历史记录里的 `over_base` 按没有码处理，显示 detail 的第一句。
 
-use gate_core::autopilot::{KEY_GUARD_SKIP_REASONS, MEMBER_CAUSED};
 use gate_core::reasons::{self, Reason};
-use std::collections::HashSet;
 
 /// 全部原因码：(常量名, 码, 给站长看的短说明)。`None` = 没有短说明，显示 detail 的第一句。
 const ALL: &[(&str, &str, Option<&str>)] = &[
@@ -388,21 +386,5 @@ fn backfill_classifies_historical_messages() {
     ];
     for &(text, want) in table {
         assert_eq!(reasons::classify(text), want, "{text:?}");
-    }
-}
-
-#[test]
-fn every_reason_code_is_classified_exactly_once() {
-    let skip: HashSet<&str> = KEY_GUARD_SKIP_REASONS.into_iter().collect();
-    let member: HashSet<&str> = MEMBER_CAUSED.into_iter().collect();
-    assert!(skip.is_disjoint(&member), "同一个原因码不能两边都算");
-    for (_, c, _) in ALL {
-        assert!(
-            skip.contains(c) || member.contains(c),
-            "原因码 {c} 没有归类：加进 KEY_GUARD_SKIP_REASONS（站点层面）或 MEMBER_CAUSED（成员自己的问题）"
-        );
-    }
-    for c in skip.iter().chain(member.iter()) {
-        assert!(ALL.iter().any(|(_, x, _)| x == c), "{c} 不是现有的原因码");
     }
 }

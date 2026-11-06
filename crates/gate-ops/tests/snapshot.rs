@@ -416,7 +416,6 @@ fn sanitize_replaces_keys_and_drops_secrets_and_content() {
             "claim_rules",
             "guard_account_daily_cap",
             "member_policy_defaults",
-            "member_policy_v1_migrated",
             "register_open",
             "runtime_budgets"
         ]

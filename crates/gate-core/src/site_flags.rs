@@ -200,18 +200,6 @@ pub static ALGO_NOTICE: Spec = spec(
     "quota_algo → 首页",
     "首页显示的今日额度说明",
 );
-/// 请求日志里来源 IP 和客户端（User-Agent）保留几天，到期由维护任务清成空串；0 = 永久（站长 10-22：后台记录一律留存）。
-pub static ORIGIN_KEEP_DAYS: Spec = bounded(
-    spec(
-        "usage_origin_keep_days",
-        Kind::Int,
-        SpecDefault::Int(0),
-        "audit",
-        "请求日志里的来源 IP 和客户端保留几天，到期清除；0 = 永久",
-    ),
-    0,
-    365,
-);
 pub static MEMBER_SWEEP: Spec = spec(
     "member_sweep",
     Kind::Flag,
@@ -234,7 +222,7 @@ pub static V5_MEDIUM_MODE: Spec = Spec {
 };
 
 /// 登记表（已删除的设置不在里面；新增的追加在末尾）。
-pub static ALL: [&Spec; 10] = [
+pub static ALL: [&Spec; 9] = [
     &MEMBER_SWEEP,
     &ISSUE_HOURLY_CAP,
     &REGISTER_OPEN,
@@ -243,7 +231,6 @@ pub static ALL: [&Spec; 10] = [
     &GLOBAL_MONTHLY_ANLAS,
     &ALGO_NOTICE,
     &V5_MEDIUM_MODE,
-    &ORIGIN_KEEP_DAYS,
     &MAINTENANCE_MODE,
 ];
 

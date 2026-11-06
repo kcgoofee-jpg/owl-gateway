@@ -4,7 +4,6 @@ import { act, useAdmin } from "../Admin";
 import { CardPending, SectionHead } from "./_kit";
 import { type Guard, guardSpecs, RUNTIME_SPECS, type Settings } from "./limits/core";
 import type { Ops } from "./onboarding/core";
-import { FeaturesCard } from "./onboarding/features";
 import { NumField, SaveBar, Sect, SelectField, SwitchRow, useForm } from "./system/forms";
 
 function BudgetCard() {
@@ -164,7 +163,6 @@ export default function Limits() {
     <Sect>
       <SectionHead title="运行保护" />
       <BudgetCard />
-      {ops.data && <FeaturesCard ops={ops.data} />}
       <GuardCard />
     </Sect>
   );

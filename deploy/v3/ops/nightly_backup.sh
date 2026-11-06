@@ -14,8 +14,6 @@ trap 'rm -rf "$WORK"' EXIT
 
 # 1) 数据库一致性快照（复用部署用的工具；含完整性校验）
 /usr/local/bin/naigate-snapshot "$WORK/nai_gate.db.gz"
-# 备份里不留生成记录（提示词 / 参数 / 图片指纹），见 naigate-strip-prompts
-/usr/local/bin/naigate-strip-prompts "$WORK/nai_gate.db.gz"
 
 # 2) 敏感与配置文件 + 快照 一起打包（存在的才收：upstream_tokens.json 只在接管过令牌池时存在）
 FILES=(.env)
@@ -27,7 +25,13 @@ tar -czf "$WORK/bundle.tar.gz" -C /opt/service-tools "${FILES[@]}"
 test -s /opt/owl/nai-mirror/nai-app/image.html
 test -s /opt/owl/nai-mirror/nai-app/bridge.js
 (cd /opt/owl/nai-mirror && find nai-app -type f -print0 | sort -z | xargs -0 sha256sum) > "$WORK/workbench.sha256"
-tar -czf "$WORK/owl.tar.gz" -C / opt/owl/compose.yml opt/owl/cutover.sh opt/caddy/Caddyfile opt/owl/nai-mirror/nai-app
+# 3.0 的部署文件、线上 Caddy 配置，以及服务器上被 cron / systemd timer 调度的运维脚本。
+# ops/ 以前不在包里：close-stale-deliveries.sh 在线上每 5 分钟跑，丢了只能去备份里翻（翻不到）。
+OWL_RESTORE=(opt/owl/compose.yml opt/owl/cutover.sh opt/owl/ops opt/caddy/Caddyfile opt/owl/nai-mirror/nai-app)
+for unit in owl-prune-snapshots.service owl-prune-snapshots.timer; do
+  [ -f "/etc/systemd/system/$unit" ] && OWL_RESTORE+=("etc/systemd/system/$unit")
+done
+tar -czf "$WORK/owl.tar.gz" -C / "${OWL_RESTORE[@]}"
 
 # New API and the OWL account bridge are restored together with the gateway.
 python3 - "$WORK" <<'PYNEWAPI'

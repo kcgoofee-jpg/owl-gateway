@@ -67,10 +67,12 @@ services:
       - REGISTRATION_BACKEND_URL=http://nai-gate:8000
       - SITE_URL=${SITE_URL}
       # AI 对话（@奶妹 / 回复奶妹）：KEY 未配置时该功能整体关闭，其余不受影响。
-      # 走宿主机 127.0.0.1:8080 的 zcode-proxy（bigmodel GLM），经 host-gateway 进来。
-      - NAIMEI_LLM_BASE_URL=${NAIMEI_LLM_BASE_URL:-http://host.docker.internal:8080}
+      # 2026-11-06 起走宿主机 new-api（127.0.0.1:3300，同时发布在 owl_internal 网关 172.18.0.1:3300）。
+      # 原来的 zcode-proxy/GLM 反代已删除：start-plan 靠 captcha 自动领取、配额与外部账号共享，
+      # 长期返回 1005 exceed quota limit，奶妹只能静默空回。
+      - NAIMEI_LLM_BASE_URL=${NAIMEI_LLM_BASE_URL:-http://host.docker.internal:3300}
       - NAIMEI_LLM_API_KEY=${NAIMEI_LLM_API_KEY:-}
-      - NAIMEI_LLM_MODEL=${NAIMEI_LLM_MODEL:-glm-5.3-flash}
+      - NAIMEI_LLM_MODEL=${NAIMEI_LLM_MODEL:-doubao-seed-2.1-lite}
       - NAIMEI_OWNER_IDS=${NAIMEI_OWNER_IDS:-}
       - NAIMEI_CHAT_LOG=/app/data/chat/chatlog.jsonl
       - TZ=Asia/Shanghai

@@ -598,8 +598,6 @@ async fn members_view_shape_and_dropped_fields() {
     }
     assert_eq!(m[1]["discord_id"], "900000000000000002");
     assert_eq!(m[1]["tags"][0]["tag"], "观察");
-    assert_eq!(m[1]["auto_tags"], json!([{"tag": "请求过快", "count": 1}]));
-    assert_eq!(m[1]["rejected_24h"], 1);
     assert_eq!(
         m[1]["share"]["paused_until"]
             .as_f64()
@@ -676,8 +674,8 @@ async fn members_filter_attention_trims_rows_and_counts() {
             all["total"].clone(),
             all["attention"].clone()
         ),
-        (json!("all"), json!(9), json!(4)),
-        "k2 快到期、k3 已过期、k8 角色太多、k9 重置两次 → 4 个要处理"
+        (json!("all"), json!(9), json!(3)),
+        "k2 快到期、k3 已过期、k9 重置两次 → 3 个要处理（自动标签判定已删除）"
     );
     assert_eq!(
         all["members"].as_array().unwrap().len(),
@@ -699,7 +697,7 @@ async fn members_filter_attention_trims_rows_and_counts() {
             att["total"].clone(),
             att["attention"].clone()
         ),
-        (json!("attention"), json!(9), json!(4)),
+        (json!("attention"), json!(9), json!(3)),
         "attention 模式只裁 members，total/attention 仍是全量口径"
     );
     let names: Vec<&str> = att["members"]
@@ -710,8 +708,8 @@ async fn members_filter_attention_trims_rows_and_counts() {
         .collect();
     assert_eq!(
         names,
-        ["重置两次", "角色太多", "已过期", "快到期"],
-        "id 倒序；停用的 k4、已查看的 k6、只有「请求过快」的 k7 不在里面"
+        ["重置两次", "已过期", "快到期"],
+        "id 倒序；停用的 k4、已查看的 k6、只有「请求过快」的 k7、靠自动标签判定的 k8 都不在里面"
     );
     assert_eq!(att["members"][0]["today"]["images"], 0);
     assert_eq!(
@@ -802,7 +800,7 @@ async fn share_clear_lifts_the_pause() {
         a.actions()
             .await
             .iter()
-            .any(|(act, t, ..)| act == "防分享清零（误判）" && t == "Key #1 测试成员")
+            .any(|(act, t, ..)| act == "解除限流暂停" && t == "Key #1 测试成员")
     );
 }
 

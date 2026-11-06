@@ -20,11 +20,11 @@ pub fn router() -> Router<AppState> {
 }
 
 /// `_feature_view`：该 Key 当前各项功能是否可用（已计入全局开关）。
-async fn feature_view(state: &AppState, key: &Key) -> Result<Vec<Value>, ApiError> {
+async fn feature_view(_state: &AppState, key: &Key) -> Result<Vec<Value>, ApiError> {
     let mut view = Vec::new();
     for (name, label) in FEATURES {
         // require_feature 只在被拒时返回 Gate 错误
-        let on = match require_feature(state, key, name).await {
+        let on = match require_feature(key, name) {
             Ok(()) => true,
             Err(ApiError::Gate(_)) => false,
             Err(e) => return Err(e),

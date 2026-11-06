@@ -140,7 +140,7 @@ impl Reserved {
             )
             .into());
         }
-        crate::auth::require_feature(&self.state, &current, self.requirements.feature).await?;
+        crate::auth::require_feature(&current, self.requirements.feature)?;
         if self.requirements.v5
             && (!current.policy.v5 || crate::ops::v5_paused(&self.state.db).await?)
         {
@@ -152,7 +152,7 @@ impl Reserved {
             .into());
         }
         if self.requirements.vibe {
-            crate::auth::require_feature(&self.state, &current, "vibe").await?;
+            crate::auth::require_feature(&current, "vibe")?;
         }
         if (self.requirements.img2img && !current.policy.img2img)
             || (self.requirements.paid_parameters && !current.policy.paid_parameters)

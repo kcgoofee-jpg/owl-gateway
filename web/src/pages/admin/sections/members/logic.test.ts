@@ -4,7 +4,6 @@ import {
   buildFilters,
   countFilter,
   DAY,
-  hasReason,
   matchesQuery,
   memberIssues,
   memberKeyOptions,
@@ -14,7 +13,6 @@ import {
   memberVerdict,
   needsAttention,
   normalizeFilter,
-  rejectReasons,
   sortMembers,
 } from "./logic";
 import type { Member } from "./types";
@@ -27,7 +25,6 @@ function mk(p: Partial<Member> = {}): Member {
     id,
     name: `m${id}`,
     enabled: true,
-    invited: false,
     discord_id: `9000000000000000${id}`,
     discord: null,
     created_at: NOW - 10 * DAY,
@@ -72,12 +69,9 @@ function mk(p: Partial<Member> = {}): Member {
     registered_at: NOW - 10 * DAY,
     first_image_at: NOW - 9 * DAY,
     last_image_at: NOW - 3600,
-    rejected_24h: 0,
-    rejected_why: [],
     share: null,
     reset_today: null,
     tags: [],
-    auto_tags: [],
     key_count: 1,
     all_key_ids: [id],
     ...p,
@@ -117,14 +111,6 @@ describe("memberIssues / needsAttention", () => {
       tags: [{ tag: ACK_TAG, note: "", by: "站长", ts: NOW - 2 * DAY }],
     });
     expect(needsAttention(stale, NOW)).toBe(true);
-  });
-
-  it("单纯「请求过快」只是提示，不进需要处理；次数很多的其他自动标签才算", () => {
-    const rate = mk({ auto_tags: [{ tag: "请求过快", count: 99 }] });
-    expect(memberIssues(rate, NOW)[0]?.level).toBe("info");
-    expect(needsAttention(rate, NOW)).toBe(false);
-    const loud = mk({ auto_tags: [{ tag: "并发超限", count: 60 }] });
-    expect(needsAttention(loud, NOW)).toBe(true);
   });
 
   it("被限流暂停给出「误判，解除」动作", () => {
@@ -173,17 +159,8 @@ describe("memberVerdict / memberStatus", () => {
 
 describe("筛选横栏", () => {
   const ids = (f: ReturnType<typeof buildFilters>) => f.chips.map((c) => c.id);
-  it("一条横栏按顺序：全部 / 今日 / 没出图 / 新加入 / 被拒 / 快回收 / 邀请 / 需要处理", () => {
-    expect(ids(buildFilters(NOW, 3))).toEqual([
-      "all",
-      "today",
-      "never",
-      "new",
-      "rejected",
-      "reclaim",
-      "invite",
-      "attention",
-    ]);
+  it("一条横栏按顺序：全部 / 今日 / 没出图 / 新加入 / 快回收 / 需要处理", () => {
+    expect(ids(buildFilters(NOW, 3))).toEqual(["all", "today", "never", "new", "reclaim", "attention"]);
   });
   it("已下线的筛选不在横栏里：普通身份组、后台手动建的 Key、旧的 staff 筛选、站长标签", () => {
     const all = ids(buildFilters(NOW, 3)).join(",");
@@ -193,11 +170,10 @@ describe("筛选横栏", () => {
   it("「快被回收」所有领取方式使用相同闲置窗口，标签显示有效天数", () => {
     const idle = mk({ last_image_at: NOW - 2.5 * DAY });
     const fresh = mk({ last_image_at: NOW - 3600 });
-    const invite = mk({ last_image_at: NOW - 2.5 * DAY, invited: true });
     const never = mk({ last_image_at: null, first_image_at: null, created_at: NOW - 2.5 * DAY });
     const reclaim = buildFilters(NOW, 3).chips.find((x) => x.id === "reclaim");
     expect(reclaim?.label).toBe("快被回收（满 3 天）");
-    expect([idle, fresh, invite, never].filter((m) => reclaim?.test(m))).toEqual([idle, invite, never]);
+    expect([idle, fresh, never].filter((m) => reclaim?.test(m))).toEqual([idle, never]);
     expect(buildFilters(NOW, 7).chips.find((x) => x.id === "reclaim")?.label).toBe("快被回收（满 7 天）");
   });
   it("回收天数为 0（关闭）时没有「快被回收」", () => {
@@ -207,7 +183,7 @@ describe("筛选横栏", () => {
     const rows = [
       mk({ today: { images: 1, v5: 0, anlas: 0, requests: 2, legacy_free_images: 1 } }),
       mk({ first_image_at: null, registered_at: NOW - 3600 }),
-      mk({ invited: true, tags: [{ tag: "邀请", note: "", by: "", ts: NOW }], rejected_24h: 2 }),
+      mk({ tags: [{ tag: "邀请", note: "", by: "", ts: NOW }] }),
     ];
     const f = buildFilters(NOW, 3);
     const n = (id: string) => countFilter(rows, f.chips.find((c) => c.id === id) as never);
@@ -215,27 +191,10 @@ describe("筛选横栏", () => {
     expect(n("today")).toBe(1);
     expect(n("never")).toBe(1);
     expect(n("new")).toBe(1);
-    expect(n("rejected")).toBe(1);
-    expect(n("invite")).toBe(1);
     expect(n("attention")).toBe(0);
   });
-  it("被拒原因：只数近 24 小时被拒的，人数多的在前", () => {
-    const tag = (t: string, count = 1) => ({ tag: t, count, note: "" });
-    const rows = [
-      mk({ rejected_24h: 3, auto_tags: [tag("请求过快", 3)] }),
-      mk({ rejected_24h: 1, auto_tags: [tag("角色超 6 个"), tag("请求过快")] }),
-      mk({ rejected_24h: 2, auto_tags: [tag("请求过快", 2)] }),
-      mk({ rejected_24h: 0, auto_tags: [tag("旧标签")] }),
-    ];
-    expect(rejectReasons(rows)).toEqual([
-      { tag: "请求过快", count: 3 },
-      { tag: "角色超 6 个", count: 1 },
-    ]);
-    expect(hasReason(rows[1] as Member, "角色超 6 个")).toBe(true);
-    expect(hasReason(rows[0] as Member, "角色超 6 个")).toBe(false);
-  });
-  it("老链接 ?filter=role:invite 换成「邀请 Key」", () => {
-    expect(normalizeFilter("role:invite")).toBe("invite");
+  it("已删掉的老筛选 id 回到「全部」", () => {
+    for (const gone of ["role:invite", "invite", "rejected"]) expect(normalizeFilter(gone)).toBeNull();
     expect(normalizeFilter("never")).toBe("never");
     expect(normalizeFilter(undefined)).toBeNull();
   });

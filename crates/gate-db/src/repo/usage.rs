@@ -31,10 +31,10 @@ pub struct Success {
     pub rid: String,
     /// 处理这条请求的上游账号；没发到上游为 None。
     pub token_id: Option<String>,
-    /// 请求的 User-Agent / 来源 IP（原文；保留期见 `Db::purge_usage_origin`）。
+    /// 请求的 User-Agent / 来源 IP（原文，长期保留）。
     pub client: String,
     pub ip: String,
-    /// Extra client headers (anti-abuse; purged with `client` / `src`).
+    /// Extra client headers (anti-abuse; 长期保留，与 `client` / `src` 一致).
     pub hints: ClientHints,
     /// Anlas the site paid from the upstream account itself (not charged to the member's counters):
     /// written to `usage_log.anlas` together with `anlas`, left out of `counters`.
@@ -77,15 +77,15 @@ pub struct NewLog {
     pub reason: String,
     /// 选中过的上游账号（选号之后才失败的请求有值）；选号之前就被拒为 None。
     pub token_id: Option<String>,
-    /// 请求的 User-Agent / 来源 IP（原文；保留期见 `Db::purge_usage_origin`）。
+    /// 请求的 User-Agent / 来源 IP（原文，长期保留）。
     pub client: String,
     pub ip: String,
-    /// Extra client headers (anti-abuse; purged with `client` / `src`).
+    /// Extra client headers (anti-abuse; 长期保留，与 `client` / `src` 一致).
     pub hints: ClientHints,
 }
 
 /// 请求里除 UA / IP 之外的客户端特征（站长 10-23：防一人多号 / 共用 Key，要能从日志里举证）。
-/// 都不含 Authorization / Cookie 原文；保留期和 `client` / `src` 相同（后台设置 usage_origin_keep_days，0 = 永久，默认永久；见 `Db::purge_usage_origin`）。
+/// 都不含 Authorization / Cookie 原文；与 `client` / `src` 一样长期保留。
 /// 空串写成 NULL。
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, serde::Deserialize)]
 pub struct ClientHints {
@@ -290,19 +290,6 @@ fn log_filter(f: &LogFilter) -> (String, Vec<SqlValue>) {
 }
 
 impl Db {
-    pub async fn purge_usage_origin(&self, before: f64) -> Result<usize> {
-        self.write(move |tx| {
-            tx.execute(
-                "UPDATE usage_log SET client='', src='', xrw=NULL, lang=NULL, chua=NULL, hfp=NULL, bid=NULL, origin=NULL \
-                 WHERE ts<? AND (client!='' OR src!='' OR xrw IS NOT NULL OR lang IS NOT NULL \
-                 OR chua IS NOT NULL OR hfp IS NOT NULL OR bid IS NOT NULL OR origin IS NOT NULL)",
-                params![before],
-            )
-        })
-        .await
-    }
-
-    /// 日志列表（新→旧）；`limit` 夹在 1..=500，`offset` 不小于 0。
     pub async fn list_logs(
         &self,
         limit: i64,
@@ -402,14 +389,6 @@ impl Db {
                 .iter()
                 .map(|(from, to)| stmt.query_row(params![from, to], |r| value::i64_or(r, 0, 0)))
                 .collect()
-        })
-        .await
-    }
-
-    /// 只清理明细日志；每日计数器和账本不受影响。返回删除条数。
-    pub async fn purge_usage_log(&self, older_than: f64) -> Result<i64> {
-        self.write(move |tx| {
-            Ok(tx.execute("DELETE FROM usage_log WHERE ts<?", [older_than])? as i64)
         })
         .await
     }

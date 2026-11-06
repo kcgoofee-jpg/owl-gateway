@@ -11,7 +11,7 @@ use std::time::Duration;
 
 fn open(queue: usize) -> (tempfile::TempDir, Db) {
     let dir = tempfile::tempdir().unwrap();
-    let db = Db::open_with_queue(&dir.path().join("q.db"), None, queue).unwrap();
+    let db = Db::open_with_queue(&dir.path().join("q.db"), queue).unwrap();
     (dir, db)
 }
 

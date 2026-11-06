@@ -4,7 +4,7 @@
 //! （[`JobsState::record`]）：内存里一份，整体写进设置 `job_last`（serde_json）。任务出错或 panic 都只记成
 //! 这一轮失败（`ok=false`，摘要写错误，另记 Bug，来源 `job:<名字>`），循环照常继续。
 
-use super::{autopilot, capacity, idle_recycle_job, jittered, maintenance_job, sleep_or_shutdown};
+use super::{breaker, capacity, idle_recycle_job, jittered, maintenance_job, sleep_or_shutdown};
 use crate::error::{ApiError, InternalError};
 use crate::state::AppState;
 use futures::FutureExt;
@@ -42,23 +42,17 @@ fn run_upstream_snapshot(s: &AppState) -> BoxFuture<'_, Result<String, JobError>
     Box::pin(capacity::upstream_snapshot(s))
 }
 fn run_breaker(s: &AppState) -> BoxFuture<'_, Result<String, JobError>> {
-    Box::pin(autopilot::breaker(s))
-}
-fn run_key_guard(s: &AppState) -> BoxFuture<'_, Result<String, JobError>> {
-    Box::pin(autopilot::key_guard(s))
+    Box::pin(breaker::run(s))
 }
 fn run_maintenance(s: &AppState) -> BoxFuture<'_, Result<String, JobError>> {
     Box::pin(maintenance_job(s))
-}
-fn run_anlas_reconcile(s: &AppState) -> BoxFuture<'_, Result<String, JobError>> {
-    Box::pin(super::reconcile::run(s))
 }
 fn run_idle_recycle(s: &AppState) -> BoxFuture<'_, Result<String, JobError>> {
     Box::pin(idle_recycle_job(s))
 }
 
 /// 全部定时任务，按启动顺序。周期和抖动沿用内核时代的值。
-pub const JOBS: [Job; 6] = [
+pub const JOBS: [Job; 4] = [
     Job {
         name: "upstream_snapshot",
         title: "上游 V5 快照",
@@ -76,28 +70,12 @@ pub const JOBS: [Job; 6] = [
         run: run_breaker,
     },
     Job {
-        name: "key_guard",
-        title: "单 Key 限流",
-        every: "每 10 分钟",
-        every_secs: 600.0,
-        jitter: 0.2,
-        run: run_key_guard,
-    },
-    Job {
         name: "maintenance",
         title: "维护",
         every: "每 5 分钟",
         every_secs: 300.0,
         jitter: 0.2,
         run: run_maintenance,
-    },
-    Job {
-        name: "anlas_reconcile",
-        title: "Anlas 自动核对",
-        every: "每小时",
-        every_secs: 3600.0,
-        jitter: 0.1,
-        run: run_anlas_reconcile,
     },
     Job {
         name: "idle_recycle",

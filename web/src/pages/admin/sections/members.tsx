@@ -36,13 +36,10 @@ import {
   ALL_FILTER,
   buildFilters,
   countFilter,
-  hasReason,
   matchesQuery,
   memberIssues,
   memberLabel,
   normalizeFilter,
-  REJECTED_FILTER,
-  rejectReasons,
   type SortKey,
   sortMembers,
 } from "./members/logic";
@@ -75,7 +72,6 @@ export default function Members() {
   // 默认「全部成员」：不再默认落到「需要处理」把 368 人藏起来；要处理的人数在 chip 上提示。
   // 老链接的 ?filter= 照旧生效（normalizeFilter 只做旧 id 的改名）。
   const [filter, setFilter] = useState<string | null>(normalizeFilter(query.filter) ?? ALL_FILTER);
-  const [reason, setReason] = useState<string | null>(null);
   const [search, setSearch] = useState("");
   const [sort, setSort] = useState<SortKey>("today");
   const [dir, setDir] = useState<"asc" | "desc">("desc");
@@ -93,9 +89,6 @@ export default function Members() {
 
   const activeId = all.some((f) => f.id === filter) ? (filter as string) : ALL_FILTER;
   const active = all.find((f) => f.id === activeId) ?? filters.chips[0];
-  // 被拒原因是「24 小时被拒过」之内的第二层；原因随刷新消失（那 24 小时已过）时自动退回
-  const reasons = useMemo(() => rejectReasons(rows), [rows]);
-  const reasonOn = activeId === REJECTED_FILTER && reason !== null && reasons.some((r) => r.tag === reason);
   const chips = filters.chips.map((f) => ({
     id: f.id,
     label: f.label,
@@ -107,20 +100,17 @@ export default function Members() {
   const list = useMemo(() => {
     if (!active) return [];
     return sortMembers(
-      rows
-        .filter(active.test)
-        .filter((m) => !reasonOn || hasReason(m, reason as string))
-        .filter((m) => matchesQuery(m, search)),
+      rows.filter(active.test).filter((m) => matchesQuery(m, search)),
       sort,
       dir,
     );
-  }, [rows, active, reasonOn, reason, search, sort, dir]);
+  }, [rows, active, search, sort, dir]);
   // 展开了某位、开着对话框、或往下看了：顺序和名单冻住（默认按今日用量排，会在眼前跳位置），数值照常更新
   const top = useRef<HTMLDivElement>(null);
   const scrolled = useScrolledPast(top);
   const live = useFrozenList(list, (m) => m.id, {
     frozen: scrolled || open.size > 0 || dlg !== null,
-    key: `${activeId}|${reasonOn ? reason : ""}|${search}|${sort}|${dir}`,
+    key: `${activeId}|${search}|${sort}|${dir}`,
   });
   const frozenList = live.rows ?? list;
   const shown = frozenList.slice(0, limit);
@@ -141,7 +131,6 @@ export default function Members() {
   };
   const showAll = () => {
     setFilter(ALL_FILTER);
-    setReason(null);
     setLimit(PAGE);
   };
 
@@ -403,14 +392,6 @@ export default function Members() {
               onToggle={(id) => {
                 // 再点一次选中的标签 = 取消，回到全部成员
                 setFilter(id === activeId ? ALL_FILTER : id);
-                setReason(null);
-                setLimit(PAGE);
-              }}
-              reasonsOf={REJECTED_FILTER}
-              reasons={reasons}
-              reason={reasonOn ? reason : null}
-              onReason={(tag) => {
-                setReason(tag);
                 setLimit(PAGE);
               }}
             />

@@ -6,8 +6,8 @@
 
 | 文件 | 在哪跑 | 用途 |
 |---|---|---|
+| `purge-legacy-logs.sh` | 服务器 | 一次性：把旧日志归档到 `/opt/backups/legacy-logs-<日期>/` 后从库里删掉，顺手清掉已下线功能的表和设置、把 `user_version` 升到 2。跑完必须紧接着 `tools/deploy.sh` |
 | `migrate_restore.sh` | 新服务器 | 灾难恢复：从 S3 拉最新加密备份 → 解密 → 恢复库、`.env`、3.0 部署文件与 Caddy 配置 → 用 CI 镜像启动 |
-| `pull-ro-snapshot.sh` | 本机 | 拉每天的脱敏只读快照（`/opt/backups/ro/`）到本地，排查问题用 |
 | `pull-backup-mac.sh` | 本机 | 把加密备份多拉一份到本机（异地第三份） |
 | `../Caddyfile.access-log.example` | 服务器 | Caddy JSON 访问日志片段（不含 IP / 请求头），给 `nai-ops traffic` 用 |
 | `SYSTEM-FACTS.md` | — | 系统事实速查（数字以代码为准） |

@@ -1,13 +1,12 @@
-//! 定时任务（额度同步 / 自动驾驶 / 上游快照 / 维护循环 / 闲置回收）要用的查询与写入。
+//! 定时任务（上游快照 / 维护循环 / 闲置回收）要用的查询与写入。
 //!
-//! 定时任务（额度同步 / 上游快照 / 维护循环 / 闲置回收）要用的查询与写入，
 //! 按「同一个任务读到的一批数据」收成一个方法一次读完。
 //!
 //! SQL 文本固定（包括没有 `ORDER BY` 的地方：行顺序由 SQLite 决定），快照测试按它对拍；
 //! 这里**不做任何「顺手优化」**。
 
 use crate::{Db, Result, value};
-use gate_core::autopilot::BreakerRows;
+use gate_core::breaker::BreakerRows;
 use gate_core::quota::{QuietInputs, QuietSnap, quiet_count_pairs, quiet_snaps_since};
 use rusqlite::params;
 
@@ -55,11 +54,11 @@ impl Db {
         .await
     }
 
-    // ------------------------------------------------------------------ 自动驾驶（autopilot.run）
+    // ------------------------------------------------------------------ 全站熔断（定时任务 breaker）
 
-    /// 熔断统计：`since` 之后上游真正出错的次数与出图请求总数（没有行时 SUM 为 NULL），
+    /// 熔断统计：`since` 之后上游真正出错的次数与出图请求总数（没有行时为 NULL），
     /// 以及这些失败来自多少把不同的 Key。
-    pub async fn autopilot_breaker_rows(&self, since: f64) -> Result<BreakerRows> {
+    pub async fn breaker_rows(&self, since: f64) -> Result<BreakerRows> {
         const FAIL: &str = "status='error' AND (up_status>=500 OR up_status BETWEEN 200 AND 299)";
         self.read(move |c| {
             c.query_row(
@@ -77,44 +76,6 @@ impl Db {
                     })
                 },
             )
-        })
-        .await
-    }
-
-    /// 每把 Key 近 1 小时的被拒次数（排除「Key 暂停」本身和全站层面的拒绝）。
-    pub async fn autopilot_rejects(
-        &self,
-        since: f64,
-        skip: &[&str],
-        half: &[&str],
-    ) -> Result<Vec<(i64, i64)>> {
-        let skip = skip.join("','");
-        let half = half.join("','");
-        self.read(move |c| {
-            // `half` 里的原因按半次算（整数运算：先按 2 倍累加，最后除以 2 向下取整）
-            let mut stmt = c.prepare(&format!(
-                "SELECT key_id, SUM(CASE WHEN reason IN ('{half}') THEN 1 ELSE 2 END)/2 FROM usage_log \
-                 WHERE ts>=? AND status='rejected' \
-                 AND key_id IS NOT NULL AND reason NOT IN ('{skip}') GROUP BY key_id"
-            ))?;
-            stmt.query_map([since], |r| {
-                Ok((value::i64_or(r, 0, 0)?, value::i64_or(r, 1, 0)?))
-            })?
-            .collect()
-        })
-        .await
-    }
-
-    /// 参与单 Key 限流判断的成员 Key（id, name）。
-    pub async fn autopilot_keys(&self) -> Result<Vec<(i64, String)>> {
-        self.read(|c| {
-            // 没写 ORDER BY：全表扫描就是 rowid 顺序，这里写明，免得换了查询计划后顺序漂移
-            let mut stmt =
-                c.prepare("SELECT id, name FROM api_keys WHERE enabled=1 ORDER BY id")?;
-            stmt.query_map([], |r| {
-                Ok((value::i64_or(r, 0, 0)?, value::text_or(r, 1, "None")?))
-            })?
-            .collect()
         })
         .await
     }
@@ -166,7 +127,7 @@ impl Db {
 
     // ------------------------------------------------------------------ 测试支撑
 
-    /// 在一个事务里依次执行一批 SQL（对拍夹具的 `seed_sql`）。
+    /// 在一个事务里依次执行一批 SQL（对拍 / 故障注入夹具用）。
     pub async fn run_script(&self, statements: Vec<String>) -> Result<()> {
         self.write(move |tx| {
             for s in &statements {

@@ -124,7 +124,6 @@ pub async fn seed(db: &Db, clock: &Clock, now: f64) -> Result<Seeded> {
     seed_usage(db, clock, now, &keys, &mut rng).await?;
     seed_member_extras(db, now, &keys).await?;
     seed_records(db, now).await?;
-    seed_reconciliation(db, now).await?;
     Ok(Seeded { keys })
 }
 
@@ -362,20 +361,6 @@ async fn seed_usage(
     Ok(())
 }
 
-/// 一份一天前的 Anlas 对账快照：「上游」页的余额推算有数可算。
-async fn seed_reconciliation(db: &Db, now: f64) -> Result<()> {
-    let id = gate_upstream::headers::token_id(DEV_UPSTREAM_TOKEN);
-    let snapshot = serde_json::json!({
-        "checked_at": now - 86400.0,
-        "accounts": {id: {"fixed": 9000, "purchased": 300, "expires_at": (now + 12.0 * 86400.0) as i64}},
-        "ledger": {"anlas": 0, "unconfirmed_anlas": 0, "unconfirmed_requests": 0, "last_log_id": 0},
-        "balance": 9300,
-        "comparison": {"reason": "first"},
-    });
-    db.save_reconciliation(&snapshot).await?;
-    Ok(())
-}
-
 // ------------------------------------------------------------------ 成员相关：券 / 黑名单 / 捐赠
 
 async fn seed_member_extras(db: &Db, now: f64, keys: &[SeededKey]) -> Result<()> {
@@ -488,7 +473,7 @@ mod tests {
         let today0 = clock.day_start(1_792_000_000.0);
         for now in [today0 + 30.0, today0 + 12.0 * 3600.0, today0 + DAY - 30.0] {
             let dir = tempfile::tempdir().unwrap();
-            let db = Db::open_for_gateway(dir.path().join("nai_gate.db"), now, 3).unwrap();
+            let db = Db::open(dir.path().join("nai_gate.db")).unwrap();
             let seeded = seed(&db, &clock, now).await.unwrap();
             let day = clock.day(now);
 

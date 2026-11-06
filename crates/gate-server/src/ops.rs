@@ -8,12 +8,9 @@
 
 use crate::error::{ApiError, HttpError, InternalError};
 use crate::state::AppState;
-use gate_core::features::{self, FEATURES, GLOBAL_KEY};
-use gate_core::json;
 use gate_core::site_flags;
 use gate_db::{Db, DbError};
 use serde_json::{Map, Value, json};
-use std::sync::Mutex;
 
 /// 后台这几个接口里的错误：参数不合法回 422，在别处管的设置回 400，库里的数据坏了回 500。
 #[derive(Debug)]
@@ -49,12 +46,8 @@ impl From<OpsError> for ApiError {
 /// 后台接口共用的单例，挂在 `AppState::ops` 上。
 #[derive(Default)]
 pub struct Shared {
-    /// 上一次发测试告警的时间。
-    pub alert_test_at: Mutex<f64>,
     /// 运行期限制的写锁：写库 + 生效必须连在一起。
     pub runtime_limits: tokio::sync::Mutex<()>,
-    /// Anlas 核对的互斥锁：同一时刻只允许一次。
-    pub reconcile: tokio::sync::Mutex<()>,
     /// 手动账号信息查询：全局冷却与串行化。
     pub account_information: tokio::sync::Mutex<()>,
     /// Per-account query timestamps only. Sensitive upstream responses are never cached here.
@@ -183,56 +176,4 @@ pub async fn set_registration(state: &AppState, body: &Map<String, Value>) -> Re
         .map_err(|message| OpsError::Invalid(message.into()))?;
     state.db.set_claim_rules(&rules).await?;
     Ok(())
-}
-
-// ------------------------------------------------------------------ 全局功能开关
-
-/// 全局开关：功能名 → 是否开启，按 `FEATURES` 的顺序。缺省全部开启。
-pub async fn global_flags(state: &AppState) -> Result<Map<String, Value>, OpsError> {
-    let raw = state.db.get_setting(GLOBAL_KEY).await?;
-    let flags = features::parse_global_flags(raw.as_deref())
-        .map_err(|e| OpsError::Corrupt(format!("{GLOBAL_KEY} 存档损坏：{e}")))?;
-    Ok(FEATURES
-        .iter()
-        .map(|(name, _)| {
-            (
-                (*name).to_string(),
-                Value::Bool(flags.get(name).copied().unwrap_or(true)),
-            )
-        })
-        .collect())
-}
-
-pub async fn set_global_features(
-    state: &AppState,
-    flags: &Map<String, Value>,
-) -> Result<(), OpsError> {
-    let mut current = global_flags(state).await?;
-    for (name, value) in flags {
-        if FEATURES.iter().any(|(n, _)| n == name) && value.is_boolean() {
-            current.insert(name.clone(), value.clone());
-        }
-    }
-    state
-        .db
-        .set_setting(GLOBAL_KEY, &json::dumps(&Value::Object(current)))
-        .await?;
-    Ok(())
-}
-
-/// Save the request metadata retention policy.
-pub async fn set_log_retention(
-    state: &AppState,
-    body: &Map<String, Value>,
-) -> Result<Value, OpsError> {
-    let days = body
-        .get("origin_keep_days")
-        .and_then(Value::as_i64)
-        .filter(|v| (0..=365).contains(v))
-        .ok_or_else(|| OpsError::Invalid("origin_keep_days 必须是 0 到 365 的整数".into()))?;
-    state
-        .db
-        .set_setting(site_flags::ORIGIN_KEEP_DAYS.key, &days.to_string())
-        .await?;
-    Ok(json!({"origin_keep_days":days}))
 }

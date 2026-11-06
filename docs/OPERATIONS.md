@@ -37,7 +37,7 @@ compose 的 `stop_grace_period` 是 120 秒，所以发布时进行中的图不�
 （Caddyfile → `/opt/caddy/Caddyfile`，然后 `/opt/owl/caddy-reload.sh`，**不要** `docker exec caddy caddy reload`：见上面「改 Caddy 配置」）。
 `deploy/Caddyfile.production` 是模板，线上文件里还有 Cloudflare 信任段等本地改动，改线上时只做同样的增量。
 
-**页面降级**：网关不可用时，首页由 Caddy 返回静态维护页（503 + `Retry-After`），自动重试。出图和用户接口保留真实错误码。独立 `/status` 页面、`/status.json`、事件表、官方状态轮询及 S3 静态镜像已经移除；`/public/status` 仍提供首页元信息，`/admin/api/status` 仍提供告警配置。`/livez`、`/readyz`、`/healthz` 保留。
+**页面降级**：网关不可用时，首页由 Caddy 返回静态维护页（503 + `Retry-After`），自动重试。出图和用户接口保留真实错误码。独立 `/status` 页面、`/status.json`、事件表、官方状态轮询及 S3 静态镜像已经移除；`/public/status` 仍提供首页元信息，`/livez`、`/readyz`、`/healthz` 保留。
 
 10-27 起不再等队列：`restart` / `previous` 立即停机换版，停机 1–2 分钟由 Caddy 的维护页兜住（在途和已排队的图在旧进程退出前最多收尾 120 秒）。`load` 只将候选镜像打上 `staged` 标签，不改正在运行的版本或回滚标签。
 
@@ -65,13 +65,20 @@ image-gen        2      2     0      0     0      0     2000     4000         2
 
 快照由宿主机的 `nai-ops` 做（`/usr/local/bin/naigate-snapshot` 是共用入口），不经过网关容器，不锁库。恢复见 `deploy/ops/migrate_restore.sh`。
 
-| 时间 | 脚本 | 内容 |
-|---|---|---|
-| 每晚 03:30 | `naigate-backup`（`/etc/cron.d/naigate-backup`，`deploy/harden.sh` 装的） | 本机 GFS 轮换，快照先过 `naigate-strip-prompts`（清掉整张 `generation_audit`，不含提示词）：每日 14 份、每周日 8 份、每月 1 号 6 份，放在 `/opt/backups/{daily,weekly,monthly}/nai_gate-*.db.gz` |
-| 每晚 04:30 | `nightly_backup.sh` | 一致快照（不含原图，同样先过 `naigate-strip-prompts`）+ `.env` / `secret_key` / 上游 Token 存档 / 3.0 部署文件 / Caddy 配置，客户端 AES-256 加密后推 S3（脚本注释写 60 天过期，桶的生命周期配置未核对）；口令在服务器 `/root/.backup_pass`，务必在服务器之外另存一份 |
-| 每天 05:10 | `ro-snapshot.sh` | 脱敏只读快照 `/opt/backups/ro/owl-ro-YYYYMMDD.db.gz`（保留 7 份；去掉 Key 原文、盐、提示词、捐赠的上游 Token，来源 IP 打成前两段），本机用 `deploy/ops/pull-ro-snapshot.sh` 拉取 |
+分三层，**历史只留在一层**，其余都是快速回滚用的短窗口，避免磁盘被备份自己吃满。
 
-后两条是 root 的 crontab，原文在 `deploy/v3/ops/crontab`。本机还可以用 `deploy/ops/pull-backup-mac.sh`（每天 04:30，校验后保留 30 份）把加密备份多拉一份（异地第三份）。
+| 时间 | 脚本 | 内容 | 保留 |
+|---|---|---|---|
+| 每晚 04:30 | `nightly_backup.sh` | 一致快照（不含原图，先过 `naigate-strip-prompts`）+ `.env` / `secret_key` / 上游 Token / 3.0 部署文件（含 `/opt/owl/ops` 与回收定时器单元）/ Caddy 配置，客户端 AES-256 加密后推 S3 | **60 天（唯一的历史层）**；口令在 `/root/.backup_pass`，务必在服务器之外另存一份 |
+| 每晚 03:30 | `naigate-backup`（`/etc/cron.d/naigate-backup`，`deploy/harden.sh` 装的） | 本机 GFS 轮换，快照先过 `naigate-strip-prompts`（清掉整张 `generation_audit`，不含提示词），放在 `/opt/backups/{daily,weekly,monthly}/nai_gate-*.db.gz` | daily 3 / weekly 2 / monthly 2，约 110MB |
+| 每天 04:10 | `prune-db-snapshots.sh`（`owl-prune-snapshots.timer`） | 剪网关启动时留下的整库副本 `data/nai_gate.db.before-*/` | 最新 1 份 |
+
+`cutover.sh restart` 换版成功后也会立刻剪一次迁移快照和旧构建标签，不等定时器。
+
+2026-11-06 之前这三层都在堆历史：本地 daily 14 / weekly 8 / monthly 6、newapi 侧 14 天一刀切、迁移快照从不回收（91 份 / 6.5G），本地备份总量一度到 1.2G 且全部是同一份库的重复拷贝。现在本地封顶约 170MB。
+
+`close-stale-deliveries.sh`（每 5 分钟）和上面的备份都在 root 的 crontab 里，原文见 `deploy/v3/ops/crontab`。
+本机可以用 `deploy/ops/pull-backup-mac.sh`（每天 04:30，校验后保留 30 份）把加密备份多拉一份（异地第三份）。
 
 ## 改密钥
 
@@ -113,7 +120,7 @@ curl -s http://127.0.0.1:3003/healthz
 ## 安全红线
 
 - 仓库是公开的：不提交 `.env`、数据库、快照、成员数据；夹具和测试只用合成数据（CI 有 gitleaks 和 `check-fixtures.sh`）；文档里也不写真实 Discord ID、App ID、IP、域名。
-- **不私信成员**：机器人没有任何私信出口，不群发、不批量发消息；给站长的告警只在重大事故时发（网关 `alerts.rs`：上游 Token 失效 / 连续 403 / Token 被改动 / 磁盘不足；部署完成通知走 `tools/deploy.sh` 的可选 webhook）。宿主机巡检 10-27 删除，站点可达性由 GitHub 的「站点探测」workflow 每 5 分钟外测。
+- **没有主动外发消息**：告警私信、部署通知、站点探测 workflow 都已删除，机器人不私信任何人。事故看后台操作日志与容器日志。
 - 上游请求的指纹 / 节奏改动要站长点头。
 
 ### 平台 / 第三方依赖中断预案（通用）

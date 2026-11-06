@@ -5,7 +5,7 @@
 //!
 //! 路由只做参数校验和响应，聚合逻辑在这里。
 
-use super::{AUTO_TAG_PATTERNS, discord_profile, jflag, jget};
+use super::{discord_profile, jflag, jget};
 use crate::error::ApiError;
 use crate::routes::admin::req::http;
 use crate::state::AppState;
@@ -84,24 +84,6 @@ fn attention_needed(m: &Obj, now: f64) -> bool {
     if expires_at.is_some_and(|at| at - now < 3.0 * DAY_SECS) {
         return true;
     }
-    // 自动标签：单纯客户端短时连点「请求过快」不升级；有备注或近 24h ≥ 50 次才要处理
-    let loud_auto_tag = m
-        .get("auto_tags")
-        .and_then(Value::as_array)
-        .is_some_and(|tags| {
-            tags.iter().any(|t| {
-                let tag = t.get("tag").and_then(Value::as_str).unwrap_or("");
-                let count = t.get("count").and_then(Value::as_i64).unwrap_or(0);
-                let noted = t
-                    .get("note")
-                    .and_then(Value::as_str)
-                    .is_some_and(|n| !n.is_empty());
-                tag != "请求过快" && (noted || count >= 50)
-            })
-        });
-    if loud_auto_tag {
-        return true;
-    }
     // 今天被手动重置额度 ≥ 2 次
     m.get("reset_today")
         .and_then(|r| r.get("count"))
@@ -164,13 +146,6 @@ pub(super) async fn members_view(state: &AppState, filter_raw: &str) -> Result<V
     for t in st.db.key_tag_rows().await? {
         manual_tags.entry(t.key_id).or_default().push(t);
     }
-    let mut auto_tags: HashMap<i64, Vec<Value>> = HashMap::new();
-    for (kid, label, n) in st.db.auto_tag_counts(since, &AUTO_TAG_PATTERNS).await? {
-        auto_tags
-            .entry(kid)
-            .or_default()
-            .push(json!({"tag": label, "count": n}));
-    }
 
     // 今日「重置今日额度」痕迹：按服务日起点统计次数与最近一次（从操作日志取，只读）。
     // 起点是**当前服务日**的 7 点（不能用日历日期算，凌晨 0–7 点起点会落在未来）。
@@ -203,7 +178,7 @@ pub(super) async fn members_view(state: &AppState, filter_raw: &str) -> Result<V
         let my_tags = manual_tags.get(&id);
         let invited = my_tags.is_some_and(|t| t.iter().any(|x| x.tag == INVITE_TAG));
         let reg_row = reg.get(&id);
-        let ms = milestones.get(&id);
+        let _ms = milestones.get(&id);
         let mut m = Obj::new();
         let mut put = |k: &str, v: Value| {
             m.insert(k.to_string(), v);
@@ -254,11 +229,6 @@ pub(super) async fn members_view(state: &AppState, filter_raw: &str) -> Result<V
             "last_image_at",
             json!(image_stats.get(&id).and_then(|m| m.last_image_at)),
         );
-        put("rejected_24h", json!(ms.map_or(0, |m| m.rejected_24h)));
-        put(
-            "rejected_why",
-            json!(ms.and_then(|m| m.rejected_why.clone()).unwrap_or_default()),
-        );
         // 字段名沿用 2.x 的 "share"（前端和 admin_snapshot 按这个名字读）；内容只剩 Key 临时暂停的到期时间
         put(
             "share",
@@ -282,10 +252,6 @@ pub(super) async fn members_view(state: &AppState, filter_raw: &str) -> Result<V
                     .map(|t| json!({"tag": t.tag, "note": t.note, "by": t.by, "ts": values::float(t.ts)}))
                     .collect(),
             ),
-        );
-        put(
-            "auto_tags",
-            Value::Array(auto_tags.get(&id).cloned().unwrap_or_default()),
         );
         out.push(m);
     }
@@ -364,10 +330,6 @@ pub(super) async fn members_view(state: &AppState, filter_raw: &str) -> Result<V
             head.insert(
                 "total_images".into(),
                 num_add(&head["total_images"], &other["total_images"]),
-            );
-            head.insert(
-                "rejected_24h".into(),
-                num_add(&head["rejected_24h"], &other["rejected_24h"]),
             );
             // max(a or 0, b or 0)：b 严格更大才取 b
             let (a, b) = (or0(&head["last_used_at"]), or0(&other["last_used_at"]));

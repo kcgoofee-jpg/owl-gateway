@@ -3,7 +3,7 @@
 //! 读数只有一个聚合接口 [`page`]（`GET /admin/api/upstream`）：每个上游账号一行，合并
 //! 令牌池状态、官方读数（`/user/subscription` 的 V5 余量缓存、`/user/information` 的账号状态缓存）、
 //! 本站观测（请求窗口、今日张数）和 Anlas 核对推算，外加核对历史、未知预留和两把会话 CSRF。
-//! 页面一次取全，手动刷新官方信息（`POST /admin/api/upstream/refresh-info`）和核对（`POST /admin/api/reconciliation`）是仅有的两个会碰上游的动作。
+//! 页面一次取全，手动刷新官方信息（`POST /admin/api/upstream/refresh-info`）是唯一会碰上游的动作。
 //!
 //! 上游 Token 的增删改都是敏感操作：完整 Token 永远不出现在响应、日志和操作记录里（响应里只有打码版本），
 //! 每次变更都会私信站长（「如果这不是你操作的，请立刻更换后台密码」）。
@@ -11,7 +11,6 @@
 use super::super::BODY_LIMIT;
 use crate::body::read_json_body;
 use crate::error::{ApiError, ApiResult, HttpError, InternalError, ok_json};
-use crate::reconciliation::{self, RunError};
 use crate::session::{ADMIN_COOKIE, AdminSession, cookie};
 use crate::state::AppState;
 use axum::Router;
@@ -43,7 +42,6 @@ pub(super) fn router() -> Router<AppState> {
             "/admin/api/upstream-tokens/{token_id}/enabled",
             put(set_enabled),
         )
-        .route("/admin/api/reconciliation", post(reconcile))
         .route(
             "/admin/api/request-settlements/{request_id}/release",
             post(release_request_settlement),
@@ -51,7 +49,7 @@ pub(super) fn router() -> Router<AppState> {
 }
 
 /// 「上游」页的一次性读数：账号行 + 核对 + 未知预留 + 冷却 + 会话 CSRF。
-/// 除 `refresh-info` / `reconciliation` 两个动作外，页面不需要再发第二个请求。
+/// 除 `refresh-info` 外，页面不需要再发第二个请求。
 async fn page(State(state): State<AppState>, _s: AdminSession, req: Request) -> ApiResult {
     let (parts, _) = req.into_parts();
     let now = state.now();
@@ -99,22 +97,12 @@ async fn page(State(state): State<AppState>, _s: AdminSession, req: Request) -> 
         accounts.push(row);
     }
 
-    let recon = match reconciliation::status(&state).await {
-        Ok(Value::Object(m)) => m,
-        Ok(_) => Map::new(),
-        Err(e) => return run_error(e),
-    };
     let session = session_cookie(&parts);
     Ok(ok_json(&json!({
         "generated_at": values::float(now),
         "pool_configured": state.nai.configured().await,
         "accounts": accounts,
         "threshold": allowance["threshold"],
-        "reconciliation": {
-            "history": recon.get("history").cloned().unwrap_or(json!([])),
-            "running": recon.get("running").cloned().unwrap_or(json!(false)),
-            "retry_after": recon.get("retry_after").cloned().unwrap_or(json!(0)),
-        },
         "settlements": state
             .db
             .list_unknown_request_settlements()
@@ -365,9 +353,9 @@ async fn exists(state: &AppState, id: &str) -> bool {
     state.nai.tokens().await.iter().any(|t| t.token_id == id)
 }
 
-/// 上游 Token 被改动：私信站长（告警，不是公告）。
-fn alert_owner(state: &AppState, text: &str) {
-    state.alerter.notify("upstream_token_changed", text, 0.0);
+/// 上游 Token 被改动：记一条警告日志（告警渠道已下线）。
+fn alert_owner(_state: &AppState, text: &str) {
+    tracing::warn!(target: "upstream", "上游 Token 被改动：{text}");
 }
 
 /// 请求体里的 Token（去掉首尾空白）：必须是 `pst-` 开头的持久 API Token。
@@ -525,46 +513,6 @@ fn csrf_token(state: &AppState, session_cookie: &str) -> String {
 
 fn session_cookie(parts: &Parts) -> String {
     cookie(&parts.headers, ADMIN_COOKIE).unwrap_or_default()
-}
-
-fn run_error(e: RunError) -> ApiResult {
-    match e {
-        RunError::Internal(e) => Err(e),
-        RunError::Refused(r) => {
-            use axum::response::IntoResponse;
-            let mut resp = HttpError::new(r.status, r.message).into_response();
-            if r.retry_after != 0
-                && let Ok(v) = r.retry_after.to_string().parse()
-            {
-                resp.headers_mut().insert("retry-after", v);
-            }
-            Ok(resp)
-        }
-    }
-}
-
-async fn reconcile(State(state): State<AppState>, _s: AdminSession, req: Request) -> ApiResult {
-    let (parts, body) = req.into_parts();
-    let expected = csrf_token(&state, &session_cookie(&parts));
-    // 会话绑定的 CSRF：反向代理 / TLS 终止后也成立，且隔离同级站点
-    let given = crate::auth::header_str(&parts.headers, "x-nai-admin-csrf");
-    if !crate::session::ct_eq(given.as_bytes(), expected.as_bytes()) {
-        return Err(HttpError::new(403, "会话校验失败，请刷新后台后重试").into());
-    }
-    let ct = crate::auth::header_str(&parts.headers, "content-type");
-    if primitives::strip(ct.split(';').next().unwrap_or("")).to_lowercase() != "application/json" {
-        return Err(HttpError::new(415, "请使用 JSON 请求").into());
-    }
-    if !read_json_body(&parts.headers, body, 1024).await?.is_empty() {
-        return Err(HttpError::new(400, "本操作不接受自定义账号或地址").into());
-    }
-    let mut out = match reconciliation::run(&state).await {
-        Ok(Value::Object(m)) => m,
-        Ok(_) => Map::new(),
-        Err(e) => return run_error(e),
-    };
-    out.insert("csrf_token".into(), Value::String(expected));
-    Ok(ok_json(&Value::Object(out)))
 }
 
 #[cfg(test)]

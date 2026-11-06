@@ -1,7 +1,6 @@
 /** 成员相关接口的数据形状（/admin/api/members、/admin/api/keys、/admin/api/bans 等）。 */
 import type { PolicySnapshot } from "../member-policy";
 export type Tag = { tag: string; note: string; by: string; ts: number };
-export type AutoTag = { tag: string; count: number; note?: string };
 export type Discord = {
   id: string;
   username: string | null;
@@ -14,7 +13,6 @@ export type Member = {
   id: number;
   name: string;
   enabled: boolean;
-  invited: boolean;
   discord_id: string | null;
   discord: Discord | null;
   created_at: number;
@@ -27,12 +25,9 @@ export type Member = {
   registered_at: number | null;
   first_image_at: number | null;
   last_image_at: number | null;
-  rejected_24h: number;
-  rejected_why: Array<[string, number]>;
   share: { paused_until: number } | null;
   reset_today: { count: number; last_ts: number } | null;
   tags: Tag[];
-  auto_tags: AutoTag[];
   key_count: number;
   all_key_ids: number[];
 };
@@ -43,7 +38,6 @@ export type KeyRow = {
   token: string;
   enabled: boolean;
   policy: PolicySnapshot;
-  invited: boolean;
   expires_at: number | null;
   created_at: number;
   last_used_at: number | null;

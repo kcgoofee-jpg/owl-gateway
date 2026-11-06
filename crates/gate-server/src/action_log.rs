@@ -22,7 +22,6 @@ pub const ADMIN_ACTIONS: &[(&str, &str, &str)] = &[
     ("POST", "/login", "登录后台"),
     ("PUT", "/password", "修改后台密码"),
     ("POST", "/logout", "退出登录"),
-    ("POST", "/reconciliation", "Anlas 核对"),
     ("POST", "/keys", "新建 Key"),
     ("POST", "/keys/{key_id}/regenerate", "重新生成 Key"),
     ("PATCH", "/keys/{key_id}", "修改 Key"),
@@ -56,14 +55,10 @@ pub const ADMIN_ACTIONS: &[(&str, &str, &str)] = &[
     ),
     ("PUT", "/settings", "修改预算"),
     ("POST", "/ops/manual", "手动改设置"),
-    ("POST", "/sitepaid-hints/dismiss", "关闭站付 V5 到期提醒"),
-    ("POST", "/alerts/test", "发送测试告警"),
     ("PUT", "/ops/registration", "修改开放注册设置"),
-    ("PUT", "/ops/features", "修改全局功能开关"),
-    ("PUT", "/ops/log-retention", "修改请求来源保留设置"),
     ("PUT", "/guard", "修改账号保护与排队设置"),
-    ("POST", "/keys/{key_id}/share-clear", "防分享清零（误判）"),
     ("POST", "/ops/reset-all-keys", "全站杀头重置"),
+    ("POST", "/keys/{key_id}/share-clear", "解除限流暂停"),
 ];
 
 /// 操作名；表里没有的写成「方法 路径」。

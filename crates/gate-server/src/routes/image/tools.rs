@@ -30,15 +30,13 @@ pub(super) async fn tool(
     check_image_cooldown(&state)?;
     check_rpm(&state, &key)?;
     require_feature(
-        &state,
         &key,
         if operation == "upscale" {
             "upscale"
         } else {
             "augment"
         },
-    )
-    .await?;
+    )?;
     let body = read_image_payload(&parts.headers, body, IMAGE_BODY_LIMIT).await?;
     let body = Value::Object(body);
     let op = operation.to_string();
@@ -217,7 +215,7 @@ pub(super) async fn vibe(state: AppState, req: Request) -> Result<Response, ApiE
     let key = authenticate(&state, &parts, false).await?;
     check_image_cooldown(&state)?;
     check_rpm(&state, &key)?;
-    require_feature(&state, &key, "vibe").await?;
+    require_feature(&key, "vibe")?;
     let mut body = read_image_payload(&parts.headers, body, IMAGE_BODY_LIMIT).await?;
     // 兼容 Launcher 的写法
     if let Some(value) = body.shift_remove("information_extracted") {

@@ -3,7 +3,7 @@
  * 时间单位都是 Unix 秒。
  */
 import { fullTime, rel, scopeText, withUnit } from "../../../../lib/format";
-import type { AutoTag, Member, Tag } from "./types";
+import type { Member, Tag } from "./types";
 
 export const HOUR = 3600;
 export const DAY = 86400;
@@ -83,21 +83,6 @@ export function memberIssues(m: Member, now: number): Issue[] {
       actions: [{ kind: "edit" }, { kind: "ack" }],
     });
   }
-  // 自动标签：单纯客户端短时连点「请求过快」不升级为要处理
-  for (const t of m.auto_tags as AutoTag[]) {
-    const rateLimit = t.tag === "请求过快";
-    const loud = !rateLimit && (!!t.note || t.count >= 50);
-    out.push({
-      id: `auto:${t.tag}`,
-      level: loud ? "warn" : "info",
-      title: t.tag,
-      detail:
-        t.note ||
-        `近 24 小时因此被拒 ${t.count} 次。是客户端设置的问题，本人改了就好${loud ? "；次数多，可能是客户端在自动重试" : ""}`,
-      need: loud,
-      actions: loud ? [{ kind: "ack" }] : [],
-    });
-  }
   if (m.reset_today && m.reset_today.count >= 2) {
     out.push({
       id: "reset-many",
@@ -131,10 +116,8 @@ export function memberVerdict(m: Member, now: number): { title: string; sub: str
     title = `今天的额度用完了（${withUnit(used, "张")}）`;
   else if (used > 0) title = `正常使用，今天出了 ${withUnit(used, "张")}`;
   else title = `今天还没用${m.last_used_at ? `，上次是 ${rel(m.last_used_at, now)}` : ""}`;
-  const why = (m.rejected_why || []).map(([r, n]) => `${r} ${n}`).join("、");
   const ack = m.tags.find((t) => t.tag === ACK_TAG);
   const sub = [
-    m.rejected_24h ? `24 小时被拒 ${m.rejected_24h} 次${why ? `：${why}` : ""}` : "",
     m.reset_today?.count ? `站长今天重置过 ${m.reset_today.count} 次额度` : "",
     acked(m, now) && ack ? `${rel(ack.ts, now)}点过「没问题」` : "",
   ]
@@ -180,8 +163,6 @@ export type FilterDef = {
 export type FilterSet = { chips: FilterDef[] };
 /** 筛选栏的「全部」：没有筛选 */
 export const ALL_FILTER = "all";
-/** 「24 小时被拒过」：选中后，横栏里紧跟着出现被拒原因 */
-export const REJECTED_FILTER = "rejected";
 
 const collator = new Intl.Collator(["zh-Hans-CN", "en"], { numeric: true, sensitivity: "base" });
 export const compareText = (a: string, b: string): number => collator.compare(a, b);
@@ -200,7 +181,6 @@ export function buildFilters(now: number, idleDays: number): FilterSet {
       label: "24 小时新加入",
       test: (m) => !!m.registered_at && now - m.registered_at < DAY,
     },
-    { id: REJECTED_FILTER, label: "24 小时被拒过", test: (m) => m.rejected_24h > 0 },
   ];
   if (idleDays > 0) {
     chips.push({
@@ -211,36 +191,18 @@ export function buildFilters(now: number, idleDays: number): FilterSet {
       test: (m) => now - (m.last_image_at ?? m.created_at) > (idleDays - 1) * DAY,
     });
   }
-  chips.push(
-    {
-      id: "invite",
-      label: "邀请 Key",
-      hint: "历史邀请凭据，按普通成员凭据管理",
-      test: (m) => m.invited,
-    },
-    { id: "attention", label: "需要处理", test: (m) => needsAttention(m, now) },
-  );
+  chips.push({ id: "attention", label: "需要处理", test: (m) => needsAttention(m, now) });
   return { chips };
 }
 
-/** 老链接 / 老书签里的筛选 id 换成现在的 */
-export const normalizeFilter = (id: string | null | undefined): string | null =>
-  id === "role:invite" ? "invite" : (id ?? null);
+/** 老链接 / 老书签里的筛选 id 换成现在的（已删的筛选回到「全部」）。 */
+export const normalizeFilter = (id: string | null | undefined): string | null => {
+  if (!id) return null;
+  if (id === "role:invite" || id === "invite" || id === "rejected") return null;
+  return id;
+};
 
 export const countFilter = (rows: Member[], f: FilterDef): number => rows.filter(f.test).length;
-
-/** 近 24 小时被拒的原因（请求过快、角色超 6 个…，来自 auto_tags）及人数，多的在前；只数成员，口径与「24 小时被拒过」一致 */
-export function rejectReasons(rows: Member[]): Array<{ tag: string; count: number }> {
-  const n = new Map<string, number>();
-  for (const m of rows) {
-    if (m.rejected_24h <= 0) continue;
-    for (const t of new Set(m.auto_tags.map((x) => x.tag))) n.set(t, (n.get(t) ?? 0) + 1);
-  }
-  return [...n]
-    .map(([tag, count]) => ({ tag, count }))
-    .sort((a, b) => b.count - a.count || compareText(a.tag, b.tag));
-}
-export const hasReason = (m: Member, tag: string): boolean => m.auto_tags.some((x) => x.tag === tag);
 
 export function matchesQuery(m: Member, raw: string): boolean {
   const terms = raw.normalize("NFKC").trim().toLowerCase().split(/\s+/).filter(Boolean);

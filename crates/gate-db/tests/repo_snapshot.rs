@@ -257,13 +257,6 @@ async fn call(db: &Db, c: &Case) -> Out {
     let a = |i: usize, name: &str| arg(c, i, name);
     let m = c.get("method").unwrap().as_str().unwrap();
     Ok(match m {
-        // ---------------- reconciliation
-        "reconciliation_totals" => db.reconciliation_totals().await?,
-        "save_reconciliation" => {
-            db.save_reconciliation(c.arg(0)).await?;
-            Value::Null
-        }
-        "reconciliation_history" => json!(db.reconciliation_history(int(a(0, "limit"), 20)).await?),
         // ---------------- upstream
         "get_upstream_counter" => js(&db
             .get_upstream_counter(&s(a(0, "token_id"), ""), &s(a(1, "day"), ""))
@@ -548,7 +541,6 @@ async fn call(db: &Db, c: &Case) -> Out {
             };
             json!(db.log_summary(&fl).await?)
         }
-        "purge_usage_log" => json!(db.purge_usage_log(num(a(0, "older_than"), 0.0)).await?),
         "member_milestones" => int_map(
             db.member_milestones(num(a(0, "since"), 0.0), &reason_label)
                 .await?,
@@ -668,7 +660,6 @@ macro_rules! area_tests {
 }
 
 area_tests!(
-    reconciliation,
     upstream,
     settings,
     coupons,
@@ -681,9 +672,6 @@ area_tests!(
 
 /// `call` 支持的全部方法：每个方法在快照里至少要有 `MIN_CASES_PER_METHOD` 个用例（抽样、删用例时不会悄悄丢掉一个方法）。
 const METHODS: &[&str] = &[
-    "reconciliation_totals",
-    "save_reconciliation",
-    "reconciliation_history",
     "get_upstream_counter",
     "move_upstream_token",
     "get_upstream_token_limits",
@@ -724,7 +712,6 @@ const METHODS: &[&str] = &[
     "add_log",
     "list_logs",
     "log_summary",
-    "purge_usage_log",
     "member_milestones",
     "image_perf_rows",
     "image_stability",

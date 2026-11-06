@@ -3,6 +3,11 @@ name: CI
 on:
   push:
     branches: [main]
+    # 纯文档提交不跑 8 个 job：CI 只对会进镜像/进服务器的东西负责。
+    paths-ignore:
+      - "**.md"
+      - "docs/**"
+      - ".codex-attachments/**"
   workflow_dispatch:
 
 concurrency:
@@ -128,8 +133,29 @@ jobs:
     timeout-minutes: 10
     steps:
       - uses: actions/checkout@v7
-      - name: Check deployment shell syntax
-        run: bash -n tools/deploy.sh deploy/v3/cutover.sh tools/ci/test-cutover.sh
+      - name: Check every tracked bash script parses
+        # 自动发现，不再维护硬编码清单：以前删掉一个脚本、忘了同步这份清单，CI 立刻变红，
+        # 而失败的其实是清单本身不是代码。现在按 shebang 找 bash 脚本，增删都自动跟上。
+        run: |
+          set -eu
+          fail=0
+          while IFS= read -r -d '' f; do
+            first=$(head -n1 "$f" 2>/dev/null || true)
+            case $first in
+              '#!'*bash*)
+                bash -n "$f" || { echo "::error file=$f::shell 语法错误"; fail=1; }
+                ;;
+            esac
+          done < <(git ls-files -z)
+          exit $fail
+      - name: Check the server-side ops scripts the deploy ships still exist
+        # tools/deploy.sh 会把 RUNTIME_OPS 里的文件 rsync 到 /opt/owl/ops/；这里核对它们都在，
+        # 免得同步悄悄变成空操作（以前 close-stale-deliveries.sh 就只存在于服务器上）。
+        run: |
+          set -eu
+          for f in nightly_backup.sh close-stale-deliveries.sh; do
+            [ -s "deploy/v3/ops/$f" ] || { echo "::error::deploy/v3/ops/$f 缺失或为空"; exit 1; }
+          done
       - name: Exercise safe image staging and queue wait
         run: bash tools/ci/test-cutover.sh
 
@@ -207,5 +233,7 @@ jobs:
         with:
           name: owl-gate-image
           path: /tmp/owl-gate.tar.gz
-          retention-days: 7
+          # 每版镜像约 250MB，一天能推十来次。原先是 7 天，光 CI 产物就压着十几 GB 配额；
+          # tools/deploy.sh 永远只拉最近一次成功的 run，2 天足够回退到前一天的构建。
+          retention-days: 2
           compression-level: 0

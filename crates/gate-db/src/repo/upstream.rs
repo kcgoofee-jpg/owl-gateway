@@ -177,4 +177,28 @@ impl Db {
         })
         .await
     }
+
+    /// 每个上游账号最近一条快照的余额读数：`(token_id, ts, anlas, v5_percent)`。
+    /// 只读历史数据，不向上游发请求——这就是「上游」页展示余额的唯一来源。
+    pub async fn latest_snapshots(&self) -> Result<Vec<(String, f64, Option<f64>, Option<f64>)>> {
+        self.read(|c| {
+            let mut stmt = c.prepare(
+                "SELECT s.token_id, s.ts, s.anlas, s.v5_percent FROM upstream_snapshots s \
+                 JOIN (SELECT token_id, MAX(ts) AS ts FROM upstream_snapshots \
+                       WHERE token_id!='' GROUP BY token_id) m \
+                   ON s.token_id=m.token_id AND s.ts=m.ts \
+                 ORDER BY s.token_id",
+            )?;
+            stmt.query_map([], |r| {
+                Ok((
+                    value::text_or(r, 0, "")?,
+                    value::f64_or(r, 1, 0.0)?,
+                    value::f64_opt(r, 2)?,
+                    value::f64_opt(r, 3)?,
+                ))
+            })?
+            .collect()
+        })
+        .await
+    }
 }

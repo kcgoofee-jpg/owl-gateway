@@ -28,7 +28,6 @@ pub fn router() -> Router<AppState> {
         .merge(upstream::router())
         .merge(upstream_information::router())
         .merge(upstream_details::router())
-        .merge(account_stats::router())
         .merge(limits::router())
         .merge(manual::router())
         .merge(onboarding::router())

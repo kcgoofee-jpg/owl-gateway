@@ -2089,7 +2089,6 @@ async fn web_login_records_browser_id() {
         .unwrap();
     assert_eq!(rows().await.len(), 2);
     // 后台记录一律留存（站长 10-22）：维护任务不再清浏览器登录记录
-    gate_server::jobs::purge(&e.state).await.unwrap();
     assert_eq!(rows().await.len(), 2);
 }
 
@@ -2122,12 +2121,7 @@ async fn shared_browser_does_not_infer_abuse_or_block_registration() {
     )
     .await;
     assert_eq!(s, 307);
-    let rows = common::query(
-        &e.state.db,
-        "SELECT kind, subject, score, status FROM abuse_signals",
-    )
-    .await;
-    assert!(rows.is_empty());
+    // 共用浏览器不再产生任何风控信号（打分引擎已整体删除），注册照常放行
     assert!(
         svc(&e)
             .issue_direct(MEMBER, GUILD, &user(MEMBER))

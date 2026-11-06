@@ -629,23 +629,6 @@ async fn subscription(state: &AppState, key: &Key) -> Result<Value, InternalErro
         "v5Images": view["naiGate"]["v5LeftToday"],
         "anlas": view["naiGate"]["anlasLeft"]
     });
-    if !key.owner_image_full {
-        let raw = state
-            .db
-            .get_setting(gate_core::features::GLOBAL_KEY)
-            .await?;
-        let flags = gate_core::features::parse_global_flags(raw.as_deref())
-            .map_err(|e| InternalError(e.to_string()))?;
-        for (name, _) in gate_core::features::FEATURES {
-            if !flags.get(name).copied().unwrap_or(false) {
-                view["naiGate"]["features"][name] = json!(false);
-            }
-        }
-        if view["naiGate"]["features"]["image"] == false {
-            view["naiGate"]["features"]["v5"] = json!(false);
-            view["naiGate"]["features"]["img2img"] = json!(false);
-        }
-    }
     Ok(view)
 }
 

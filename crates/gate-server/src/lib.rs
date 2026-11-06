@@ -3,7 +3,6 @@
 pub mod accounting;
 pub mod action_log;
 pub mod admission;
-pub mod alerts;
 pub mod allowance;
 pub mod asn;
 pub mod auth;
@@ -25,7 +24,6 @@ pub mod media;
 pub mod middleware;
 pub mod multipart;
 pub mod ops;
-pub mod reconciliation;
 pub mod ref_cache;
 pub mod ref_images;
 pub mod registration;

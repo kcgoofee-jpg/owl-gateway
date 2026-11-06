@@ -11,7 +11,7 @@
 
 use crate::error::InternalError;
 use crate::state::AppState;
-use gate_core::features::{self, FEATURES};
+use gate_core::features::FEATURES;
 use gate_core::primitives;
 use gate_core::reasons::Reason;
 use serde_json::{Map, Value, json};
@@ -318,15 +318,9 @@ fn public_limits(state: &AppState) -> Value {
 
 /// 首页元信息的公开响应：不含任何密钥、成员信息或计数细节。
 pub async fn build_status(state: &AppState) -> Result<Value, InternalError> {
-    let flags =
-        features::parse_global_flags(state.db.get_setting(features::GLOBAL_KEY).await?.as_deref())?;
-    let enabled = |n: &str| flags.get(n).copied().unwrap_or(false);
     let mut reg = json!({"open": false, "slots_left": null});
-    let mut defaults: Vec<String> = if enabled("image") {
-        vec!["image".into()]
-    } else {
-        vec![]
-    };
+    // 默认功能一律按成员规则的默认值给，站点级开关已删除
+    let mut defaults: Vec<String> = vec!["image".into()];
     if let Some(cfg) = registration_settings(state).await? {
         reg = json!({"open": cfg.open, "slots_left": slots_left(state, &cfg).await?});
         if let Some(note) = &cfg.role_note {
@@ -338,10 +332,7 @@ pub async fn build_status(state: &AppState) -> Result<Value, InternalError> {
             .filter(|(name, _)| policy.allows(name))
             .map(|(name, _)| (*name).to_owned())
             .collect();
-        defaults = names
-            .into_iter()
-            .filter(|n| enabled(n) && n != "voice")
-            .collect();
+        defaults = names.into_iter().filter(|n| n != "voice").collect();
     }
     let now = state.now();
     let (status, _, _) = state.health.status(now);
