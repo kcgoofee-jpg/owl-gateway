@@ -17,8 +17,8 @@ import {
   Users,
 } from "lucide-preact";
 import type { ComponentChildren, ComponentType } from "preact";
-import { useEffect, useState } from "preact/hooks";
 import { Suspense } from "preact/compat";
+import { useEffect, useState } from "preact/hooks";
 import { LocationProvider, lazy, Route, Router, useLocation } from "preact-iso";
 import { ApiError, getJSON, sendJSON } from "../../lib/api";
 import { Button, cx, Field, Skeleton, toast } from "../../ui";
@@ -498,15 +498,15 @@ export function Admin() {
         <Suspense fallback={<SectionLoading />}>
           <Router>
             {SECTIONS.flatMap((s) => [
-            // preact-iso 的 `/*` 至少要多一段路径：分区根路径单独注册一条
-            <Route key={s.id} path={s.path} component={s.view} />,
-            <Route key={`${s.id}-sub`} path={`${s.path}/*`} component={s.view} />,
-          ])}
-          {/* 总览页 10-23 删除：/admin 直接是成员页 */}
-          <Route key="root" path="/admin" component={MembersView} />
-          <Route key="root-slash" path="/admin/" component={MembersView} />
-          {/* 不认识的 /admin/*：404 视图，不再静默渲染成员页 */}
-          <Route default component={NotFound} />
+              // preact-iso 的 `/*` 至少要多一段路径：分区根路径单独注册一条
+              <Route key={s.id} path={s.path} component={s.view} />,
+              <Route key={`${s.id}-sub`} path={`${s.path}/*`} component={s.view} />,
+            ])}
+            {/* 总览页 10-23 删除：/admin 直接是成员页 */}
+            <Route key="root" path="/admin" component={MembersView} />
+            <Route key="root-slash" path="/admin/" component={MembersView} />
+            {/* 不认识的 /admin/*：404 视图，不再静默渲染成员页 */}
+            <Route default component={NotFound} />
           </Router>
         </Suspense>
       </Shell>

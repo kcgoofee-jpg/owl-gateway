@@ -136,7 +136,9 @@ export function Actions() {
                   <div class="small muted">
                     <Actor a={a} />
                   </div>
-                  <div class="small" title={a.target}>{targetText(a)}</div>
+                  <div class="small" title={a.target}>
+                    {targetText(a)}
+                  </div>
                   {a.detail && (
                     <div class="small muted">
                       <ActionDetail value={a.detail} />

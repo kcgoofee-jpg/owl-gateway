@@ -85,10 +85,7 @@ export default function Members() {
 
   const now = Date.now() / 1000;
   const idleDays = mem.data?.inactivity_days ?? 3;
-  const rows: MemberRow[] = useMemo(
-    () => (mem.data?.members ?? []).filter((m) => m.enabled),
-    [mem.data],
-  );
+  const rows: MemberRow[] = useMemo(() => (mem.data?.members ?? []).filter((m) => m.enabled), [mem.data]);
   const byId = (id: number) => rows.find((r) => r.id === id);
 
   const filters = useMemo(() => buildFilters(now, idleDays), [now, idleDays]);

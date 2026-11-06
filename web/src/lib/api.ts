@@ -54,12 +54,7 @@ export async function getJSON<T>(url: string, init?: RequestInit): Promise<T> {
 
 const REQUEST_TIMEOUT_MS = 20_000;
 
-async function request<T>(
-  method: string,
-  url: string,
-  body?: unknown,
-  init?: RequestInit,
-): Promise<T> {
+async function request<T>(method: string, url: string, body?: unknown, init?: RequestInit): Promise<T> {
   const ctrl = new AbortController();
   const timer = setTimeout(() => ctrl.abort(), REQUEST_TIMEOUT_MS);
   try {
