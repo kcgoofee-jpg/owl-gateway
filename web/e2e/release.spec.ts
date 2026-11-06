@@ -548,7 +548,10 @@ test("share settings opens as a second view inside the share dialog", async ({ p
   await confirm.getByRole("button", { name: "分享设置" }).click();
   const settings = page.getByRole("dialog", { name: "分享设置" });
   await expect(settings.getByRole("combobox", { name: "分享到" })).toHaveValue("owl");
-  await expect(settings.getByRole("checkbox", { name: "附带生成参数（提示词、种子）" })).not.toBeChecked();
+  // 等面板把服务端状态读回来（未连接个人频道时自动备份是禁用的），后面的勾选断言才不是碰运气。
+  await expect(settings.getByRole("checkbox", { name: "出图后自动转发到个人频道" })).toBeDisabled();
+  // 没有记住过选择时，附带生成参数默认是勾上的。
+  await expect(settings.getByRole("checkbox", { name: "附带生成参数（提示词、种子）" })).toBeChecked();
   // 「记住分享选择」和自动备份一样是勾选框，不再是保存 / 忘记两个按钮。
   const remember = settings.getByRole("checkbox", { name: "记住分享选择" });
   await expect(remember).not.toBeChecked();
