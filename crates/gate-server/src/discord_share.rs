@@ -30,7 +30,7 @@ pub struct Destination {
     pub token: String,
 }
 
-/// 成员勾选「记住本次选择，下次不再提示」后保存的目的地与元数据选择。
+/// 成员勾选「记住分享选择」后保存的目的地与元数据选择；下次分享直接按它发送。
 /// `binding_id` 记下确认时的个人频道绑定：绑定换了 / 断开 / 失效，这条选择就作废，必须重新确认。
 #[derive(Serialize, Deserialize, Clone)]
 pub struct SharePreference {

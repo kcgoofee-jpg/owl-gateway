@@ -1,7 +1,7 @@
 /* owl ⇄ NovelAI 生图页桥：把官网前端的 API 调用改到本站网关。
    只做三件事：改 base、带 Key、隐藏账号横幅。 */
 (function () {
-  window.__BRIDGE_VERSION__ = "2026-11-06-share-settings-v3";
+  window.__BRIDGE_VERSION__ = "2026-11-06-share-settings-v4";
   var CFG = window.__NAI_BRIDGE__ || {};
   var GATE = CFG.gate || "";
   var KEY = CFG.key || "";
@@ -128,6 +128,8 @@
   XMLHttpRequest.prototype.open = function (m, u) {
     var mapped = map(u);
     this.__bridgeAuth = mapped !== u;
+    // 走本站接口的 XHR 也带来源标记：服务端的自动备份按 UA 前缀认「网页工作台」。
+    this.__bridgeOwn = mapped !== u || (KEY && needsAuth(u));
     this.__bridgeHeaders = [];
     return XO.call(this, m, mapped, ...Array.prototype.slice.call(arguments, 2));
   };
@@ -138,6 +140,11 @@
   };
   var OS = XMLHttpRequest.prototype.send;
   XMLHttpRequest.prototype.send = function (body) {
+    if (this.__bridgeOwn) {
+      try {
+        XS.call(this, "x-owl-client", "workbench");
+      } catch (e) {}
+    }
     if (this.__bridgeAuth && KEY) {
       try {
         XS.call(this, "authorization", "Bearer " + KEY);
@@ -468,7 +475,7 @@
   }
 
   // 返回 true/false 而不是抛错：调用方要据此回滚勾选框。
-  function savePreference(choice) {
+  function savePreference(choice, quiet) {
     return fetch("/public/me/share-preference", {
       method: "PUT",
       credentials: "same-origin",
@@ -480,7 +487,7 @@
       }),
     }).then(function (r) {
       if (!r.ok) throw new Error("save failed");
-      toast("已记住，下次分享直接发送。");
+      if (!quiet) toast("已记住，下次分享直接发送。");
       return true;
     }).catch(function () {
       toast("这次选择没能记住，下次会再询问。", true);
@@ -498,10 +505,6 @@
         toast("清除失败，请稍后再试。", true);
         return false;
       });
-  }
-
-  function destinationName(value) {
-    return value === "personal" ? "我的个人频道" : "OWL 公共频道";
   }
 
   /* ---- 分享设置：分享弹窗的二级界面。入口在分享弹窗里，不再往官网工具栏塞按钮。 ---- */
@@ -567,12 +570,12 @@
 
     var binding = null;
 
-    function save() {
+    function save(quiet) {
       return savePreference({
         destination: select.value,
         includeMetadata: metaRow.box.checked,
         bindingId: binding && binding.binding_id,
-      });
+      }, quiet);
     }
 
     function refresh() {
@@ -632,10 +635,10 @@
     });
     // 已记住时改目的地或参数：直接更新记住的选择，不用再点一次保存。
     select.addEventListener("change", function () {
-      if (rememberRow.box.checked) save().then(refresh);
+      if (rememberRow.box.checked) save(true).then(refresh);
     });
     metaRow.box.addEventListener("change", function () {
-      if (rememberRow.box.checked) save().then(refresh);
+      if (rememberRow.box.checked) save(true).then(refresh);
     });
     backupRow.box.addEventListener("change", function () {
       backupRow.box.disabled = true;
