@@ -432,7 +432,10 @@ async fn generate(state: AppState, req: Request, streaming: bool) -> ApiResult {
             &key,
             &prep.est,
             prep.legacy_free_images,
-            crate::admission::DispatchRequirements::image(&prep.body)?,
+            crate::admission::DispatchRequirements::image(
+                &prep.body,
+                prep.key.allows_paid_parameters(),
+            )?,
         )
         .await?;
         let reserved = Arc::new(reserved);

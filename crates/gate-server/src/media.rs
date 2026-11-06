@@ -12,7 +12,8 @@ use image::{ImageFormat, ImageReader, Limits};
 use serde_json::{Map, Value, json};
 use std::io::{Cursor, Read};
 
-pub const MAX_PIXELS: u64 = 3_145_728;
+/// 图片工具的输入面积上限。数字的唯一出处是 `policy::TOOL_MAX_PIXELS`。
+pub const MAX_PIXELS: u64 = gate_core::policy::TOOL_MAX_PIXELS;
 pub const MAX_RESPONSE_BYTES: usize = 64 * 1024 * 1024;
 pub const UPSCALE_MODEL: &str = "nai-diffusion-5-curated";
 pub const DIRECTOR_TOOLS: [&str; 7] = [
@@ -56,7 +57,7 @@ pub fn dimensions(raw: &[u8], output: bool) -> Result<(u32, u32), String> {
         .map_err(|_| BAD_IMAGE.to_string())?;
     let limit = if output { MAX_PIXELS * 4 } else { MAX_PIXELS };
     if w.min(h) < 1
-        || w.max(h) > 8192
+        || w.max(h) > gate_core::policy::MAX_SIDE
         || u64::from(w) * u64::from(h) > limit
         || is_animated(raw, format)
     {
@@ -65,8 +66,8 @@ pub fn dimensions(raw: &[u8], output: bool) -> Result<(u32, u32), String> {
     // 完整解码一次（与 Pillow 的 img.load() 一样，截断 / 损坏的数据在这里暴露）
     let mut reader = ImageReader::with_format(Cursor::new(raw), format);
     let mut limits = Limits::default();
-    limits.max_image_width = Some(8192);
-    limits.max_image_height = Some(8192);
+    limits.max_image_width = Some(gate_core::policy::MAX_SIDE);
+    limits.max_image_height = Some(gate_core::policy::MAX_SIDE);
     limits.max_alloc = Some(limit * 8);
     reader.limits(limits);
     reader.decode().map_err(|_| BAD_IMAGE.to_string())?;
@@ -185,7 +186,7 @@ pub fn prepare_tool(body: &Value, operation: &str) -> Result<(Value, i64), Strin
             return Err("放大仅支持 2 倍默认设置，未扣费。请在客户端中恢复默认值。给客户端作者：只支持官方当前放大模型、scale=2、declared_blur_sigma=0".into());
         }
         let cost = [
-            (1_048_576u64, 1),
+            (gate_core::policy::FREE_MAX_PIXELS as u64, 1),
             (1_747_627, 2),
             (2_446_678, 3),
             (MAX_PIXELS, 4),
@@ -235,11 +236,13 @@ pub fn prepare_tool(body: &Value, operation: &str) -> Result<(Value, i64), Strin
     }
     let (mut w, mut h) = (u64::from(width), u64::from(height));
     // 与官方页面一样：小图先放大到 Normal 再处理（这也让去背景有 65 Anlas 的最低价）
-    if pixels < 1_011_712 {
-        let ratio = (1_048_576f64 / pixels as f64).sqrt();
+    let normal = gate_core::policy::NORMAL_PIXELS;
+    let free = gate_core::policy::FREE_MAX_PIXELS as u64;
+    if pixels < normal {
+        let ratio = (free as f64 / pixels as f64).sqrt();
         w = (width as f64 * ratio).floor() as u64;
         h = (height as f64 * ratio).floor() as u64;
-        if w.max(h) > 8192 {
+        if w.max(h) > u64::from(gate_core::policy::MAX_SIDE) {
             return Err("图片长宽比过大，未扣费。请裁剪后重试。".into());
         }
         let img = image::load_from_memory(&raw).map_err(|_| BAD_IMAGE.to_string())?;
@@ -260,7 +263,7 @@ pub fn prepare_tool(body: &Value, operation: &str) -> Result<(Value, i64), Strin
     );
     let cost = if tool == "bg-removal" {
         3 * base + 5
-    } else if w * h <= 1_048_576 {
+    } else if w * h <= free {
         0
     } else {
         base

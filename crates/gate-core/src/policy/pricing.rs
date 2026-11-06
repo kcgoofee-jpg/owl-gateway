@@ -69,9 +69,6 @@ pub fn has_paid_extras(params: &Value) -> ValidationResult<bool> {
 
 /// 免费出图的步数上限（上游 Opus 免费条件；也是本站免费档钳制的上限）。
 pub const FREE_MAX_STEPS: i64 = 28;
-/// 免费出图的面积上限 1024×1024（同上）。
-pub const FREE_MAX_PIXELS: i64 = 1024 * 1024;
-
 /// 首张是否符合免费条件；批次内其余图片仍按张计费。
 pub fn opus_free_eligible(params: &Value) -> ValidationResult<bool> {
     let p = params_of(params)?;

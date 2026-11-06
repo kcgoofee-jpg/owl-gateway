@@ -1,4 +1,4 @@
-//! 参数规范化、钳制与守卫：宽度高度取 64 的倍数、步数 / 采样器收敛、图生图与局部重绘的前置检查。
+//! 参数规范化、钳制与守卫：宽高落在 `DIMENSION_STEP` 网格上、步数 / 采样器收敛、图生图与局部重绘的前置检查。
 
 use super::*;
 
@@ -196,7 +196,7 @@ pub(crate) fn f_to_i128(f: f64) -> Option<i128> {
 
 // ----------------------------------------------------------------------------- 图片钳制
 
-/// 等比缩小到像素面积上限内，边长取 64 的倍数。
+/// 等比缩小到像素面积上限内，边长落在 [`DIMENSION_STEP`] 网格上。
 pub fn fit_size(width: i128, height: i128, max_pixels: i128) -> ValidationResult<(i128, i128)> {
     let area = width.saturating_mul(height);
     if area <= max_pixels {
@@ -210,32 +210,33 @@ pub fn fit_size(width: i128, height: i128, max_pixels: i128) -> ValidationResult
         return Err(ValidationError::value("math domain error"));
     }
     let scale = q.sqrt();
+    let step = i128::from(DIMENSION_STEP);
     let snap = |side: i128| -> i128 {
         std::cmp::max(
-            64,
-            i128::from(primitives::round0(side as f64 * scale / 64.0)) * 64,
+            step,
+            i128::from(primitives::round0(side as f64 * scale / step as f64)) * step,
         )
     };
     let mut w2 = snap(width);
     let mut h2 = snap(height);
-    // 取整到 64 的倍数之后可能仍然略超上限：一档一档（64）缩长的那一边。
+    // 取整到 `DIMENSION_STEP` 之后可能仍然略超上限：一档一档缩长的那一边。
     // 两边相等时同时缩——只缩一边会把 4096×4096 变成 1408×1472 这种歪掉的尺寸。
-    while w2.saturating_mul(h2) > max_pixels && (w2 > 64 || h2 > 64) {
+    while w2.saturating_mul(h2) > max_pixels && (w2 > step || h2 > step) {
         if w2 == h2 {
-            if w2 <= 64 {
+            if w2 <= step {
                 break;
             }
-            (w2, h2) = (w2 - 64, h2 - 64);
+            (w2, h2) = (w2 - step, h2 - step);
         } else if w2 > h2 {
-            if w2 <= 64 {
+            if w2 <= step {
                 break;
             }
-            w2 -= 64;
+            w2 -= step;
         } else {
-            if h2 <= 64 {
+            if h2 <= step {
                 break;
             }
-            h2 -= 64;
+            h2 -= step;
         }
     }
     Ok((w2, h2))
@@ -269,8 +270,10 @@ pub fn clamp_image_params(
             "本站不支持图生图和局部重绘，未扣费。请在客户端中去掉原图。".into()
         ));
     }
-    if max_pixels < 64 * 64 {
-        finish!(Some("MAX_PIXELS 不能小于 4096（最小尺寸 64x64）".into()));
+    if i128::from(max_pixels) < i128::from(DIMENSION_STEP) * i128::from(DIMENSION_STEP) {
+        finish!(Some(
+            "站点尺寸上限配置异常（小于最小可出图尺寸），未扣费。请联系站长。".into()
+        ));
     }
 
     // 批量张数 -> 1
@@ -289,7 +292,7 @@ pub fn clamp_image_params(
     //
     // - V5：上游只认三个 Normal 预设。落在某个预设的框内就照原样发（文档口径是「之内」），
     //   超出框才按长宽比吸附到最接近的预设。
-    // - V4.5 及以下：支持任意 64 的倍数，所以只按面积等比缩小，**不吸附 V5 预设**——
+    // - V4.5 及以下：支持任意 `DIMENSION_STEP` 的倍数，所以只按面积等比缩小，**不吸附 V5 预设**——
     //   吸附会把 1920×1080 变成 1216×832、把 65536×64 变成 1216×832，那是换了个构图，不是缩小。
     let w = int_or(p.get("width"), 0, 0)?;
     let h = int_or(p.get("height"), 0, 0)?;

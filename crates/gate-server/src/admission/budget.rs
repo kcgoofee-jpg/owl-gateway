@@ -28,14 +28,24 @@ impl DispatchRequirements {
         }
     }
 
-    pub fn image(body: &serde_json::Value) -> Result<Self, InternalError> {
-        let (_, notes, problem) = gate_core::policy::clamp_image_params(
-            body,
-            gate_core::policy::FREE_MAX_PIXELS,
-            gate_core::policy::FREE_MAX_STEPS,
-            true,
-        )
-        .map_err(|e| InternalError(e.to_string()))?;
+    /// `body` 是**已经过 `params::prepare` 的**请求体；`may_exceed_free` = 这把 Key 有没有
+    /// 「高规格参数」权限（没有的话 prepare 已经按免费档钳制过一遍了）。
+    ///
+    /// 没有权限的 Key：发出去的已经是免费规格，不必再跑一遍钳制去判断「算不算高规格」——
+    /// 以前这里无条件重跑一次 `clamp_image_params`，等于每个生图请求多一次 JSON 深拷贝。
+    pub fn image(body: &serde_json::Value, may_exceed_free: bool) -> Result<Self, InternalError> {
+        let paid_parameters = if may_exceed_free {
+            let (_, notes, problem) = gate_core::policy::clamp_image_params(
+                body,
+                gate_core::policy::FREE_MAX_PIXELS,
+                gate_core::policy::FREE_MAX_STEPS,
+                true,
+            )
+            .map_err(|e| InternalError(e.to_string()))?;
+            !notes.is_empty() || problem.is_some()
+        } else {
+            false
+        };
         let img2img = ["image", "mask"].iter().any(|name| {
             body.get("parameters")
                 .and_then(|p| p.get(*name))
@@ -54,7 +64,7 @@ impl DispatchRequirements {
                     .is_some_and(gate_core::values::enabled)
             }),
             img2img,
-            paid_parameters: !notes.is_empty() || problem.is_some(),
+            paid_parameters,
         })
     }
 }

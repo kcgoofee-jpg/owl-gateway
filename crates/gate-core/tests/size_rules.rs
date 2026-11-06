@@ -58,3 +58,81 @@ fn fit_size_keeps_wide_and_tall_requests_proportional() {
     // 本来就够小：原样返回（幂等）
     assert_eq!(fit(512, 512, 1024 * 1024), (512, 512));
 }
+
+/// 尺寸常量的相互关系：改任何一个都必须让这些成立，否则上层会算出上游不收的尺寸。
+#[test]
+fn size_constants_stay_consistent() {
+    use gate_core::policy as p;
+
+    // 三个 V5 预设必须落在 64 网格上（上游硬要求），且都不超过免费面积
+    for (w, h) in p::V5_NORMAL_PRESETS {
+        assert_eq!(w % p::DIMENSION_STEP, 0, "预设宽 {w} 不在 64 网格上");
+        assert_eq!(h % p::DIMENSION_STEP, 0, "预设高 {h} 不在 64 网格上");
+        let area = w * h;
+        assert!(
+            area <= p::FREE_MAX_PIXELS,
+            "预设 {w}×{h} 面积 {area} 超过免费上限 {}",
+            p::FREE_MAX_PIXELS
+        );
+    }
+
+    // 「Normal」基准 = 长方形预设（832×1216）的面积，也是三个预设里最小的：比它还小的图才会被工具放大
+    let areas: Vec<i64> = p::V5_NORMAL_PRESETS.iter().map(|(w, h)| w * h).collect();
+    assert_eq!(
+        p::NORMAL_PIXELS as i64,
+        *areas.iter().min().unwrap(),
+        "NORMAL_PIXELS 应等于最小的 V5 预设面积"
+    );
+
+    // 工具上限比免费上限宽，且是 64 网格上的尺寸（1536×2048）
+    assert!(p::TOOL_MAX_PIXELS > p::FREE_MAX_PIXELS as u64);
+    assert_eq!(p::TOOL_MAX_PIXELS, 1536 * 2048);
+    // 任何一边都不能超过解码上限
+    assert!((p::TOOL_MAX_PIXELS as f64).sqrt() < f64::from(p::MAX_SIDE));
+
+    // fit_size 的输出永远在网格上、永远不超上限
+    for cap in [p::FREE_MAX_PIXELS, p::FREE_MAX_PIXELS / 4] {
+        for (w, h) in [
+            (1920, 1080),
+            (1080, 1920),
+            (3000, 3000),
+            (4096, 512),
+            (512, 4096),
+        ] {
+            let (ow, oh) = p::fit_size(w, h, i128::from(cap)).unwrap();
+            assert_eq!(
+                ow % i128::from(p::DIMENSION_STEP),
+                0,
+                "{w}×{h} → {ow}×{oh} 宽不在网格上"
+            );
+            assert_eq!(
+                oh % i128::from(p::DIMENSION_STEP),
+                0,
+                "{w}×{h} → {ow}×{oh} 高不在网格上"
+            );
+            assert!(
+                ow * oh <= i128::from(cap),
+                "{w}×{h} → {ow}×{oh} 超过上限 {cap}"
+            );
+        }
+    }
+
+    // snap_v5_preset 只会吐三个预设之一
+    for (w, h) in [
+        (1, 1),
+        (1920, 1080),
+        (1080, 1920),
+        (1024, 1024),
+        (5000, 64),
+        (64, 5000),
+    ] {
+        let got = (
+            p::snap_v5_preset(w, h).0 as i64,
+            p::snap_v5_preset(w, h).1 as i64,
+        );
+        assert!(
+            p::V5_NORMAL_PRESETS.contains(&got),
+            "{w}×{h} 吸附成了 {got:?}，不在三个预设里"
+        );
+    }
+}

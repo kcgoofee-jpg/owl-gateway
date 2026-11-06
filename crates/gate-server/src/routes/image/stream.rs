@@ -219,7 +219,10 @@ async fn run_stream(
             &key,
             &prep.est,
             prep.legacy_free_images,
-            crate::admission::DispatchRequirements::image(&prep.body)?,
+            crate::admission::DispatchRequirements::image(
+                &prep.body,
+                prep.key.allows_paid_parameters(),
+            )?,
         )
         .await?;
         Ok::<_, ApiError>((admission, slots, reserved))
