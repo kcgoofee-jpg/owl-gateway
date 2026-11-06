@@ -571,7 +571,6 @@ async fn members_view_shape_and_dropped_fields() {
     let r = a.get(&format!("{A}/members")).await;
     assert_eq!(r.status, 200, "{}", r.text());
     let v = r.json();
-    assert_eq!(v["inactivity_days"], 3);
     // 裁剪前的成员行数与「需要处理」的行数：默认 all 时 members 本身不改
     assert_eq!(
         (

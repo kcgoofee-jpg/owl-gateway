@@ -9,12 +9,7 @@ use serde_json::{Value, json};
 /// 2026-10-14 12:00:00 +08:00
 const NOW: f64 = 1_791_950_400.0;
 
-const NAMES: [&str; 4] = [
-    "upstream_snapshot",
-    "breaker",
-    "maintenance",
-    "idle_recycle",
-];
+const NAMES: [&str; 3] = ["upstream_snapshot", "breaker", "maintenance"];
 
 #[tokio::test]
 async fn routes_need_admin_login() {
@@ -83,8 +78,7 @@ async fn jobs_registry_and_last_run() {
     }
     let by = |name: &str| last[name]["summary"].clone();
     assert_eq!(by("maintenance"), "全部完成");
-    assert_eq!(by("idle_recycle"), "最近 60 分钟没出图，本轮跳过");
-    for gone in ["key_guard", "anlas_reconcile", "abuse_scan"] {
+    for gone in ["key_guard", "anlas_reconcile", "abuse_scan", "idle_recycle"] {
         assert!(gate_server::jobs::find(gone).is_none(), "{gone}");
     }
 }

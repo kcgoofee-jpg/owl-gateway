@@ -68,15 +68,6 @@ impl Reader<'_> {
             .map(|s| s.trim().to_string())
             .unwrap_or_default()
     }
-    /// registration.py 的 `number()`：`max(0, int(os.getenv(name, default)))`，解析失败用默认值（不夹 0）。
-    fn nonneg(&self, name: &str, default: i64) -> i64 {
-        match self.0.get(name) {
-            None => default.max(0),
-            Some(v) => primitives::parse_int(&v)
-                .map(|n| n.max(0))
-                .unwrap_or(default),
-        }
-    }
 }
 
 /// 自助领取 Key（Discord 机器人桥接）的配置；任一必填项缺失则为 None。
@@ -120,8 +111,6 @@ pub struct EnvConfig {
     pub auth_block_seconds: i64,
     pub login_max_attempts: i64,
     pub login_window_seconds: i64,
-    /// 连续这么多天没成功出过图的 Key 自动回收（0 = 关）。只在这里解析一次，机器人、后台、定时任务共用。
-    pub key_inactivity_delete_days: i64,
     /// 「只有站长可用」维护模式下放行的 Discord 成员 ID（逗号分隔）。空 = 该模式等同全站关闭。
     pub maintenance_owner_ids: Vec<String>,
     pub owner_image_subject: String,
@@ -233,7 +222,6 @@ impl EnvConfig {
             auth_block_seconds: AUTH_BLOCK_SECONDS,
             login_max_attempts: LOGIN_MAX_ATTEMPTS,
             login_window_seconds: LOGIN_WINDOW_SECONDS,
-            key_inactivity_delete_days: r.nonneg("KEY_INACTIVITY_DELETE_DAYS", 3),
             maintenance_owner_ids: split_list("MAINTENANCE_OWNER_IDS", ""),
             owner_image_subject: r.str("OWNER_IMAGE_SUBJECT", ""),
             discord_bot_token: r.str("DISCORD_BOT_TOKEN", ""),
@@ -299,23 +287,6 @@ mod tests {
             (c.auth_fail_max, c.login_max_attempts),
             (AUTH_FAIL_MAX, LOGIN_MAX_ATTEMPTS)
         );
-    }
-
-    #[test]
-    fn inactivity_days_parse_once() {
-        let days = |v: Option<&str>| {
-            let mut m = env(&[]);
-            if let Some(v) = v {
-                m.insert("KEY_INACTIVITY_DELETE_DAYS".into(), v.into());
-            }
-            EnvConfig::load(&m).key_inactivity_delete_days
-        };
-        assert_eq!(days(None), 3);
-        assert_eq!(days(Some(" 10 ")), 10);
-        assert_eq!(days(Some("0")), 0, "0 = 关闭回收");
-        assert_eq!(days(Some("-5")), 0, "负数按 0 处理");
-        assert_eq!(days(Some("abc")), 3, "读不懂用默认值");
-        assert_eq!(days(Some("")), 3);
     }
 
     #[test]

@@ -169,9 +169,8 @@ export const compareText = (a: string, b: string): number => collator.compare(a,
 
 /**
  * 一条横栏的全部筛选，按「站长日常最常看」排序。
- * idleDays：后端「满 N 天未生图」回收的天数；0 = 回收关闭，不出现「快被回收」。
  */
-export function buildFilters(now: number, idleDays: number): FilterSet {
+export function buildFilters(now: number): FilterSet {
   const chips: FilterDef[] = [
     { id: ALL_FILTER, label: "全部成员", test: () => true },
     { id: "today", label: "今日活跃", test: (m) => m.today.requests > 0 },
@@ -182,15 +181,6 @@ export function buildFilters(now: number, idleDays: number): FilterSet {
       test: (m) => !!m.registered_at && now - m.registered_at < DAY,
     },
   ];
-  if (idleDays > 0) {
-    chips.push({
-      id: "reclaim",
-      label: `快被回收（满 ${idleDays} 天）`,
-      hint: `满 ${idleDays} 天没生过图就会被自动删除（不拉黑，之后可以再领）`,
-      // 与后端回收口径一致：只看最近一次成功生图（没生过图的从创建时间算）
-      test: (m) => now - (m.last_image_at ?? m.created_at) > (idleDays - 1) * DAY,
-    });
-  }
   chips.push({ id: "attention", label: "需要处理", test: (m) => needsAttention(m, now) });
   return { chips };
 }

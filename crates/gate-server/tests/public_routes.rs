@@ -233,7 +233,6 @@ async fn public_live_shape_and_key_order() {
             "site",
             "discord_invite",
             "algo_notice",
-            "key_inactivity_delete_days",
             "web_login",
             "registration",
             "me"
@@ -270,7 +269,6 @@ async fn public_live_shape_and_key_order() {
     assert_eq!(rules["rest"], json!([1, 3]));
     assert_eq!(v["site"], "https://gate.example.top");
     assert_eq!(v["discord_invite"], "https://discord.gg/abc");
-    assert_eq!(v["key_inactivity_delete_days"], 3);
     assert_eq!(v["web_login"], true, "网页登录常开");
     assert!(
         v.get("home_join_open").is_none(),
@@ -463,7 +461,6 @@ async fn public_status_exposes_only_safe_fields() {
             "web_login",
             "algo_notice",
             "discord_invite",
-            "key_inactivity_delete_days",
             "limits",
             "image_jobs",
             "stability"
@@ -488,7 +485,6 @@ async fn public_status_exposes_only_safe_fields() {
     assert_eq!(v["image_jobs"], 0);
     assert_eq!(v["stability"], json!({"ok": 0, "error": 0}));
     assert_eq!(v["web_login"], true);
-    assert_eq!(v["key_inactivity_delete_days"], 3);
 
     // 8 秒缓存；invalidate 后看到新值
     common::claim_for(&e.state, json!({"open":true,"max_users":5})).await;

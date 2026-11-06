@@ -12,7 +12,6 @@ pub mod clock;
 pub mod discord_ua;
 pub mod features;
 pub mod guard;
-pub mod idle;
 pub mod json;
 pub mod key_status;
 pub mod member_flags;

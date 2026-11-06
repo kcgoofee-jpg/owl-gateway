@@ -35,14 +35,8 @@ impl RegistrationService {
         if cfg.max_users == 0 || cfg.max_users - self.count_active().await? > 0 {
             return Ok(cfg);
         }
-        // 只有开着闲置回收时才提它（10-17 起已关闭，写了就是误导）
-        let recycle = if self.idle_days() != 0 {
-            "闲置的 Key 会被自动回收，"
-        } else {
-            ""
-        };
         denied(format!(
-            "名额已满（上限 {} 人），请过段时间再试。{recycle}空出的名额先到先得。",
+            "名额已满（上限 {} 人），请过段时间再试。空出的名额先到先得。",
             cfg.max_users
         ))
     }
@@ -122,7 +116,7 @@ impl RegistrationService {
     pub async fn revoke(&self, discord_id: &str, remove_role: bool) -> Result<bool, DbError> {
         if self
             .db
-            .revoke_registration(discord_id, crate::time::now())
+            .revoke_registration(discord_id)
             .await?
             .is_none()
         {
@@ -277,7 +271,7 @@ impl RegistrationService {
             .await;
         if let Err(e) = stored {
             // Key 已建好但登记失败：不留没人认领的孤儿 Key
-            let _ = self.db.delete_key(key_id, crate::time::now()).await;
+            let _ = self.db.delete_key(key_id).await;
             return Err(e.into());
         }
         if !self.cfg.member_role_id.is_empty() {
@@ -306,7 +300,6 @@ impl RegistrationService {
             v5,
             daily_v5,
             reset_hour: gate_core::clock::DAY_RESET_HOUR,
-            idle_days: self.env.key_inactivity_delete_days,
             opened: &opened,
         });
         Ok(Provisioned { key, message })

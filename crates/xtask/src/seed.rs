@@ -220,7 +220,7 @@ fn events(now: f64, clock: &Clock, rng: &mut StdRng) -> Vec<Event> {
             }
         }
     }
-    // 每把 Key 最近一次使用都在刚才（后台「最近使用」、闲置判定、停机检测都不会有怪结果）
+    // 每把 Key 最近一次使用都在刚才（后台「最近使用」看着正常）
     for key in 0..NAMES.len() {
         out.push(Event {
             ts: now - 45.0 - 240.0 * key as f64,
@@ -509,7 +509,7 @@ mod tests {
                     .is_empty()
             );
 
-            // 最近一条请求就在刚才（网关启动时的停机检测不会往操作日志里写「闲置计时重置」）
+            // 最近一条请求就在刚才（后台「最近使用」看着正常）
             let last = db.last_log_ts().await.unwrap().unwrap();
             assert!(now - last < 3600.0, "最近一条日志太旧：{}", now - last);
         }

@@ -1,13 +1,12 @@
 //! 定时任务与启动 / 关停序列。
 //!
-//! 只剩四件事，全部挂在 `state.tasks` 上，启动后立即跑第一轮，睡觉时听 `state.shutdown`：
+//! 只剩三件事，全部挂在 `state.tasks` 上，启动后立即跑第一轮，睡觉时听 `state.shutdown`：
 //!
 //! | 任务 | 周期 | 做什么 |
 //! |---|---|---|
 //! | `upstream_snapshot` 上游 V5 快照 | 10 分钟 ±20%，满 1 小时才记 | 主动读一次订阅，写 `upstream_snapshots`（后台「额度记录」页估算 V5 实测恢复速度用） |
 //! | `breaker` 全站熔断 | 10 分钟 ±20% | 15 分钟内上游失败 ≥ 5 次、占比 ≥ 30%、来自 ≥ 2 把 Key → 全站暂停出图 5 分钟（阈值是常量，不是自适应） |
 //! | `maintenance` 维护 | 5 分钟 ±20% | 注册服务的三个同步（`registration::registrar_jobs`）/ 结算账本只留未决行 / 磁盘自检 |
-//! | `idle_recycle` 闲置回收 | 1 小时 | 长期不用的 Key 删除（不拉黑，之后还能再 /register；站点出不了图的服务日不算，见 [`idle_recycle_window`]）；`KEY_INACTIVITY_DELETE_DAYS=0` 时**什么都不做** |
 //!
 //! 单 Key 限流（按 1 小时被拒次数推断「客户端在死循环」）、Anlas 自动核对、日志保留清理都已删除。
 //! 熔断保留：它的阈值写死在 `gate_core::breaker` 里，作用是不让上游账号被打死。
@@ -24,10 +23,8 @@ mod support;
 
 pub use registry::{JOBS, Job, JobError, JobsState, find, guarded, run_once, spawn_job};
 
-use crate::action_log::log_action;
 use crate::bugs::Report;
 use crate::state::AppState;
-use gate_core::idle;
 use std::time::Duration;
 
 /// 关停时等待记账 / 写库任务的最长时间（docker `stop_grace_period` 是 120 秒）。
@@ -178,171 +175,6 @@ async fn disk_check(state: &AppState) -> Result<(), JobError> {
         );
     }
     Ok(())
-}
-
-// ---------------------------------------------------------------------------
-// 闲置 Key 回收
-// ---------------------------------------------------------------------------
-
-/// 定时任务「闲置回收」。2026-10-13 站长：取消闲置提醒私信，到期直接删 Key，不提前通知。
-/// 10-23 站长：只删 Key，**不拉黑** Discord 账号——成员之后还能再 /register 领新 Key。
-pub(crate) async fn idle_recycle_job(state: &AppState) -> Result<String, JobError> {
-    Ok(match recycle_inactive_keys(state).await? {
-        Recycle::Off => "关闭（天数=0）".to_string(),
-        Recycle::Skipped => "最近 60 分钟没出图，本轮跳过".to_string(),
-        Recycle::Done {
-            deleted,
-            skipped_days,
-        } => {
-            if deleted > 0 {
-                tracing::info!("deleted {deleted} inactive API key(s)");
-            }
-            if skipped_days > 0 {
-                format!("回收 {deleted} 把（不算站点没在正常出图的 {skipped_days} 天）")
-            } else {
-                format!("回收 {deleted} 把")
-            }
-        }
-    })
-}
-
-/// 一轮闲置回收的结果。
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum Recycle {
-    /// `KEY_INACTIVITY_DELETE_DAYS=0`：关闭。
-    Off,
-    /// 最近 60 分钟全站没有成功出图：本轮跳过。
-    Skipped,
-    /// 删掉的 Key 数；`skipped_days` = 往回多数的、站点没在正常出图的服务日数。
-    Done { deleted: usize, skipped_days: i64 },
-}
-
-/// 本轮闲置回收的截止时间；站点眼下就出不了图时返回 `None`（本轮不回收）。
-///
-/// 站点自己出不了图的服务日不算成员闲置：
-/// - 已完结的服务日全站成功出图不到 [`idle::HEALTHY_DAY_MIN_IMAGES`] 张 → 跳过，往回多数一天（最多回看 30 天）；
-/// - 当前服务日：最近 60 分钟全站一张都没出成功 → 本轮直接跳过。
-///
-/// 平时（近几天都在正常出图）截止时间就是「现在 − N 天」，与原来完全相同。
-pub async fn idle_recycle_window(
-    state: &AppState,
-    days: i64,
-    now: f64,
-) -> Result<Option<idle::IdleWindow>, JobError> {
-    let recent = state
-        .db
-        .ok_image_counts(vec![(now - idle::RECENT_OK_WINDOW, f64::MAX)])
-        .await?;
-    if recent.first().copied().unwrap_or(0) == 0 {
-        return Ok(None);
-    }
-    // 已完结的服务日：用服务日工具取日期与起点，不自己做时区换算
-    let lookback = idle::max_lookback_days(days) as usize;
-    let names = state.clock.last_days(now, lookback + 1);
-    let mut ranges = Vec::with_capacity(lookback);
-    for pair in names.windows(2) {
-        if let (Some(start), Some(end)) = (
-            state.clock.service_day_start(&pair[0]),
-            state.clock.service_day_start(&pair[1]),
-        ) {
-            ranges.push((start, end));
-        }
-    }
-    let counts = state.db.ok_image_counts(ranges.clone()).await?;
-    // 整段历史里一张成功图都没有：不是"站点一直没出图"，而是这段时间的日志不在了
-    // （例如维护时归档并删掉了旧日志）。历史不可考时不做跳过，按自然日算——
-    // 否则会把每一历史天都当成"站点没在服务"，闲置回收要空转满一个月。
-    if counts.iter().all(|c| *c == 0) {
-        return Ok(Some(idle::IdleWindow {
-            cutoff: now - days.max(0) as f64 * 86400.0,
-            skipped_days: 0,
-        }));
-    }
-    let served: Vec<idle::ServedDay> = ranges
-        .into_iter()
-        .zip(counts)
-        .map(|((start, end), ok_images)| idle::ServedDay {
-            start,
-            end,
-            ok_images,
-        })
-        .collect();
-    Ok(Some(idle::idle_window(now, days, &served)))
-}
-
-/// 回收长期未使用的普通 Key（只删 Key、释放名额和身份组，不拉黑）。返回删掉的 Key 数，见 [`recycle_inactive_keys`]。
-pub async fn delete_inactive_keys(state: &AppState) -> Result<usize, JobError> {
-    Ok(match recycle_inactive_keys(state).await? {
-        Recycle::Done { deleted, .. } => deleted,
-        Recycle::Off | Recycle::Skipped => 0,
-    })
-}
-
-/// 闲置回收的一轮。
-///
-/// **`KEY_INACTIVITY_DELETE_DAYS=0` 表示关闭：这时无论库里有什么都不会删任何 Key**（线上现在是 3，10-13 起开着）。
-/// 「连续 N 天」不算站点自己出不了图的服务日，见 [`idle_recycle_window`]。
-pub async fn recycle_inactive_keys(state: &AppState) -> Result<Recycle, JobError> {
-    let days = std::cmp::max(0, state.env.key_inactivity_delete_days);
-    if days == 0 {
-        return Ok(Recycle::Off);
-    }
-    let now = state.now();
-    let Some(window) = idle_recycle_window(state, days, now).await? else {
-        tracing::info!("最近 60 分钟全站没有成功出图，本轮不做闲置回收");
-        return Ok(Recycle::Skipped);
-    };
-    if window.skipped_days > 0 {
-        tracing::info!(
-            skipped_days = window.skipped_days,
-            "闲置回收跳过站点没在正常出图的服务日"
-        );
-    }
-    let key_ids = state.db.inactive_key_ids(window.cutoff, now).await?;
-    let detail = if window.skipped_days > 0 {
-        format!(
-            "连续 {days} 天未活动自动回收（不算站点没在正常出图的 {} 天）",
-            window.skipped_days
-        )
-    } else {
-        format!("连续 {days} 天未活动自动回收")
-    };
-    let registrar = state.registration.clone();
-    for &key_id in &key_ids {
-        let key_name = state
-            .db
-            .get_key(key_id)
-            .await?
-            .and_then(|k| k.get("name").map(gate_core::values::text))
-            .unwrap_or_else(|| format!("Key #{key_id}"));
-        // 领取记录会随 Key 一起删掉：先记下是谁，删完摘身份组
-        let reg = state.db.registration_for_key(key_id).await?;
-        state.db.delete_key(key_id, state.now()).await?;
-        log_action(
-            &state.db,
-            "系统",
-            "闲置回收 Key",
-            &format!("Key #{key_id} {key_name}"),
-            &detail,
-            true,
-            state.now(),
-        )
-        .await;
-        // 不拉黑（站长 10-23）：之后还能再 /register 领新 Key；只摘身份组
-        if let (Some(reg), Some(r)) = (&reg, &registrar) {
-            let _ = r.release_role(&reg.discord_id).await;
-        }
-        // 释放领取记录
-        for discord_id in state.db.forget_registration_for_key(key_id).await? {
-            if let Some(r) = &registrar {
-                r.release_role(&discord_id).await?;
-            }
-        }
-    }
-    Ok(Recycle::Done {
-        deleted: key_ids.len(),
-        skipped_days: window.skipped_days,
-    })
 }
 
 #[cfg(test)]

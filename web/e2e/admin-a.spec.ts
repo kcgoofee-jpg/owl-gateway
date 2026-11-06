@@ -167,10 +167,10 @@ test.describe("已登录", () => {
     expect(errs).toEqual([]);
   });
 
-  /** 拦下成员接口，在真实数据上改一改（让被拒原因、回收天数可预期） */
+  /** 拦下成员接口，在真实数据上改一改（让列表里的极端情形可预期） */
   async function mockMembers(
     page: Page,
-    edit: (body: { members: Array<Record<string, unknown>>; inactivity_days: number }) => void,
+    edit: (body: { members: Array<Record<string, unknown>> }) => void,
   ) {
     await page.route("**/admin/api/members", async (route) => {
       const res = await route.fetch();
@@ -181,140 +181,16 @@ test.describe("已登录", () => {
   }
   const bar = (page: Page) => page.getByRole("group", { name: "筛选成员" });
 
-  test("成员：筛选是一条横栏——一级四颗常用标签，低频的收进「更多」菜单", async ({ page }) => {
-    const errs = watchConsole(page, "/admin/api/events");
-    await open(page, "/admin/members", PAGES[0]?.ready as never);
-    const b = bar(page);
-    await expect(b.locator("select")).toHaveCount(0);
-    await expect(page.getByRole("combobox", { name: "更多筛选" })).toHaveCount(0);
-    // 已下线的筛选不在
-    for (const gone of [/身份组/, /后台手动建/, /站长 \/ 测试/])
-      await expect(b.getByRole("button", { name: gone })).toHaveCount(0);
-    for (const name of [/^全部成员 \d+$/, /^今日活跃 \d+$/, /^24 小时被拒过 \d+$/, /^需要处理 \d+$/])
-      await expect(b.getByRole("button", { name })).toBeVisible();
-    // 低频筛选不直接摆在横栏里，收在「更多」菜单（带人数）
-    for (const gone of [/还没出过图/, /24 小时新加入/, /邀请 Key/])
-      await expect(b.getByRole("button", { name: gone })).toHaveCount(0);
-    await b.getByRole("button", { name: "更多" }).click();
-    const menu = page.getByRole("menu");
-    for (const name of [/^还没出过图 \d+$/, /^24 小时新加入 \d+$/, /^邀请 Key \d+$/])
-      await expect(menu.getByRole("menuitem", { name })).toBeVisible();
-
-    // 默认：全部成员（不再默认藏到「需要处理」）；点「今日活跃」→ 高亮，再点 → 回到全部
-    await page.keyboard.press("Escape");
-    const today = b.getByRole("button", { name: /^今日活跃/ });
-    const all = b.getByRole("button", { name: /^全部成员/ });
-    await expect(all).toHaveAttribute("aria-pressed", "true");
-    await expect(page.getByText(/^共 [\d,]+ 位成员$/)).toBeVisible();
-    await today.click();
-    await expect(today).toHaveAttribute("aria-pressed", "true");
-    await expect(all).toHaveAttribute("aria-pressed", "false");
-    await today.click();
-    await expect(today).toHaveAttribute("aria-pressed", "false");
-    await expect(all).toHaveAttribute("aria-pressed", "true");
-
-    // 选中筛选时屏幕上明确写清「当前只显示 X / Y 位」，一键回全部
-    await b.getByRole("button", { name: /^需要处理/ }).click();
-    await expect(page.getByText(/当前只显示「需要处理」的 [\d,]+ \/ [\d,]+ 位/)).toBeVisible();
-    await page.getByRole("button", { name: "查看全部" }).click();
-    await expect(all).toHaveAttribute("aria-pressed", "true");
-
-    // 从「更多」里选：行末回显一颗可关闭的选中标签，点它 = 取消
-    await b.getByRole("button", { name: "更多" }).click();
-    await menu.getByRole("menuitem", { name: /^还没出过图/ }).click();
-    const pick = b.getByRole("button", { name: /^还没出过图/ });
-    await expect(pick).toBeVisible();
-    await expect(pick).toHaveAttribute("aria-pressed", "true");
-    await pick.click();
-    await expect(pick).toHaveCount(0);
-
-    // 键盘：Tab 到标签、空格 / 回车切换
-    await today.focus();
-    await page.keyboard.press("Enter");
-    await expect(today).toHaveAttribute("aria-pressed", "true");
-    expect(errs).toEqual([]);
-  });
-
-  test("成员：「24 小时被拒过」选中后，被拒原因单独一行出现（主横栏不动），可再窄一层", async ({ page }) => {
-    await mockMembers(page, (body) => {
-      const people = body.members;
-      for (const m of people) {
-        m.rejected_24h = 0;
-        m.auto_tags = [];
-      }
-      const rows = people.filter((m) => m.enabled && !m.invited).slice(0, 3);
-      rows.forEach((m, i) => {
-        m.rejected_24h = 2;
-        m.auto_tags = i === 0 ? [{ tag: "角色超 6 个", count: 2 }] : [{ tag: "请求过快", count: 2 }];
-      });
-    });
-    await open(page, "/admin/members", PAGES[0]?.ready as never);
-    const b = bar(page);
-    const reasons = page.getByRole("group", { name: "被拒原因" });
-    await expect(reasons).toHaveCount(0);
-    const rejected = b.getByRole("button", { name: /^24 小时被拒过/ });
-    const before = await rejected.boundingBox();
-    await rejected.click();
-    const slow = reasons.getByRole("button", { name: /^请求过快 2$/ });
-    await expect(slow).toBeVisible();
-    await expect(reasons.getByRole("button")).not.toHaveCount(0);
-    // 主横栏里没有原因，「24 小时被拒过」位置不动；原因在下一行
-    await expect(b.getByRole("button", { name: /^请求过快/ })).toHaveCount(0);
-    const [after, s] = await Promise.all([rejected.boundingBox(), slow.boundingBox()]);
-    expect(Math.abs((after?.x ?? 0) - (before?.x ?? 99))).toBeLessThan(1.5);
-    expect((s?.y ?? 0) - (after?.y ?? 0)).toBeGreaterThan(10);
-    await slow.click();
-    await expect(slow).toHaveAttribute("aria-pressed", "true");
-    await expect(page.getByRole("button", { name: /展开.*的详情/ })).toHaveCount(2);
-    await slow.click();
-    await expect(page.getByRole("button", { name: /展开.*的详情/ })).toHaveCount(3);
-    // 换掉被拒筛选：原因收起
-    await b.getByRole("button", { name: /^今日活跃/ }).click();
-    await expect(reasons).toHaveCount(0);
-  });
-
-  test("成员：回收关闭时「更多」里没有「快被回收」，开启时菜单项用设置的天数", async ({ page }) => {
-    await mockMembers(page, (body) => {
-      body.inactivity_days = 0;
-    });
-    await open(page, "/admin/members", PAGES[0]?.ready as never);
-    await expect(bar(page).getByRole("button", { name: /^全部成员/ })).toBeVisible();
-    await bar(page).getByRole("button", { name: "更多" }).click();
-    await expect(page.getByRole("menu").getByRole("menuitem", { name: /快被回收/ })).toHaveCount(0);
-    await page.keyboard.press("Escape");
-    await page.unroute("**/admin/api/members");
-    await mockMembers(page, (body) => {
-      body.inactivity_days = 5;
-    });
-    await open(page, "/admin/members", PAGES[0]?.ready as never);
-    await bar(page).getByRole("button", { name: "更多" }).click();
-    await expect(
-      page.getByRole("menu").getByRole("menuitem", { name: /^快被回收（满 5 天） \d+$/ }),
-    ).toBeVisible();
-  });
-
   for (const size of [DESKTOP, MOBILE]) {
     test(`成员：筛选横栏在 ${size.width}px 是单行，不换行、不出孤字、不撑出横向滚动`, async ({ page }) => {
       await page.setViewportSize(size);
       await mockMembers(page, (body) => {
-        // 最长的情形：回收开着、被拒原因展开（原因在下一行）
-        body.inactivity_days = 3;
+        // 最长的情形：每颗标签都带人数
         const m = body.members[0];
-        if (m) {
-          m.rejected_24h = 1;
-          m.auto_tags = [
-            { tag: "角色超 6 个", count: 1 },
-            { tag: "请求过快", count: 1 },
-          ];
-        }
+        if (m) m.requests_today = 9;
       });
       await open(page, "/admin/members", PAGES[0]?.ready as never);
       const b = bar(page);
-      await b.getByRole("button", { name: /^24 小时被拒过/ }).click();
-      // 原因在主横栏下面单独一行，主横栏照样单行
-      await expect(
-        page.getByRole("group", { name: "被拒原因" }).getByRole("button", { name: /^请求过快/ }),
-      ).toBeVisible();
       const geo = await b.evaluate((el) => {
         const chips = [...el.querySelectorAll<HTMLElement>("button")].map((x) => x.getBoundingClientRect());
         const scroll = el.querySelector<HTMLElement>(".mb-bar__scroll");
@@ -334,7 +210,7 @@ test.describe("已登录", () => {
       expect(geo.heights, "标签等高").toHaveLength(1);
       expect(geo.noWrap).toBe(true);
       expect(geo.pageScroll, "页面不横向滚动").toBe(true);
-      // 放不下（手机）标签那一段自己横向滚（「更多」钉在行尾），而不是换行
+      // 放不下（手机）时标签那一段自己横向滚，而不是换行
       if (!geo.fits)
         expect(
           await b.evaluate((el) => {

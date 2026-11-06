@@ -561,23 +561,6 @@ async fn issue_mints_a_key_with_current_welcome_message() {
     assert!(d.seen().is_empty(), "{:?}", d.calls());
 }
 
-/// 闲置回收关闭（KEY_INACTIVITY_DELETE_DAYS=0）时，名额满的回复不再说「闲置的 Key 会被自动回收」。
-#[tokio::test]
-async fn full_message_does_not_promise_recycling_when_it_is_off() {
-    let (e, _d) = setup_reg(&[("KEY_INACTIVITY_DELETE_DAYS", "0")]).await;
-    common::claim_for(&e.state, json!({"max_users":1})).await;
-    open_registration(&e).await;
-    assert_eq!(issue(&e, MEMBER).await.0, 200);
-    let full = issue(&e, OTHER).await;
-    assert_eq!(
-        (full.0, detail(&full)),
-        (
-            403,
-            "名额已满（上限 1 人），请过段时间再试。空出的名额先到先得。"
-        )
-    );
-}
-
 #[tokio::test]
 async fn issue_enforces_capacity_age_hourly_cap_and_expiry_rotation() {
     let (e, _d) = setup_reg(&[]).await;
@@ -590,7 +573,7 @@ async fn issue_enforces_capacity_age_hourly_cap_and_expiry_rotation() {
         (full.0, detail(&full)),
         (
             403,
-            "名额已满（上限 1 人），请过段时间再试。闲置的 Key 会被自动回收，空出的名额先到先得。"
+            "名额已满（上限 1 人），请过段时间再试。空出的名额先到先得。"
         )
     );
     // 撤销释放名额
@@ -1772,23 +1755,8 @@ async fn web_login_flow_matches_legacy() {
     let mut footprint = calls.split_off(2);
     footprint.sort();
     assert_eq!(calls, ["POST /oauth2/token", "GET /users/@me"]);
-    // 站长 10-23：服务器列表和外部账号（scope guilds / connections）一起查，存进足迹表
-    assert_eq!(
-        footprint,
-        ["GET /users/@me/connections", "GET /users/@me/guilds"]
-    );
-    let guilds = common::query(
-        &e.state.db,
-        "SELECT discord_id, guild_id, name FROM discord_user_guilds ORDER BY guild_id",
-    )
-    .await;
-    assert_eq!(
-        guilds,
-        [
-            json!({"discord_id": MEMBER, "guild_id": "900000000000000091", "name": "Owl"}),
-            json!({"discord_id": MEMBER, "guild_id": "900000000000000092", "name": "Art"}),
-        ]
-    );
+    // 站长 10-23：绑定的外部账号（scope connections）存进足迹表
+    assert_eq!(footprint, ["GET /users/@me/connections"]);
     let conns = common::query(
         &e.state.db,
         "SELECT type, ext_id, name, verified FROM discord_user_connections ORDER BY type",

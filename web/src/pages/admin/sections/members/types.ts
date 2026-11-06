@@ -55,7 +55,6 @@ export type MemberRow = Member & { k?: KeyRow | undefined };
  */
 export type MembersResp = {
   members: Member[];
-  inactivity_days: number;
   total?: number;
   attention?: number;
   filter?: "all" | "attention";

@@ -404,11 +404,10 @@ async fn call(db: &Db, c: &Case) -> Out {
             Value::Null
         }
         "delete_key" => {
-            db.delete_key(int(a(0, "key_id"), 0), now).await?;
+            db.delete_key(int(a(0, "key_id"), 0)).await?;
             Value::Null
         }
-        // 已过期的 Key 不算闲置，所以要带 `now`
-        "inactive_key_ids" => json!(db.inactive_key_ids(num(a(0, "cutoff"), 0.0), now).await?),
+        // 已过期的 Key 不参与，所以要带 `now`
         "list_keys" => json!(db.list_keys().await?),
         "touch_key" => {
             db.touch_key(int(a(0, "key_id"), 0), now).await?;
@@ -697,7 +696,6 @@ const METHODS: &[&str] = &[
     "rotate_key_token",
     "update_key",
     "delete_key",
-    "inactive_key_ids",
     "list_keys",
     "touch_key",
     "get_counter",

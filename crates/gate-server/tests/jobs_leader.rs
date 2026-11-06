@@ -12,7 +12,7 @@ async fn ran(e: &Env) -> bool {
     let raw = setting(&e.state, "job_last").await.unwrap_or_default();
     serde_json::from_str::<Value>(&raw)
         .ok()
-        .and_then(|v| v.get("idle_recycle").cloned())
+        .and_then(|v| v.get("maintenance").cloned())
         .is_some()
 }
 

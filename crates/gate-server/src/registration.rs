@@ -167,8 +167,6 @@ pub struct Welcome<'a> {
     pub daily_v5: i64,
     /// 每天几点重置（服务日起点）。
     pub reset_hour: i64,
-    /// 连续几天没有成功出图会被回收，0 = 不回收。
-    pub idle_days: i64,
     /// 已开通功能的名字，空串 = 不写这一行。
     pub opened: &'a str,
 }
@@ -197,12 +195,6 @@ pub fn welcome_message(w: &Welcome) -> String {
     )];
     if !w.opened.is_empty() {
         rules.push(format!("• 已开通功能：{}", w.opened));
-    }
-    if w.idle_days != 0 {
-        rules.push(format!(
-            "• 连续 {} 天没有成功出图会被自动回收（不另行提醒），之后可以再 /register 领新的",
-            w.idle_days
-        ));
     }
     rules.push("• 每把 Key 同时生成 1 张、最多再排 2 张，多发的会被退回，等前面的出完再发".into());
     let v5_sizes = if w.v5 {
@@ -286,8 +278,6 @@ pub struct WebIdentity {
     pub avatar: String,
     /// 只有验证身份组的授权（verify=true）才会是 `Some`；普通登录（门槛没配）不查成员信息，也绝不因此拒绝登录。
     pub role: Option<RoleCheck>,
-    /// 所在服务器 `(id, 名字)`；查不到（老授权没有 guilds scope、Discord 出错）为 None。尽力而为，不影响登录。
-    pub guilds: Option<Vec<(String, String)>>,
     /// 绑定的外部账号；查不到为 None。
     pub connections: Option<Vec<DiscordConnection>>,
 }
@@ -332,8 +322,6 @@ mod web_login;
 
 pub struct RegistrationService {
     db: Db,
-    /// 进程配置：Discord API 地址、闲置回收天数。
-    env: EnvConfig,
     cfg: RegistrationEnv,
     api_base: String,
     http: reqwest::Client,
@@ -354,7 +342,6 @@ impl RegistrationService {
             .ok()?;
         Some(Self {
             db,
-            env: env.clone(),
             cfg,
             // 容忍写成 `.../v10/` 的环境变量：拼路径时不出现 `//`
             api_base: env.discord_api_base.trim_end_matches('/').to_string(),
@@ -371,9 +358,6 @@ impl RegistrationService {
     /// 发出 /register 的服务器（也是退群回收 / 身份组所在的服务器）。
     pub fn command_guild(&self) -> &str {
         &self.cfg.guild_id
-    }
-    pub fn idle_days(&self) -> i64 {
-        self.env.key_inactivity_delete_days
     }
 
     // ---- 名额与查询 ----
@@ -503,7 +487,6 @@ mod tests {
             v5: daily_v5 != 0,
             daily_v5,
             reset_hour: 7,
-            idle_days: 3,
             opened: "文生图",
         }
     }
@@ -559,9 +542,8 @@ mod tests {
             "{t}"
         );
         assert!(t.contains("V5 只有 832×1216"), "{t}");
-        // 不回收、没有已开通功能
+        // 没有已开通功能
         let t = welcome_message(&Welcome {
-            idle_days: 0,
             opened: "",
             ..welcome(30, 0)
         });

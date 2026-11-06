@@ -80,11 +80,10 @@ export default function Members() {
   const [dlg, setDlg] = useState<Dlg | null>(null);
 
   const now = Date.now() / 1000;
-  const idleDays = mem.data?.inactivity_days ?? 3;
   const rows: MemberRow[] = useMemo(() => (mem.data?.members ?? []).filter((m) => m.enabled), [mem.data]);
   const byId = (id: number) => rows.find((r) => r.id === id);
 
-  const filters = useMemo(() => buildFilters(now, idleDays), [now, idleDays]);
+  const filters = useMemo(() => buildFilters(now), [now]);
   const all = filters.chips;
 
   const activeId = all.some((f) => f.id === filter) ? (filter as string) : ALL_FILTER;

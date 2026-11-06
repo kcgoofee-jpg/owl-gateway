@@ -179,7 +179,7 @@ impl Db {
         .await
     }
 
-    /// 这把 Key 的领取记录（`key_id` 唯一，至多一行）：属于哪个 Discord 账号、闲置回收拉黑时带上的资料。
+    /// 这把 Key 的领取记录（`key_id` 唯一，至多一行）：属于哪个 Discord 账号。
     pub async fn registration_for_key(&self, key_id: i64) -> Result<Option<RegistrationRow>> {
         self.read(move |c| {
             c.query_row(

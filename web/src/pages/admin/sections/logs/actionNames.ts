@@ -47,7 +47,7 @@ const GROUPS: Array<[string, string[]]> = [
       "补记：手动改设置",
     ],
   ],
-  ["系统自动", ["退群回收 Key", "Key 到期释放名额", "闲置回收 Key", "闲置回收前提醒", "闲置计时重置"]],
+  ["系统自动", ["退群回收 Key", "Key 到期释放名额"]],
 ];
 
 export const actionLabel = (a: string): string => ALIAS[a] ?? a;

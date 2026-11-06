@@ -4,7 +4,7 @@
 //! （[`JobsState::record`]）：内存里一份，整体写进设置 `job_last`（serde_json）。任务出错或 panic 都只记成
 //! 这一轮失败（`ok=false`，摘要写错误，另记 Bug，来源 `job:<名字>`），循环照常继续。
 
-use super::{breaker, capacity, idle_recycle_job, jittered, maintenance_job, sleep_or_shutdown};
+use super::{breaker, capacity, jittered, maintenance_job, sleep_or_shutdown};
 use crate::error::{ApiError, InternalError};
 use crate::state::AppState;
 use futures::FutureExt;
@@ -47,12 +47,9 @@ fn run_breaker(s: &AppState) -> BoxFuture<'_, Result<String, JobError>> {
 fn run_maintenance(s: &AppState) -> BoxFuture<'_, Result<String, JobError>> {
     Box::pin(maintenance_job(s))
 }
-fn run_idle_recycle(s: &AppState) -> BoxFuture<'_, Result<String, JobError>> {
-    Box::pin(idle_recycle_job(s))
-}
 
 /// 全部定时任务，按启动顺序。周期和抖动沿用内核时代的值。
-pub const JOBS: [Job; 4] = [
+pub const JOBS: [Job; 3] = [
     Job {
         name: "upstream_snapshot",
         title: "上游 V5 快照",
@@ -76,14 +73,6 @@ pub const JOBS: [Job; 4] = [
         every_secs: 300.0,
         jitter: 0.2,
         run: run_maintenance,
-    },
-    Job {
-        name: "idle_recycle",
-        title: "闲置回收",
-        every: "每小时",
-        every_secs: 3600.0,
-        jitter: 0.0,
-        run: run_idle_recycle,
     },
 ];
 
@@ -323,7 +312,7 @@ pub fn spawn_job(state: &AppState, job: &'static Job) {
 /// 每个任务启动后的第一轮错开几秒。
 ///
 /// 为什么：部署时 `cutover.sh` 起来后 1 秒内就打 `/healthz`（读写各 1 秒上限），而九个任务原本会在同一瞬间
-/// 各跑一轮——`abuse_scan` 要读十几万行、`maintenance` 和 `idle_recycle` 要写库，读写连接被占满，健康检查
+/// 各跑一轮——`maintenance` 要写库，读写连接被占满，健康检查
 /// 就回 503，部署被判失败自动回滚（10-31 04:37 那次）。错开之后第一轮分散在十秒内，健康检查不再和它们抢；
 /// 间隔不能太大：等待锁释放的测试与运维脚本都以 10 秒为界看「任务起来没有」。
 pub fn first_round_delay(job: &'static Job) -> f64 {

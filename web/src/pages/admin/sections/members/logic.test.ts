@@ -159,25 +159,13 @@ describe("memberVerdict / memberStatus", () => {
 
 describe("筛选横栏", () => {
   const ids = (f: ReturnType<typeof buildFilters>) => f.chips.map((c) => c.id);
-  it("一条横栏按顺序：全部 / 今日 / 没出图 / 新加入 / 快回收 / 需要处理", () => {
-    expect(ids(buildFilters(NOW, 3))).toEqual(["all", "today", "never", "new", "reclaim", "attention"]);
+  it("一条横栏按顺序：全部 / 今日 / 没出图 / 新加入 / 需要处理", () => {
+    expect(ids(buildFilters(NOW))).toEqual(["all", "today", "never", "new", "attention"]);
   });
   it("已下线的筛选不在横栏里：普通身份组、后台手动建的 Key、旧的 staff 筛选、站长标签", () => {
-    const all = ids(buildFilters(NOW, 3)).join(",");
+    const all = ids(buildFilters(NOW)).join(",");
     for (const gone of ["role:regular", "role:admin", "role:test", "manual", "staff", "tag:"])
       expect(all).not.toContain(gone);
-  });
-  it("「快被回收」所有领取方式使用相同闲置窗口，标签显示有效天数", () => {
-    const idle = mk({ last_image_at: NOW - 2.5 * DAY });
-    const fresh = mk({ last_image_at: NOW - 3600 });
-    const never = mk({ last_image_at: null, first_image_at: null, created_at: NOW - 2.5 * DAY });
-    const reclaim = buildFilters(NOW, 3).chips.find((x) => x.id === "reclaim");
-    expect(reclaim?.label).toBe("快被回收（满 3 天）");
-    expect([idle, fresh, never].filter((m) => reclaim?.test(m))).toEqual([idle, never]);
-    expect(buildFilters(NOW, 7).chips.find((x) => x.id === "reclaim")?.label).toBe("快被回收（满 7 天）");
-  });
-  it("回收天数为 0（关闭）时没有「快被回收」", () => {
-    expect(ids(buildFilters(NOW, 0))).not.toContain("reclaim");
   });
   it("各标签的人数", () => {
     const rows = [
@@ -185,7 +173,7 @@ describe("筛选横栏", () => {
       mk({ first_image_at: null, registered_at: NOW - 3600 }),
       mk({ tags: [{ tag: "邀请", note: "", by: "", ts: NOW }] }),
     ];
-    const f = buildFilters(NOW, 3);
+    const f = buildFilters(NOW);
     const n = (id: string) => countFilter(rows, f.chips.find((c) => c.id === id) as never);
     expect(n("all")).toBe(3);
     expect(n("today")).toBe(1);

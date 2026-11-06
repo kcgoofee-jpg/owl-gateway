@@ -388,7 +388,6 @@ pub(super) async fn members_view(state: &AppState, filter_raw: &str) -> Result<V
     };
     Ok(json!({
         "members": members,
-        "inactivity_days": st.env.key_inactivity_delete_days,
         "total": total,
         "attention": attention,
         "filter": filter,

@@ -87,12 +87,12 @@ impl Db {
     }
 
     /// 撤销：删除该用户的 Key（连带标签 / 领取记录）。返回被删的 Key；没有领取记录为 None。
-    pub async fn revoke_registration(&self, discord_id: &str, now: f64) -> Result<Option<i64>> {
+    pub async fn revoke_registration(&self, discord_id: &str) -> Result<Option<i64>> {
         match self.registration_key_id(discord_id).await? {
             Some(key_id) => {
                 // delete_key 之后还会再按 discord_id 删一次领取记录；key_id 是唯一键，
                 // delete_key 已经按 key_id 删过了，那一步是空操作，不重复。
-                self.delete_key(key_id, now).await?;
+                self.delete_key(key_id).await?;
                 Ok(Some(key_id))
             }
             None => Ok(None),

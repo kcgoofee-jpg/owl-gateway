@@ -1,4 +1,4 @@
-//! 闲置回收的口径：只有真正出图（`image` / `image_stream`）成功才算「用过」。
+//! `last_image_at` 的口径：只有真正出图（`image` / `image_stream`）成功才算「出过图」。
 
 use gate_db::Db;
 use gate_db::repo::keys::NewKey;

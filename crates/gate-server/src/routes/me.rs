@@ -1,4 +1,4 @@
-//! `GET /v1/me`：这把 Key 自己的额度、功能开关和闲置回收设置。
+//! `GET /v1/me`：这把 Key 自己的额度、功能开关和成员规则。
 //!
 //! 2026-10-15 文本生成 / 语音 / OpenAI 兼容聊天整套接口删除（线上几乎没人用），这个文件原先叫
 //! `text.rs`，只留下了 `/v1/me`（线上冒烟 `nai-ops smoke` 和用 Key 自查额度的脚本在用）。
@@ -63,7 +63,6 @@ async fn v1_me(State(state): State<AppState>, req: Request) -> ApiResult {
             "requests": c.requests,
         },
         "expires_at": key.expires_at(),
-        "inactivity_delete_days": state.env.key_inactivity_delete_days,
         "features": features,
         "policy": key.policy,
     })))

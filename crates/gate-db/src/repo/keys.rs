@@ -1,8 +1,8 @@
-//! 虚拟 Key：增删改查、闲置判定、身份组。
+//! 虚拟 Key：增删改查、身份组。
 
 use super::{SqlValue, json_to_sql};
 use crate::{Db, Result, value};
-use gate_core::{primitives, values};
+use gate_core::values;
 use rusqlite::{OptionalExtension, params};
 use serde::Deserialize;
 use serde_json::Value;
@@ -190,62 +190,12 @@ impl Db {
 
     /// 删 Key：触发器把 V5 标记归档进墓碑表并清掉当日额度基线；
     /// 计数器 / 日志保留（已受理的请求事后结算仍可写入）。
-    /// 删之前把「Key → Discord 账号」记进 `deleted_key_owners`（周报追溯已删 Key 的日志用，保留 14 天）。
-    pub async fn delete_key(&self, key_id: i64, now: f64) -> Result<()> {
+    pub async fn delete_key(&self, key_id: i64) -> Result<()> {
         self.write(move |tx| {
-            tx.execute(
-                "INSERT INTO deleted_key_owners(key_id, discord_id, name, deleted_at) \
-                 SELECT k.id, COALESCE(k.discord_id, \
-                   (SELECT r.discord_id FROM discord_registrations r WHERE r.key_id=k.id)), k.name, ? \
-                 FROM api_keys k WHERE k.id=? \
-                 ON CONFLICT(key_id) DO UPDATE SET discord_id=COALESCE(excluded.discord_id, discord_id), \
-                   name=excluded.name, deleted_at=excluded.deleted_at",
-                params![now, key_id],
-            )?;
             tx.execute("DELETE FROM key_tags WHERE key_id=?", [key_id])?;
             tx.execute("DELETE FROM discord_registrations WHERE key_id=?", [key_id])?;
             tx.execute("DELETE FROM api_keys WHERE id=?", [key_id])?;
             Ok(())
-        })
-        .await
-    }
-
-    /// 闲置 = 连续没生图（2026-10-13 站长）：只看 last_image_at，从没生过图的 Key 从创建时间起算；
-    /// 邀请标签的 Key 豁免。「宽限起点」设置损坏（解析不了 / 非有限 / 负数）时返回空，绝不触发批量删除。
-    ///
-    /// 已过期的 Key（`expires_at <= now`）不算闲置：过期后请求一律 403、`last_image_at` 不会再更新，
-    /// 它们照旧在成员下次 /register 时释放，不进封禁表。
-    pub async fn inactive_key_ids(&self, cutoff: f64, now: f64) -> Result<Vec<i64>> {
-        self.read(move |c| {
-            let raw: Option<String> = c
-                .query_row(
-                    "SELECT value FROM site_settings WHERE key=?",
-                    ["key_inactivity_grace_started_at"],
-                    |r| value::text_opt(r, 0),
-                )
-                .optional()?
-                .flatten();
-            let grace = match raw {
-                None => 0.0, // 缺省 0
-                Some(s) => match primitives::parse_float(&s) {
-                    Some(g) => g,
-                    None => return Ok(Vec::new()),
-                },
-            };
-            if !grace.is_finite() || grace < 0.0 {
-                return Ok(Vec::new());
-            }
-            let mut stmt = c.prepare(
-                "SELECT k.id FROM api_keys k \
-                 LEFT JOIN discord_registrations r ON r.key_id=k.id \
-                 LEFT JOIN member_rules m ON m.discord_id=k.discord_id \
-                 WHERE k.enabled=1 \
-                   AND (k.expires_at IS NULL OR k.expires_at > ?1) \
-                   AND MAX(COALESCE(k.last_image_at,r.created_at,k.created_at), ?2) < ?3 \
-                   AND COALESCE(m.recycle_not_before,0)<=?1 ORDER BY k.id ASC",
-            )?;
-            stmt.query_map(params![now, grace, cutoff], |r| value::i64_or(r, 0, 0))?
-                .collect()
         })
         .await
     }

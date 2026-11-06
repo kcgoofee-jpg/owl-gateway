@@ -295,10 +295,6 @@ async fn build_meta(state: &AppState) -> Result<Map<String, Value>, InternalErro
         "algo_notice".into(),
         json!(primitives::take_chars(&algo, 300)),
     );
-    m.insert(
-        "key_inactivity_delete_days".into(),
-        json!(env.key_inactivity_delete_days),
-    );
     // 网页登录常开（暂停开关 web_login_paused 已删除）；字段留着是因为已打开的旧页面还在读它
     m.insert("web_login".into(), json!(true));
     m.insert("registration".into(), reg);
@@ -359,7 +355,6 @@ pub async fn build_status(state: &AppState) -> Result<Value, InternalError> {
         "web_login": true,
         "algo_notice": primitives::take_chars(&algo, 300),
         "discord_invite": env.discord_invite_url,
-        "key_inactivity_delete_days": env.key_inactivity_delete_days,
         "limits": public_limits(state),
         "image_jobs": image_jobs,
         "stability": stability,
