@@ -185,7 +185,7 @@ impl GuardCore {
     }
 
     /// Daily cap for one account right now: a live temporary override, else `account_daily_cap`
-    /// (manual). 10-27 起 0 = 停用（不再是不限）。
+    /// (manual). 10-27 起 0 = 停用（不再是不限）：`load_settings` 只按 [min, max] 夹值，不做 0 → 9999 的改写。
     pub fn daily_cap_for(&self, token_id: &str, now: f64) -> i64 {
         match self.token_daily_caps.get(token_id) {
             Some(&(cap, until)) if now < until => cap,
@@ -194,7 +194,7 @@ impl GuardCore {
     }
 
     /// 这个账号今天出满了吗（`used` ≥ 今天的上限）。10-27 起上限 0 = 停用（永不放行），
-    /// 不再是「不限」；存量 0 已由启动迁移刷成 9999。与 [`Self::token_block_reason`] 同一判断。
+    /// 不再是「不限」。与 [`Self::token_block_reason`] 同一判断。
     pub fn at_daily_cap(&self, token_id: &str, used: i64, now: f64) -> bool {
         used >= self.daily_cap_for(token_id, now)
     }

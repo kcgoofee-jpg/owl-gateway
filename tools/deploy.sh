@@ -118,7 +118,7 @@ say "syncing server-side ops scripts"
 runtime_ops=(nightly_backup.sh close-stale-deliveries.sh migrate-schema.sh)
 local_ops=() remote_ops=()
 for f in "${runtime_ops[@]}"; do
-  # migrate-schema.sh 放在 deploy/ops/（和 purge-legacy-logs.sh 一起），其余在 deploy/v3/ops/
+  # migrate-schema.sh 放在 deploy/ops/，其余在 deploy/v3/ops/
   if [[ $f == migrate-schema.sh ]]; then local_ops+=("deploy/ops/$f"); else local_ops+=("deploy/v3/ops/$f"); fi
   remote_ops+=("/opt/owl/ops/$f")
 done

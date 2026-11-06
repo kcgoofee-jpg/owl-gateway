@@ -43,7 +43,11 @@ export type Guard = {
 
 /** 账号保护字段的短标题 / 说明（接口的 label 是整段说明文字）。 */
 export const GUARD_COPY: Record<string, { label: string; hint: string; unit?: string }> = {
-  account_daily_cap: { label: "单号每天上限", hint: "每个上游账号每天最多出几张；0 = 不限", unit: "张" },
+  account_daily_cap: {
+    label: "单号每天上限",
+    hint: "每个上游账号每天最多出几张；0 = 这个账号今天一张都不出（不是不限，要放开填 9999）",
+    unit: "张",
+  },
   post_jitter_min: {
     label: "每张出完后歇（最少）",
     hint: "这个账号每张出完后歇 N～M 秒（随机）再接下一张；至少 1 秒",
@@ -51,7 +55,11 @@ export const GUARD_COPY: Record<string, { label: string; hint: string; unit?: st
   },
   post_jitter_max: { label: "每张出完后歇（最多）", hint: "小于最少时按最少", unit: "秒" },
   queue_per_member: { label: "每人排队", hint: "每个成员最多同时排几张", unit: "张" },
-  queue_per_account: { label: "账号排队", hint: "每个账号全站最多同时排几张", unit: "张" },
+  queue_per_account: {
+    label: "账号排队",
+    hint: "每个上游账号最多同时排几张；全站上限 = 这个数 × 可用账号数，再按排队超时内能开始的张数收紧",
+    unit: "张",
+  },
 };
 
 /** 接口给的字段 → 表单规格（范围取自接口） */

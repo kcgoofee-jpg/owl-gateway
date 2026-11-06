@@ -3,7 +3,6 @@ import { Card } from "../../../ui";
 import { act, useAdmin } from "../Admin";
 import { CardPending, SectionHead } from "./_kit";
 import { type Guard, guardSpecs, RUNTIME_SPECS, type Settings } from "./limits/core";
-import type { Ops } from "./onboarding/core";
 import { NumField, SaveBar, Sect, SelectField, SwitchRow, useForm } from "./system/forms";
 
 function BudgetCard() {
@@ -158,7 +157,6 @@ function GuardCard() {
 }
 
 export default function Limits() {
-  const ops = useAdmin<Ops>("/admin/api/ops");
   return (
     <Sect>
       <SectionHead title="运行保护" />
