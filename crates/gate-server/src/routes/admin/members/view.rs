@@ -127,12 +127,8 @@ pub(super) async fn members_view(state: &AppState, filter_raw: &str) -> Result<V
     let today = st.day();
     let week_start = st.clock.last_days(now, 7).remove(0);
     let week: HashMap<i64, Value> = st.db.member_usage(&week_start).await?.into_iter().collect();
-    let totals: HashMap<i64, i64> = st
-        .db
-        .generated_image_totals(None)
-        .await?
-        .into_iter()
-        .collect();
+    let image_stats: HashMap<i64, gate_db::repo::usage::ImageMilestones> =
+        st.db.member_image_stats().await?.into_iter().collect();
     let reg: HashMap<i64, RegistrationRow> = st
         .db
         .registration_rows()
@@ -238,7 +234,10 @@ pub(super) async fn members_view(state: &AppState, filter_raw: &str) -> Result<V
             json!({"images": wi("images"), "v5": wi("v5"),
                    "anlas": values::float(primitives::round(wf("anlas"), 2)), "requests": wi("requests")}),
         );
-        put("total_images", json!(totals.get(&id).copied().unwrap_or(0)));
+        put(
+            "total_images",
+            json!(image_stats.get(&id).map_or(0, |m| m.total_images)),
+        );
         // 筛选用：领取时间（Discord 领取优先，否则建 Key 时间）、首次 / 最近成功出图、24h 被拒次数
         put(
             "registered_at",
@@ -247,8 +246,14 @@ pub(super) async fn members_view(state: &AppState, filter_raw: &str) -> Result<V
                 None => jget(&row, "created_at"),
             },
         );
-        put("first_image_at", json!(ms.and_then(|m| m.first_image_at)));
-        put("last_image_at", json!(ms.and_then(|m| m.last_image_at)));
+        put(
+            "first_image_at",
+            json!(image_stats.get(&id).and_then(|m| m.first_image_at)),
+        );
+        put(
+            "last_image_at",
+            json!(image_stats.get(&id).and_then(|m| m.last_image_at)),
+        );
         put("rejected_24h", json!(ms.map_or(0, |m| m.rejected_24h)));
         put(
             "rejected_why",

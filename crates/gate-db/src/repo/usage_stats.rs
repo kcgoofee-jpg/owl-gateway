@@ -12,24 +12,12 @@ impl Db {
         since: f64,
         reason_label: &(dyn Fn(&str, &str) -> String + Sync),
     ) -> Result<OrderedPairs<i64, Milestone>> {
-        // 先在读连接里取回原始分组行，再在写侧合并（reason_label 不必跨线程）
+        // 先在读连接里取回原始分组行，再在写侧合并（reason_label 不必跨线程）。
+        // 成功出图的首末时间已移到 [`Self::member_image_stats`]：members_view 里它和累计张数
+        // 合并成一次扫描，这里不再重复扫同一批行。
         type RawWhy = (i64, String, String, i64);
-        type RawImg = (i64, Option<f64>, Option<f64>);
-        let (img, rej, why): (Vec<RawImg>, Vec<(i64, i64)>, Vec<RawWhy>) = self
+        let (rej, why): (Vec<(i64, i64)>, Vec<RawWhy>) = self
             .read(move |c| {
-                let img = c
-                    .prepare(
-                        "SELECT key_id, MIN(ts), MAX(ts) FROM usage_log \
-                         WHERE status='ok' AND kind IN ('image','image_stream') AND key_id IS NOT NULL GROUP BY key_id",
-                    )?
-                    .query_map([], |r| {
-                        Ok((
-                            value::i64_or(r, 0, 0)?,
-                            value::f64_opt(r, 1)?,
-                            value::f64_opt(r, 2)?,
-                        ))
-                    })?
-                    .collect::<rusqlite::Result<Vec<_>>>()?;
                 let rej = c
                     .prepare(
                         "SELECT key_id, COUNT(*) FROM usage_log WHERE status='rejected' AND ts>=? AND key_id IS NOT NULL \
@@ -52,7 +40,7 @@ impl Db {
                         ))
                     })?
                     .collect::<rusqlite::Result<Vec<_>>>()?;
-                Ok((img, rej, why))
+                Ok((rej, why))
             })
             .await?;
 
@@ -74,13 +62,6 @@ impl Db {
                 }
             };
             &mut out[idx].1
-        }
-        for (key_id, first, last) in img {
-            // out[key] = {...}：覆盖写（GROUP BY 之后键唯一）
-            let m = slot(&mut out, key_id);
-            m.first_image_at = first;
-            m.last_image_at = last;
-            m.rejected_24h = 0;
         }
         for (key_id, n) in rej {
             slot(&mut out, key_id).rejected_24h = n;
@@ -108,6 +89,29 @@ impl Db {
             slot(&mut out, key_id).rejected_why = Some(items);
         }
         Ok(out)
+    }
+
+    /// 每把 Key 的成功出图首末时间与累计张数，一次扫描同时取回。
+    /// `members_view` 原来为这两组数各扫一遍同一批 `usage_log` 行（见 docs/backend-audit-2026-11-01.md）。
+    pub async fn member_image_stats(&self) -> Result<OrderedPairs<i64, ImageMilestones>> {
+        self.read(move |c| {
+            c.prepare(
+                "SELECT key_id, MIN(ts), MAX(ts), COALESCE(SUM(images), 0) FROM usage_log \
+                 WHERE status='ok' AND kind IN ('image','image_stream') AND key_id IS NOT NULL GROUP BY key_id",
+            )?
+            .query_map([], |r| {
+                Ok((
+                    value::i64_or(r, 0, 0)?,
+                    ImageMilestones {
+                        first_image_at: value::f64_opt(r, 1)?,
+                        last_image_at: value::f64_opt(r, 2)?,
+                        total_images: value::i64_or(r, 3, 0)?,
+                    },
+                ))
+            })?
+            .collect::<rusqlite::Result<OrderedPairs<i64, ImageMilestones>>>()
+        })
+        .await
     }
 
     /// 统计窗内的出图汇总（`/self-register/bot/stats` 用：今日全站张数、平均/最长排队）。
@@ -188,7 +192,7 @@ impl Db {
                 "SELECT kind, status, COUNT(*) AS n, COALESCE(SUM(images),0) AS images, \
                         COALESCE(SUM(tokens),0) AS tokens, COALESCE(SUM(anlas),0) AS anlas, \
                         COUNT(DISTINCT key_id) AS users \
-                 FROM usage_log WHERE ts>=? GROUP BY kind, status",
+                 FROM usage_log WHERE ts>=? GROUP BY kind, status ORDER BY kind, status",
             )?;
             stmt.query_map([since], value::row_json)?.collect()
         })

@@ -74,6 +74,8 @@ CREATE TABLE IF NOT EXISTS usage_log (
 );
 CREATE INDEX IF NOT EXISTS idx_log_ts ON usage_log (ts DESC);
 CREATE INDEX IF NOT EXISTS idx_log_key ON usage_log (key_id, ts DESC);
+-- 后台成员列表的合并聚合（首末出图时间 + 累计张数，见 member_image_stats）：覆盖索引避免整表回读
+CREATE INDEX IF NOT EXISTS idx_log_image_stats ON usage_log (status, kind, key_id, ts, images);
 CREATE TABLE IF NOT EXISTS upstream_token_counters (
     token_id TEXT NOT NULL,
     day TEXT NOT NULL,            -- YYYY-MM-DD (按配置时区)

@@ -39,7 +39,7 @@ const PAGES: Array<{ name: string; path: string; ready: (p: Page) => ReturnType<
     path: "/admin/logs/usage",
     ready: (p) => p.getByText("暂无记录").or(p.locator(".lg-listcard")),
   },
-  { name: "logs-actions", path: "/admin/logs/actions", ready: (p) => p.getByLabel("操作者") },
+  { name: "logs-actions", path: "/admin/logs/actions", ready: (p) => p.getByLabel("发起者") },
 ];
 
 async function open(

@@ -49,7 +49,7 @@ import {
 import type { DetailActions } from "./members/MemberDetail";
 import { MemberList } from "./members/MemberList";
 import { Empty, NARROW, useMedia } from "./members/shared";
-import type { KeysResp, MemberRow, MembersResp } from "./members/types";
+import type { MemberRow, MembersResp } from "./members/types";
 import "./members.css";
 
 type Dlg =
@@ -67,7 +67,8 @@ export default function Members() {
   const loc = useLocation();
   const { query } = loc;
   const mem = useAdmin<MembersResp>("/admin/api/members");
-  const keys = useAdmin<KeysResp>("/admin/api/keys");
+  // Key 详情不再首屏整包拉取（/admin/api/keys 457KB / 248ms，每拍刷新都来一遍）：
+  // 列表只用 members 自带的 key_count / 规则 / 用量；展开详情时按需 GET /admin/api/keys/{id}。
   const bans = useAdmin<{ total: number }>("/admin/api/bans");
   const narrow = useMedia(NARROW);
 
@@ -84,11 +85,10 @@ export default function Members() {
 
   const now = Date.now() / 1000;
   const idleDays = mem.data?.inactivity_days ?? 3;
-  const rows: MemberRow[] = useMemo(() => {
-    const km = new Map((keys.data?.keys ?? []).map((k) => [k.id, k]));
-    // 以成员为主：停用的 Key 不再列出（谁用过、什么时候停用的，日志里都有）
-    return (mem.data?.members ?? []).filter((m) => m.enabled).map((m) => ({ ...m, k: km.get(m.id) }));
-  }, [mem.data, keys.data]);
+  const rows: MemberRow[] = useMemo(
+    () => (mem.data?.members ?? []).filter((m) => m.enabled),
+    [mem.data],
+  );
   const byId = (id: number) => rows.find((r) => r.id === id);
 
   const filters = useMemo(() => buildFilters(now, idleDays), [now, idleDays]);

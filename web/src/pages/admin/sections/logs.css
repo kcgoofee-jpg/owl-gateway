@@ -269,3 +269,26 @@
 .table td > .copy {
   min-width: 190px;
 }
+
+/* 操作日志长详情折叠：摘要一行可点，展开后代码块限高滚动（原始值完整保留） */
+.lg-fold {
+  margin: 0;
+}
+.lg-fold > summary {
+  cursor: pointer;
+  color: inherit;
+  text-decoration: underline;
+  text-underline-offset: 2px;
+  user-select: none;
+}
+.lg-fold > summary:hover {
+  text-decoration: underline;
+}
+.lg-fold > code {
+  display: block;
+  max-height: 12em;
+  overflow: auto;
+  margin-top: var(--sp-2);
+  white-space: pre-wrap;
+  word-break: break-all;
+}

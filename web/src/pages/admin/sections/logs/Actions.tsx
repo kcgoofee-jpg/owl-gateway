@@ -12,26 +12,46 @@ import type { ActionRow, ActionsResp } from "./types";
 const Result = (props: { a: ActionRow }) =>
   props.a.ok ? <Badge tone="ok">成功</Badge> : <Badge tone="danger">失败</Badge>;
 
-/** 「手动」/「自动」标签 + 操作者；成员自己的操作只显示操作者。 */
+/**
+ * 「发起者」的显示文本：去掉成员自助前缀（类别已由标签表达），旧记录里「后台 1.2.3.4」
+ * 这类来源 IP 不再当身份展示（原始值保留在记录里，详情可查）；其余原样显示。
+ */
+function subjectText(actor: string): string {
+  const s = actor.replace(/^(Discord|网页):/, "").trim();
+  return s.replace(/^后台\s+\S*([0-9a-fA-F]{0,4}:){2,}\S*|\s*\d{1,3}(\.\d{1,3}){3}$/g, "").trim() || s;
+}
+
+/** 「涉及项」：空值显示占位；成员自助操作里对象重复了发起者本人的，不再重复显示。 */
+function targetText(a: ActionRow): string {
+  const t = (a.target ?? "").trim();
+  if (!t || t === a.actor.trim() || (a.kind === "member" && t === subjectText(a.actor))) return "—";
+  return t;
+}
+
+/** 「手动」/「自动」/「自助」标签 + 操作者；类别认不出的旧记录只显示原文。 */
 function Actor(props: { a: ActionRow }) {
   const k = props.a.kind;
   return (
     <span class="lg-actor">
-      {(k === "manual" || k === "auto") && <KindTag kind={k} />}
-      <span>{props.a.actor}</span>
+      {(k === "manual" || k === "auto" || k === "member") && <KindTag kind={k} />}
+      <span>{subjectText(props.a.actor) || props.a.actor}</span>
     </span>
   );
 }
 
-/** 结构化操作参数以代码显示，说明与错误仍按普通文字显示。 */
+const DETAIL_INLINE = 140;
+
+/** 结构化操作参数以代码显示；长内容折叠，列表里不再铺整段 JSON（原始值一点不少）。 */
 function ActionDetail({ value }: { value: string }) {
-  try {
-    const parsed: unknown = JSON.parse(value);
-    if (parsed !== null && typeof parsed === "object") return <code>{value}</code>;
-  } catch {
-    /* 普通说明不需要解析。 */
-  }
-  return <>{value}</>;
+  const long = value.length > DETAIL_INLINE;
+  const code = <code>{value}</code>;
+  if (!long) return <>{value}</>;
+  return (
+    <details class="lg-fold">
+      <summary>展开详情（{value.length} 字符）</summary>
+      {code}
+    </details>
+  );
 }
 
 export function Actions() {
@@ -59,7 +79,7 @@ export function Actions() {
     <div class="stack">
       <div class="xa-toolbar">
         <label class="field-inline">
-          <span class="field-inline__k">操作者</span>
+          <span class="field-inline__k">发起者</span>
           <select
             class="select"
             value={actor}
@@ -116,7 +136,7 @@ export function Actions() {
                   <div class="small muted">
                     <Actor a={a} />
                   </div>
-                  {a.target && <div class="small">{a.target}</div>}
+                  <div class="small" title={a.target}>{targetText(a)}</div>
                   {a.detail && (
                     <div class="small muted">
                       <ActionDetail value={a.detail} />
@@ -132,9 +152,9 @@ export function Actions() {
                 <thead>
                   <tr>
                     <th scope="col">时间</th>
-                    <th scope="col">操作者</th>
+                    <th scope="col">发起者</th>
                     <th scope="col">操作</th>
-                    <th scope="col">对象</th>
+                    <th scope="col">涉及项</th>
                     <th scope="col">详情</th>
                     <th scope="col">结果</th>
                   </tr>
@@ -149,7 +169,7 @@ export function Actions() {
                         <Actor a={a} />
                       </td>
                       <td class="nowrap">{actionLabel(a.action)}</td>
-                      <td>{a.target}</td>
+                      <td title={a.target}>{targetText(a)}</td>
                       <td class="muted lg-note">
                         <ActionDetail value={a.detail} />
                       </td>

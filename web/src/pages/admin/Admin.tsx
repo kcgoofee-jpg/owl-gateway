@@ -18,6 +18,7 @@ import {
 } from "lucide-preact";
 import type { ComponentChildren, ComponentType } from "preact";
 import { useEffect, useState } from "preact/hooks";
+import { Suspense } from "preact/compat";
 import { LocationProvider, lazy, Route, Router, useLocation } from "preact-iso";
 import { ApiError, getJSON, sendJSON } from "../../lib/api";
 import { Button, cx, Field, Skeleton, toast } from "../../ui";
@@ -335,6 +336,18 @@ function NotFound() {
 /* ---------------- 外壳 ---------------- */
 const drawerOpen = signal(false);
 
+/** 分区 chunk 加载中的骨架（有侧栏在，宽度对齐内容区即可）。 */
+function SectionLoading() {
+  return (
+    <div class="xa-page" aria-busy="true">
+      <Skeleton w="160px" h="28px" />
+      <Skeleton h="56px" />
+      <Skeleton h="56px" />
+      <Skeleton h="56px" />
+    </div>
+  );
+}
+
 function Nav() {
   const { path } = useLocation();
   const active = (s: Section) =>
@@ -480,8 +493,11 @@ export function Admin() {
   return (
     <LocationProvider>
       <Shell>
-        <Router>
-          {SECTIONS.flatMap((s) => [
+        {/* 懒加载分区切换时显示目标骨架，而不是让旧分区继续冒充新页面
+            （旧版在 chunk 挂起期间保留旧内容：侧栏已选「日志」，正文还是「成员」）。 */}
+        <Suspense fallback={<SectionLoading />}>
+          <Router>
+            {SECTIONS.flatMap((s) => [
             // preact-iso 的 `/*` 至少要多一段路径：分区根路径单独注册一条
             <Route key={s.id} path={s.path} component={s.view} />,
             <Route key={`${s.id}-sub`} path={`${s.path}/*`} component={s.view} />,
@@ -491,7 +507,8 @@ export function Admin() {
           <Route key="root-slash" path="/admin/" component={MembersView} />
           {/* 不认识的 /admin/*：404 视图，不再静默渲染成员页 */}
           <Route default component={NotFound} />
-        </Router>
+          </Router>
+        </Suspense>
       </Shell>
     </LocationProvider>
   );

@@ -25,11 +25,12 @@ export function SectionHead(props: { title: string; desc?: ComponentChildren; ac
 
 /** 「手动」/「自动」标签（站长 10-20：站长和 Claude 的改动算手动，定时任务和自动反应算自动）。 */
 const KIND_TAGS = {
-  manual: { label: "手动", tone: "accent", title: "站长或 Claude 做的改动" },
-  auto: { label: "自动", tone: "info", title: "定时任务或自动反应做的改动" },
+  manual: { label: "后台", tone: "accent", title: "站长或 Claude 拍板做的改动（后台管理）" },
+  auto: { label: "系统", tone: "info", title: "定时任务或自动反应做的改动（系统任务）" },
+  member: { label: "自助", tone: "ok", title: "成员自己在 Discord / 网页做的操作" },
 } as const;
 
-export function KindTag(props: { kind: "manual" | "auto" }) {
+export function KindTag(props: { kind: "manual" | "auto" | "member" }) {
   const t = KIND_TAGS[props.kind];
   return (
     <Badge tone={t.tone} title={t.title}>

@@ -2,11 +2,12 @@
 import { ExternalLink, Plus } from "lucide-preact";
 import { useState } from "preact/hooks";
 import { dayOf, fullTime, rel, usedOf } from "../../../../lib/format";
+import { useAdmin } from "../../Admin";
 import { Badge, Button, copyText, Menu, toast } from "../../../../ui";
 import { exceptionCount, FEATURE_FIELDS, POLICY_SPECS } from "../member-policy";
 import { call } from "./actions";
 import { type Issue, type IssueAction, memberIssues, memberLabel, memberVerdict, userTags } from "./logic";
-import type { MemberRow } from "./types";
+import type { KeyRow, MemberRow } from "./types";
 
 export type DetailActions = {
   edit: (m: MemberRow) => void;
@@ -63,7 +64,10 @@ function IssueList(props: { m: MemberRow; issues: Issue[]; act: DetailActions })
 
 export function MemberDetail(props: { m: MemberRow; now: number; act: DetailActions }) {
   const { m, now, act } = props;
-  const k = m.k;
+  // Key 详情（凭据 / 累计用量 / 生效策略）按需取：列表首屏不再整包拉全部 Key。
+  // useAdmin 跟着全局刷新节拍自动重取；成员对象里的 key_count==0 时不必请求。
+  const detail = useAdmin<{ key: KeyRow }>(m.key_count > 0 ? `/admin/api/keys/${m.id}` : null);
+  const k = m.k ?? detail.data?.key;
   const verdict = memberVerdict(m, now);
   const [reveal, setReveal] = useState(false);
   const dc = m.discord;

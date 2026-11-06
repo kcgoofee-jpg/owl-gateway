@@ -163,6 +163,14 @@ impl LogSummary {
     }
 }
 
+/// `member_image_stats` 里每把 Key 的一项：成功出图首末时间与累计张数（一次扫描取回）。
+#[derive(Debug, Clone, PartialEq, Serialize)]
+pub struct ImageMilestones {
+    pub first_image_at: Option<f64>,
+    pub last_image_at: Option<f64>,
+    pub total_images: i64,
+}
+
 /// `member_milestones` 里每把 Key 的一项。`rejected_why` 只有被拒过的 Key 才有（序列化时省略）。
 #[derive(Debug, Clone, PartialEq, Serialize)]
 pub struct Milestone {

@@ -13,7 +13,7 @@ use crate::session::AdminSession;
 use crate::state::AppState;
 use axum::Router;
 use axum::extract::{Request, State};
-use axum::routing::{delete, get, patch, post, put};
+use axum::routing::{delete, get, post, put};
 use gate_core::{primitives, validation, values};
 use gate_db::repo::admin_members::RegistrationRow;
 use gate_db::repo::counters::Counter;
@@ -26,7 +26,7 @@ pub fn router() -> Router<AppState> {
         .route("/admin/api/keys", get(list_keys))
         .route(
             "/admin/api/keys/{key_id}",
-            patch(patch_key).delete(delete_key),
+            get(get_key).patch(patch_key).delete(delete_key),
         )
         .route("/admin/api/keys/{key_id}/regenerate", post(regenerate_key))
         .route(
@@ -154,6 +154,21 @@ pub(super) async fn full_key_json(
 
 async fn list_keys(State(state): State<AppState>, _s: AdminSession) -> R {
     Ok(ok_json(&member_ops::list_keys_with_counters(&state).await?))
+}
+
+/// 单把 Key 的完整详情（含凭据与累计用量）：成员详情展开时按需取，
+/// 列表首屏不再整包拉全部 Key（700KB+ / 248ms，见 docs/backend-audit-2026-11-01.md）。
+async fn get_key(
+    State(state): State<AppState>,
+    _s: AdminSession,
+    AdminPath(key_id): AdminPath<i64>,
+) -> R {
+    let Some(row) = load_key(&state, key_id).await? else {
+        return Err(http(404, NO_KEY));
+    };
+    Ok(ok_json(
+        &json!({ "key": full_key_json(&state, &row, key_id).await? }),
+    ))
 }
 
 async fn regenerate_key(
