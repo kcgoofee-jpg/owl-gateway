@@ -614,6 +614,8 @@
             backupRow.box.disabled = !binding;
             backupRow.box.checked = !!(b && b.enabled && binding);
             if (!binding) backupRow.box.checked = false;
+            // 说明行删掉了，禁用原因放在悬停提示里，不占版面。
+            backupRow.label.title = binding ? "" : "连接个人频道后才能开启自动备份";
           });
       });
     }
