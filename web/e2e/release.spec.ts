@@ -289,15 +289,10 @@ test("Discord sharing confirmation keeps or removes file and hidden metadata", a
     await dialog.getByRole("button", { name: "确认转发", exact: true }).click();
     await expect(upload).not.toHaveAttribute("data-owl-busy", "1");
     await expect
-      .poll(() =>
-        page.evaluate(() => (window as unknown as { __saved: unknown[] }).__saved.length),
-      )
+      .poll(() => page.evaluate(() => (window as unknown as { __saved: unknown[] }).__saved.length))
       .toBe(savedBefore + 1);
     expect(
-      await page.evaluate(
-        (i) => (window as unknown as { __saved: unknown[] }).__saved[i],
-        savedBefore,
-      ),
+      await page.evaluate((i) => (window as unknown as { __saved: unknown[] }).__saved[i], savedBefore),
     ).toEqual({
       destination: "owl",
       include_metadata: true,
@@ -313,9 +308,7 @@ test("Discord sharing confirmation keeps or removes file and hidden metadata", a
     };
   });
   await page.locator('a[href="/explore/register"]').click();
-  await page
-    .getByRole("checkbox", { name: "包含生成元数据（提示词、种子等）" })
-    .uncheck();
+  await page.getByRole("checkbox", { name: "包含生成元数据（提示词、种子等）" }).uncheck();
   await page.getByRole("button", { name: "确认转发", exact: true }).click();
   await expect(page.locator('a[href="/explore/register"]')).not.toHaveAttribute("data-owl-busy", "1");
   expect(await page.evaluate(() => (window as unknown as { __uploads: FormData[] }).__uploads.length)).toBe(
@@ -504,7 +497,9 @@ test("share settings entry shows remembered choice and can clear it", async ({ p
       const u = String(url);
       const method = (init?.method ?? "GET").toUpperCase();
       if (u === "/public/me/share-preference") {
-        const state = await (window as unknown as { __owlTestRemembered: () => unknown }).__owlTestRemembered();
+        const state = await (
+          window as unknown as { __owlTestRemembered: () => unknown }
+        ).__owlTestRemembered();
         if (method === "GET")
           return new Response(
             JSON.stringify(state ? { remembered: state, last: state } : { remembered: null, last: null }),
@@ -526,13 +521,9 @@ test("share settings entry shows remembered choice and can clear it", async ({ p
   await expect(settings).toBeVisible();
   await settings.click();
   const dialog = page.getByRole("dialog", { name: "分享设置" });
-  await expect(
-    dialog.getByText("当前记住：OWL 公共频道 · 不包含元数据，分享时不再提示。"),
-  ).toBeVisible();
+  await expect(dialog.getByText("当前记住：OWL 公共频道 · 不包含元数据，分享时不再提示。")).toBeVisible();
   await expect(dialog.getByRole("combobox", { name: "分享目的地" })).toHaveValue("owl");
-  await expect(
-    dialog.getByRole("checkbox", { name: "包含生成元数据（提示词、种子等）" }),
-  ).not.toBeChecked();
+  await expect(dialog.getByRole("checkbox", { name: "包含生成元数据（提示词、种子等）" })).not.toBeChecked();
   await dialog.getByRole("button", { name: "清除记忆", exact: true }).click();
   await expect(
     dialog.getByText("尚未记住选择：每次分享都会询问。在分享弹窗勾选「记住本次选择」即可跳过。"),
