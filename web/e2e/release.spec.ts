@@ -190,12 +190,10 @@ test("Discord sharing confirmation keeps or removes file and hidden metadata", a
     }, format);
     const upload = page.locator('a[href="/explore/register"]');
     await upload.click();
-    const dialog = page.getByRole("dialog", { name: "确认分享" });
-    await expect(
-      dialog.getByText("该分享转发至 owl 服务器进行保存备份，请确认是否有潜在二传违规风险！"),
-    ).toBeVisible();
-    const metadata = dialog.getByRole("checkbox", { name: "包含生成元数据（提示词、种子等）" });
-    const remember = dialog.getByRole("checkbox", { name: "记住本次选择，下次不再提示" });
+    const dialog = page.getByRole("dialog");
+    await expect(dialog.getByText("会转发到 owl 服务器留存备份，注意二传风险。")).toBeVisible();
+    const metadata = dialog.getByRole("checkbox", { name: "附带生成参数（提示词、种子）" });
+    const remember = dialog.getByRole("checkbox", { name: "记住这次选择" });
     // 站点默认：包含生成元数据；记住选择默认不勾。
     await expect(metadata).toBeChecked();
     await expect(remember).not.toBeChecked();
@@ -211,7 +209,7 @@ test("Discord sharing confirmation keeps or removes file and hidden metadata", a
     await expect(dialog).toHaveCount(0);
     // 默认（包含元数据）：原图字节原样发出，并把 prompt 等元数据随表单提交。
     await upload.click();
-    await dialog.getByRole("button", { name: "确认转发", exact: true }).click();
+    await dialog.getByRole("button", { name: "分享", exact: true }).click();
     await expect(upload).not.toHaveAttribute("data-owl-busy", "1");
     expect(
       await page.evaluate(async () => {
@@ -243,7 +241,7 @@ test("Discord sharing confirmation keeps or removes file and hidden metadata", a
     // 取消勾选：清理后的 PNG（字节必然重编码），不携带任何生成参数。
     await upload.click();
     await metadata.uncheck();
-    await dialog.getByRole("button", { name: "确认转发", exact: true }).click();
+    await dialog.getByRole("button", { name: "分享", exact: true }).click();
     await expect(upload).not.toHaveAttribute("data-owl-busy", "1");
     const clean = await page.evaluate(async () => {
       const w = window as typeof window & { __uploads: FormData[] };
@@ -286,7 +284,7 @@ test("Discord sharing confirmation keeps or removes file and hidden metadata", a
     );
     await upload.click();
     await remember.check();
-    await dialog.getByRole("button", { name: "确认转发", exact: true }).click();
+    await dialog.getByRole("button", { name: "分享", exact: true }).click();
     await expect(upload).not.toHaveAttribute("data-owl-busy", "1");
     await expect
       .poll(() => page.evaluate(() => (window as unknown as { __saved: unknown[] }).__saved.length))
@@ -308,8 +306,8 @@ test("Discord sharing confirmation keeps or removes file and hidden metadata", a
     };
   });
   await page.locator('a[href="/explore/register"]').click();
-  await page.getByRole("checkbox", { name: "包含生成元数据（提示词、种子等）" }).uncheck();
-  await page.getByRole("button", { name: "确认转发", exact: true }).click();
+  await page.getByRole("checkbox", { name: "附带生成参数（提示词、种子）" }).uncheck();
+  await page.getByRole("button", { name: "分享", exact: true }).click();
   await expect(page.locator('a[href="/explore/register"]')).not.toHaveAttribute("data-owl-busy", "1");
   expect(await page.evaluate(() => (window as unknown as { __uploads: FormData[] }).__uploads.length)).toBe(
     0,
@@ -405,23 +403,19 @@ test("personal channel sharing selects the bound destination and never falls bac
   });
   const share = page.locator('a[href="/explore/register"]');
   await share.click();
-  const dialog = page.getByRole("dialog", { name: "确认分享" });
+  const dialog = page.getByRole("dialog");
   const destination = dialog.getByRole("combobox", { name: "转发到" });
   await expect(destination).toHaveValue("personal");
-  await expect(
-    dialog.getByText("该分享将转发至你的个人 Discord 频道，请确认是否有潜在二传违规风险！"),
-  ).toBeVisible();
+  await expect(dialog.getByText("会发到你的个人 Discord 频道，注意二传风险。")).toBeVisible();
   // 切换目的地只改警示文案：元数据勾选是独立的选择，不再被重置。
-  const metadata = dialog.getByRole("checkbox", { name: "包含生成元数据（提示词、种子等）" });
+  const metadata = dialog.getByRole("checkbox", { name: "附带生成参数（提示词、种子）" });
   await expect(metadata).toBeChecked();
   await destination.selectOption("owl");
-  await expect(
-    dialog.getByText("该分享转发至 owl 服务器进行保存备份，请确认是否有潜在二传违规风险！"),
-  ).toBeVisible();
+  await expect(dialog.getByText("会转发到 owl 服务器留存备份，注意二传风险。")).toBeVisible();
   await expect(metadata).toBeChecked();
   await destination.selectOption("personal");
-  await dialog.getByRole("checkbox", { name: "记住本次选择，下次不再提示" }).check();
-  await dialog.getByRole("button", { name: "确认转发", exact: true }).click();
+  await dialog.getByRole("checkbox", { name: "记住这次选择" }).check();
+  await dialog.getByRole("button", { name: "分享", exact: true }).click();
   await expect(share).not.toHaveAttribute("data-owl-busy", "1");
   expect(await page.evaluate(() => (window as unknown as { __sent: string[] }).__sent)).toEqual(["personal"]);
   await expect
@@ -432,7 +426,7 @@ test("personal channel sharing selects the bound destination and never falls bac
     include_metadata: true,
     binding_id: "900000000000000081",
   });
-  // 记住的选择当前可用：下次分享不再弹窗，直接按记住的目的地与元数据发送。
+  // 记住的选择只用于预填：再点分享仍会开弹窗，这样「分享设置」这个二级入口才可达。
   await page.evaluate(() => {
     const w = window as typeof window & { __remembered: unknown };
     w.__remembered = {
@@ -442,7 +436,10 @@ test("personal channel sharing selects the bound destination and never falls bac
     };
   });
   await share.click();
-  await expect(dialog).toHaveCount(0);
+  await expect(dialog.getByRole("combobox", { name: "转发到" })).toHaveValue("personal");
+  await expect(dialog.getByRole("checkbox", { name: "附带生成参数（提示词、种子）" })).not.toBeChecked();
+  await expect(dialog.getByRole("checkbox", { name: "记住这次选择" })).toBeChecked();
+  await dialog.getByRole("button", { name: "分享", exact: true }).click();
   await expect(share).not.toHaveAttribute("data-owl-busy", "1");
   expect(await page.evaluate(() => (window as unknown as { __sent: string[] }).__sent)).toEqual([
     "personal",
@@ -452,6 +449,7 @@ test("personal channel sharing selects the bound destination and never falls bac
     (window as unknown as { __failSend: boolean }).__failSend = true;
   });
   await share.click();
+  await dialog.getByRole("button", { name: "分享", exact: true }).click();
   await expect(share).not.toHaveAttribute("data-owl-busy", "1");
   expect(await page.evaluate(() => (window as unknown as { __sent: string[] }).__sent)).toEqual([
     "personal",
@@ -463,12 +461,12 @@ test("personal channel sharing selects the bound destination and never falls bac
     (window as unknown as { __remembered: unknown }).__remembered = null;
   });
   await share.click();
-  await expect(dialog.getByRole("button", { name: "确认转发", exact: true })).toBeDisabled();
-  await expect(dialog.getByRole("button", { name: "重试读取", exact: true })).toBeVisible();
+  await expect(dialog.getByRole("button", { name: "分享", exact: true })).toBeDisabled();
+  await expect(dialog.getByRole("button", { name: "重试", exact: true })).toBeVisible();
   await dialog.getByRole("button", { name: "取消", exact: true }).click();
 });
 
-test("share settings entry shows remembered choice and can clear it", async ({ page }) => {
+test("share settings opens as a second view inside the share dialog", async ({ page }) => {
   const bridge = readFileSync(
     resolve(import.meta.dirname, "../../deploy/nai-mirror-overrides/bridge.js"),
     "utf8",
@@ -517,18 +515,42 @@ test("share settings entry shows remembered choice and can clear it", async ({ p
     };
   });
   await page.evaluate(bridge);
-  const settings = page.getByRole("button", { name: "分享设置" });
-  await expect(settings).toBeVisible();
-  await settings.click();
-  const dialog = page.getByRole("dialog", { name: "分享设置" });
-  await expect(dialog.getByText("当前记住：OWL 公共频道 · 不包含元数据，分享时不再提示。")).toBeVisible();
-  await expect(dialog.getByRole("combobox", { name: "分享目的地" })).toHaveValue("owl");
-  await expect(dialog.getByRole("checkbox", { name: "包含生成元数据（提示词、种子等）" })).not.toBeChecked();
-  await dialog.getByRole("button", { name: "清除记忆", exact: true }).click();
-  await expect(
-    dialog.getByText("尚未记住选择：每次分享都会询问。在分享弹窗勾选「记住本次选择」即可跳过。"),
-  ).toBeVisible();
+  // 分享设置不再往工具栏塞独立按钮：没有弹窗时页面上找不到这个入口。
+  await expect(page.locator(".owl-settings-entry")).toHaveCount(0);
+  await expect(page.getByRole("button", { name: "分享设置" })).toHaveCount(0);
+  await page.evaluate(async () => {
+    const c = document.createElement("canvas");
+    c.width = c.height = 32;
+    const ctx = c.getContext("2d");
+    if (!ctx) throw new Error("no canvas");
+    ctx.fillRect(0, 0, 32, 32);
+    const blob = await new Promise<Blob>((resolve) =>
+      c.toBlob((b) => {
+        if (b) resolve(b);
+      }, "image/png"),
+    );
+    const image = document.querySelector("img");
+    if (!image) throw new Error("no image");
+    image.src = URL.createObjectURL(blob);
+    await image.decode();
+  });
+  await page.locator('a[href="/explore/register"]').click();
+  const confirm = page.getByRole("dialog", { name: "分享到 Discord" });
+  await expect(confirm).toBeVisible();
+  await confirm.getByRole("button", { name: "分享设置" }).click();
+  const settings = page.getByRole("dialog", { name: "分享设置" });
+  await expect(settings.getByText("已记住：OWL 公共频道 · 不带生成参数。")).toBeVisible();
+  await expect(settings.getByRole("combobox", { name: "分享到" })).toHaveValue("owl");
+  await expect(settings.getByRole("checkbox", { name: "附带生成参数（提示词、种子）" })).not.toBeChecked();
+  await settings.getByRole("button", { name: "忘记", exact: true }).click();
+  await expect(settings.getByText("未记住：每次分享都会确认。")).toBeVisible();
   expect(cleared).toBe(1);
-  await dialog.getByRole("button", { name: "关闭", exact: true }).click();
-  await expect(dialog).toHaveCount(0);
+  // 二级是同一个弹窗里的视图切换：返回后一级还在，不需要重新点分享图标。
+  await settings.getByRole("button", { name: "返回", exact: true }).click();
+  await expect(page.getByRole("dialog", { name: "分享到 Discord" })).toBeVisible();
+  await page
+    .getByRole("dialog", { name: "分享到 Discord" })
+    .getByRole("button", { name: "取消", exact: true })
+    .click();
+  await expect(page.getByRole("dialog")).toHaveCount(0);
 });
