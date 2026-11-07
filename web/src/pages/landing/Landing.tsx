@@ -12,6 +12,7 @@ import { Grain } from "./Grain";
 import { GuestGuides, JoinServerCard, UsageNoticeCard } from "./Guest";
 import { displayName } from "./helpers";
 import { Coupons } from "./Member";
+// 页面底部的游戏入口，三种身份都看得到
 import { MyRequestsCard } from "./Requests";
 import { QuotaRings } from "./Rings";
 import { Splash, type Landing as SplashLanding, splashActive } from "./Splash";
@@ -20,6 +21,7 @@ import { createStore, type Store } from "./store";
 import { Topbar } from "./Topbar";
 import type { MeMember } from "./types";
 import "./landing.css";
+import { ArcadeFooter } from "./ArcadeFooter";
 
 /** 「Key 在头像里」的一次性提示（每个浏览器一次）。 */
 const KEY_HINT_KEY = "owl-key-hint";
@@ -260,6 +262,7 @@ function Page({ store }: { store: Store }) {
           <GuestHome />
         )}
       </main>
+      <ArcadeFooter />
     </>
   );
 }

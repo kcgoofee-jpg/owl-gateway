@@ -1,0 +1,80 @@
+/* 首页底部游戏入口。颜色/间距/圆角全部取 ui/tokens.css 的变量，跟随主题切换。 */
+.lp-footer {
+  padding: 0 0 var(--sp-10);
+}
+.lp-footer__card {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-3);
+  padding: var(--sp-3) var(--sp-4);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  background: color-mix(in oklab, var(--surface) 82%, transparent);
+  color: var(--text);
+  text-decoration: none;
+  transition:
+    border-color 0.18s,
+    background 0.18s,
+    transform 0.18s;
+}
+.lp-footer__card:hover {
+  border-color: var(--border-strong);
+  background: var(--surface-2);
+  transform: translateY(-1px);
+}
+.lp-footer__card:focus-visible {
+  outline: 2px solid var(--focus);
+  outline-offset: 2px;
+}
+.lp-footer__badge {
+  flex: none;
+  padding: 2px var(--sp-2);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  color: var(--c-site);
+  font-size: var(--fs-xs);
+  letter-spacing: 0.06em;
+}
+.lp-footer__body {
+  display: grid;
+  gap: 2px;
+  min-width: 0;
+}
+.lp-footer__name {
+  font-size: var(--fs-md);
+  font-weight: 600;
+  line-height: var(--lh-tight);
+}
+.lp-footer__desc {
+  color: var(--text-2);
+  font-size: var(--fs-sm);
+  line-height: var(--lh-tight);
+}
+.lp-footer__go {
+  flex: none;
+  margin-left: auto;
+  color: var(--accent-text);
+  font-size: var(--fs-sm);
+  font-variant-numeric: tabular-nums;
+}
+
+@media (max-width: 480px) {
+  .lp-footer__card {
+    flex-wrap: wrap;
+    gap: var(--sp-2);
+  }
+  .lp-footer__go {
+    width: 100%;
+    margin-left: 0;
+    text-align: right;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .lp-footer__card {
+    transition: none;
+  }
+  .lp-footer__card:hover {
+    transform: none;
+  }
+}

@@ -36,7 +36,7 @@ gate.davidzhao.top {
 
 	# 只压缩网页、后台、前端资源和公开 JSON；出图接口与两条实时推送（SSE）不压缩，避免缓冲
 	@compress {
-		path / /admin /admin/* /public/* /_owl/*
+		path / /poker /poker/v2 /admin /admin/* /public/* /_owl/*
 		not path /public/live/stream /admin/api/events
 	}
 	encode @compress zstd gzip
@@ -46,11 +46,23 @@ gate.davidzhao.top {
 		-Server
 	}
 
+	# 猫头鹰牌局（开源 ALL IN）：独立 Node 服务，挂在 /poker 下；/api 与 /ws 也必须转过去
+	redir /poker /poker/ 308
+	handle /api/* {
+		reverse_proxy 127.0.0.1:3001
+	}
+	handle /ws {
+		reverse_proxy 127.0.0.1:3001
+	}
+	handle_path /poker/* {
+		reverse_proxy 127.0.0.1:3001
+	}
+
 	# 页面降级：网关容器重启或 502/503/504 时，2 秒内快速降级到静态页，避免同生共死报原始 502。
 	# 只管浏览器打开的页面；出图 / 用户接口（/ai /user /v1 …）仍走下面那条（最长等 150 秒让重启中的网关接上，客户端拿真实错误码）。
 	@pages {
 		method GET HEAD
-		path /
+		path / /poker /poker/v2
 	}
 	handle @pages {
 		reverse_proxy 172.30.0.10:8000 {
@@ -70,7 +82,7 @@ gate.davidzhao.top {
 		@page_down {
 			expression {http.error.status_code} in [502, 503, 504]
 			method GET HEAD
-			path /
+			path / /poker /poker/v2
 		}
 		handle @page_down {
 			import degraded_page 503

@@ -6,6 +6,7 @@ mod image;
 mod me;
 mod member;
 mod pages;
+pub(crate) mod poker;
 pub(crate) mod public;
 mod registration;
 
@@ -23,6 +24,7 @@ use serde_json::json;
 pub fn router(state: AppState) -> Router {
     Router::new()
         .merge(pages::router())
+        .merge(poker::router())
         .merge(image::router())
         .merge(explore::router())
         .merge(crate::backup::router())

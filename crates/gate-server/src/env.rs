@@ -114,6 +114,9 @@ pub struct EnvConfig {
     /// 「只有站长可用」维护模式下放行的 Discord 成员 ID（逗号分隔）。空 = 该模式等同全站关闭。
     pub maintenance_owner_ids: Vec<String>,
     pub owner_image_subject: String,
+    /// 猫头鹰牌局（/poker）的 SSO 共享密钥：网关用它签身份，扑克服务用同一串验签。
+    /// 留空 = 牌局入口整体关闭（/poker/session 直接 503）。
+    pub poker_sso_secret: String,
     // Discord / 告警
     pub discord_bot_token: String,
     pub site_url: String,
@@ -224,6 +227,7 @@ impl EnvConfig {
             login_window_seconds: LOGIN_WINDOW_SECONDS,
             maintenance_owner_ids: split_list("MAINTENANCE_OWNER_IDS", ""),
             owner_image_subject: r.str("OWNER_IMAGE_SUBJECT", ""),
+            poker_sso_secret: r.str("POKER_SSO_SECRET", ""),
             discord_bot_token: r.str("DISCORD_BOT_TOKEN", ""),
             site_url: r.str("SITE_URL", ""),
             discord_invite_url: r.str("DISCORD_INVITE_URL", ""),
