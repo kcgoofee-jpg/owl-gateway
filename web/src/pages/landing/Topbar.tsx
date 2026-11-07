@@ -137,6 +137,7 @@ export function Topbar(props: {
             <svg viewBox="0 0 24 24" aria-hidden="true">
               <path d="M12 2C9.6 5.6 4 9 4 13.2A5 5 0 0 0 12 18c.2 1.6-.6 2.9-1.6 4h3.2C12.6 20.9 11.8 19.6 12 18a5 5 0 0 0 8-4.8C20 9 14.4 5.6 12 2Z" />
             </svg>
+            <span class="sr-only">德州扑克</span>
           </a>
           {props.workbench && (
             <a id="workbench-entry" class="btn btn--primary btn--sm site-top__wb" href="/image">
