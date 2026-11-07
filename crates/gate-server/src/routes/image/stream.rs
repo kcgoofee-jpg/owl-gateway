@@ -393,6 +393,7 @@ async fn perform_stream(
                 image_count,
                 est0.anlas > 0.0,
                 est0.v5 > 0 && est0.anlas == 0.0,
+                super::v5_lane(state, &prep.model),
                 state.limits().queue_timeout,
                 &cb,
                 allow,

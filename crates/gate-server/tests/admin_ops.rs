@@ -380,12 +380,13 @@ async fn runtime_limits_validate_apply_and_persist() {
 
 /// 账号保护字段（名字, 默认, 下限, 上限），顺序同接口。每小时上限 / 按时段放行 10-22 删除；
 /// 间隔抖动 `interval_jitter` 10-23 删除（出图节奏只剩出完后歇 N～M 秒，下限 1 秒）。
-const GUARD_FIELDS: [(&str, i64, i64, i64); 5] = [
+const GUARD_FIELDS: [(&str, i64, i64, i64); 6] = [
     ("account_daily_cap", 2400, 0, 9999),
     ("post_jitter_min", 1, 1, 30),
     ("post_jitter_max", 3, 1, 30),
     ("queue_per_member", 2, 1, 5),
     ("queue_per_account", 5, 0, 100),
+    ("v5_priority", 1, 0, 1),
 ];
 
 #[tokio::test]

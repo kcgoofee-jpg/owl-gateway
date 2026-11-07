@@ -50,6 +50,7 @@ impl<H: Hooks> NaiClient<H> {
         _image_count: i64,
         requires_anlas: bool,
         v5_free: bool,
+        v5_lane: bool,
         queue_timeout: f64,
         cb: &Callbacks<'_>,
         allowance: Option<&dyn Allowance>,
@@ -62,7 +63,8 @@ impl<H: Hooks> NaiClient<H> {
         let deadline = started + Duration::from_secs_f64(queue_timeout.max(0.0));
         let patient = started + Duration::from_secs_f64(queue_timeout.max(0.0) / 2.0);
         // 公平排队的信息：成员今天的用量 + 开始排队的时刻（换号 / 402 换一把都不变）
-        let arrival = Arrival::new(obs.share(), inner.scheduler.mono(), queue_timeout);
+        let arrival =
+            Arrival::new(obs.share(), inner.scheduler.mono(), queue_timeout).fast_lane(v5_lane);
         let mut moves = 0;
         'pick: loop {
             let Some((mut token, ticket)) = inner

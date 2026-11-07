@@ -32,6 +32,9 @@ pub struct Arrival {
     pub since: f64,
     /// 到这个时刻（单调秒）还没开始就不再看用量，按先来后到排在最前（防饿死：开始排队 + 排队超时的一半）。
     pub patient_at: f64,
+    /// 短作业车道（V5）：实测上游只占 4 秒左右、且没有长尾，让它先于同条件的普通请求开始。
+    /// 只由服务端按请求体里的模型判定（`guard_v5_priority` 关掉即为 false），客户端指定无效。
+    pub fast_lane: bool,
 }
 
 impl Arrival {
@@ -40,22 +43,34 @@ impl Arrival {
             share: share.max(0),
             since: now,
             patient_at: now + queue_timeout.max(0.0) / 2.0,
+            fast_lane: false,
         }
+    }
+
+    /// 标记成短作业车道（[`Self::fast_lane`]）。
+    pub fn fast_lane(mut self, fast: bool) -> Self {
+        self.fast_lane = fast;
+        self
     }
 }
 
 /// 公平排队的先后（`Less` = `a` 先轮到）：等久了的（过了 `patient_at`）在最前、按先来后到；
-/// 其余按今天出的张数从少到多，一样多按先来后到；最后按票号（同一时刻到的先登记的先）。
+/// 其余短作业车道（V5）先，再按今天出的张数从少到多，一样多按先来后到；最后按票号（同一时刻到的先登记的先）。
 pub fn fair_cmp(a: (&Arrival, u64), b: (&Arrival, u64), now: f64) -> std::cmp::Ordering {
     let key = |(x, id): (&Arrival, u64)| {
         let aged = now >= x.patient_at;
-        (!aged, if aged { 0 } else { x.share }, x.since, id)
+        // 老化的一律排最前、且不再看用量和车道（防饿死压过一切偏好），只按先来后到；
+        // 没老化的才比车道：快车道（V5）0、普通 1，同车道再按今天出的张数。
+        let lane = if aged || x.fast_lane { 0u8 } else { 1 };
+        let share = if aged { 0 } else { x.share };
+        (!aged, lane, share, x.since, id)
     };
     let (ka, kb) = (key(a), key(b));
     ka.0.cmp(&kb.0)
         .then(ka.1.cmp(&kb.1))
-        .then(ka.2.total_cmp(&kb.2))
-        .then(ka.3.cmp(&kb.3))
+        .then(ka.2.cmp(&kb.2))
+        .then(ka.3.total_cmp(&kb.3))
+        .then(ka.4.cmp(&kb.4))
 }
 
 /// 两次开始出图的平均间距（秒）。`gen_secs` = 实测出图耗时（没有样本为 0），`post_mean` = 平均歇的秒数，
@@ -130,6 +145,28 @@ mod tests {
         assert_eq!(fair_cmp((&light, 2), (&heavy, 1), 60.0), Greater);
         // 负数用量按 0
         assert_eq!(Arrival::new(-5, 0.0, 90.0).share, 0);
+    }
+
+    #[test]
+    fn fast_lane_wins_until_the_other_side_has_waited_half_the_timeout() {
+        use std::cmp::Ordering::*;
+        // 普通先到、V5 后到：没老化前 V5 先上
+        let plain = Arrival::new(3, 0.0, 90.0);
+        let v5 = Arrival::new(40, 5.0, 90.0).fast_lane(true);
+        assert_eq!(fair_cmp((&v5, 2), (&plain, 1), 10.0), Less);
+        // 普通等过 45 秒（排队超时的一半）：老化压过车道，回到先来后到
+        assert_eq!(fair_cmp((&plain, 1), (&v5, 2), 45.0), Less);
+        // 两条都老化了：仍按先来后到
+        assert_eq!(fair_cmp((&v5, 2), (&plain, 1), 60.0), Greater);
+    }
+
+    #[test]
+    fn fast_lane_keeps_the_share_tiebreak_inside_the_lane() {
+        use std::cmp::Ordering::*;
+        let a = Arrival::new(9, 0.0, 90.0).fast_lane(true);
+        let b = Arrival::new(2, 1.0, 90.0).fast_lane(true);
+        // 同车道：今天出得少的先，车道不改变这一点
+        assert_eq!(fair_cmp((&b, 2), (&a, 1), 10.0), Less);
     }
 
     #[test]

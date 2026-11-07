@@ -155,6 +155,12 @@ pub(super) fn detail160(status: u16, message: &str) -> String {
     take_chars(&format!("{status} {message}"), 160).to_string()
 }
 
+/// 这张图走不走短作业车道（V5 优先）：只看请求体里的模型族，加上 `guard_v5_priority` 开关。
+/// 判定全在服务端，客户端的参数 / 请求头改不了；关掉开关就回到全部按公平排队。
+pub(super) fn v5_lane(state: &AppState, model: &str) -> bool {
+    gate_core::policy::is_v5_model(model) && state.guard.with(|g| g.v5_priority())
+}
+
 /// 上游 429：暂停全站图片请求（两种响应都在收尾时记日志，回调只更新冷却）。
 pub(super) fn on_429(state: &AppState) -> Box<dyn Fn(f64) -> BoxFuture<'static, ()> + Send + Sync> {
     let s = state.clone();

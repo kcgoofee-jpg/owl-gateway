@@ -36,8 +36,21 @@
   /* ---- 排队反馈（2026-11-01）：本站队列满时出图请求会挂 60–120 秒，官网前端在这段时间
      不显示任何东西，用户以为卡死就刷新页面——刷新等于断开，前面白等。这里补一条计时提示，
      并在 429 / 断连时换成一句人话（等多久看 Retry-After）。只加显示，不动请求。 ---- */
-  var QW = { n: 0, since: 0, timer: null, el: null };
+  var QW = { n: 0, since: 0, timer: null, el: null, v5: false };
   var QW_PAT = /\/ai\/generate-image(?:-stream)?(?:\?|$)/;
+
+  /* V5 走网关的短作业车道（guard_v5_priority），排队通常明显短于 4.5。
+     只在请求体是 JSON 字符串时认一下模型；读不到就当普通请求，不影响任何请求逻辑。 */
+  function qwIsV5(init) {
+    try {
+      var b = init && init.body;
+      if (typeof b !== "string") return false;
+      var m = JSON.parse(b).model;
+      return typeof m === "string" && m.indexOf("nai-diffusion-5-") === 0;
+    } catch (e) {
+      return false;
+    }
+  }
 
   function qwBox() {
     if (QW.el && QW.el.isConnected) return QW.el;
@@ -55,16 +68,17 @@
     return el;
   }
 
-  function qwStart() {
+  function qwStart(v5) {
     QW.n++;
     if (QW.timer) return true;
     QW.since = Date.now();
+    QW.v5 = !!v5;
     var el = qwBox();
     function tick() {
       var s = Math.round((Date.now() - QW.since) / 1000);
       el.textContent = s < 3
         ? "正在出图…"
-        : "排队中 " + s + " 秒 · 别刷新，刷新就白等了";
+        : "排队中 " + s + " 秒" + (QW.v5 ? " · V5 优先" : "") + " · 别刷新，刷新就白等了";
     }
     tick();
     QW.timer = setInterval(tick, 1000);
@@ -111,7 +125,7 @@
     // 同源请求必须带 Cookie：维护模式按网页会话判定站长，丢 Cookie 会被当成访客挡掉
     init.credentials = "same-origin";
     window.__bridgeLog = window.__bridgeLog || [];
-    var watching = QW_PAT.test(mapped) ? qwStart() : false;
+    var watching = QW_PAT.test(mapped) ? qwStart(qwIsV5(init)) : false;
     return of.call(window, mapped, init).then(function (r) {
       window.__bridgeLog.push(mapped + " -> " + r.status);
       if (watching) { qwStop(); if (r.status === 429) qwFail(r); }

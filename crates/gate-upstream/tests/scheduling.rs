@@ -548,6 +548,7 @@ async fn stream_retries_a_concurrency_lock_but_not_a_rate_limit() {
                 1,
                 false,
                 false,
+                false,
                 30.0,
                 &Callbacks::default(),
                 None,
@@ -621,6 +622,63 @@ async fn a_light_user_overtakes_a_heavy_one_on_the_same_account() {
         light.sent_at.lock().unwrap().unwrap(),
     );
     assert!(lt < ht, "轻度用户应先发出：light={lt:?} heavy={ht:?}");
+}
+
+/// V5 走短作业车道：账号先被一个普通请求占着，之后一个「今天出得更多」的 V5 请求进来，
+/// 账号空出来时 V5 先发 —— 车道压过「今天出得少」的用量比较（实测 V5 只占上游 4 秒，见
+/// `docs/report-20261107-v5-queue.md`）。普通请求等满排队超时的一半后会反过来排到最前（见下一个用例）。
+#[tokio::test]
+async fn a_v5_request_takes_the_fast_lane_over_a_lighter_plain_one() {
+    let up = MockUpstream::start().await;
+    up.push(
+        "/ai/generate-image",
+        Reply::Chunks {
+            status: 200,
+            content_type: "binary/octet-stream".into(),
+            chunks: vec![(
+                Duration::from_millis(600),
+                bytes::Bytes::from(gate_testkit::zip_of_pngs(1)),
+            )],
+        },
+    );
+    let hooks = TestHooks::default();
+    let c = NaiClient::new(
+        config(&up.url(), &hooks, 0.0),
+        hooks.clone(),
+        vec![(T1.into(), 0, false)],
+    )
+    .unwrap();
+    let body = image_body();
+    let send = |obs: std::sync::Arc<Watch>, timeout: f64, v5_lane: bool| {
+        let (c, url, body) = (c.clone(), up.url(), body.clone());
+        tokio::spawn(async move {
+            let mut o = image_opts(&url, &body);
+            o.queue_timeout = timeout;
+            o.v5_lane = v5_lane;
+            c.request(o, &Callbacks::default(), None, obs.as_ref())
+                .await
+        })
+    };
+    let first = send(std::sync::Arc::new(Watch::with_share(0)), 30.0, false);
+    tokio::time::sleep(Duration::from_millis(100)).await;
+    // 普通请求：今天只出了 3 张（按用量排序它本来该先）
+    let plain = std::sync::Arc::new(Watch::with_share(3));
+    let p = send(plain.clone(), 30.0, false);
+    tokio::time::sleep(Duration::from_millis(100)).await;
+    // V5：今天出了 150 张、来得更晚，但走快车道
+    let v5 = std::sync::Arc::new(Watch::with_share(150));
+    let v = send(v5.clone(), 30.0, true);
+    for r in [first, p, v] {
+        r.await.unwrap().unwrap();
+    }
+    let (pt, vt) = (
+        plain.sent_at.lock().unwrap().unwrap(),
+        v5.sent_at.lock().unwrap().unwrap(),
+    );
+    assert!(
+        vt < pt,
+        "V5 应先发出（快车道压过用量比较）：v5={vt:?} plain={pt:?}"
+    );
 }
 
 /// 防饿死：重度用户等过了排队超时的一半，就按先来后到排在最前，后来的轻度用户不能再插队。

@@ -238,7 +238,8 @@ async fn public_live_shape_and_key_order() {
             "me"
         ]
     );
-    assert_eq!(v["mode"], "fifo");
+    // 默认 `guard_v5_priority=1`：V5 走短作业车道，模式对外报 v5-priority
+    assert_eq!(v["mode"], "v5-priority");
     assert_eq!(v["auth"], json!({"requests": 2, "rejected": 1}));
     assert_eq!(
         keys(&v["quota"]),

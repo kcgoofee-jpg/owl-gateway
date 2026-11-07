@@ -52,7 +52,7 @@ pub const ACCOUNT_DAILY_CAP_DEFAULT: i64 = 2400;
 pub const QUEUE_PER_MEMBER_DEFAULT: i64 = 2;
 
 /// 所有设置（存 `site_settings` 的键是 `guard_<名称>`）；0 表示关闭该项。
-pub const FIELDS: [Field; 5] = [
+pub const FIELDS: [Field; 6] = [
     field(
         "account_daily_cap",
         ACCOUNT_DAILY_CAP_DEFAULT,
@@ -93,6 +93,16 @@ pub const FIELDS: [Field; 5] = [
         0,
         100,
         "每个上游账号全站最多同时排几张图",
+    ),
+    // 短作业车道（2026-11-07）：V5 实测只占上游 4 秒左右且没有长尾，让它先开始能把
+    // 自己的等待从 ~30 秒压到 ~15 秒，普通请求只多等 v5 那点忙时（有 1/(1-ρ_v5) 的硬上界）。
+    // 等满排队超时一半的老化仍然压过车道，所以不会饿死普通请求。
+    field(
+        "v5_priority",
+        1,
+        0,
+        1,
+        "V5 出图优先（1=开，0=关；不抢占正在生成的那张）",
     ),
 ];
 
@@ -388,6 +398,12 @@ impl GuardCore {
             .iter()
             .map(|r| one(*r))
             .try_fold(0i64, |sum, c| c.map(|c| sum.saturating_add(c)))
+    }
+
+    /// V5 是否走短作业车道（`v5_priority` 参数，默认开）：只影响同一个账号上谁先开始，
+    /// 不提高 RPM、排队容量或额度，也不抢占已经发往上游的那张。
+    pub fn v5_priority(&self) -> bool {
+        self.v("v5_priority") != 0
     }
 
     /// 全站排队满了吗（排队 + 正在生成 ≥ [`queue_cap`](Self::queue_cap)）：入队判断和 /public/live 的 `queue.full` 共用这一处。

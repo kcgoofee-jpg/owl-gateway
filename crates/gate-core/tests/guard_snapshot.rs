@@ -67,12 +67,14 @@ fn constants() {
     // 站长 10-22 删掉了 daily_burst / account_hourly_cap / hourly_min / hourly_max / hourly_step，
     // 加了出图间隔 AIMD 的四个参数 interval_*（默认值 = gate_upstream::pace 的常量）
     // 10-23：出图间隔抖动 interval_jitter 删除；歇的下限 1 秒（原来写死的 SETTLE_GAP）
-    let want: [(&str, i64, i64, i64); 5] = [
+    // 11-07：加 v5_priority（V5 短作业车道，默认开）
+    let want: [(&str, i64, i64, i64); 6] = [
         ("account_daily_cap", 2400, 0, 9999),
         ("post_jitter_min", 1, 1, 30),
         ("post_jitter_max", 3, 1, 30),
         ("queue_per_member", 2, 1, 5),
         ("queue_per_account", 5, 0, 100),
+        ("v5_priority", 1, 0, 1),
     ];
     let got: Vec<(&str, i64, i64, i64)> = FIELDS
         .iter()
