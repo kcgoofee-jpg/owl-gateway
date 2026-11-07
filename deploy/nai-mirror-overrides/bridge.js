@@ -92,23 +92,111 @@
     if (QW.el) { QW.el.remove(); QW.el = null; }
   }
 
+  /* ---- 冷却（2026-11-07）：429 之后按 Retry-After 把出图按钮按住。
+     理由：实测有成员 86 分钟被拒 46 次（其中 7 次是撞上自己的 key_rate），反复点既不占上游额度、
+     也不会更快排上，只把自己的每分钟 10 次刷光。这里只加显示和点击拦截，不改任何请求。 ---- */
+  var CD = { until: 0, timer: null, el: null };
+
+  function cdLeft() {
+    return Math.max(0, Math.ceil((CD.until - Date.now()) / 1000));
+  }
+
+  function cdEl(text) {
+    if (CD.el && CD.el.isConnected) { CD.el.textContent = text; return CD.el; }
+    var el = document.createElement("div");
+    el.setAttribute("data-owl-cooling", "1");
+    el.style.cssText = [
+      "position:fixed", "left:50%", "bottom:32px", "transform:translateX(-50%)",
+      "padding:10px 16px", "border-radius:999px", "z-index:2147482999",
+      "font:600 13px/1.4 system-ui,-apple-system,'Segoe UI',sans-serif",
+      "color:#fff", "background:#7a2c2c", "border:1px solid #d16060",
+      "box-shadow:0 6px 22px rgba(0,0,0,.4)", "pointer-events:none", "white-space:nowrap",
+    ].join(";");
+    (document.body || document.documentElement).appendChild(el);
+    CD.el = el;
+    el.textContent = text;
+    return el;
+  }
+
+  function cdPaint() {
+    var s = cdLeft();
+    if (s <= 0) { cdStop(); return; }
+    cdEl("冷却中 " + s + " 秒 · 现在点也不会出图（没扣费）");
+  }
+
+  function cdStart(secs) {
+    if (!(secs > 0)) return;
+    var until = Date.now() + Math.min(secs, 300) * 1000;
+    if (until <= CD.until) return;
+    CD.until = until;
+    cdPaint();
+    if (!CD.timer) CD.timer = setInterval(cdPaint, 1000);
+  }
+
+  function cdStop() {
+    if (CD.timer) { clearInterval(CD.timer); CD.timer = null; }
+    CD.until = 0;
+    if (CD.el && CD.el.isConnected) CD.el.remove();
+    CD.el = null;
+  }
+
+  function cdNotice(text) {
+    var el = cdEl(text);
+    setTimeout(function () {
+      if (el.isConnected) el.remove();
+      if (CD.el === el) CD.el = null;
+    }, 8000);
+  }
+
+  /* 生成按钮找法：不依赖官网的 class，只认可见、文本短、以「生成 / 出图 / Generate」开头的按钮或它的子元素。 */
+  function cdIsGenerate(el) {
+    for (var i = 0; el && i < 6; i++, el = el.parentElement) {
+      var t = (el.textContent || "").trim();
+      if (t.length <= 20 && /^(生成|出图|Generate)/i.test(t)) return true;
+    }
+    return false;
+  }
+
+  document.addEventListener("click", function (e) {
+    if (cdLeft() <= 0) return;
+    if (!cdIsGenerate(e.target)) return;
+    e.preventDefault();
+    e.stopPropagation();
+    cdPaint();
+  }, true);
+
   function qwFail(r, netErr) {
     var wait = 15;
     try {
       var ra = r && r.headers && r.headers.get("retry-after");
       if (ra && /^\d+$/.test(ra) && +ra > 0 && +ra <= 300) wait = +ra;
     } catch (e) {}
-    var text = netErr
-      ? "连接断了 · 等 10 秒再点一次（这次没扣费）"
-      : "这轮没排上 · 约 " + wait + " 秒后重试（没扣费）";
-    var el = qwBox();
-    el.style.background = "#7a2c2c";
-    el.style.borderColor = "#d16060";
-    el.textContent = text;
-    setTimeout(function () {
-      if (el.isConnected) el.remove();
-      if (QW.el === el) QW.el = null;
-    }, 6000);
+    if (netErr) {
+      var el = qwBox();
+      el.style.background = "#7a2c2c";
+      el.style.borderColor = "#d16060";
+      el.textContent = "连接断了 · 等 10 秒再点一次（这次没扣费）";
+      setTimeout(function () {
+        if (el.isConnected) el.remove();
+        if (QW.el === el) QW.el = null;
+      }, 6000);
+      return;
+    }
+    // 429：额度类的不做倒计时（等到明天才有用），其余按 Retry-After 冷却
+    try {
+      r.clone().json().then(function (j) {
+        var code = (j && j.error && j.error.code) || "";
+        if (code === "member_quota" || code === "site_quota") {
+          cdNotice("今日额度已用完 · 明天 7 点重置（没扣费）");
+        } else if (code === "feature_off") {
+          cdNotice("这个功能暂时关闭");
+        } else {
+          cdStart(wait);
+        }
+      }).catch(function () { cdStart(wait); });
+    } catch (e) {
+      cdStart(wait);
+    }
   }
 
   var of = window.fetch;
