@@ -156,7 +156,7 @@ pub(super) fn detail160(status: u16, message: &str) -> String {
 }
 
 /// 这张图走不走短作业车道（V5 优先）：只看请求体里的模型族，加上 `guard_v5_priority` 开关。
-/// 判定全在服务端，客户端的参数 / 请求头改不了；关掉开关就回到全部按公平排队。
+/// 判定全在服务端，客户端的参数 / 请求头改不了；关掉开关就回到全部按先来后到。
 pub(super) fn v5_lane(state: &AppState, model: &str) -> bool {
     gate_core::policy::is_v5_model(model) && state.guard.with(|g| g.v5_priority())
 }
@@ -428,7 +428,7 @@ async fn generate(state: AppState, req: Request, streaming: bool) -> ApiResult {
         .reason("client_disconnected");
     let (s, c) = (state.clone(), ctx.clone());
     shielded(&state, &ctx, cancelled, async move {
-        let admission = image_admission(&s, &c, &key).await?;
+        let admission = image_admission(&s, &c, &key, v5_lane(&s, &prep.model)).await?;
         let slots = acquire_slots(&s);
         // 排队 / 预算等待之后再查一次冷却和额度
         check_image_cooldown(&s)?;

@@ -130,6 +130,8 @@ pub struct Entry {
     pub running: bool,
     /// 上游客户端估计的开始时刻（墙钟）：已经排到某个账号上才有。排队位次按它排（见 [`GuardCore::queue_view`]）。
     pub eta: Option<f64>,
+    /// 短作业车道（V5）：同一把 Key 里它可以越过还没开始的普通条目（见 [`GuardCore::key_turn`]）。
+    pub fast: bool,
 }
 
 /// `save(body)` 的结果。
@@ -414,8 +416,15 @@ impl GuardCore {
 
     /// 每个成员最多同时排 `queue_per_member` 张（还没发往上游的；同一把 Key 仍然一次只生成 1 张，见 [`key_turn`](Self::key_turn)）；
     /// 全站排队总数有上限（`cap`，见 [`queue_cap`](Self::queue_cap)）。
+    /// `fast` = 短作业车道（V5），登记进条目里供 [`key_turn`](Self::key_turn) 用。
     /// 返回拒绝原因或 None。通过时登记一个排队条目（编号 = `self.seq`，取 `entries.last()` 可得）；`now` 是 `time.time()`。
-    pub fn admit_image(&mut self, key_id: i64, cap: Option<i64>, now: f64) -> Option<Reason> {
+    pub fn admit_image(
+        &mut self,
+        key_id: i64,
+        cap: Option<i64>,
+        now: f64,
+        fast: bool,
+    ) -> Option<Reason> {
         let mine = self.image_inflight.get(&key_id).copied().unwrap_or(0);
         let per = self.v("queue_per_member").max(1);
         let waiting = self
@@ -445,6 +454,7 @@ impl GuardCore {
             since: now,
             running: false,
             eta: None,
+            fast,
         });
         None
     }
@@ -456,13 +466,19 @@ impl GuardCore {
         }
     }
 
-    /// 轮到这把 Key 的这一张了吗：它是这把 Key 还在的条目里最早登记的（前面那张已出完或被取消）。
-    /// 每把 Key 同时只生成 1 张，排在后面的那张等它。
+    /// 轮到这把 Key 的这一张了吗：每把 Key 同时只生成 1 张，排在后面的那张等它。
+    ///
+    /// 普通请求等**所有**更早的条目（原来那张，或被取消 / 被拒掉的那张）；
+    /// 短作业车道（V5）只等**正在生成**的更早条目 —— 没开始的普通条目可以越过，
+    /// 因为 V5 实测只占上游 3–5 秒，等一张 20–40 秒的 4.5 不划算（站长 11-07）。
     pub fn key_turn(&self, key_id: i64, entry_id: i64) -> bool {
+        let Some(me) = self.entries.iter().find(|e| e.id == entry_id) else {
+            return true;
+        };
         !self
             .entries
             .iter()
-            .any(|e| e.key == key_id && e.id < entry_id)
+            .any(|e| e.key == key_id && e.id < entry_id && (e.running || !me.fast))
     }
 
     /// 这把 Key 的一张排队中的图开始发往上游；给了 `entry_id` 就标记那一张。
@@ -611,10 +627,10 @@ mod tests {
         assert_eq!(two, Some(4));
         for (i, key) in [1, 2, 3, 4].into_iter().enumerate() {
             assert!(!g.queue_full(two), "第 {i} 张之前还没满");
-            assert_eq!(g.admit_image(key, two, NOON), None);
+            assert_eq!(g.admit_image(key, two, NOON, false), None);
         }
         assert!(g.queue_full(two));
-        let r = g.admit_image(5, two, NOON).unwrap();
+        let r = g.admit_image(5, two, NOON, false).unwrap();
         assert_eq!(r.code(), reasons::QUEUE_FULL);
         // 文案只说「排队满」，不报全站闸门张数：那是站点内部数字（还随账号数变），
         // 成员一次只发一张却看到「最多同时排 4 张」只会以为是自己占了名额。
@@ -649,7 +665,7 @@ mod tests {
         g.values.insert("queue_per_member".into(), 3);
         // 1、2、3 号 Key 依次来；2 号排到了空着的账号上，估计比 1 号先开始
         for (key, at) in [(1, 0.0), (2, 1.0), (3, 2.0)] {
-            assert_eq!(g.admit_image(key, None, NOON + at), None);
+            assert_eq!(g.admit_image(key, None, NOON + at, false), None);
         }
         let ids: Vec<i64> = g.entries.iter().map(|e| e.id).collect();
         g.set_eta(ids[0], NOON + 20.0);
@@ -667,11 +683,11 @@ mod tests {
     fn key_turn_is_first_come_first_served() {
         let mut g = guard();
         let one = g.queue_cap(&[None]);
-        assert_eq!(g.admit_image(7, one, NOON), None);
+        assert_eq!(g.admit_image(7, one, NOON, false), None);
         let first = g.entries.last().unwrap().id;
-        assert_eq!(g.admit_image(7, one, NOON + 1.0), None);
+        assert_eq!(g.admit_image(7, one, NOON + 1.0, false), None);
         let second = g.entries.last().unwrap().id;
-        assert_eq!(g.admit_image(8, one, NOON + 2.0), None);
+        assert_eq!(g.admit_image(8, one, NOON + 2.0, false), None);
         let other = g.entries.last().unwrap().id;
         // 同一把 Key：先来的先生成，后来的等；别的 Key 不受影响
         assert!(g.key_turn(7, first));
@@ -679,7 +695,7 @@ mod tests {
         assert!(g.key_turn(8, other));
         // 第三张排不进来（每人最多同时排 2 张，两张都还没发出）
         assert_eq!(
-            g.admit_image(7, one, NOON + 3.0)
+            g.admit_image(7, one, NOON + 3.0, false)
                 .map(|r| r.code().to_string()),
             Some(reasons::MEMBER_QUEUE_FULL.to_string())
         );
@@ -692,7 +708,7 @@ mod tests {
     fn member_queue_cap_counts_only_images_not_yet_sent() {
         let mut g = guard();
         assert_eq!(g.v("queue_per_member"), QUEUE_PER_MEMBER_DEFAULT);
-        let admit = |g: &mut GuardCore, at: f64| g.admit_image(9, None, NOON + at);
+        let admit = |g: &mut GuardCore, at: f64| g.admit_image(9, None, NOON + at, false);
         assert_eq!(admit(&mut g, 0.0), None);
         let first = g.entries.last().unwrap().id;
         assert_eq!(admit(&mut g, 1.0), None);
@@ -715,11 +731,11 @@ mod tests {
         // 设置是手动的：调成 1
         g.values.insert("queue_per_member".into(), 1);
         assert_eq!(
-            g.admit_image(10, None, NOON).map(|_| ()),
+            g.admit_image(10, None, NOON, false).map(|_| ()),
             None,
             "别人不受影响"
         );
-        assert!(g.admit_image(10, None, NOON).is_some());
+        assert!(g.admit_image(10, None, NOON, false).is_some());
     }
 
     #[test]

@@ -257,7 +257,14 @@ fn replay(c: &Case, tally: &mut Tally) -> Vec<Value> {
                 // 用例给的是账号数：每个账号按「每账号排队数」算（不带上游估算）
                 let accounts = step["accounts"].as_i64().unwrap().max(1) as usize;
                 let cap = g.queue_cap(&vec![None; accounts]);
-                Ok(pair(g.admit_image(step["key"].as_i64().unwrap(), cap, now)))
+                // 用例可以带 "fast": true 走短作业车道（默认普通）
+                let fast = step.get("fast").and_then(|v| v.as_bool()).unwrap_or(false);
+                Ok(pair(g.admit_image(
+                    step["key"].as_i64().unwrap(),
+                    cap,
+                    now,
+                    fast,
+                )))
             }
             "mark_running" => {
                 g.mark_running(step["key"].as_i64().unwrap(), step["entry_id"].as_i64());

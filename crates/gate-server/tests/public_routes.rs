@@ -371,7 +371,7 @@ async fn public_live_blocked_reason_and_queue() {
         .with(|g| g.trip_breaker(300.0, "", now))
         .unwrap();
     // 有人在排队
-    e.state.guard.with(|g| g.admit_image(77, None, now));
+    e.state.guard.with(|g| g.admit_image(77, None, now, false));
     e.state.live.invalidate();
     let (_, _, v) = get_json(&e.state, "/public/live", &[]).await;
     assert_eq!(
@@ -393,8 +393,10 @@ async fn public_live_me_for_logged_in_member_only() {
     let now = e.state.now();
     // 实测每张 2.5 秒（测试环境出完不歇）：周期 2.5 秒，排队超时 5 秒内能开始 ⌈5 ÷ 2.5⌉ = 2 张
     e.state.nai.tokens().await[0].set_gen_secs(2.5);
-    e.state.guard.with(|g| g.admit_image(77, None, now - 5.0)); // 别人先到
-    e.state.guard.with(|g| g.admit_image(1, None, now)); // 测试成员排第 2
+    e.state
+        .guard
+        .with(|g| g.admit_image(77, None, now - 5.0, false)); // 别人先到
+    e.state.guard.with(|g| g.admit_image(1, None, now, false)); // 测试成员排第 2
     e.state.live.invalidate();
 
     let (_, _, guest) = get_json(&e.state, "/public/live", &[]).await;
@@ -989,7 +991,7 @@ async fn live_stream_carries_my_queue_per_connection() {
     assert_eq!(g1["me"], Value::Null);
 
     let now = e.state.now();
-    e.state.guard.with(|g| g.admit_image(1, None, now));
+    e.state.guard.with(|g| g.admit_image(1, None, now, false));
     let m2 = member.next_data(Duration::from_secs(5)).await.unwrap();
     assert_eq!(
         m2["me"],
@@ -1073,7 +1075,7 @@ async fn admin_events_stream_snapshot_and_badges() {
     // 真有变化（队列里多了一张图）才推，隔至少 15 秒（后台每次刷新会重拉几页数据）
     let t0 = tokio::time::Instant::now();
     let now = e.state.now();
-    e.state.guard.with(|g| g.admit_image(9, None, now));
+    e.state.guard.with(|g| g.admit_image(9, None, now, false));
     let second = sse
         .next_data(Duration::from_secs(20))
         .await
@@ -1159,7 +1161,7 @@ async fn landing_boot_for_member_with_key() {
     let p = setup_with_static(&reg_env(), Some(LANDING_HTML)).await;
     let cookie = register_member(&p.state).await;
     let now = p.state.now();
-    p.state.guard.with(|g| g.admit_image(1, None, now));
+    p.state.guard.with(|g| g.admit_image(1, None, now, false));
     let (status, _, body) = raw(&p.state, "GET", "/", &[("cookie", &cookie)], b"").await;
     assert_eq!(status, 200);
     let boot = boot_of(&String::from_utf8(body).unwrap());

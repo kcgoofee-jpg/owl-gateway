@@ -368,7 +368,7 @@ async fn after_half_the_timeout_a_clearly_earlier_account_wins() {
     send(30.0, none()).await.unwrap().unwrap();
     send(30.0, none()).await.unwrap().unwrap();
     let pause = || tokio::time::sleep(Duration::from_millis(80));
-    // T2（一样快，按轮询）。排队超时比 r5 的短一点：r3 先「等久了」，公平排队里一直排在 r5 前面
+    // T2（一样快，按轮询）。排队超时比 r5 的短一点：r3 先「等久了」，排队顺序里一直排在 r5 前面
     // （否则 r5 先过了一半超时会在 T2 上排到 r3 前面，就不用挪了）
     let r3 = send(6.9, none());
     pause().await;
@@ -400,19 +400,9 @@ async fn after_half_the_timeout_a_clearly_earlier_account_wins() {
 /// 记下状态码、并发锁、什么时候发出。
 #[derive(Default)]
 struct Watch {
-    share: i64,
     statuses: Mutex<Vec<u16>>,
     locked: Mutex<Vec<String>>,
     sent_at: Mutex<Option<Instant>>,
-}
-
-impl Watch {
-    fn with_share(share: i64) -> Self {
-        Self {
-            share,
-            ..Default::default()
-        }
-    }
 }
 
 impl Observer for Watch {
@@ -424,9 +414,6 @@ impl Observer for Watch {
     }
     fn sent(&self) {
         self.sent_at.lock().unwrap().get_or_insert(Instant::now());
-    }
-    fn share(&self) -> i64 {
-        self.share
     }
 }
 
@@ -572,12 +559,11 @@ async fn stream_retries_a_concurrency_lock_but_not_a_rate_limit() {
     assert_eq!(c.pacing(&t).locked_today, 1);
 }
 
-// ---------------------------------------------------------------- 公平排队（站长 10-22）
+// ---------------------------------------------------------------- 排队顺序
 
-/// 一个账号上正在出一张；先来的重度用户（今天 150 张）和后来的轻度用户（今天 3 张）在等：
-/// 空出来时轻度用户先上。
+/// 一个账号上正在出一张；之后到的两张按登记顺序排队：先登记的先把这一张发出去。
 #[tokio::test]
-async fn a_light_user_overtakes_a_heavy_one_on_the_same_account() {
+async fn arrivals_start_in_the_order_they_queued() {
     let up = MockUpstream::start().await;
     up.push(
         "/ai/generate-image",
@@ -607,28 +593,28 @@ async fn a_light_user_overtakes_a_heavy_one_on_the_same_account() {
                 .await
         })
     };
-    let first = send(std::sync::Arc::new(Watch::with_share(0)), 30.0);
+    let first = send(std::sync::Arc::new(Watch::default()), 30.0);
     tokio::time::sleep(Duration::from_millis(100)).await;
-    let heavy = std::sync::Arc::new(Watch::with_share(150));
-    let h = send(heavy.clone(), 30.0);
+    let earlier = std::sync::Arc::new(Watch::default());
+    let a = send(earlier.clone(), 30.0);
     tokio::time::sleep(Duration::from_millis(100)).await;
-    let light = std::sync::Arc::new(Watch::with_share(3));
-    let l = send(light.clone(), 30.0);
-    for r in [first, h, l] {
+    let later = std::sync::Arc::new(Watch::default());
+    let b = send(later.clone(), 30.0);
+    for r in [first, a, b] {
         r.await.unwrap().unwrap();
     }
-    let (ht, lt) = (
-        heavy.sent_at.lock().unwrap().unwrap(),
-        light.sent_at.lock().unwrap().unwrap(),
+    let (at, bt) = (
+        earlier.sent_at.lock().unwrap().unwrap(),
+        later.sent_at.lock().unwrap().unwrap(),
     );
-    assert!(lt < ht, "轻度用户应先发出：light={lt:?} heavy={ht:?}");
+    assert!(at < bt, "先登记的应先发出：earlier={at:?} later={bt:?}");
 }
 
-/// V5 走短作业车道：账号先被一个普通请求占着，之后一个「今天出得更多」的 V5 请求进来，
-/// 账号空出来时 V5 先发 —— 车道压过「今天出得少」的用量比较（实测 V5 只占上游 4 秒，见
-/// `docs/report-20261107-v5-queue.md`）。普通请求等满排队超时的一半后会反过来排到最前（见下一个用例）。
+/// V5 走短作业车道：账号先被一个普通请求占着，之后一张 V5 进来，账号空出来时 V5 先发。
+/// （11-07 之前这里还比「今天出得少」，那个比较已经删掉，现在只比车道和到达顺序。）
+/// V5 后到也能先发（实测 V5 只占上游 4 秒，见 `docs/report-20261107-v5-queue.md`）。
 #[tokio::test]
-async fn a_v5_request_takes_the_fast_lane_over_a_lighter_plain_one() {
+async fn a_v5_request_takes_the_fast_lane_over_an_earlier_plain_one() {
     let up = MockUpstream::start().await;
     up.push(
         "/ai/generate-image",
@@ -659,14 +645,14 @@ async fn a_v5_request_takes_the_fast_lane_over_a_lighter_plain_one() {
                 .await
         })
     };
-    let first = send(std::sync::Arc::new(Watch::with_share(0)), 30.0, false);
+    let first = send(std::sync::Arc::new(Watch::default()), 30.0, false);
     tokio::time::sleep(Duration::from_millis(100)).await;
-    // 普通请求：今天只出了 3 张（按用量排序它本来该先）
-    let plain = std::sync::Arc::new(Watch::with_share(3));
+    // 普通请求（先登记）
+    let plain = std::sync::Arc::new(Watch::default());
     let p = send(plain.clone(), 30.0, false);
     tokio::time::sleep(Duration::from_millis(100)).await;
-    // V5：今天出了 150 张、来得更晚，但走快车道
-    let v5 = std::sync::Arc::new(Watch::with_share(150));
+    // V5：来得更晚，但走快车道
+    let v5 = std::sync::Arc::new(Watch::default());
     let v = send(v5.clone(), 30.0, true);
     for r in [first, p, v] {
         r.await.unwrap().unwrap();
@@ -675,76 +661,17 @@ async fn a_v5_request_takes_the_fast_lane_over_a_lighter_plain_one() {
         plain.sent_at.lock().unwrap().unwrap(),
         v5.sent_at.lock().unwrap().unwrap(),
     );
-    assert!(
-        vt < pt,
-        "V5 应先发出（快车道压过用量比较）：v5={vt:?} plain={pt:?}"
-    );
+    assert!(vt < pt, "V5 应先发出：v5={vt:?} plain={pt:?}");
 }
 
-/// 防饿死：重度用户等过了排队超时的一半，就按先来后到排在最前，后来的轻度用户不能再插队。
+/// 成员看到的「还要等多久」按登记顺序：先来的估得更早，后来的排到后面。
 #[tokio::test]
-async fn a_long_waiting_heavy_user_is_no_longer_overtaken() {
-    let up = MockUpstream::start().await;
-    up.push(
-        "/ai/generate-image",
-        Reply::Chunks {
-            status: 200,
-            content_type: "binary/octet-stream".into(),
-            chunks: vec![(
-                Duration::from_millis(1500),
-                bytes::Bytes::from(gate_testkit::zip_of_pngs(1)),
-            )],
-        },
-    );
-    let hooks = TestHooks::default();
-    let c = NaiClient::new(
-        config(&up.url(), &hooks, 0.0),
-        hooks.clone(),
-        vec![(T1.into(), 0, false)],
-    )
-    .unwrap();
-    let body = image_body();
-    let send = |obs: std::sync::Arc<Watch>, timeout: f64| {
-        let (c, url, body) = (c.clone(), up.url(), body.clone());
-        tokio::spawn(async move {
-            let mut o = image_opts(&url, &body);
-            o.queue_timeout = timeout;
-            c.request(o, &Callbacks::default(), None, obs.as_ref())
-                .await
-        })
-    };
-    let first = send(std::sync::Arc::new(Watch::with_share(0)), 30.0);
-    tokio::time::sleep(Duration::from_millis(50)).await;
-    // 排队超时 2 秒：约 1 秒后就算「等久了」
-    let heavy = std::sync::Arc::new(Watch::with_share(150));
-    let h = send(heavy.clone(), 2.0);
-    tokio::time::sleep(Duration::from_millis(1150)).await;
-    let light = std::sync::Arc::new(Watch::with_share(3));
-    let l = send(light.clone(), 30.0);
-    for r in [first, h, l] {
-        r.await.unwrap().unwrap();
-    }
-    let (ht, lt) = (
-        heavy.sent_at.lock().unwrap().unwrap(),
-        light.sent_at.lock().unwrap().unwrap(),
-    );
-    assert!(
-        ht < lt,
-        "等久了的重度用户应先发出：heavy={ht:?} light={lt:?}"
-    );
-}
-
-/// 成员看到的「还要等多久」按公平顺序：轻度用户排在重度用户前面，估计更早开始。
-#[tokio::test]
-async fn queue_estimates_follow_the_fair_order() {
+async fn queue_estimates_follow_the_arrival_order() {
     #[derive(Default)]
-    struct Eta(i64, Mutex<Vec<f64>>);
+    struct Eta(Mutex<Vec<f64>>);
     impl Observer for Eta {
         fn queued(&self, _t: &str, wait: f64) {
-            self.1.lock().unwrap().push(wait);
-        }
-        fn share(&self) -> i64 {
-            self.0
+            self.0.lock().unwrap().push(wait);
         }
     }
     let up = MockUpstream::start().await;
@@ -773,22 +700,22 @@ async fn queue_estimates_follow_the_fair_order() {
                 .await
         })
     };
-    let heavy = std::sync::Arc::new(Eta(150, Mutex::default()));
-    let h = send(heavy.clone());
+    let earlier = std::sync::Arc::new(Eta(Mutex::default()));
+    let a = send(earlier.clone());
     tokio::time::sleep(Duration::from_millis(100)).await;
-    let light = std::sync::Arc::new(Eta(3, Mutex::default()));
-    let l = send(light.clone());
+    let later = std::sync::Arc::new(Eta(Mutex::default()));
+    let b = send(later.clone());
     tokio::time::sleep(Duration::from_millis(1200)).await;
-    let last = |e: &Eta| *e.1.lock().unwrap().last().unwrap();
-    // 轻度用户排第一（约 4 秒后），重度用户被挤到第二（再加一个 5 秒周期）
-    assert!(last(&light) < 5.0, "{:?}", light.1.lock().unwrap());
+    let last = |e: &Eta| *e.0.lock().unwrap().last().unwrap();
+    // 先来的估得更早（约 4 秒后），后来的排到下一轮（再加一个 5 秒周期）
+    assert!(last(&earlier) < 5.0, "{:?}", earlier.0.lock().unwrap());
     assert!(
-        last(&heavy) > last(&light) + 3.0,
+        last(&later) > last(&earlier) + 3.0,
         "{:?}",
-        heavy.1.lock().unwrap()
+        later.0.lock().unwrap()
     );
-    h.abort();
-    l.abort();
+    a.abort();
+    b.abort();
 }
 
 #[tokio::test]

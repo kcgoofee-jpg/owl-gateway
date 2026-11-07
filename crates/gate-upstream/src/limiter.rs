@@ -6,8 +6,8 @@
 //! - 先到先得（FIFO），有人在等时新来的不能插队；
 //! - 等待中被取消：若已被授予槽位则立即归还（不会漏槽），否则从队列里移除并唤醒下一个。
 //!
-//! 出图排队（站长 10-22，公平排队）不再走这里的 FIFO：谁先轮到由账号的等待队列按「今天用得少的先」排
-//! （见 `scheduler.rs`），轮到的那张用 [`AdjustableLimiter::try_acquire`] 直接取槽；槽位归还 / 扩容时
+//! 出图排队不再走这里的 FIFO：谁先轮到由账号的等待队列按 `pace::fair_cmp` 排（车道 + 先来后到，见
+//! `scheduler.rs`），轮到的那张用 [`AdjustableLimiter::try_acquire`] 直接取槽；槽位归还 / 扩容时
 //! [`AdjustableLimiter::notify`] 叫醒在等的。
 
 use std::collections::VecDeque;

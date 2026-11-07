@@ -154,20 +154,25 @@ async fn wait_key_turn(state: &AppState, key_id: i64, entry_id: i64) -> Result<(
         .map_err(|_| queue_timeout())
 }
 
+/// `fast` = 短作业车道（V5，见 [`crate::routes::image::v5_lane`]）：只影响同一把 Key 里能不能越过
+/// 还没开始的普通条目（[`gate_core::guard::GuardCore::key_turn`]），不影响全站排队上限或额度。
 pub async fn image_admission(
     state: &AppState,
     ctx: &ReqCtx,
     key: &Key,
+    fast: bool,
 ) -> Result<Admission, ApiError> {
     guard_hard_block(state).await?;
     let cap = queue_cap(state).await;
     let key_id = key.id();
     let now = state.now();
     // 登记与取编号在同一次加锁里完成，不会被别人插队
-    let admitted = state.guard.with(|g| match g.admit_image(key_id, cap, now) {
-        Some(r) => Err(r),
-        None => Ok(g.entries.last().map_or(0, |e| e.id)),
-    });
+    let admitted = state
+        .guard
+        .with(|g| match g.admit_image(key_id, cap, now, fast) {
+            Some(r) => Err(r),
+            None => Ok(g.entries.last().map_or(0, |e| e.id)),
+        });
     let entry_id = admitted.map_err(|r| gate(429, r))?;
     // 先拿到登记：等待时超时 / 客户端断开，登记照样归还
     let admission = Admission {
@@ -176,9 +181,6 @@ pub async fn image_admission(
         entry_id,
     };
     wait_key_turn(state, key_id, entry_id).await?;
-    // 公平排队（站长 10-22）：上游账号空出来时先给今天出得少的成员；轮到这一张时再取，前一张刚出完也算进去
-    let images_today = state.db.get_counter(key_id, &state.day()).await?.images;
-    ctx.set_share(images_today);
     let guard = state.guard.clone();
     ctx.on_sent(move || guard.with(|g| g.mark_running(key_id, Some(entry_id))));
     // 上游客户端排到 / 换到账号后报「还要等多久」：成员看到的排队位次按它排（两个账号各排各的）

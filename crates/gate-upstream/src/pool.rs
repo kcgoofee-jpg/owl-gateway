@@ -9,7 +9,7 @@
 //! [`TIE_SECS`]）时按轮询。排队期间别的账号空出来了（或者等了一半排队超时、别的账号明显更快），
 //! 就把这张挪过去（[`Pool::try_move`]），资格规则与选号完全一样（启停、冷却、Anlas、V5 日限、账号保护）。
 //!
-//! 同一个账号上谁先轮到按公平排队（[`crate::pace::fair_cmp`]：今天出得少的先，等久了的按先来后到），
+//! 同一个账号上谁先轮到按 [`crate::pace::fair_cmp`]：短作业车道（V5）先，同车道按先来后到，等满半个超时的跳过排队；
 //! 估算开始时间、成员看到的位次都按这个顺序算（[`Token::ahead_of`] / [`Token::ahead_for`]）。
 
 use crate::error::UpstreamError;
@@ -240,7 +240,7 @@ impl Token {
         self.with(|f| f.waiting.len())
     }
 
-    /// 票号 `id` 前面还有几张会先轮到（公平排队的顺序，`now` 是单调秒；不在队里时按队尾算）。
+    /// 票号 `id` 前面还有几张会先轮到（**排队顺序**，`now` 是单调秒；不在队里时按队尾算）。
     pub(crate) fn ahead_of(&self, id: u64, now: f64) -> usize {
         self.with(|f| {
             let Some((_, me)) = f.waiting.iter().find(|(w, _)| *w == id) else {
@@ -444,7 +444,7 @@ struct Waiters {
 pub(crate) struct Ticket {
     token: Arc<Token>,
     id: u64,
-    /// 公平排队的信息（换号时原样带到新账号）。
+    /// 排队信息（换号时原样带到新账号）。
     arrival: Arrival,
     waiters: Arc<Mutex<Waiters>>,
 }
@@ -684,7 +684,7 @@ impl Pool {
     /// 选一把符合费用策略、这张图能最早开始的 Token；V5 免费额度在这里原子预留。
     /// 要花 Anlas 的图跳过不能付 Anlas 的 Token（见 [`Token::can_pay_anlas`]）。
     /// `image_job`（图片车道）时还要过账号保护，并在选中的 Token 上登记排队票（见 [`Ticket`]）；
-    /// 估算开始时间按公平排队里这张会排在第几（`arrival`）。
+    /// 估算开始时间按排队顺序里这张会排在第几（`arrival`）。
     #[allow(clippy::too_many_arguments)] // 费用要求、车道、公平信息都只在选号这一层用
     pub(crate) async fn pick(
         &self,

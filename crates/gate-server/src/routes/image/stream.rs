@@ -209,8 +209,9 @@ async fn run_stream(
 ) {
     let key = prep.key.clone();
     let model = prep.model.clone();
+    let v5_lane = super::v5_lane(&state, &model);
     let mut queued = Box::pin(async {
-        let admission = image_admission(&state, &ctx, &key).await?;
+        let admission = image_admission(&state, &ctx, &key, v5_lane).await?;
         let slots = acquire_slots(&state);
         check_image_cooldown(&state)?;
         let reserved = reserve_image_budget(

@@ -211,7 +211,7 @@ pub async fn build(state: &AppState, now: f64) -> Result<Map<String, Value>, Int
     }
     let mut body = Map::new();
     body.insert("t".into(), json!(now));
-    // "fifo" = 全部按公平排队；"v5-priority" = V5 走短作业车道（guard_v5_priority 打开时）。
+    // "fifo" = 车道关掉、全部按先来后到；"v5-priority" = V5 走短作业车道（guard_v5_priority 打开时）。
     // 前端目前只读 queue.full / queue.waiting，多这一个字段不影响旧页面。
     let v5_priority = state.guard.with(|g| g.v5_priority());
     body.insert(

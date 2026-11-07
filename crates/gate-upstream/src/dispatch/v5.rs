@@ -62,9 +62,8 @@ impl<H: Hooks> NaiClient<H> {
         let started = tokio::time::Instant::now();
         let deadline = started + Duration::from_secs_f64(queue_timeout.max(0.0));
         let patient = started + Duration::from_secs_f64(queue_timeout.max(0.0) / 2.0);
-        // 公平排队的信息：成员今天的用量 + 开始排队的时刻（换号 / 402 换一把都不变）
-        let arrival =
-            Arrival::new(obs.share(), inner.scheduler.mono(), queue_timeout).fast_lane(v5_lane);
+        // 排队信息：开始排队的时刻（换号 / 402 换一把都不变）+ 短作业车道
+        let arrival = Arrival::new(inner.scheduler.mono(), queue_timeout).fast_lane(v5_lane);
         let mut moves = 0;
         'pick: loop {
             let Some((mut token, ticket)) = inner

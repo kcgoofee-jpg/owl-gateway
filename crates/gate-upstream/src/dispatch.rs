@@ -49,9 +49,8 @@ impl<H: Hooks> NaiClient<H> {
         let inner = &self.inner;
         // 换号重试要按最初的费用策略重新选号（V5 确认成「按 Anlas 计」会改这两项）
         let (v5_free0, requires_anlas0) = (o.v5_free, o.requires_anlas);
-        // 公平排队的信息：成员今天的用量 + 开始排队的时刻 + 是不是短作业车道（重试 / 换号都不变）
-        let arrival =
-            Arrival::new(obs.share(), inner.scheduler.mono(), o.queue_timeout).fast_lane(o.v5_lane);
+        // 排队信息：开始排队的时刻 + 是不是短作业车道（重试 / 换号都不变）
+        let arrival = Arrival::new(inner.scheduler.mono(), o.queue_timeout).fast_lane(o.v5_lane);
         let mut attempts = 0;
         let mut switched = false;
         while attempts < 2 + usize::from(switched) {
@@ -373,7 +372,7 @@ impl<H: Hooks> NaiClient<H> {
         Attempt::Done(Ok(resp))
     }
 
-    /// 等这张图在 `fl` 的账号上轮到（公平排队里排第一）：占并发槽、等出图间隔到点（[`Scheduler::acquire`](crate::scheduler::Scheduler::acquire)）。
+    /// 等这张图在 `fl` 的账号上轮到（排队顺序里排第一）：占并发槽、等出图间隔到点（[`Scheduler::acquire`](crate::scheduler::Scheduler::acquire)）。
     /// 等的同时每 [`POLL`] 看一次：报「还要等多久」给观察者；`can_move` 时问令牌池能不能换到更早开始的账号
     /// （[`Pool::try_move`](crate::pool::Pool::try_move)，过了 `patient` 以后更积极）。到 `deadline` 还没轮到算超时。
     #[allow(clippy::too_many_arguments)] // 费用要求与超时都只在这一层用
@@ -397,7 +396,7 @@ impl<H: Hooks> NaiClient<H> {
             ticket,
             ..
         } = fl;
-        // 轮到谁按这个账号上的公平排队（见 Scheduler::acquire）
+        // 轮到谁按这个账号上的排队顺序（见 Scheduler::acquire）
         let ticket_id = ticket.as_ref().map(Ticket::id);
         let acquire = inner.scheduler.acquire(token, permit, turn, ticket_id);
         tokio::pin!(acquire);

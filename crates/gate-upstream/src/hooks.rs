@@ -72,10 +72,6 @@ pub trait Observer: Send + Sync {
     fn queued(&self, _token_id: &str, _wait: f64) {}
     fn sent(&self) {}
     fn status(&self, _code: u16) {}
-    /// 这个成员今天已经出了几张：公平排队按它排（少的先，见 [`crate::pace::fair_cmp`]）。默认 0。
-    fn share(&self) -> i64 {
-        0
-    }
     /// 上游对 `token_id` 回了「并发锁」（上一张还没释放；不是限流，网关会在同一账号上稍后重试）。
     fn locked(&self, _token_id: &str) {}
 }

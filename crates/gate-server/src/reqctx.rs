@@ -57,8 +57,6 @@ struct Inner {
     on_sent: Option<Box<dyn FnOnce() + Send>>,
     /// 上游客户端估计这一张何时开始（墙钟）：排队位次按它排。
     on_queued: Option<Arc<dyn Fn(f64) + Send + Sync>>,
-    /// 这个成员今天已经出了几张（出图准入时取）：上游公平排队按它排，少的先。
-    share: i64,
     /// 本请求遇到上游「并发锁」的次数（网关已在同一账号上重试；不算 429）。
     locked: u32,
     client_disconnected: bool,
@@ -104,7 +102,6 @@ impl ReqCtx {
                 ua: String::new(),
                 on_sent: None,
                 on_queued: None,
-                share: 0,
                 locked: 0,
                 client_disconnected: false,
             })),
@@ -249,10 +246,6 @@ impl ReqCtx {
         self.with(|i| i.on_queued = Some(Arc::new(hook)));
     }
 
-    /// 记下这个成员今天已经出了几张（公平排队用）。
-    pub fn set_share(&self, images_today: i64) {
-        self.with(|i| i.share = images_today.max(0));
-    }
     pub fn was_sent(&self) -> bool {
         self.with(|i| i.sent.is_some())
     }
@@ -383,9 +376,6 @@ impl gate_upstream::client::Observer for ReqCtx {
     }
     fn status(&self, code: u16) {
         self.mark_status(code);
-    }
-    fn share(&self) -> i64 {
-        self.with(|i| i.share)
     }
     fn locked(&self, token_id: &str) {
         let n = self.with(|i| {
