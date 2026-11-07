@@ -135,7 +135,9 @@ export function Topbar(props: {
         <div class="site-top__right">
           <a class="site-top__poker" href="/poker" aria-label="德州扑克牌桌" title="德州扑克">
             <svg viewBox="0 0 24 24" aria-hidden="true">
-              <path d="M12 2C9.6 5.6 4 9 4 13.2A5 5 0 0 0 12 18c.2 1.6-.6 2.9-1.6 4h3.2C12.6 20.9 11.8 19.6 12 18a5 5 0 0 0 8-4.8C20 9 14.4 5.6 12 2Z" />
+              <path d="M6.2 7.5h11.6a3.2 3.2 0 0 1 3.1 2.4l1 4.3a2.7 2.7 0 0 1-4.6 2.5l-1.5-1.6a3.4 3.4 0 0 0-4.9 0l-1.5 1.6a2.7 2.7 0 0 1-4.6-2.5l1-4.3a3.2 3.2 0 0 1 3.1-2.4Z" />
+              <circle cx="8.3" cy="12.4" r="1.25" />
+              <circle cx="15.7" cy="12.4" r="1.25" />
             </svg>
             <span class="sr-only">德州扑克</span>
           </a>
