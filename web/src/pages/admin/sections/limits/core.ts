@@ -60,6 +60,10 @@ export const GUARD_COPY: Record<string, { label: string; hint: string; unit?: st
     hint: "每个上游账号最多同时排几张；全站上限 = 这个数 × 可用账号数，再按排队超时内能开始的张数收紧",
     unit: "张",
   },
+  v5_priority: {
+    label: "V5 优先",
+    hint: "1 = V5 请求先于同条件的 4.5 开始（不抢正在出的那张；等满 45 秒的 4.5 仍会跳到最前）；0 = 全部按用量排队",
+  },
 };
 
 /** 接口给的字段 → 表单规格（范围取自接口） */

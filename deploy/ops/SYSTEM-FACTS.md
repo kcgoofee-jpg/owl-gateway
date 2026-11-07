@@ -25,6 +25,7 @@
 | 每日上限 `guard_account_daily_cap` | 2400（0～20000，手动） | 未核对 | 每个上游账号每个服务日的出图总量（V4.5 + V5 合计）；用完等次日 07:00。10-23 起只有这个手动值（加上 `nai-ops manual` 的临时值 `guard_token_daily_caps`）；按最近 7 天自动定的 `quota_account_caps` / `quota_account_cap_auto` 删除 |
 | 每人排队 `guard_queue_per_member` | 2（1～5，手动） | 未部署 | 10-22 取代 `guard_key_image_queue`（旧键留在库里也不再读）。每个成员最多同时 2 张**还没发往上游**的图（正在生成的不算），再发当场回 429（`member_queue_full`，「你已有 2 张在排队，等前面的出完再发」），不占账号、不扣 Anlas。同一把 Key 仍然一次只生成 1 张：排着的那张等前一张出完（或被拒 / 取消）才往上游发；等待超过排队超时回 429（`queue_timeout`）。首页 / `/public/status` 里的字段名仍是 `key_image_queue`（兼容），值是这一项 |
 | 全站排队 `guard_queue_per_account` | 5（0～100） | 5 | 每个上游账号最多同时 5 张（含正在生成的），再收紧到排队超时内这个账号真能开始的张数（见下面「选号与排队中换号」）；满了回 429（`queue_full`） |
+| V5 优先 `guard_v5_priority` | 1（0～1，手动） | 1（11-07 发版起） | 11-07 加：同一个上游账号空出来时，模型族是 `nai-diffusion-5-*` 的请求先于同条件的普通请求开始（`pace::Arrival::fast_lane` → `fair_cmp`）。不抢占已经发往上游的那张，不提高 RPM / 排队容量 / 额度；等满排队超时一半（45 秒）的普通请求仍然跳到最前，所以不会饿死。只影响派发顺序，`/public/live` 的 `mode` 会报 `v5-priority`（关掉报 `fifo`）。依据：V5 实测 `dur_ms` 中位 3.9 秒、上界 9.7 秒，V4.5 中位 8.9 秒、上界 52 秒（`docs/report-20261107-v5-queue.md`）；模拟给 V5 平均等待 −89.6%、V4.5 +1.9%（上界 1/(1−ρ_v5)=1.019）。回滚：`nai-ops set v5_priority 0` |
 | 每把 Key 每分钟请求数 | 成员 Key 5；后台手建 Key 10（代码常量，`defaults.rs`；手建时可在弹窗里改） | 未核对 | 生图 / 放大 / 导演工具 / Vibe / 标签补全都计数（10-31 起标签补全也计入，以前不计导致客户端可以无节制灌），被拒的也计。超出回 429（`key_rate`） |
 | 排队超时 `runtime_queue_timeout` | 90 秒（代码常量；后台可改，范围 15～300） | 90 | 超时回 429（`queue_timeout`） |
 | 上游 429 后的全站冷却 `runtime_image_429_cooldown_seconds` | 60 秒（代码常量；后台可改，范围 60～3600） | 180 | 实际冷却 = max(此值, 上游 Retry-After)，Retry-After 先夹到 5～3600 秒。冷却期内所有图片请求回 429（`cooldown`）；冷却状态跨重启保留（`image_cooldown_until`，超过 1 小时的值视为无效） |
@@ -209,7 +210,7 @@
 
 | 组 | 键 | 默认 / 线上 |
 |---|---|---|
-| `guard_*` | 5 个账号保护字段：`account_daily_cap`、`post_jitter_min`、`post_jitter_max`、`queue_per_member`、`queue_per_account`（另有运行态 `guard_token_daily_caps`、熔断状态），见 §1 | 见 §1 |
+| `guard_*` | 6 个账号保护字段：`account_daily_cap`、`post_jitter_min`、`post_jitter_max`、`queue_per_member`、`queue_per_account`、`v5_priority`（另有运行态 `guard_token_daily_caps`、熔断状态），见 §1 | 见 §1 |
 | `runtime_*` | `queue_timeout`、`image_429_cooldown_seconds`，后台可调，重启后仍优先于代码常量（`runtime_image_min_interval` 10-23 删除，旧行不再读） | 见 §1 |
 | `quota_*` | 10-23 起全部不再读写（见 §2「删除」） | — |
 | `autopilot_*` | `autopilot_breaker_until`（规则模式键、`autopilot_last`、`autopilot_history` 已不再读写，见 §3） | 运行态 |
