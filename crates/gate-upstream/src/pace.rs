@@ -31,7 +31,12 @@ pub struct Arrival {
     /// 开始排队的时刻（上游客户端的单调秒）。
     pub since: f64,
     /// 到这个时刻（单调秒）还没开始就不再看用量，按先来后到排在最前（防饿死：开始排队 + 排队超时的一半）。
+    /// 只在同一条车道内生效——跨车道的抢先看 [`Self::hard_at`]。
     pub patient_at: f64,
+    /// 到这个时刻（单调秒）还没开始就压过短作业车道（防饿死：开始排队 + 整个排队超时）。
+    /// 半个超时只在车道内抢先，是因为拥塞时几乎每张普通请求都过 45 秒，用两条不同的阈值才能既让 V5 真的先出、
+    /// 又不把普通请求饿死。
+    pub hard_at: f64,
     /// 短作业车道（V5）：实测上游只占 4 秒左右、且没有长尾，让它先于同条件的普通请求开始。
     /// 只由服务端按请求体里的模型判定（`guard_v5_priority` 关掉即为 false），客户端指定无效。
     pub fast_lane: bool,
@@ -43,6 +48,7 @@ impl Arrival {
             share: share.max(0),
             since: now,
             patient_at: now + queue_timeout.max(0.0) / 2.0,
+            hard_at: now + queue_timeout.max(0.0),
             fast_lane: false,
         }
     }
@@ -54,16 +60,21 @@ impl Arrival {
     }
 }
 
-/// 公平排队的先后（`Less` = `a` 先轮到）：等久了的（过了 `patient_at`）在最前、按先来后到；
-/// 其余短作业车道（V5）先，再按今天出的张数从少到多，一样多按先来后到；最后按票号（同一时刻到的先登记的先）。
+/// 公平排队的先后（`Less` = `a` 先轮到）：
+/// 1. **车道**：短作业（V5）先于普通；只有等满整个排队超时的普通请求（`hard_at`）才压过车道；
+/// 2. **车道内**：等满半个超时的（`patient_at`）不再看用量，按先来后到；
+/// 3. 其余按今天出的张数从少到多，再按先来后到；
+/// 4. 最后按票号（同一时刻到的先登记的先）。
+///
+/// 为什么分两档：11-07 上线实测发现，拥塞时几乎每张普通请求都过了 45 秒，若「等半个超时」就能越过车道，
+/// V5 一次也插不进去（18:05 那批 V5 等了 52 秒、79 秒）。半个超时留在车道内防饿死，整个超时才允许跨车道。
 pub fn fair_cmp(a: (&Arrival, u64), b: (&Arrival, u64), now: f64) -> std::cmp::Ordering {
     let key = |(x, id): (&Arrival, u64)| {
         let aged = now >= x.patient_at;
-        // 老化的一律排最前、且不再看用量和车道（防饿死压过一切偏好），只按先来后到；
-        // 没老化的才比车道：快车道（V5）0、普通 1，同车道再按今天出的张数。
-        let lane = if aged || x.fast_lane { 0u8 } else { 1 };
+        let hard = now >= x.hard_at;
+        let lane = if x.fast_lane || hard { 0u8 } else { 1 };
         let share = if aged { 0 } else { x.share };
-        (!aged, lane, share, x.since, id)
+        (lane, !aged, share, x.since, id)
     };
     let (ka, kb) = (key(a), key(b));
     ka.0.cmp(&kb.0)
@@ -148,16 +159,18 @@ mod tests {
     }
 
     #[test]
-    fn fast_lane_wins_until_the_other_side_has_waited_half_the_timeout() {
+    fn fast_lane_wins_until_the_other_side_has_waited_the_whole_timeout() {
         use std::cmp::Ordering::*;
-        // 普通先到、V5 后到：没老化前 V5 先上
+        // 普通先到、V5 后到：V5 先上
         let plain = Arrival::new(3, 0.0, 90.0);
         let v5 = Arrival::new(40, 5.0, 90.0).fast_lane(true);
         assert_eq!(fair_cmp((&v5, 2), (&plain, 1), 10.0), Less);
-        // 普通等过 45 秒（排队超时的一半）：老化压过车道，回到先来后到
-        assert_eq!(fair_cmp((&plain, 1), (&v5, 2), 45.0), Less);
-        // 两条都老化了：仍按先来后到
-        assert_eq!(fair_cmp((&v5, 2), (&plain, 1), 60.0), Greater);
+        // 普通等过 45 秒（半个超时）：只在普通车道内抢先，压不过车道
+        assert_eq!(fair_cmp((&plain, 1), (&v5, 2), 45.0), Greater);
+        // 等满整个超时（90 秒）：硬老化压过车道，最后一定能跑到
+        assert_eq!(fair_cmp((&plain, 1), (&v5, 2), 91.0), Less);
+        // V5 自己等满整个超时后，两条都按先来后到
+        assert_eq!(fair_cmp((&v5, 2), (&plain, 1), 96.0), Greater);
     }
 
     #[test]
