@@ -214,12 +214,9 @@
     border-color 0.15s;
 }
 .site-top__poker svg {
-  width: 17px;
-  height: 17px;
-  fill: none;
-  stroke: currentColor;
-  stroke-width: 1.7;
-  stroke-linejoin: round;
+  width: 16px;
+  height: 16px;
+  fill: currentColor;
 }
 .site-top__poker:hover {
   color: var(--text);

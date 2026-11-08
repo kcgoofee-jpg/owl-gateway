@@ -24,48 +24,22 @@ async fn poker_session(State(state): State<AppState>, req: Request) -> Response 
     if state.env.poker_sso_secret.is_empty() {
         return (StatusCode::SERVICE_UNAVAILABLE, "牌局未开启").into_response();
     }
-    let headers = req.headers().clone();
-    let member = session::member_state(&state, &headers).await.ok().flatten();
-
-    // 成员走 Discord 身份；游客用浏览器标记 owl_bid（没有就现种一个），两边都签同一套票
-    let (identity, is_guest, cookie) = match member {
-        Some((discord_id, _key)) => (discord_id, false, None),
-        None => {
-            let bid = headers
-                .get(axum::http::header::COOKIE)
-                .and_then(|v| v.to_str().ok())
-                .and_then(|raw| {
-                    raw.split(';')
-                        .filter_map(|kv| kv.trim().split_once('='))
-                        .find(|(k, _)| *k == super::public::BROWSER_COOKIE)
-                        .map(|(_, v)| v.to_string())
-                })
-                .filter(|b| super::public::valid_browser_id(b))
-                .unwrap_or_else(|| hex::encode(rand::random::<[u8; 16]>()));
-            let cookie = crate::session::set_cookie_header(
-                super::public::BROWSER_COOKIE,
-                &bid,
-                400 * 86400,
-                true,
-                "lax",
-            );
-            (format!("guest_{bid}"), true, Some(cookie))
-        }
+    let Some((discord_id, _key)) = session::member_state(&state, req.headers())
+        .await
+        .ok()
+        .flatten()
+    else {
+        return (StatusCode::UNAUTHORIZED, "请先用 Discord 登录").into_response();
     };
-    let discord_id = identity;
     // 昵称和头像由网关给，扑克侧不再回查
     let (username, display_name, avatar) = match state.db.discord_profile_row(&discord_id).await {
         Ok(Some(row)) => row,
         _ => (None, None, None),
     };
-    let name = if is_guest {
-        format!("游客{}", &discord_id[discord_id.len().saturating_sub(4)..])
-    } else {
-        display_name
-            .filter(|s| !s.is_empty())
-            .or(username)
-            .unwrap_or_else(|| format!("玩家{}", &discord_id[discord_id.len().saturating_sub(4)..]))
-    };
+    let name = display_name
+        .filter(|s| !s.is_empty())
+        .or(username)
+        .unwrap_or_else(|| format!("玩家{}", &discord_id[discord_id.len().saturating_sub(4)..]));
     let avatar = avatar.unwrap_or_default();
     let exp = state.now() as i64 + TTL_SECONDS;
     // 昵称里可能有冒号，payload 用 JSON 再转 hex，避免分隔符歧义
@@ -81,10 +55,5 @@ async fn poker_session(State(state): State<AppState>, req: Request) -> Response 
         "{payload}.{}",
         session::hmac_hex(&state.env.poker_sso_secret, &payload)
     );
-    let mut resp = ok_json(&json!({ "token": token, "exp": exp, "guest": is_guest }));
-    if let Some(cookie) = cookie {
-        resp.headers_mut()
-            .append(axum::http::header::SET_COOKIE, cookie);
-    }
-    resp
+    ok_json(&json!({ "token": token, "exp": exp }))
 }
