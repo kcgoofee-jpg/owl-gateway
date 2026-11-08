@@ -126,18 +126,13 @@ export function Topbar(props: {
       <div class="wrap site-top__in">
         <a class="brand" href="/">
           <span class="brand__mark-anchor" aria-hidden="true">
-            <img class="brand__mark" src="/_owl/owl-eyes.svg" alt="" width="32" height="32" />
+            <img class="brand__mark" src="/_owl/favicon.svg" alt="" width="32" height="32" />
             <i class="brand__landing-eye" />
             <i class="brand__landing-eye" />
           </span>
           <span class="brand__name">猫头鹰公益站</span>
         </a>
         <div class="site-top__right">
-          <a class="site-top__poker" href="/poker" aria-label="德州扑克牌桌" title="德州扑克">
-            <svg viewBox="0 0 24 24" aria-hidden="true">
-              <path d="M12 2C9.6 5.6 4 9 4 13.2A5 5 0 0 0 12 18c.2 1.6-.6 2.9-1.6 4h3.2C12.6 20.9 11.8 19.6 12 18a5 5 0 0 0 8-4.8C20 9 14.4 5.6 12 2Z" />
-            </svg>
-          </a>
           {props.workbench && (
             <a id="workbench-entry" class="btn btn--primary btn--sm site-top__wb" href="/image">
               生图工作台

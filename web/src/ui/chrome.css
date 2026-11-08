@@ -198,31 +198,3 @@
   left: 74.21875%;
   top: 49.53125%;
 }
-
-/* 顶栏的扑克牌入口：和工作台按钮同排，做成圆形图标按钮 */
-.site-top__poker {
-  display: grid;
-  place-items: center;
-  width: var(--control-h);
-  height: var(--control-h);
-  border: 1px solid var(--border);
-  border-radius: 50%;
-  color: var(--text-2);
-  text-decoration: none;
-  transition:
-    color 0.15s,
-    border-color 0.15s;
-}
-.site-top__poker svg {
-  width: 16px;
-  height: 16px;
-  fill: currentColor;
-}
-.site-top__poker:hover {
-  color: var(--text);
-  border-color: var(--border-strong);
-}
-.site-top__poker:focus-visible {
-  outline: 2px solid var(--focus);
-  outline-offset: 2px;
-}

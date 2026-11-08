@@ -1,5 +1,4 @@
-import { readFile } from "node:fs/promises";
-import { extname, join, normalize, resolve } from "node:path";
+import { resolve } from "node:path";
 import preact from "@preact/preset-vite";
 import type { Plugin } from "vite";
 import { defineConfig } from "vitest/config";
@@ -26,39 +25,11 @@ function pageRoutes(): Plugin {
   };
 }
 
-// 开发时把 /poker-assets 指到仓库外的 mirror 目录（线上由网关的 STATIC_DIR 提供）
-function pokerAssets(): Plugin {
-  const root = resolve(import.meta.dirname, "../mirror/poker-assets");
-  const MIME: Record<string, string> = {
-    ".png": "image/png",
-    ".jpg": "image/jpeg",
-    ".webp": "image/webp",
-    ".json": "application/json",
-  };
-  return {
-    name: "owl-poker-assets",
-    configureServer(server) {
-      server.middlewares.use("/poker-assets", async (req, res, next) => {
-        const rel = decodeURIComponent((req.url ?? "").split("?")[0] ?? "");
-        const full = normalize(join(root, rel));
-        if (!full.startsWith(root)) return next();
-        try {
-          const buf = await readFile(full);
-          res.setHeader("content-type", MIME[extname(full)] ?? "application/octet-stream");
-          res.end(buf);
-        } catch {
-          next();
-        }
-      });
-    },
-  };
-}
-
 // 本站前端使用 /_owl/ 前缀，和官网镜像的静态资源路径分开。
 // 多页：首页和后台各一个入口，网关按路径返回对应的 HTML（并注入首屏数据）。
 export default defineConfig({
   base: "/_owl/",
-  plugins: [pageRoutes(), pokerAssets(), preact()],
+  plugins: [pageRoutes(), preact()],
   build: {
     outDir: "dist",
     assetsDir: ".",

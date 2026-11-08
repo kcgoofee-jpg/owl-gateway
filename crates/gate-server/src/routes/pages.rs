@@ -1,4 +1,4 @@
-//! 页面与静态资源：`/`、`/poker`、`/workbench`、`/admin`（含 `/admin/*` 前端路由，`/admin/api/*` 除外）、`/_owl/*`、图标、健康检查。
+//! 页面与静态资源：`/`、`/workbench`、`/admin`（含 `/admin/*` 前端路由，`/admin/api/*` 除外）、`/_owl/*`、图标、健康检查。
 
 use crate::AppState;
 use crate::error::ok_json;
@@ -25,8 +25,6 @@ pub fn router() -> Router<AppState> {
         )
         .route("/admin/{*rest}", get(admin_spa))
         .route("/_owl/{*path}", get(asset))
-        // 牌桌素材（从 PokerStars 客户端提取的牌面/桌布/图标），同样走 STATIC_DIR
-        .route("/poker-assets/{*path}", get(poker_asset))
         // 官网构建产物的绝对路径：全部映射到 dist/nai-app 下
         .route("/bridge.js", get(mirror_file))
         .route("/manifest.json", get(mirror_file))
@@ -102,11 +100,6 @@ async fn admin_spa(State(st): State<AppState>, Path(rest): Path<String>) -> Resp
 
 async fn asset(State(st): State<AppState>, Path(path): Path<String>) -> Response {
     st.assets.asset(&path)
-}
-
-/// `/poker-assets/*`：牌桌用的官方素材（牌面、牌背、图标），放在 `STATIC_DIR/poker-assets/`。
-async fn poker_asset(State(st): State<AppState>, Path(path): Path<String>) -> Response {
-    st.assets.asset(&format!("poker-assets/{path}"))
 }
 
 /// 官网生图页：官方构建产物 + 桥接层配置（成员 Key 由首屏数据带入）。
