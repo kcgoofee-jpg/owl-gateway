@@ -64,10 +64,10 @@ async fn is_maintenance_owner(state: &AppState, headers: &axum::http::HeaderMap)
     if owners.is_empty() {
         return false;
     }
-    if let Ok(Some((discord_id, _))) = crate::session::member_state(state, headers).await {
-        if listed_owner(&discord_id, owners) {
-            return true;
-        }
+    if let Ok(Some((discord_id, _))) = crate::session::member_state(state, headers).await
+        && listed_owner(&discord_id, owners)
+    {
+        return true;
     }
     let token = crate::auth::bearer(headers);
     if token.is_empty() {
