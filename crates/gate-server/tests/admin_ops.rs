@@ -205,6 +205,64 @@ async fn maintenance_switch_pauses_public_routes_and_keeps_admin_and_health_avai
 }
 
 #[tokio::test]
+async fn owner_maintenance_lets_the_owner_key_generate_and_blocks_others() {
+    let e = setup(&[("MAINTENANCE_OWNER_IDS", SUBJECT)]).await;
+    let admin = Admin::login_bare(&e.state).await;
+    assert_eq!(
+        admin
+            .put("/ops/maintenance", json!({"mode": "owner"}))
+            .await
+            .json(),
+        json!({"enabled": true, "mode": "owner"})
+    );
+
+    let (status, _) = generate(&e.state, TOKEN).await;
+    assert_eq!(status, 200, "站长 Key 在 owner 档应能出图");
+
+    const OTHER: &str = "nai-test-member-key-000000000000000001";
+    e.state
+        .db
+        .create_key(
+            &gate_db::repo::keys::NewKey {
+                name: "其他成员".into(),
+                token: OTHER.into(),
+                enabled: true,
+                expires_at: None,
+                discord_id: Some("900000000000000002".into()),
+            },
+            e.state.now(),
+        )
+        .await
+        .unwrap();
+    let (status, body) = generate(&e.state, OTHER).await;
+    assert_eq!(status, 503);
+    assert_eq!(
+        serde_json::from_slice::<Value>(&body).unwrap()["detail"],
+        "本站维护中，服务暂时暂停"
+    );
+    let (status, _) = generate(&e.state, "nai-unknown").await;
+    assert_eq!(status, 503);
+    assert_eq!(
+        common::send(&e.state, "GET", "/public/live", None, None, &[])
+            .await
+            .status,
+        503
+    );
+}
+
+#[tokio::test]
+async fn owner_maintenance_requires_configured_owner_ids() {
+    let e = setup(&[]).await;
+    let admin = Admin::login_bare(&e.state).await;
+    let res = admin
+        .put("/ops/maintenance", json!({"mode": "owner"}))
+        .await;
+    assert_eq!(res.status, 422);
+    assert!(res.text().contains("MAINTENANCE_OWNER_IDS"));
+    assert_eq!(common::setting(&e.state, "maintenance_mode").await, None);
+}
+
+#[tokio::test]
 async fn retired_identity_lists_cannot_be_written_as_runtime_settings() {
     let env = setup(&[]).await;
     let api = Admin::login_bare(&env.state).await;

@@ -54,14 +54,30 @@ fn maintenance_bypass(path: &str) -> bool {
         )
 }
 
-/// 「只有站长可用」维护模式下判断当前请求是不是站长本人（看网页登录的成员会话）。
+fn listed_owner(id: &str, owners: &[String]) -> bool {
+    !id.is_empty() && owners.iter().any(|owner| owner == id)
+}
+
+/// 「只有站长可用」：网页 Discord 登录，或站长自己的成员 Key（NovelAI 客户端只带 Bearer）。
 async fn is_maintenance_owner(state: &AppState, headers: &axum::http::HeaderMap) -> bool {
     let owners = &state.env.maintenance_owner_ids;
     if owners.is_empty() {
         return false;
     }
-    match crate::session::member_state(state, headers).await {
-        Ok(Some((discord_id, _))) => owners.iter().any(|id| id == &discord_id),
+    if let Ok(Some((discord_id, _))) = crate::session::member_state(state, headers).await {
+        if listed_owner(&discord_id, owners) {
+            return true;
+        }
+    }
+    let token = crate::auth::bearer(headers);
+    if token.is_empty() {
+        return false;
+    }
+    match state.db.get_key_by_token(&token).await {
+        Ok(Some(row)) => listed_owner(
+            row.get("discord_id").and_then(|v| v.as_str()).unwrap_or(""),
+            owners,
+        ),
         _ => false,
     }
 }

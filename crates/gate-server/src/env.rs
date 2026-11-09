@@ -111,7 +111,8 @@ pub struct EnvConfig {
     pub auth_block_seconds: i64,
     pub login_max_attempts: i64,
     pub login_window_seconds: i64,
-    /// 「只有站长可用」维护模式下放行的 Discord 成员 ID（逗号分隔）。空 = 该模式等同全站关闭。
+    /// 「只有站长可用」维护模式下放行的 Discord 成员 ID（逗号分隔）。
+    /// 网页登录会话和绑定到这些 ID 的成员 Key 都放行。空 = 该模式等同全站关闭。
     pub maintenance_owner_ids: Vec<String>,
     pub owner_image_subject: String,
     // Discord / 告警

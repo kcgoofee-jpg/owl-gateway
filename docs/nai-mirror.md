@@ -53,7 +53,7 @@
 | --- | --- |
 | `0` / `off` | 正常开放 |
 | `1` / `all` | 全部关闭（访客看维护页，接口 503，后台仍可用） |
-| `2` / `owner` | 只有站长可用：只有网页登录且 Discord ID 在 `MAINTENANCE_OWNER_IDS` 里的请求放行 |
+| `2` / `owner` | 只有站长可用：网页登录或成员 Key 的 Discord ID 在 `MAINTENANCE_OWNER_IDS` 里才放行（含 NovelAI 客户端出图） |
 
 `MAINTENANCE_OWNER_IDS`（逗号分隔）放在服务器 `.env`，compose 透传；留空时 `owner` 档等同全关，防止误配置。
 

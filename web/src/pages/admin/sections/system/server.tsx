@@ -28,7 +28,7 @@ export function MaintenanceCard() {
     {
       id: "owner",
       title: "只有站长可用",
-      desc: "除站长本人的网页登录外，其他人和客户端都收维护响应，方便自己先验证新版本。",
+      desc: "站长网页登录和绑定到站长 Discord 的 Key 可以出图；其他人与其它客户端收维护响应。",
     },
   ];
   return (
