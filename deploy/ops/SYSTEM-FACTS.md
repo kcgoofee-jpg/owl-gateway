@@ -77,7 +77,7 @@
 
 `quota_auto=1`（新建默认，后台显示「统一」）的成员 Key 由定时任务「额度同步」（每 10 分钟，后台改了额度时立即同步）把 `daily_images` / `daily_v5` 设成上面的手动值、`image_model_scope=all`。首页说明按成员默认规则现算，不再读写 `algo_notice`。后台单独设过额度的 Key（`quota_auto=-1`）不动。新领的 Key 直接用这两个值。「领 Key」页不再能改每人张数（回 400）。
 
-删除（库里的旧行不删，只是不再读写）：V4.5 每人上限自动调整（`quota_ceiling`、`quota_target_avg`、`quota_step`、`quota_ceiling_max`、`quota_base_min_fair`、water-fill）、总开关 `quota_auto_enabled`、每日复盘（`quota_algo_day` / `quota_algo_history` / `quota_algo_last`）、按电量定的 V5 当天方案（`quota_v5_day_plan`）、临时加量 `quota_v5_bonus`、自动暂停 `quota_v5_paused`、后台接口 `/admin/api/quota-algo`。V5 电量读数、官方恢复速度、安静时段实测恢复速度只在后台「记录」里显示（`GET /admin/api/quota-records`），不参与任何限额；上游确认免费 V5 见底时拒绝 V5（`v5_exhausted`）照旧。
+删除（库里的旧行不删，只是不再读写）：V4.5 每人上限自动调整（`quota_ceiling`、`quota_target_avg`、`quota_step`、`quota_ceiling_max`、`quota_base_min_fair`、water-fill）、总开关 `quota_auto_enabled`、每日复盘（`quota_algo_day` / `quota_algo_history` / `quota_algo_last`）、按电量定的 V5 当天方案（`quota_v5_day_plan`）、临时加量 `quota_v5_bonus`、自动暂停 `quota_v5_paused`、后台接口 `/admin/api/quota-algo`。V5 电量读数、官方恢复速度、安静时段实测恢复速度只在后台「记录」里显示（`GET /admin/api/quota-records`），不参与任何限额；上游确认免费 V5 见底（常规电量透支 **且** Extra Usage / `purchasedPercent` 为 0）时拒绝 V5（`v5_exhausted`）照旧。Usage Boost 加的 Extra Usage 仍是 0 Anlas 的免费 V5。
 
 ### 2.4 Anlas
 

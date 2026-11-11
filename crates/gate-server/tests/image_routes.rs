@@ -2392,6 +2392,45 @@ async fn usage_log_records_user_agent_and_real_client_ip() {
     );
 }
 
+/// Usage Boost Extra Usage is still free V5: a drained regular bar with remaining extra must not
+/// be treated as exhausted, even if the official meter reports isNegative.
+#[tokio::test]
+async fn extra_usage_keeps_v5_free_when_regular_meter_is_empty() {
+    let e = setup(&[]).await;
+    allow_v5(&e.state).await;
+    e.mock.push(
+        "/user/subscription",
+        Reply::json(
+            200,
+            &json!({
+                "tier": 3, "active": true,
+                "usage": {
+                    "percent": 0,
+                    "purchasedPercent": 98,
+                    "isNegative": true,
+                    "timeUntilNextPercent": 3600
+                }
+            }),
+        ),
+    );
+    for _ in 0..2 {
+        let (status, body) = v5_post(&e, image_body("nai-diffusion-5-full", 1)).await;
+        assert_eq!(status, 200, "{}", String::from_utf8_lossy(&body));
+    }
+    assert_eq!(e.mock.requests_to("/ai/generate-image").len(), 2);
+    assert_eq!(e.mock.requests_to("/user/subscription").len(), 1);
+    let rows = logs(&e.state).await;
+    let oks: Vec<&Value> = rows.iter().filter(|r| r["status"] == "ok").collect();
+    assert_eq!(oks.len(), 2, "{rows:?}");
+    for row in oks {
+        assert_eq!(row["anlas"], json!(0.0), "{row}");
+        assert!(
+            row["detail"].as_str().unwrap().contains("V5额度+1"),
+            "{row}"
+        );
+    }
+}
+
 /// Site-paid V5: once the account's free V5 meter is empty, an account listed in `v5_paid_tokens`
 /// pays from its own Anlas (logged, not charged to the member) until its budget runs out.
 #[tokio::test]

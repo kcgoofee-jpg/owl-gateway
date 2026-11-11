@@ -250,6 +250,7 @@ pub fn retry_seconds(status: Option<u16>, retry_after: &str) -> i64 {
 }
 
 /// 缓存有效期（秒）：剩 ≤2%（约 30 张）只用 15 秒（≈ 一次出图间隔），低于告警阈值 60 秒，其余 300 秒。
+/// `percent` 是常规电量加 Extra Usage 之后还剩的免费额度。
 pub fn cache_ttl(percent: i64, threshold: i64) -> i64 {
     if percent <= 2 {
         15
@@ -257,6 +258,34 @@ pub fn cache_ttl(percent: i64, threshold: i64) -> i64 {
         60
     } else {
         300
+    }
+}
+
+/// Regular `percent` plus Extra Usage (`purchasedPercent`). Extra Usage is still free V5.
+pub fn free_remaining(percent: Option<i64>, purchased_percent: Option<i64>) -> i64 {
+    percent
+        .unwrap_or(0)
+        .saturating_add(purchased_percent.unwrap_or(0))
+}
+
+/// Free V5 is gone only when Extra Usage is also gone and the regular bar is overdrawn.
+/// Usage Boost extra is consumed after regular usage and does not cost Anlas.
+pub fn free_exhausted(is_negative: Option<bool>, purchased_percent: Option<i64>) -> bool {
+    purchased_percent.unwrap_or(0) <= 0 && is_negative == Some(true)
+}
+
+/// Remaining free V5 is below the alert line. Extra Usage still counts; unknown regular percent is not "low".
+pub fn allowance_low(
+    is_negative: Option<bool>,
+    percent: Option<i64>,
+    purchased_percent: Option<i64>,
+    threshold: i64,
+) -> bool {
+    let extra = purchased_percent.unwrap_or(0);
+    if extra > 0 {
+        free_remaining(percent, purchased_percent) < threshold
+    } else {
+        is_negative == Some(true) || percent.is_some_and(|p| p < threshold)
     }
 }
 
@@ -274,7 +303,7 @@ pub enum Begin {
 /// 一次 `resolve` 的结果。
 #[derive(Debug, Clone, PartialEq)]
 pub struct Resolved {
-    /// `Ok(is_negative)`：额度是否已耗尽；`Err(())`：抛 [`UNAVAILABLE_MSG`]
+    /// `Ok(exhausted)`：免费 V5（含 Extra Usage）是否已耗尽；`Err(())`：抛 [`UNAVAILABLE_MSG`]
     pub result: Result<bool, ()>,
     /// 读数里带了「再恢复 1% 的秒数」：服务层接着调 [`AllowanceCore::note_period`]
     pub note_period: Option<i64>,
@@ -353,12 +382,12 @@ impl AllowanceCore {
         if now_mono < row.retry_at {
             return Begin::Unavailable;
         }
-        let pct = row.percent.unwrap_or(0);
-        let ttl = cache_ttl(pct, threshold);
-        // 不拿旧的「已耗尽」结果去把新的一张图切成付费
+        let remaining = free_remaining(row.percent, row.purchased_percent);
+        let ttl = cache_ttl(remaining, threshold);
+        // 不拿旧的「已耗尽」结果去把新的一张图切成付费。Extra Usage 还在时也算还有免费额度。
         if row.error.as_deref().is_none_or(str::is_empty)
-            && row.is_negative == Some(false)
-            && row.percent.unwrap_or(0) > 0
+            && remaining > 0
+            && !free_exhausted(row.is_negative, row.purchased_percent)
             && now_mono - row.at.unwrap_or(-1e9) < ttl as f64
         {
             return Begin::Cached;
@@ -438,12 +467,17 @@ impl AllowanceCore {
         );
         Resolved {
             result: if eligible {
-                Ok(sub.is_negative.expect("eligibility requires usage state"))
+                Ok(free_exhausted(sub.is_negative, sub.purchased_percent))
             } else {
                 Err(())
             },
             note_period: sub.next_percent_seconds,
-            low: sub.is_negative == Some(true) || sub.percent.is_some_and(|p| p < threshold),
+            low: allowance_low(
+                sub.is_negative,
+                sub.percent,
+                sub.purchased_percent,
+                threshold,
+            ),
         }
     }
 
@@ -459,7 +493,12 @@ impl AllowanceCore {
         let default = Row::default();
         let row = self.rows.get(token_id).unwrap_or(&default);
         let stale = now_mono - row.at.unwrap_or(-1e9) >= 300.0;
-        let low = row.is_negative == Some(true) || row.percent.is_some_and(|p| p < threshold);
+        let low = allowance_low(
+            row.is_negative,
+            row.percent,
+            row.purchased_percent,
+            threshold,
+        );
         // Historical samples are separate from the raw current API value (including zero).
         let nps = self
             .period(token_id, now_wall)
@@ -634,6 +673,63 @@ mod tests {
         assert_eq!(snap["active"], true);
         assert_eq!(snap["percent"], 0);
         assert_eq!(snap["error"], Value::Null);
+    }
+
+    fn usage_body(percent: i64, purchased: i64, negative: bool) -> Vec<u8> {
+        serde_json::to_vec(&json!({
+            "active": true, "tier": 3,
+            "usage": {
+                "percent": percent,
+                "purchasedPercent": purchased,
+                "isNegative": negative,
+                "timeUntilNextPercent": 3600
+            }
+        }))
+        .unwrap()
+    }
+
+    fn resolve_usage(percent: i64, purchased: i64, negative: bool) -> (AllowanceCore, Resolved) {
+        let body = usage_body(percent, purchased, negative);
+        let mut core = AllowanceCore::new();
+        let fetched = Fetched::Response {
+            status: 200,
+            retry_after: "",
+            body: Some(&body),
+        };
+        let resolved = core.finish_resolve("synthetic", &fetched, 10.0, 10.0, 20);
+        (core, resolved)
+    }
+
+    #[test]
+    fn extra_usage_is_still_free_v5_when_the_regular_bar_is_empty() {
+        assert!(!free_exhausted(Some(true), Some(98)));
+        assert_eq!(free_remaining(Some(0), Some(98)), 98);
+        assert!(!allowance_low(Some(true), Some(0), Some(98), 20));
+        assert!(free_exhausted(Some(true), Some(0)));
+        assert!(free_exhausted(Some(true), None));
+        assert!(!free_exhausted(Some(false), Some(0)));
+
+        let (core, resolved) = resolve_usage(0, 98, true);
+        assert_eq!(resolved.result, Ok(false));
+        assert!(!resolved.low);
+        assert_eq!(core.check_cache("synthetic", 11.0, 20), Begin::Cached);
+        let snap = core.account_snapshot(0, "synthetic", 20, 10.0, 10.0);
+        assert_eq!(snap["purchased_percent"], 98);
+        assert_eq!(snap["percent"], 0);
+        assert_eq!(snap["low"], false);
+        assert_eq!(snap["is_negative"], true);
+    }
+
+    #[test]
+    fn extra_usage_below_the_alert_line_is_low_but_not_exhausted() {
+        let (core, resolved) = resolve_usage(0, 5, true);
+        assert_eq!(resolved.result, Ok(false));
+        assert!(resolved.low);
+        assert_eq!(core.check_cache("synthetic", 11.0, 20), Begin::Cached);
+        assert_eq!(
+            core.account_snapshot(0, "synthetic", 20, 10.0, 10.0)["low"],
+            true
+        );
     }
 
     #[test]

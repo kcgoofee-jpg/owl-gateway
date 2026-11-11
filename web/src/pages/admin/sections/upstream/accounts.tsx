@@ -17,6 +17,7 @@ import {
   reading,
   tokenState,
   type UpstreamAccount,
+  v5Highlight,
   v5LimitSpecs,
   type WindowStats,
   yesterdayText,
@@ -121,6 +122,7 @@ export function AccountCard(props: {
   };
   const officialTotal =
     v?.fixed_anlas != null && v.purchased_anlas != null ? v.fixed_anlas + v.purchased_anlas : null;
+  const meter = v5Highlight(v);
   return (
     <Card class="up-account">
       <header class="token__head">
@@ -151,13 +153,13 @@ export function AccountCard(props: {
       <div class="up-highlights">
         <div>
           <span>V5 电量</span>
-          <strong>{v?.percent == null ? "—" : `${v.percent}%`}</strong>
+          <strong>{meter.label}</strong>
           <Meter
             label={<span class="sr-only">V5 电量</span>}
-            value={Math.max(0, Math.min(100, v?.percent ?? 0))}
+            value={meter.value}
             max={100}
-            text={answer(v?.is_negative, "负额度", v?.low ? "余量低" : "")}
-            {...withTone(v?.low ? "warn" : undefined)}
+            text={meter.status}
+            {...withTone(meter.warn ? "warn" : undefined)}
           />
         </div>
         <div>
@@ -226,7 +228,7 @@ export function AccountCard(props: {
           <Facts
             rows={[
               ["负额度", answer(v?.is_negative, "是", "否")],
-              ["额外购买电量", reading(v?.purchased_percent, "%")],
+              ["Usage Boost 额外电量", reading(v?.purchased_percent, "%")],
               ["下次恢复", duration(v?.time_until_next_percent_seconds)],
               ["当前推算恢复", reading(v?.current_response_recharge_per_day_estimate, "% / 天")],
               ["历史推算恢复", reading(v?.historical_sample_based_recharge_per_day_estimate, "% / 天")],

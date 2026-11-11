@@ -52,4 +52,5 @@
 
 - Anlas 是官方站的生成货币：出图超出订阅免费规格、Vibe、放大等会消耗。
 - 订阅档位（Paper / Tablet / Scroll / Opus）影响免费生成规格与 Anlas 收入；Opus 档小尺寸出图基本不耗 Anlas。
+- Opus 的 V5 免费出图有用量上限（像充电电池）：常规电量持续回补；买 Usage Boost（电池）会加 Extra Usage，常规电量用完后才扣 Extra，Extra 仍是 0 Anlas 的免费 V5。
 - 这些是**官方站**的概念；猫头鹰公益站的"额度"是站长自设的站内规则，与官方 Anlas 无关。

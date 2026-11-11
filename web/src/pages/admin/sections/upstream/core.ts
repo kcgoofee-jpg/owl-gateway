@@ -224,3 +224,24 @@ export function limitAgo(ts: number | null | undefined, now = Date.now() / 1000)
 export function quietText(rate: number | null | undefined): string {
   return rate == null || !Number.isFinite(rate) ? "—" : `${reading(rate)}% / 天`;
 }
+
+/** 账号卡片上的 V5 电量：常规电量用完后 Extra Usage 仍是免费额度。 */
+export function v5Highlight(
+  v: Pick<V5Row, "percent" | "purchased_percent" | "is_negative"> | null | undefined,
+): {
+  label: string;
+  value: number;
+  status: string;
+  warn: boolean;
+} {
+  if (v?.percent == null) return { label: "—", value: 0, status: "", warn: false };
+  const extra = v.purchased_percent ?? 0;
+  const remaining = v.percent + extra;
+  const exhausted = extra <= 0 && v.is_negative === true;
+  return {
+    label: extra > 0 ? `${v.percent}% + ${extra}% 额外` : `${v.percent}%`,
+    value: Math.max(0, Math.min(100, v.percent <= 0 && extra > 0 ? extra : v.percent)),
+    status: exhausted ? "负额度" : remaining < 20 ? "余量低" : extra > 0 && v.percent <= 0 ? "额外电量" : "",
+    warn: remaining < 20 || exhausted,
+  };
+}

@@ -74,6 +74,9 @@ fn row_json(core: &AllowanceCore, token: &str) -> Value {
         if let Some(v) = r.is_negative {
             m.insert("is_negative".into(), json!(v));
         }
+        if let Some(v) = r.purchased_percent {
+            m.insert("purchased_percent".into(), json!(v));
+        }
         if let Some(v) = r.checked_at {
             m.insert("checked_at".into(), f(v));
         }

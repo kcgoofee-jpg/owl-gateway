@@ -1,4 +1,4 @@
-# NovelAI Diffusion V5 与 Opus 用量上限 · 官方资料整理（2026-10-09 核对）
+# NovelAI Diffusion V5 与 Opus 用量上限 · 官方资料整理（2026-11-11 核对 Usage Boost）
 
 > 说明：官方文档受版权保护，这里不逐段搬运英文原文，而是按页给出原文链接 + 逐段中文详解，关键术语保留英文。
 > 对照阅读请点每节的链接。标「未经官方确认」的是在官方页面里找不到的内容。
@@ -34,6 +34,7 @@
 | U | The Anlas Policy Change Is Live（2026-09-22） | https://journal.novelai.net/anlas-policy-change/ |
 | V | V5 Full "Medium/High" Effort Toggle（2026-10-08） | https://journal.novelai.net/novelai-diffusion-v5-full-effort-toggle/ |
 | W | Terms of Service | https://novelai.net/terms |
+| X | Opus Usage Boost（2026-10-13） | https://journal.novelai.net/novelai-diffusion-v5-opus-usage-boost/ |
 
 R–V 都有日文版（路径带 `-jp`）。blog.novelai.net 拒绝访问，官方公告实际发在 journal.novelai.net。
 
@@ -137,6 +138,13 @@ R–V 都有日文版（路径带 `-jp`）。blog.novelai.net 拒绝访问，官
 ### W. Terms of Service（与公益站相关）
 - §5.1 一份订阅对应一个账号；§5.3.2 禁止让第三方远程访问账号；§5.3.5 禁止出租 / 出售 / 转让账号；§8.1 不得共享账号信息；§9.1.2 禁止复制、托管、转售服务；§9.1.3 禁止让他人通过你的账号使用服务；§9.1.6 未经允许禁止自动化系统、禁止给服务造成压力。没有公开速率限制数字。
 
+### X. Opus Usage Boost（2026-10-13）
+- 每个 Usage Boost $5.99，使用后给 Extra Usage 加 100%；库存最多 4 个，购后 1 年过期。
+- Extra Usage 和常规电量分开：常规电量先扣，扣完才扣 Extra Usage；常规电量照常回补，Boost 不影响回补速度。
+- Extra Usage 上限 400%；加上常规 100% 最多同时 500%。Extra Usage 超过 300% 时不能再用 Boost（必须先把 Extra 用到 ≤300%）。
+- Extra Usage 仍是 **0 Anlas 的免费 V5**（Normal、≤28 步、一次 1 张），不是付费 Anlas。接口字段是 `usage.purchasedPercent`。
+- 来源：https://journal.novelai.net/novelai-diffusion-v5-opus-usage-boost/
+
 ## 3. 对网关算法有用的事实（已用于 app/quota_algo.py）
 
 | 事实 | 数值 | 来源 |
@@ -148,6 +156,7 @@ R–V 都有日文版（路径带 `-jp`）。blog.novelai.net 拒绝访问，官
 | Medium effort | 比 High 省约 42%（固定 14 步、Euler Ancestral） | D、V |
 | 免费条件 | 一次 1 张、不用底图、≤ Normal（单张最大 1024×1024）、≤ 28 步 | B、N、P |
 | 一次多张 | 即使 Opus 也扣 Anlas（网关已强制每次 1 张） | M |
+| Usage Boost / Extra Usage | 每个 Boost +100% Extra Usage，仍是免费 V5；常规电量用完后才扣；接口 `purchasedPercent` | X |
 | 用完后每张 V5 扣多少 Anlas | 未经官方确认 | — |
 | 并发 / 速率限制数字 | 未经官方确认（只有 ToS §9.1.6 原则性条款） | W |
 

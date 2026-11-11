@@ -560,7 +560,7 @@ async fn default_reply(
                     "tier": 3, "active": true, "expiresAt": 1893456000,
                     "perks": {"maxPriorityActions": 1000, "startPriority": 10, "unlimitedMaxPriority": true},
                     "trainingStepsLeft": {"fixedTrainingStepsLeft": 10000, "purchasedTrainingSteps": 0},
-                    "usage": {"percent": pct, "isNegative": pct <= 0, "timeUntilNextPercent": 3600}
+                    "usage": {"percent": pct, "purchasedPercent": 0, "isNegative": pct <= 0, "timeUntilNextPercent": 3600}
                 }),
             )
         }

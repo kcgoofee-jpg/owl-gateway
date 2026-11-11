@@ -11,6 +11,7 @@ import {
   reading,
   tokenFormatProblem,
   tokenState,
+  v5Highlight,
   yesterdayText,
 } from "./core";
 
@@ -63,6 +64,27 @@ it("账号卡片上的运行文案", () => {
   expect(limitAgo(1_000 - 120, 1_000)).toBe("2 分钟前");
   expect(quietText(10.78)).toBe("10.78% / 天");
   expect(quietText(null)).toBe("—");
+});
+
+it("常规电量为空时仍显示 Usage Boost 额外电量", () => {
+  expect(v5Highlight(null).label).toBe("—");
+  expect(v5Highlight({ percent: 0, purchased_percent: 98, is_negative: true })).toEqual({
+    label: "0% + 98% 额外",
+    value: 98,
+    status: "额外电量",
+    warn: false,
+  });
+  expect(v5Highlight({ percent: 0, purchased_percent: 0, is_negative: true })).toMatchObject({
+    label: "0%",
+    status: "负额度",
+    warn: true,
+  });
+  expect(v5Highlight({ percent: 40, purchased_percent: 0, is_negative: false })).toEqual({
+    label: "40%",
+    value: 40,
+    status: "",
+    warn: false,
+  });
 });
 
 it("读数保留零与否定值，缺失值留空", () => {
