@@ -107,6 +107,7 @@ jobs:
         with:
           path: ~/.cache/ms-playwright
           key: playwright-${{ runner.os }}-${{ hashFiles('web/pnpm-lock.yaml') }}
+      - run: bash tools/ci/apt-ubuntu.sh
       - run: pnpm exec playwright install --with-deps chromium
         working-directory: web
         timeout-minutes: 10
@@ -184,6 +185,7 @@ jobs:
     timeout-minutes: 20
     steps:
       - uses: actions/checkout@v7
+      - run: bash tools/ci/apt-ubuntu.sh
       - run: sudo apt-get update && sudo apt-get install -y -o Acquire::Retries=3 --no-install-recommends musl-tools
       - run: rustup target add x86_64-unknown-linux-musl
       - uses: Swatinem/rust-cache@v2
