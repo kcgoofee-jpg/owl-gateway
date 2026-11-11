@@ -20,7 +20,7 @@ pub struct Key {
     credential: Credential,
     pub policy: MemberPolicy,
     pub owner_image_full: bool,
-    /// 站长号或赞助席插队：复用 V5 短作业车道，并越过全站排队满。
+    /// 站长号或赞助席插队：排在所有等待中的生图前面，并越过全站排队满。
     pub queue_jump: bool,
     /// 赞助席绑定的专属上游 Token；有则出图只走这把，不进全站池。
     pub bound_token_id: Option<String>,

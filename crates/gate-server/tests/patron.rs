@@ -202,7 +202,7 @@ async fn patron_portal_is_separate_from_admin_and_password_change_drops_the_sess
 }
 
 #[tokio::test]
-async fn patrons_reuse_the_fast_lane_and_keep_the_per_member_queue() {
+async fn patrons_skip_the_site_cap_and_keep_the_per_member_queue() {
     let e = setup(&[]).await;
     let admin = Admin::login(&e.state).await;
     e.state

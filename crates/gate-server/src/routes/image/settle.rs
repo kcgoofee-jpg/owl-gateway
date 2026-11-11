@@ -216,7 +216,8 @@ pub(super) async fn perform_generation(
     opts.v5_free = est0.v5 > 0 && est0.anlas == 0.0;
     opts.image_count = prep.image_count as usize;
     opts.image_lane = true;
-    opts.v5_lane = super::fast_lane(state, &key, &model);
+    opts.v5_lane = super::v5_lane(state, &model);
+    opts.jump_lane = key.queue_jump;
     opts.prefer_token_id = key.bound_token_id.clone();
     opts.max_response_bytes = Some(MAX_RESPONSE_BYTES);
     opts.queue_timeout = state.limits().queue_timeout;

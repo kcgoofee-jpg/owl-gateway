@@ -1080,9 +1080,9 @@ async fn one_image_per_key_at_a_time_without_per_key_interval() {
     );
 }
 
-/// 站长号复用 V5 短作业车道：全站排队满时普通 Key 进不去，站长号仍能入队出图。
+/// 站长号插队：全站排队满时普通 Key 进不去，站长号仍能入队出图。
 #[tokio::test]
-async fn owner_reuses_v5_lane_when_the_site_queue_is_full() {
+async fn owner_skips_site_cap_when_the_site_queue_is_full() {
     let e = setup(&[]).await;
     e.state.db.bind_image_owner(SUBJECT).await.unwrap();
     assert!(

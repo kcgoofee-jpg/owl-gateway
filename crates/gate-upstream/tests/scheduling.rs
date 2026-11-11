@@ -536,6 +536,7 @@ async fn stream_retries_a_concurrency_lock_but_not_a_rate_limit() {
                 false,
                 false,
                 false,
+                false,
                 30.0,
                 &Callbacks::default(),
                 None,
@@ -663,6 +664,57 @@ async fn a_v5_request_takes_the_fast_lane_over_an_earlier_plain_one() {
         v5.sent_at.lock().unwrap().unwrap(),
     );
     assert!(vt < pt, "V5 应先发出：v5={vt:?} plain={pt:?}");
+}
+
+/// 插队排在所有等待中的生图前面：账号先被占着，之后一张 V5 和一张更晚的插队进来，账号空出来时插队先发。
+#[tokio::test]
+async fn a_jump_request_starts_before_earlier_v5() {
+    let up = MockUpstream::start().await;
+    up.push(
+        "/ai/generate-image",
+        Reply::Chunks {
+            status: 200,
+            content_type: "binary/octet-stream".into(),
+            chunks: vec![(
+                Duration::from_millis(600),
+                bytes::Bytes::from(gate_testkit::zip_of_pngs(1)),
+            )],
+        },
+    );
+    let hooks = TestHooks::default();
+    let c = NaiClient::new(
+        config(&up.url(), &hooks, 0.0),
+        hooks.clone(),
+        vec![(T1.into(), 0, false)],
+    )
+    .unwrap();
+    let body = image_body();
+    let send = |obs: std::sync::Arc<Watch>, timeout: f64, v5_lane: bool, jump_lane: bool| {
+        let (c, url, body) = (c.clone(), up.url(), body.clone());
+        tokio::spawn(async move {
+            let mut o = image_opts(&url, &body);
+            o.queue_timeout = timeout;
+            o.v5_lane = v5_lane;
+            o.jump_lane = jump_lane;
+            c.request(o, &Callbacks::default(), None, obs.as_ref())
+                .await
+        })
+    };
+    let first = send(std::sync::Arc::new(Watch::default()), 30.0, false, false);
+    tokio::time::sleep(Duration::from_millis(100)).await;
+    let v5 = std::sync::Arc::new(Watch::default());
+    let v = send(v5.clone(), 30.0, true, false);
+    tokio::time::sleep(Duration::from_millis(100)).await;
+    let jump = std::sync::Arc::new(Watch::default());
+    let j = send(jump.clone(), 30.0, false, true);
+    for r in [first, v, j] {
+        r.await.unwrap().unwrap();
+    }
+    let (vt, jt) = (
+        v5.sent_at.lock().unwrap().unwrap(),
+        jump.sent_at.lock().unwrap().unwrap(),
+    );
+    assert!(jt < vt, "插队应先于 V5 发出：jump={jt:?} v5={vt:?}");
 }
 
 /// 成员看到的「还要等多久」按登记顺序：先来的估得更早，后来的排到后面。

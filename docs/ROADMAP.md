@@ -90,7 +90,7 @@
 | `crates/gate-upstream/src/pace.rs` | `Arrival::fast_lane` + `fair_cmp` 排序键 |
 | `crates/gate-upstream/src/dispatch.rs`、`dispatch/v5.rs` | 流式与非流式都带车道 |
 | `crates/gate-core/src/guard.rs` | 参数 `guard_v5_priority`（0/1，默认 **1**） |
-| `crates/gate-server/src/routes/image/{mod,settle,stream}.rs` | `fast_lane`：V5 看请求体模型 + 开关；站长号复用同一条车道 |
+| `crates/gate-server/src/routes/image/{mod,settle,stream}.rs` | `v5_lane`：V5 看请求体模型 + 开关；站长 / 赞助走 `jump_lane` |
 | `crates/gate-server/src/live.rs` | `/public/live` 的 `mode` 报 `v5-priority` 或 `fifo` |
 
 回滚：`nai-ops set v5_priority 0`（热更新，无需发版）。验收：发版后 24 小时 v5 的 `wait_ms` 中位降 ≥50%、v4.5 升 ≤5%；`queue_timeout` 与断连率不上升。
@@ -104,13 +104,13 @@
 
 现有 `owner_image_full`（环境变量绑定的站长号）保持不动，插队和功能放行与赞助席共用同一套判断，避免第三套特例。
 
-**插队**：不新开第三车道。`fast_lane = queue_jump || v5_lane`，`skip_site_cap = queue_jump`。`queue_jump` = 站长号或赞助席插队。每人排队上限和 RPM 不提高；不抢占已经发往上游的那张；多名赞助者在同一条短作业车道里按先来后到；等满 90 秒的普通请求仍可压过车道（现有老化）。
+**插队**（11-12）：`jump_lane = queue_jump`，`fast_lane` 只留给 V5，`skip_site_cap = queue_jump`。`queue_jump` = 站长号或赞助席插队。同一个账号空出来时插队排在所有等待中的 V5 / V4.5 前面；每人排队上限和 RPM 不提高；不抢占已经发往上游的那张；多名赞助者在插队车道里按先来后到。等满 90 秒的普通 / V5 可以压过 V5 车道，不能压过插队。
 
 **专属 Token**：不进入普通选号池，也不计入全站 `queue_cap`。该成员出图只派到这把 Token；冷却 / 401 / 见底时用明确 429/503，不悄悄改走站账号。走专属 Token 或已打开 `paid_parameters` 时不再套免费档裁剪。专属 Token 的 Anlas 花在捐赠账号上，不扣全站池、不受全站 V5 暂停。金钱赞助开挂费开关仍花全站 Anlas / V5 池。
 
 **入口**：`/patron` 独立密码、独立 Cookie（`nai_gate_patron`，`Path=/patron`）。登录限速与后台同一套（每 IP 5 次 / 300 秒）。接口只暴露登录、退出、欢迎与开关、自己改密。赞助 Cookie 打到 `/admin/api` 为 401。
 
-> 与 §6 的 V5 车道区分：V5 车道是**模型维度**；这一节是**成员维度**。赞助席和站长号走的是同一条短作业车道，不是第三档优先级。通用「第三优先级车道」不做。
+> 与 §6 的 V5 车道区分：V5 车道是**模型维度**；这一节是**成员维度**。插队是单独一条更高的车道（站长 / 赞助），V5 仍只压过普通请求。
 
 ## 8. 单上游账号更高并发评估（未排期）
 

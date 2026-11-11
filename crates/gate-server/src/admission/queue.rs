@@ -155,9 +155,9 @@ async fn wait_key_turn(state: &AppState, key_id: i64, entry_id: i64) -> Result<(
         .map_err(|_| queue_timeout())
 }
 
-/// `fast` = 短作业车道（V5，或插队复用同一条车道）：只影响同一把 Key 里能不能越过
-/// 还没开始的普通条目（[`gate_core::guard::GuardCore::key_turn`]），不影响额度。
-/// 插队（站长号 / 赞助席 `queue_jump`）越过全站排队满，每人排队上限照旧。
+/// `fast` = 短作业车道（V5）：只影响同一把 Key 里能不能越过还没开始的普通条目
+///（[`gate_core::guard::GuardCore::key_turn`]），不影响额度。
+/// 插队（站长号 / 赞助席 `queue_jump`）越过全站排队满，并排在所有等待中的 V5 / V4.5 前面；每人排队上限照旧。
 pub async fn image_admission(
     state: &AppState,
     ctx: &ReqCtx,

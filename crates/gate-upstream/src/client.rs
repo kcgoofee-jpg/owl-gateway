@@ -87,8 +87,10 @@ pub struct RequestOpts<'a> {
     pub v5_free: bool,
     pub image_count: usize,
     pub image_lane: bool,
-    /// 短作业车道（V5，或站长号复用）：同一个上游账号空出来时先于普通请求开始（见 `pace::Arrival::fast_lane`）。
+    /// 短作业车道（V5）：同一个上游账号空出来时先于普通请求开始（见 `pace::Arrival::fast_lane`）。
     pub v5_lane: bool,
+    /// 插队车道（站长号 / 赞助席）：同一个上游账号空出来时排在所有等待中的 V5 / V4.5 前面（见 `pace::Arrival::jump_lane`）。
+    pub jump_lane: bool,
     pub wait_for_image_slot: bool,
     pub max_response_bytes: Option<usize>,
     pub queue_timeout: f64,
@@ -117,6 +119,7 @@ impl<'a> RequestOpts<'a> {
             image_count: 0,
             image_lane: false,
             v5_lane: false,
+            jump_lane: false,
             wait_for_image_slot: true,
             max_response_bytes: None,
             queue_timeout: 90.0,
