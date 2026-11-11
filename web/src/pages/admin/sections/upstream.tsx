@@ -96,27 +96,30 @@ export default function Upstream() {
       {loading && !data && <Loading rows={3} />}
       {!data && error && <LoadError error={error} />}
       {data && !data.pool_configured && <Notice tone="danger">尚未配置上游 Token。</Notice>}
-      <div class="stack">
-        {(data?.accounts ?? [])
-          // 能用的排前面，已停用 / 被上游禁用的沉到最后（同类里按编号）
-          .slice()
-          .sort(
-            (x, y) =>
-              Number(y.admin_enabled && !y.disabled) - Number(x.admin_enabled && !x.disabled) ||
-              x.position - y.position,
-          )
-          .map((a) => (
-            <AccountCard
-              key={a.token_id}
-              a={a}
-              only={pool.length <= 1}
-              onDetails={setDetails}
-              onReplace={(t) => setDialog({ mode: "replace", target: t })}
-              onDelete={setDel}
-              onToggle={setToggle}
-            />
-          ))}
-      </div>
+      {data && (
+        <div class="stack">
+          {data.accounts
+            // 能用的排前面，已停用 / 被上游禁用的沉到最后（同类里按编号）
+            .slice()
+            .sort(
+              (x, y) =>
+                Number(y.admin_enabled && !y.disabled) - Number(x.admin_enabled && !x.disabled) ||
+                x.position - y.position,
+            )
+            .map((a) => (
+              <AccountCard
+                key={a.token_id}
+                a={a}
+                limit={data.fields.v5_daily_limit}
+                only={pool.length <= 1}
+                onDetails={setDetails}
+                onReplace={(t) => setDialog({ mode: "replace", target: t })}
+                onDelete={setDel}
+                onToggle={setToggle}
+              />
+            ))}
+        </div>
+      )}
       {details && data && (
         <AccountDetails
           key={details.token_id}

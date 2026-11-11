@@ -1,4 +1,3 @@
-import { V5_PAUSED_HINT } from "./status";
 import type { Me, MeMember, ServerQuotaRow } from "./types";
 
 /** /public/me 的响应（或网关注入的 owl-boot.me）长得像不像一个 Me。 */
@@ -41,7 +40,7 @@ function hint(row: ServerQuotaRow, hour: number): string | undefined {
     case "member_off":
       return "此成员未开放 V5";
     case "site_paused":
-      return V5_PAUSED_HINT;
+      return row.hint;
     case "upstream_exhausted":
       return V5_EXHAUSTED_HINT;
     case "site_empty":

@@ -125,6 +125,7 @@ export type UpstreamPage = {
   accounts: UpstreamAccount[];
   threshold: number;
   settlements: Settlement[];
+  fields: { v5_daily_limit: { kind: "int"; min: number; max: number } };
   info_refresh: { last_attempt_at: number | null; cooldown_seconds: number; retry_after: number };
   /** 释放未知预留用的会话 CSRF */
   csrf_token: string;
@@ -143,15 +144,17 @@ export function tokenState(
   return { text: "正常", tone: "ok" };
 }
 
-export const TOKEN_SPECS: Record<string, FieldSpec> = {
-  v5_daily_limit: {
-    kind: "int",
-    label: "免费 V5 日限",
-    min: 0,
-    max: 9999,
-    unit: "张",
-  },
-};
+export function v5LimitSpecs(field: { min: number; max: number }): Record<string, FieldSpec> {
+  return {
+    v5_daily_limit: {
+      kind: "int",
+      label: "免费 V5 日限",
+      min: field.min,
+      max: field.max,
+      unit: "张",
+    },
+  };
+}
 
 /** 上游 Token 的格式：以 pst- 开头（NovelAI 账号设置 → Get Persistent API Token） */
 export function tokenFormatProblem(t: string): string | null {

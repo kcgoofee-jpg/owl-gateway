@@ -26,6 +26,7 @@ async fn snapshot(state: &AppState) -> Result<Value, ApiError> {
         "active".into(),
         json!(state.db.registered_member_count(state.now()).await?),
     );
+    registration.insert("fields".into(), gate_core::member_policy::claim_fields());
     Ok(json!({
         "registration": registration,
         "maintenance": {"enabled": ops::maintenance_mode(state).await? != ops::Maintenance::Off, "mode": ops::maintenance_mode(state).await?.as_str()},

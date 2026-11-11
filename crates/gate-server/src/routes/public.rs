@@ -1004,6 +1004,9 @@ fn quota_rows_json(rows: &[gate_core::landing_quota::Row]) -> Value {
                 if !row.reason.is_empty() {
                     value["reason"] = json!(row.reason);
                 }
+                if row.reason == "site_paused" {
+                    value["hint"] = json!(gate_core::quota::V5_PAUSED_HINT);
+                }
                 value
             })
             .collect(),
@@ -1117,13 +1120,6 @@ pub(super) async fn me_payload(
     out.insert(
         "coupons".into(),
         json!(state.db.list_coupons(key.id(), true, now).await?),
-    );
-    out.insert(
-        "timing".into(),
-        match state.db.user_image_timing(key.id(), now).await {
-            Ok(t) => serde_json::to_value(t).unwrap_or(Value::Null),
-            Err(_) => Value::Null,
-        },
     );
     Ok(Value::Object(out))
 }

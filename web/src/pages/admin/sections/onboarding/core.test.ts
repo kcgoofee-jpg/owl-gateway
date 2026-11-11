@@ -16,6 +16,11 @@ describe("统一领取条件", () => {
       max_users: 20,
       expires_days: 0,
       roles: [],
+      fields: {
+        max_users: { kind: "int", min: 0, max: 100000 },
+        expires_days: { kind: "int", min: 0, max: 3650 },
+        roles: { kind: "int", min: 0, max: 6 },
+      },
     };
     expect(claimBody(registration)).toEqual({ open: true, max_users: 20, expires_days: 0, roles: [] });
   });

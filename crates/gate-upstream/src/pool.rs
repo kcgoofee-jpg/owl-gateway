@@ -967,7 +967,7 @@ impl Pool {
         if v5_free {
             return UpstreamError::local(
                 403,
-                "V5 暂停，未扣费。请使用 V4.5。",
+                gate_core::quota::V5_PAUSED_TEXT,
                 gate_core::reasons::V5_EXHAUSTED,
             );
         }

@@ -69,13 +69,13 @@
 
 | 设置 | 没设过 | 说明 |
 |---|---|---|
-| `register_daily_images` | 150 | V4.5 每人每天；新号老号一样（新号爬坡 `newbie_ramp_*` 删除）；0 = 不限 |
-| `register_daily_v5` | 0 | V5 每人每天；0 = 不限（只受全站管） |
-| `global_daily_v5` | 150 | V5 全站每天，先到先得；0 = 不限 |
+| 成员默认 V4.5 | 见成员规则 | 每人每天；0 = 停用，上限 9999。旧键 `register_daily_images` 不再登记 |
+| 成员默认 V5 | 见成员规则 | 每人每天；0 = 停用，上限 9999。旧键 `register_daily_v5` 不再登记 |
+| `budgets.daily_v5` | 150 | V5 全站每天，先到先得；0 = 停用，上限 9999。CLI 名 `global_daily_v5` 写的是这一项 |
 | `v5_paused` | 0 | V5 暂停（开关）：V5 请求本地直接回 402（`v5_exhausted`，「V5 暂停中，没有扣费，请先用 V4.5」），不扣 Anlas、不发上游；首页、成员页显示暂停，客户端订阅信息里 V5 是 0 张（`v5Paused: true`），对所有 Key 生效 |
 | `member_daily_anlas` 等 | 见 §2.4 | Anlas |
 
-`quota_auto=1`（新建默认，后台显示「统一」）的成员 Key 由定时任务「额度同步」（每 10 分钟，后台改了额度时立即同步）把 `daily_images` / `daily_v5` 设成上面的手动值、`image_model_scope=all`，并更新首页文案 `algo_notice`；后台单独设过额度的 Key（`quota_auto=-1`）不动。新领的 Key 直接用这两个值。「领 Key」页不再能改每人张数（回 400）。
+`quota_auto=1`（新建默认，后台显示「统一」）的成员 Key 由定时任务「额度同步」（每 10 分钟，后台改了额度时立即同步）把 `daily_images` / `daily_v5` 设成上面的手动值、`image_model_scope=all`。首页说明按成员默认规则现算，不再读写 `algo_notice`。后台单独设过额度的 Key（`quota_auto=-1`）不动。新领的 Key 直接用这两个值。「领 Key」页不再能改每人张数（回 400）。
 
 删除（库里的旧行不删，只是不再读写）：V4.5 每人上限自动调整（`quota_ceiling`、`quota_target_avg`、`quota_step`、`quota_ceiling_max`、`quota_base_min_fair`、water-fill）、总开关 `quota_auto_enabled`、每日复盘（`quota_algo_day` / `quota_algo_history` / `quota_algo_last`）、按电量定的 V5 当天方案（`quota_v5_day_plan`）、临时加量 `quota_v5_bonus`、自动暂停 `quota_v5_paused`、后台接口 `/admin/api/quota-algo`。V5 电量读数、官方恢复速度、安静时段实测恢复速度只在后台「记录」里显示（`GET /admin/api/quota-records`），不参与任何限额；上游确认免费 V5 见底时拒绝 V5（`v5_exhausted`）照旧。
 
@@ -85,10 +85,10 @@
 
 | 项 | 代码默认 | 线上 | 说明 |
 |---|---|---|---|
-| 每人每日上限 `member_daily_anlas` | 50（0 = 不限） | 未设置，首页文案「Anlas 每人 50/天」与默认一致 | Key 自己设置了 `daily_anlas` > 0 则以 Key 为准（成员 Key 为 0）；Vibe 编码一张参考图约 2 点，50 点 ≈ 25 次 |
-| 每人每月 | Key 自己的 `monthly_anlas`（成员 Key 为 0 = 不限） | — | |
-| 全站每日 Anlas 池 `global_daily_anlas` | 200（0 = 不开放；后台「额度与保护 → Anlas 与 V5 预算」可改，范围 0～100000） | 1000 | Vibe PVP：全站合计先到先得，抢完回 402（`site_quota`）。开放截止时间戳 `global_daily_anlas_until` 已删除（后台从来没有写入口） |
-| 全站每月预算 `global_monthly_anlas` | 10000（0 = 不限） | 9000 | 超出回 402 |
+| 每人每日上限 | 成员规则 `daily_anlas`（0 = 停用，上限 9999） | 旧键 `member_daily_anlas` 不再登记 | Vibe 编码一张参考图约 2 点 |
+| 每人每月 | 成员规则 `monthly_anlas`（0 = 停用，上限 99999） | — | |
+| 全站每日 Anlas `budgets.daily_anlas` | 200（0 = 停用，上限 9999） | 后台「运行保护」可改 | 全站合计先到先得，抢完回 402（`site_quota`）。开放截止时间戳 `global_daily_anlas_until` 已删除 |
+| 全站每月预算 `budgets.monthly_anlas` | 10000（0 = 停用，上限 99999） | 后台「运行保护」可改 | 超出回 402 |
 
 价格（码 `policy.rs`）：Vibe 编码 2 Anlas/张；精确参考 5 Anlas/张/图；V4 / V4.5 的 Vibe 超过 4 张，每多 1 张 +2/图。Anlas 自动分配（旧的分配池）已删除，快照里残留的 `anlas_pool_last` 等键不再被读取。
 
@@ -98,7 +98,7 @@
 - V4.5 及更早的模型：总像素 ≤ 1024×1024 = 1048576（`FREE_MAX_PIXELS`），宽高取 64 的倍数，超出等比缩小。
 - V5：不超过三个预设之一——832×1216、1216×832、1024×1024，超出按长宽比吸附（> 1.1 → 1216×832，< 0.9 → 832×1216，其余 1024×1024）。
 - 图生图 / 局部重绘只对后台勾了「允许图生图」（`allow_img2img`）且有 Anlas 权限的 Key 开放，其余回 400；ControlNet 回 400；角色参考（`characterReferences`）被移除。
-- 新领 Key 开通的功能 `register_features`（线 `image,vibe,tags`；`*` = 不限）；功能可选 `image`、`upscale`、`augment`、`vibe`、`tags`（文本生成 / 语音 / OpenAI 兼容聊天 2026-10-15 已整套删除，库里 Key 的 `features` 或 `features_global` 里残留的 `text` / `voice` 读取时被忽略）。站长还有全局开关 `features_global`（JSON，缺省全开）。
+- 功能开关在成员规则里：`image`、`upscale`、`augment`、`vibe`、`tags`、`img2img`、`paid_parameters`（文本生成 / 语音 / OpenAI 兼容聊天 2026-10-15 已整套删除）。站点级 `features_global` 已删除，库里残留的值不再读。
 - 上游对「模型不存在」回的是 403，网关会窥探一小段响应体把「模型级 403」和「账号级 403」分开（只有账号级才计入账号健康度和 403 冷却）。
 
 ### 2.6 重置券
@@ -193,20 +193,15 @@
 
 ## 9. 共用站点设置（登记表 `site_flags.rs`）
 
-读写只走 `site_flags::get / put`；缺失或格式不对一律回到默认值（默认值按 fail-closed 选）。下表是登记表的全部 10 项：前 9 项是 `ALL`，第 10 项 `member_daily_anlas` 已登记在表里但没列进 `ALL`。web_login_paused、home_join_open、global_daily_anlas_until、audit_image_retention_days 四项已删除，库里残留的值读到也忽略。各模块自己的参数组不在此表，见表后。
+仍在登记、代码还在读的是下面 5 项。额度预算在 `SharedBudgets` 和成员规则里，不在这张表。`register_open`、`global_daily_v5`、`global_daily_anlas`、`global_monthly_anlas`、`register_daily_images`、`register_daily_v5`、`algo_notice`、`member_daily_anlas` 不再登记；库里的旧键不删。web_login_paused、home_join_open、global_daily_anlas_until、audit_image_retention_days 早已删除，残留值读到也忽略。
 
-| 键 | 类型 | 默认 | 范围 | 说明 | 线上当前值（2026-10-15） |
-|---|---|---|---|---|---|
-| `member_sweep` | flag | True | | 退群回收：每人每天核对一次是否还在服务器，不在就删 Key | 未设置，按默认（开） |
-| `issue_hourly_cap` | int | 12 | 0–500 | 每小时最多发放的新 Key（0 = 不限） | 0（不限） |
-| `register_open` | flag | False | | 开放 /register 领取 | 1 |
-| `global_daily_v5` | int | 150（码；环境变量 `GLOBAL_DAILY_V5` 已删除） | 0–100000 | 全站每日 V5 张数（0 = 不限）；手动（10-23 起算法不再写） | 171 |
-| `global_daily_anlas` | int | 200 | 0–100000 | 全站每日 Anlas 额度（0 = 不开放 Vibe；Vibe PVP 抢额度） | 1000 |
-| `global_monthly_anlas` | float | 10000.0 | 0–1e+06 | 全站每月 Anlas 预算（0 = 不限） | 9000 |
-| `algo_notice` | str | '' | | 首页显示的今日额度说明（算法每个 tick 写入） | 每天变，不抄 |
-| `audit_image_cap_mb` | int | 8192 | 0–500000 | 原图占用上限（MB）：超过后自动删掉最旧的；0 = 不限 | 8192 |
-| `audit_image_keep_hours` | int | 24 | 0–8760 | 原图在服务器上保存几小时；0 = 只按容量上限删 | 0 |
-| `member_daily_anlas`（第 14 项） | int | 50 | 0–100000 | 每人每日 Anlas 上限（仅对未手动设置 Anlas 日额度的 Key 生效；0 = 不限） | 未设置，按默认（首页文案核对为 50） |
+| 键 | 类型 | 默认 | 范围 | 说明 |
+|---|---|---|---|---|
+| `member_sweep` | flag | 开 | | 退群回收：每人每天核对一次是否还在服务器，不在就删 Key |
+| `issue_hourly_cap` | int | 12 | 0–500 | 每小时最多发放的新 Key（0 = 不限） |
+| `v5_paused` | flag | 关 | | V5 暂停：开着时 V5 请求直接拒，不扣费 |
+| `maintenance_mode` | flag | 关 | | 维护模式：暂停公共网站与服务接口，后台和健康检查保留 |
+| `v5_medium_mode` | choice | off | off / on | 认不出的值（含已删除的 auto）按 off |
 
 其他参数组（都存在 `site_settings`，键名带前缀）：
 
@@ -219,7 +214,7 @@
 | `register_*` | `register_open`、`register_max_users`、`register_daily_images`、`register_daily_v5`、`register_image_scope`、`register_expires_days`、`register_features`、`register_role_guild` / `register_role_id` / `register_role_note` | 线 1 / 未设 / 95 / 3 / all / 0 / `image,vibe,tags` / 空 |
 | `audit_*` | `audit_prompts`、`audit_thumbs`、`audit_retention_days`（见 §7） | 线 1 / 1 / 0 |
 | `bot_*` | `bot_status`（机器人心跳，奶妹每分钟经桥接接口写一次：账号 / 服务器 / 网关延迟 / 启动时间 / `seen_at`；3 分钟没更新算离线，后台 Discord 页的「机器人状态」读它） | 随机器人上报 |
-| 其他 | `features_global`（JSON，缺省全开）、`v5_alert_threshold`（后台叫「V5 余量低提示线」，默认 20，范围 1～100；决定官方余量缓存刷多勤、后台是否标「低」，以及 `v5_medium_mode=auto` 的切换线）、`v5_medium_mode`（`off` / `on` / `auto`，默认 `off`，见 §1）、`job_last`（定时任务每轮的结果，见 §4） | 线 `v5_alert_threshold` = 20 |
+| 其他 | `v5_medium_mode`（只有 `off` / `on`，默认 `off`，见 §1）、`job_last`（定时任务每轮的结果，见 §4）。余量「低」固定 20%，不再读 `v5_alert_threshold`。`features_global` 已删除，功能开关在成员规则 | 低线 20% |
 
 线上库里还有一些代码已不再读取的残留键，看到不要当真：`anlas_member_daily_cap`、`anlas_min_key_age_days`、`economy_mode`、`autopilot_economy`、`guard_daily_cap_fallback`、`guard_account_3h_cap`、`guard_account_10m_cap`、`ack_*`、`quota_shadow_*`、`guard_base_daily_images`、`quota_base` / `quota_base_min` / `quota_base_step` / `quota_base_now`、`quota_v5_min` / `quota_v5_max`、`runtime_key_image_min_interval`、`autopilot_slots` / `autopilot_breaker` / `autopilot_key_guard` / `autopilot_slots_at`、`autopilot_last` / `autopilot_history`、`kernel_last`、`module_*`（内核模块改成定时任务后不再读写）、`module_allocation`（3.0 额度精简删掉的），以及 `bot_gallery_*`（跑图分享设置）、`bot_events`（机器人最近动作）——后两者随功能一起删除。
 

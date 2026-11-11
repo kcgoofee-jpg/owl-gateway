@@ -54,51 +54,56 @@ export type Issue = {
   actions: IssueAction[];
 };
 
-export function memberIssues(m: Member, now: number): Issue[] {
-  const out: Issue[] = [];
-  if (m.paused_until && m.paused_until > now) {
-    out.push({
-      id: "paused",
-      level: "bad",
-      title: "Key 已被限流暂停",
-      detail: `到 ${fullTime(m.paused_until)} 自动恢复（多半是客户端死循环重试触发）`,
-      actions: [{ kind: "share-clear" }],
-    });
+function issueOf(id: string, m: Member, now: number): Issue | null {
+  switch (id) {
+    case "paused":
+      return {
+        id,
+        level: "bad",
+        title: "Key 已被限流暂停",
+        detail: `到 ${fullTime(m.paused_until)} 自动恢复（多半是客户端死循环重试触发）`,
+        actions: [{ kind: "share-clear" }],
+      };
+    case "expired":
+      return {
+        id,
+        level: "bad",
+        title: "Key 已过期",
+        detail: "成员现在用不了",
+        actions: [{ kind: "edit" }],
+      };
+    case "expiring":
+      return {
+        id,
+        level: "warn",
+        title: `${Math.max(1, Math.ceil(((m.expires_at ?? now) - now) / DAY))} 天后到期`,
+        detail: fullTime(m.expires_at),
+        need: true,
+        actions: [{ kind: "edit" }, { kind: "ack" }],
+      };
+    case "reset_many":
+      return {
+        id,
+        level: "warn",
+        title: `今天被手动重置额度 ${m.reset_today?.count ?? 0} 次`,
+        detail: "操作日志里能看到是谁重置的",
+        need: true,
+        actions: [{ kind: "ack" }],
+      };
+    default:
+      return null;
   }
-  if (m.expires_at && m.expires_at < now) {
-    out.push({
-      id: "expired",
-      level: "bad",
-      title: "Key 已过期",
-      detail: "成员现在用不了",
-      actions: [{ kind: "edit" }],
-    });
-  } else if (m.expires_at && m.expires_at - now < 3 * DAY) {
-    out.push({
-      id: "expiring",
-      level: "warn",
-      title: `${Math.max(1, Math.ceil((m.expires_at - now) / DAY))} 天后到期`,
-      detail: fullTime(m.expires_at),
-      need: true,
-      actions: [{ kind: "edit" }, { kind: "ack" }],
-    });
-  }
-  if (m.reset_today && m.reset_today.count >= 2) {
-    out.push({
-      id: "reset-many",
-      level: "warn",
-      title: `今天被手动重置额度 ${m.reset_today.count} 次`,
-      detail: "操作日志里能看到是谁重置的",
-      need: true,
-      actions: [{ kind: "ack" }],
-    });
-  }
-  // 点过「没问题」的 24 小时内，这些可确认的提醒不再出现（bad 级别要单独处理，不受影响）
-  return acked(m, now) ? out.filter((x) => !x.need || x.level === "bad") : out;
 }
 
-export const needsAttention = (m: Member, now: number): boolean =>
-  memberIssues(m, now).some((x) => x.level === "bad" || (x.need && !acked(m, now)));
+/** 文案和按钮。哪些事项要出现由列表上的 `issues` 决定，这里不再判断。 */
+export function memberIssues(m: Member, now: number): Issue[] {
+  return (m.issues ?? []).flatMap((id) => {
+    const issue = issueOf(id, m, now);
+    return issue ? [issue] : [];
+  });
+}
+
+export const needsAttention = (m: Member, _now?: number): boolean => (m.issues ?? []).length > 0;
 
 /* ---------------- 一句话结论与列表状态 ---------------- */
 export function memberVerdict(m: Member, now: number): { title: string; sub: string } {
@@ -108,7 +113,7 @@ export function memberVerdict(m: Member, now: number): { title: string; sub: str
   let title: string;
   const bad = issues.find((x) => x.level === "bad");
   if (bad) title = bad.title;
-  else if (issues.some((x) => x.need) && !acked(m, now)) {
+  else if (issues.some((x) => x.need)) {
     title = `有 ${issues.filter((x) => x.need).length} 件事要看一眼`;
   } else if (!m.first_image_at) {
     title = `领了 Key ${m.registered_at ? `${ago(now - m.registered_at)}了` : ""}，还没出过图`;
@@ -133,8 +138,9 @@ export type StatusBadge = {
 };
 /** 列表里每行只放一个最重要的状态 */
 export function memberStatus(m: Member, now: number): StatusBadge | null {
-  if (m.paused_until && m.paused_until > now) return { tone: "danger", text: "已限流" };
-  if (m.expires_at && m.expires_at < now) return { tone: "danger", text: "已过期" };
+  const ids = m.issues ?? [];
+  if (ids.includes("paused")) return { tone: "danger", text: "已限流" };
+  if (ids.includes("expired")) return { tone: "danger", text: "已过期" };
   if (needsAttention(m, now)) {
     return {
       tone: "warn",

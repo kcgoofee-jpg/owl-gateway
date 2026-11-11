@@ -147,6 +147,9 @@ async fn page(State(state): State<AppState>, _s: AdminSession, req: Request) -> 
         // 会话绑定：核对与释放预留用同一把；手动查官方信息是另一把
         "csrf_token": csrf_token(&state, &session),
         "csrf_info": super::upstream_information::scoped_csrf_public(&state, &session),
+        "fields": {
+            "v5_daily_limit": {"kind": "int", "min": 0, "max": gate_core::member_policy::DAILY_MAX},
+        },
     })))
 }
 
@@ -528,13 +531,14 @@ async fn set_v5_limit(
 ) -> ApiResult {
     let (parts, body) = req.into_parts();
     let body = read_json_body(&parts.headers, body, BODY_LIMIT).await?;
+    let max = i64::from(gate_core::member_policy::DAILY_MAX);
     let limit = match body.get("v5_daily_limit").and_then(values::strict_int) {
-        // 10-27 规范化：0 = 停用这把 Token 的免费 V5，上限最大 9999（存量 0 已迁移成 9999）
-        Some(n) if (0..=9999).contains(&n) => n,
+        // 0 = 停用这把 Token 的免费 V5，上限与全站每日额度相同。
+        Some(n) if (0..=max).contains(&n) => n,
         _ => {
             return Err(HttpError::new(
                 422,
-                "上游 V5 日限额必须是 0～9999 的整数（0 = 停用免费 V5）",
+                format!("上游 V5 日限额必须是 0～{max} 的整数（0 = 停用免费 V5）"),
             )
             .into());
         }

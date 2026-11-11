@@ -48,7 +48,12 @@ async fn runtime_settings(state: &AppState) -> Result<RuntimeSettings, ApiError>
 }
 
 async fn get_settings(State(state): State<AppState>, _session: AdminSession) -> ApiResult {
-    Ok(ok_json(&json!(runtime_settings(&state).await?)))
+    let mut body = serde_json::to_value(runtime_settings(&state).await?)
+        .map_err(|e| InternalError(e.to_string()))?;
+    if let Some(obj) = body.as_object_mut() {
+        obj.insert("fields".into(), gate_core::member_policy::budget_fields());
+    }
+    Ok(ok_json(&body))
 }
 
 async fn put_settings(

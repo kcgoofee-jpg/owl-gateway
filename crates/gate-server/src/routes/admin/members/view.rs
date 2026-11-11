@@ -59,43 +59,47 @@ fn acked_24h(m: &Obj, now: f64) -> bool {
     })
 }
 
-/// 「需要站长处理」：与 `web/src/pages/admin/sections/members/logic.ts` 的 `needsAttention` 同口径
-/// （两处要一起改）。bad（限流暂停中 / 已过期）点过「没问题」也不豁免；其余（3 天内到期、
-/// 今日被重置 ≥2 次）在「已查看」后 24 小时内不算。
-/// 停用的 Key 前端列表不显示，也不计入。
-fn attention_needed(m: &Obj, now: f64) -> bool {
+/// 这一行要让站长看到的事项。停用的 Key 不进列表计数。
+/// `paused` / `expired` 不受「已查看」影响；`expiring` / `reset_many` 在 24 小时内豁免。
+fn issue_ids(m: &Obj, now: f64) -> Vec<&'static str> {
     if !m.get("enabled").and_then(Value::as_bool).unwrap_or(false) {
-        return false;
+        return Vec::new();
     }
-    let paused = m
-        .get("paused_until")
+    let mut ids = Vec::new();
+    if m.get("paused_until")
         .and_then(Value::as_f64)
-        .is_some_and(|until| until > now);
+        .is_some_and(|until| until > now)
+    {
+        ids.push("paused");
+    }
     let expires_at = m.get("expires_at").and_then(Value::as_f64);
-    let expired = expires_at.is_some_and(|at| at < now);
-    if paused || expired {
-        return true;
+    if expires_at.is_some_and(|at| at < now) {
+        ids.push("expired");
     }
-    if acked_24h(m, now) {
-        return false;
+    let acked = acked_24h(m, now);
+    if !acked && expires_at.is_some_and(|at| at >= now && at - now < 3.0 * DAY_SECS) {
+        ids.push("expiring");
     }
-    // 3 天内到期
-    if expires_at.is_some_and(|at| at - now < 3.0 * DAY_SECS) {
-        return true;
+    if !acked
+        && m.get("reset_today")
+            .and_then(|r| r.get("count"))
+            .and_then(Value::as_i64)
+            .is_some_and(|n| n >= 2)
+    {
+        ids.push("reset_many");
     }
-    // 今天被手动重置额度 ≥ 2 次
-    m.get("reset_today")
-        .and_then(|r| r.get("count"))
-        .and_then(Value::as_i64)
-        .is_some_and(|n| n >= 2)
+    ids
+}
+
+fn attention_needed(m: &Obj, now: f64) -> bool {
+    !issue_ids(m, now).is_empty()
 }
 
 /// 每位成员（Key）的今日 / 近 7 天 / 累计用量，以及来源。
 ///
 /// `?filter=all|attention`（缺省 = `all`，完全旧行为）：`attention` 只返回需要站长处理的行，
 /// 同时给出 `total`（裁剪前成员行数）/ `attention`（需要处理的行数）/ `filter`（实际生效值）。
-/// 前端 `web/src/pages/admin/sections/members/logic.ts` 的 `needsAttention` 与本文件的
-/// [`attention_needed`] 是同一条口径，改一边要同时改另一边。
+/// 每行的 `issues` 由 [`issue_ids`] 算好。前端只按这些 id 填中文和按钮。
 pub(super) async fn members_view(state: &AppState, filter_raw: &str) -> Result<Value, ApiError> {
     let policies = state.db.member_policy_directory().await?;
     let filter = match filter_raw {
@@ -374,10 +378,23 @@ pub(super) async fn members_view(state: &AppState, filter_raw: &str) -> Result<V
         merged.push(head);
     }
     singles.extend(merged);
-    // 需要站长处理的行：口径与后台前端 logic.ts 的 needsAttention 一致（含「已查看」24 小时豁免；
-    // 停用的 Key 前端列表本来就不显示，也不计入）。`total` 是裁剪前的成员行数。
+    for member in &mut singles {
+        let ids = issue_ids(member, now)
+            .into_iter()
+            .map(Value::from)
+            .collect();
+        member.insert("issues".into(), Value::Array(ids));
+    }
+    // 停用的 Key 不进计数。`total` 是裁剪前的成员行数。
     let total = singles.len();
-    let attention = singles.iter().filter(|m| attention_needed(m, now)).count();
+    let attention = singles
+        .iter()
+        .filter(|m| {
+            m.get("issues")
+                .and_then(Value::as_array)
+                .is_some_and(|ids| !ids.is_empty())
+        })
+        .count();
     let members: Vec<Obj> = if filter == "attention" {
         singles
             .into_iter()

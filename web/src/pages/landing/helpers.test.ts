@@ -56,14 +56,14 @@ describe("quotaRows", () => {
     expect(rows[1]?.paused).toBe(true);
   });
   it("全站池停用和用完不是同一句话", () => {
-    const v5 = (reason: QuotaReason, cap = 20) =>
-      quotaRows(withRows([{ id: "v5", used: 2, cap, left: 0, paused: true, reason }])).find(
-        (r) => r.id === "v5",
-      );
+    const v5 = (reason: QuotaReason, cap = 20, hint?: string) =>
+      quotaRows(
+        withRows([{ id: "v5", used: 2, cap, left: 0, paused: true, reason, ...(hint ? { hint } : {}) }]),
+      ).find((r) => r.id === "v5");
     expect(v5("disabled")?.hint).toBe("全站 V5 已停用");
     expect(v5("site_empty")?.hint).toBe("全站今天的 V5 额度用完了，7 点重置后恢复");
     expect(v5("member_off")?.hint).toBe("此成员未开放 V5");
-    expect(v5("site_paused")?.hint).toBe("V5 暂停，请使用 V4.5");
+    expect(v5("site_paused", 20, "V5 暂停，请使用 V4.5")?.hint).toBe("V5 暂停，请使用 V4.5");
     expect(v5("upstream_exhausted")?.hint).toBe("全站 V5 免费额度暂时用完，正在逐步恢复，可以先用 V4.5");
   });
   it("没有原因码就不加说明，剩余原样显示", () => {

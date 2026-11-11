@@ -14,7 +14,7 @@ use axum::routing::{get, post};
 use gate_core::{features, primitives};
 use gate_db::repo::admin_records::ActionFilter;
 use gate_db::repo::usage::LogFilter;
-use serde_json::{Value, json};
+use serde_json::{Map, Value, json};
 
 pub fn router() -> Router<AppState> {
     Router::new()
@@ -30,7 +30,11 @@ async fn feature_names(_session: AdminSession) -> R {
         .iter()
         .map(|(id, label)| json!({"id": id, "label": label}))
         .collect();
-    Ok(ok_json(&json!({"features": items})))
+    let mut kinds = Map::new();
+    for (kind, id) in features::KIND_FEATURE {
+        kinds.insert((*kind).to_string(), Value::String((*id).to_string()));
+    }
+    Ok(ok_json(&json!({"features": items, "kinds": kinds})))
 }
 
 /// 页数：至少 1 页。

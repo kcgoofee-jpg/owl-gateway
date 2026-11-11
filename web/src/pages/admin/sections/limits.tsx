@@ -25,25 +25,46 @@ function BudgetCard() {
         : null,
     [query.data],
   );
+  const fields = query.data?.fields;
   const form = useForm(
-    {
-      daily_v5: { kind: "int", label: "V5 全站每天", min: 0, max: 9999, unit: "张" },
-      daily_anlas: { kind: "int", label: "Anlas 全站每天", min: 0, max: 9999, unit: "Anlas" },
-      monthly_anlas: { kind: "float", label: "Anlas 全站每月", min: 0, max: 99999, unit: "Anlas" },
-      v5_paused: { kind: "bool", label: "暂停 V5" },
-      v5_medium_mode: {
-        kind: "select",
-        label: "V5 模型",
-        options: [
-          { value: "off", label: "保留请求模型" },
-          { value: "on", label: "Full 转为 Medium" },
-        ],
-      },
-    },
+    fields
+      ? {
+          daily_v5: {
+            kind: fields.daily_v5.kind,
+            label: "V5 全站每天",
+            min: fields.daily_v5.min,
+            max: fields.daily_v5.max,
+            unit: "张",
+          },
+          daily_anlas: {
+            kind: fields.daily_anlas.kind,
+            label: "Anlas 全站每天",
+            min: fields.daily_anlas.min,
+            max: fields.daily_anlas.max,
+            unit: "Anlas",
+          },
+          monthly_anlas: {
+            kind: fields.monthly_anlas.kind,
+            label: "Anlas 全站每月",
+            min: fields.monthly_anlas.min,
+            max: fields.monthly_anlas.max,
+            unit: "Anlas",
+          },
+          v5_paused: { kind: "bool", label: "暂停 V5" },
+          v5_medium_mode: {
+            kind: "select",
+            label: "V5 模型",
+            options: [
+              { value: "off", label: "保留请求模型" },
+              { value: "on", label: "Full 转为 Medium" },
+            ],
+          },
+        }
+      : {},
     server,
   );
   const [saving, setSaving] = useState(false);
-  if (!query.data || !server)
+  if (!query.data || !server || !fields)
     return <CardPending title="全站预算（0 停用）" loading={query.loading} error={query.error} />;
   const save = async () => {
     const value = { ...server, ...form.changes() };

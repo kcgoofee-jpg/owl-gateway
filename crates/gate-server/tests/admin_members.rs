@@ -323,7 +323,10 @@ async fn reset_quota_and_tags_do_not_change_member_policy() {
 async fn coupons_list_and_issue() {
     let (e, a) = ready().await;
     let c = format!("{A}/keys/1/coupons");
-    assert_eq!(a.get(&c).await.json(), json!({"coupons": []}));
+    let empty = a.get(&c).await.json();
+    assert_eq!(empty["coupons"], json!([]));
+    assert_eq!(empty["fields"]["days"]["min"], 1);
+    assert_eq!(empty["fields"]["days"]["max"], 30);
     for (body, detail) in [
         (json!({"kind": "gold"}), "目前只有重置券（reset）"),
         (json!({"days": 0}), "有效期 days 必须在 1～30 天之间"),

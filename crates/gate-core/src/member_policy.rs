@@ -9,6 +9,30 @@ pub const DAILY_MAX: u32 = 9999;
 pub const MONTHLY_MAX: f64 = 99999.0;
 pub const RPM_MIN: u32 = 1;
 pub const RPM_MAX: u32 = 600;
+/// 领取名额上限。0 表示不限。
+pub const CLAIM_USERS_MAX: u32 = 100_000;
+/// Key 有效天数上限。0 表示永久。
+pub const CLAIM_EXPIRES_MAX: u32 = 3_650;
+/// 领取身份组条数上限。
+pub const CLAIM_ROLES_MAX: usize = 6;
+
+/// 全站预算表单的范围。和 [`SharedBudgets::validate`] 是同一份。
+pub fn budget_fields() -> Value {
+    json!({
+        "daily_v5": {"kind": "int", "min": 0, "max": DAILY_MAX},
+        "daily_anlas": {"kind": "int", "min": 0, "max": DAILY_MAX},
+        "monthly_anlas": {"kind": "float", "min": 0, "max": MONTHLY_MAX},
+    })
+}
+
+/// 领取条件表单的范围。和 [`ClaimRules::validate`] 是同一份。
+pub fn claim_fields() -> Value {
+    json!({
+        "max_users": {"kind": "int", "min": 0, "max": CLAIM_USERS_MAX},
+        "expires_days": {"kind": "int", "min": 0, "max": CLAIM_EXPIRES_MAX},
+        "roles": {"kind": "int", "min": 0, "max": CLAIM_ROLES_MAX},
+    })
+}
 
 /// 后台表单用的字段范围。数字范围和 [`MemberPolicy::validate`] 是同一份。
 pub fn policy_fields() -> Value {
@@ -64,7 +88,10 @@ impl ClaimRules {
     }
 
     pub fn validate(&self) -> Result<(), &'static str> {
-        if self.max_users > 100000 || self.expires_days > 3650 || self.roles.len() > 6 {
+        if self.max_users > CLAIM_USERS_MAX
+            || self.expires_days > CLAIM_EXPIRES_MAX
+            || self.roles.len() > CLAIM_ROLES_MAX
+        {
             return Err("领取条件超出有效范围");
         }
         let mut seen = std::collections::HashSet::new();

@@ -1,49 +1,24 @@
-/** 日志相关的显示格式化（纯函数）：模型短名、功能名、耗时。 */
+/** 日志相关的显示格式化（纯函数）：功能名、耗时。模型短名和交付徽标在 lib/request-label。 */
 import { secondsText } from "../../../../lib/format";
 import { type Feature, RETIRED } from "../features";
 
-/** 请求日志 kind → 功能 id（后端 features.KIND_FEATURE 的副本） */
-const KIND_FEATURE: Record<string, string> = {
-  image: "image",
-  image_stream: "image",
-  upscale: "upscale",
-  "augment-image": "augment",
-  vibe_encode: "vibe",
-  tags: "tags",
+export { deliveryLabel, shortModel } from "../../../../lib/request-label";
+
+/** 已删除的 kind。现行 kind → 功能 id 由 GET /admin/api/features 的 kinds 给出。 */
+const RETIRED_KIND: Record<string, string> = {
   text: "text",
   chat: "text",
   voice: "voice",
 };
 
-export function kindLabel(kind: string | null | undefined, features: Feature[] = []): string {
-  const id = KIND_FEATURE[kind ?? ""];
+export function kindLabel(
+  kind: string | null | undefined,
+  features: Feature[] = [],
+  kinds: Record<string, string> = {},
+): string {
+  const id = kinds[kind ?? ""] ?? RETIRED_KIND[kind ?? ""];
   const f = features.find((x) => x.id === id) ?? RETIRED.find((x) => x.id === id);
   return f ? f.short : kind || "—";
-}
-
-/** 模型短名：nai-diffusion-4-5-full → V4.5（完整名放 title） */
-export function shortModel(model: string | null | undefined): string {
-  const m = String(model ?? "");
-  if (!m) return "";
-  const base = /diffusion-5/.test(m)
-    ? "V5"
-    : /diffusion-4-5/.test(m)
-      ? "V4.5"
-      : /diffusion-4/.test(m)
-        ? "V4"
-        : /furry-3/.test(m)
-          ? "Furry V3"
-          : /diffusion-3/.test(m)
-            ? "V3"
-            : /diffusion-2/.test(m)
-              ? "V2"
-              : /furry/.test(m)
-                ? "Furry"
-                : /^nai-diffusion$/.test(m)
-                  ? "V1"
-                  : "";
-  if (!base) return m.length > 18 ? `${m.slice(0, 16)}…` : m;
-  return base + (/curated/.test(m) ? " Curated" : "") + (/inpainting/.test(m) ? " 重绘" : "");
 }
 
 /** 耗时：生成 4.2 秒、等 12 秒（等待 < 100ms 不显示） */
@@ -60,18 +35,3 @@ export const STATUS_TEXT: Record<string, string> = {
 export const statusText = (s: string | null | undefined): string => STATUS_TEXT[s ?? ""] ?? (s || "错误");
 export const statusTone = (s: string): "ok" | "warn" | "danger" =>
   s === "ok" ? "ok" : s === "rejected" || s === "cancelled" ? "warn" : "danger";
-
-/** 交付徽标只显示异常态：完成不显示（服务端无法确认客户端真的收到）。 */
-export function deliveryLabel(state: string | null | undefined): {
-  text: string;
-  tone: "warn" | "danger";
-} | null {
-  switch (state) {
-    case "transport_interrupted":
-      return { text: "传输中断", tone: "danger" };
-    case "pending":
-      return { text: "传输中", tone: "warn" };
-    default:
-      return null;
-  }
-}

@@ -43,6 +43,7 @@ async fn manual_v5_pause_refuses_every_member_without_dispatch() {
     policy_for(&e.state, second, json!({"v5":true,"daily_v5":20})).await;
     let api = Admin::login_bare(&e.state).await;
     let (_, mut settings) = api.json("GET", "/settings", None).await;
+    settings.as_object_mut().unwrap().remove("fields");
     settings["v5_paused"] = json!(true);
     let (status, response) = api.json("PUT", "/settings", Some(settings.clone())).await;
     assert_eq!(status, 200, "{response}");

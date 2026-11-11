@@ -67,15 +67,24 @@ async fn actions(e: &Env) -> Vec<(String, String, String, String, bool)> {
 
 const SETTINGS_DEFAULT: &str = r#"{"budgets":{"daily_v5":150,"daily_anlas":200,"monthly_anlas":10000.0},"v5_paused":false,"v5_medium_mode":"off"}"#;
 
+fn settings_write(mut value: Value) -> Value {
+    if let Some(obj) = value.as_object_mut() {
+        obj.remove("fields");
+    }
+    value
+}
+
 #[tokio::test]
 async fn settings_get_put_and_stored_strings() {
     let e = setup(&[]).await;
     let api = Admin::login_bare(&e.state).await;
     let (_, initial) = api.json("GET", "/settings", None).await;
     assert_eq!(
-        initial,
+        settings_write(initial.clone()),
         serde_json::from_str::<Value>(SETTINGS_DEFAULT).unwrap()
     );
+    assert_eq!(initial["fields"]["daily_v5"]["max"], 9999);
+    assert_eq!(initial["fields"]["monthly_anlas"]["max"], 99999.0);
     let before = settings(&e).await;
     for bad in [
         json!({}),
@@ -85,13 +94,13 @@ async fn settings_get_put_and_stored_strings() {
         assert_eq!(api.json("PUT", "/settings", Some(bad)).await.0, 422);
     }
     assert_eq!(settings(&e).await, before);
-    let mut proposed = initial;
+    let mut proposed = settings_write(initial.clone());
     proposed["budgets"] = json!({"daily_v5":200,"daily_anlas":350,"monthly_anlas":5000.0});
-    assert_eq!(
-        api.json("PUT", "/settings", Some(proposed.clone())).await,
-        (200, proposed.clone())
-    );
-    assert_eq!(api.get_ok("/settings").await, proposed);
+    let (status, saved) = api.json("PUT", "/settings", Some(proposed.clone())).await;
+    assert_eq!(status, 200, "{saved}");
+    assert_eq!(settings_write(saved.clone()), proposed);
+    assert_eq!(saved["fields"], initial["fields"]);
+    assert_eq!(api.get_ok("/settings").await, saved);
     assert_eq!(
         serde_json::from_str::<Value>(&settings(&e).await["runtime_budgets"]).unwrap(),
         proposed["budgets"]
@@ -296,7 +305,12 @@ async fn settings_patch_never_rewrites_an_omitted_emergency_pause() {
     );
     assert_eq!(settings(&e).await["v5_paused"], "1");
     full["budgets"]["daily_anlas"] = json!(63);
-    assert_eq!(api.json("PUT", "/settings", Some(full)).await.0, 200);
+    assert_eq!(
+        api.json("PUT", "/settings", Some(settings_write(full)))
+            .await
+            .0,
+        200
+    );
     assert_eq!(settings(&e).await["v5_paused"], "1");
 }
 
@@ -308,7 +322,8 @@ async fn global_daily_anlas_pool_is_editable() {
         let mut full = api.get_ok("/settings").await;
         full["budgets"]["daily_anlas"] = json!(limit);
         assert_eq!(
-            api.json("PUT", "/settings", Some(full.clone())).await,
+            api.json("PUT", "/settings", Some(settings_write(full.clone())))
+                .await,
             (200, full)
         );
         assert_eq!(
@@ -325,7 +340,8 @@ async fn canonical_global_limit_zero_round_trips_without_legacy_widening() {
     let mut full = api.get_ok("/settings").await;
     full["budgets"]["daily_v5"] = json!(0);
     assert_eq!(
-        api.json("PUT", "/settings", Some(full.clone())).await,
+        api.json("PUT", "/settings", Some(settings_write(full.clone())))
+            .await,
         (200, full)
     );
     assert_eq!(e.state.db.shared_budgets().await.unwrap().daily_v5, 0);
@@ -1341,7 +1357,12 @@ async fn v5_medium_mode_is_validated_stored_and_audited() {
     for mode in ["on", "off"] {
         let mut full = api.get_ok("/settings").await;
         full["v5_medium_mode"] = json!(mode);
-        assert_eq!(api.json("PUT", "/settings", Some(full)).await.0, 200);
+        assert_eq!(
+            api.json("PUT", "/settings", Some(settings_write(full)))
+                .await
+                .0,
+            200
+        );
         assert_eq!(settings(&e).await["v5_medium_mode"], mode);
     }
     let frozen = settings(&e).await;
@@ -1349,7 +1370,12 @@ async fn v5_medium_mode_is_validated_stored_and_audited() {
         let mut full = api.get_ok("/settings").await;
         full["v5_medium_mode"] = bad;
         full["v5_paused"] = json!(true);
-        assert_eq!(api.json("PUT", "/settings", Some(full)).await.0, 422);
+        assert_eq!(
+            api.json("PUT", "/settings", Some(settings_write(full)))
+                .await
+                .0,
+            422
+        );
     }
     assert_eq!(settings(&e).await, frozen);
     assert!(actions(&e).await.iter().any(|r| r.1 == "修改预算" && r.4));
@@ -1363,6 +1389,11 @@ async fn v5_medium_state_follows_the_manual_switch() {
     assert_eq!(full["v5_medium_mode"], "off");
     assert!(full.get("v5_medium_state").is_none());
     full["v5_medium_mode"] = json!("on");
-    assert_eq!(api.json("PUT", "/settings", Some(full)).await.0, 200);
+    assert_eq!(
+        api.json("PUT", "/settings", Some(settings_write(full)))
+            .await
+            .0,
+        200
+    );
     assert_eq!(api.get_ok("/settings").await["v5_medium_mode"], "on");
 }

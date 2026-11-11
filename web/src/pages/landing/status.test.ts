@@ -23,8 +23,24 @@ const idle = (over: Partial<Live> = {}): Live => ({
   me: null,
   ...over,
 });
-const blocked = (code: string, text: string, over: Partial<Live> = {}): Live =>
-  idle({ guard: { blocked: { code, text } }, ...over });
+const blocked = (
+  code: string,
+  text: string,
+  over: Partial<Live> & { when?: string; manual?: boolean } = {},
+): Live => {
+  const { when, manual, ...rest } = over;
+  return idle({
+    guard: {
+      blocked: {
+        code,
+        text,
+        ...(when !== undefined ? { when } : {}),
+        ...(manual !== undefined ? { manual } : {}),
+      },
+    },
+    ...rest,
+  });
+};
 
 const sentence = (live: Live | null) => deriveStatus(live)?.sentence;
 
@@ -40,7 +56,7 @@ describe("deriveStatus：正常与排队", () => {
   });
 
   it("有人排队：只显示当前排队张数（站长 10-27），不显示秒数", () => {
-    const v = deriveStatus(idle({ queue: { waiting: 3, running: 1 } }), { nowMs: 0 });
+    const v = deriveStatus(idle({ queue: { waiting: 3, running: 1 } }));
     expect(v?.tone).toBe("busy");
     expect(v?.headline).toBe("排队 3 张");
     expect(v?.announce).toBe("排队 3 张");
@@ -77,35 +93,39 @@ describe("deriveStatus：与 API 的 429 原因同一句话", () => {
     expect(API.cooldown).toContain("暂停出图约 45 秒");
   });
 
-  it("每日上限：明天 7 点恢复", () => {
-    expect(sentence(blocked("daily_cap", API.daily))).toBe("今日出图已满 · 明天 7 点恢复");
-  });
-
-  it("每日上限：零点到 7 点之间，网关原文说「今天 7 点」，首页照说", () => {
-    expect(sentence(blocked("daily_cap", API.daily.replace("明天 7 点", "今天 7 点")))).toBe(
+  it("每日上限：整点用接口给的 when", () => {
+    expect(sentence(blocked("daily_cap", API.daily, { when: "明天 7 点" }))).toBe(
+      "今日出图已满 · 明天 7 点恢复",
+    );
+    expect(sentence(blocked("daily_cap", API.daily, { when: "今天 7 点" }))).toBe(
       "今日出图已满 · 今天 7 点恢复",
     );
-  });
-
-  it("每日上限的恢复整点取自接口原文，不写死", () => {
-    expect(sentence(blocked("daily_cap", API.daily.replace("明天 7 点", "明天 5 点")))).toBe(
+    expect(sentence(blocked("daily_cap", API.daily, { when: "明天 5 点" }))).toBe(
       "今日出图已满 · 明天 5 点恢复",
     );
+  });
+
+  it("每日上限没有整点时不编 7 点", () => {
+    expect(sentence(blocked("daily_cap", "没有整点"))).toBe("今日出图已满");
   });
 
   it("不再发出的原因码：原文照搬", () => {
     expect(sentence(blocked("paced", "这个时段全站的出图份额用完了"))).toBe("这个时段全站的出图份额用完了");
   });
 
-  it("熔断：标题只说原因，灰字只留时间", () => {
-    const v = deriveStatus(blocked("breaker", API.breaker));
+  it("熔断：标题按原因码，灰字用接口给的时间", () => {
+    const v = deriveStatus(blocked("breaker", API.breaker, { when: "约 30 秒后恢复" }));
     expect(v?.tone).toBe("bad");
     expect(v?.sentence).toBe("上游连续出错 · 约 30 秒后恢复");
-    expect(sentence(blocked("breaker", API.breakerTripped))).toBe("上游连续出错 · 暂停 60 秒");
+    expect(sentence(blocked("breaker", API.breakerTripped, { when: "暂停 60 秒" }))).toBe(
+      "上游连续出错 · 暂停 60 秒",
+    );
   });
 
   it("站长手动熔断写的原因：放在灰字里", () => {
-    expect(sentence(blocked("breaker", "站长正在调整"))).toBe("暂停出图 · 站长正在调整");
+    expect(sentence(blocked("breaker", "站长正在调整", { when: "站长正在调整", manual: true }))).toBe(
+      "暂停出图 · 站长正在调整",
+    );
   });
 
   it("不认识的原因码：原文照搬，不改写", () => {

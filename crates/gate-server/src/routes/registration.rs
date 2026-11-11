@@ -310,7 +310,7 @@ async fn bot_context(State(state): State<AppState>, req: Request) -> ApiResult {
 
 fn member_bot_projection(me: &Value) -> Value {
     let mut out = Map::new();
-    for name in ["has_key", "requires_web_login", "policy", "today", "timing"] {
+    for name in ["has_key", "requires_web_login", "policy", "today"] {
         if let Some(value) = me.get(name) {
             out.insert(name.into(), value.clone());
         }

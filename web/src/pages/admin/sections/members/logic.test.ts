@@ -72,6 +72,7 @@ function mk(p: Partial<Member> = {}): Member {
     paused_until: null,
     reset_today: null,
     tags: [],
+    issues: [],
     key_count: 1,
     all_key_ids: [id],
     ...p,
@@ -86,35 +87,34 @@ describe("memberIssues / needsAttention", () => {
   });
 
   it("Key 已过期是 bad，必须处理", () => {
-    const m = mk({ expires_at: NOW - 10 });
+    const m = mk({ expires_at: NOW - 10, issues: ["expired"] });
     expect(memberIssues(m, NOW)[0]?.level).toBe("bad");
     expect(needsAttention(m, NOW)).toBe(true);
     expect(memberStatus(m, NOW)?.text).toBe("已过期");
   });
 
   it("3 天内到期要看一眼；点「没问题」后 24 小时内不再提醒，但 bad 不受影响", () => {
-    const soon = mk({ expires_at: NOW + 2 * DAY });
+    const soon = mk({ expires_at: NOW + 2 * DAY, issues: ["expiring"] });
     expect(needsAttention(soon, NOW)).toBe(true);
+    expect(memberIssues(soon, NOW)[0]?.title).toContain("天后到期");
     const ack = mk({
       expires_at: NOW + 2 * DAY,
+      issues: [],
       tags: [{ tag: ACK_TAG, note: "", by: "站长", ts: NOW - 3600 }],
     });
     expect(needsAttention(ack, NOW)).toBe(false);
     const ackExpired = mk({
       expires_at: NOW - 5,
+      issues: ["expired"],
       tags: [{ tag: ACK_TAG, note: "", by: "站长", ts: NOW - 3600 }],
     });
     expect(needsAttention(ackExpired, NOW)).toBe(true);
-    // 24 小时后「没问题」失效
-    const stale = mk({
-      expires_at: NOW + 2 * DAY,
-      tags: [{ tag: ACK_TAG, note: "", by: "站长", ts: NOW - 2 * DAY }],
-    });
+    const stale = mk({ expires_at: NOW + 2 * DAY, issues: ["expiring"] });
     expect(needsAttention(stale, NOW)).toBe(true);
   });
 
   it("被限流暂停给出「误判，解除」动作", () => {
-    const m = mk({ paused_until: NOW + 600 });
+    const m = mk({ paused_until: NOW + 600, issues: ["paused"] });
     const i = memberIssues(m, NOW).find((x) => x.id === "paused");
     expect(i?.actions).toEqual([{ kind: "share-clear" }]);
     expect(memberStatus(m, NOW)?.text).toBe("已限流");

@@ -171,7 +171,7 @@ pub(super) fn resolve_v5(
                 // 不自动转成扣成员的 Anlas（Anlas 只给 V4.5 大图和 Vibe 用）
                 return Err(UpstreamError::local(
                     403,
-                    "V5 暂停，未扣费。请使用 V4.5。",
+                    gate_core::quota::V5_PAUSED_TEXT,
                     reasons::V5_EXHAUSTED,
                 ));
             }

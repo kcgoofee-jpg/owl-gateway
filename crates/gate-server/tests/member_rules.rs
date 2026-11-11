@@ -213,6 +213,7 @@ async fn v5_client_view_uses_member_permission_and_shared_budget_without_identit
     let mut runtime = admin.get_ok("/settings").await;
     assert!(runtime.get("gateway_owner_discord_ids").is_none());
     assert!(runtime.get("v5_access_mode").is_none());
+    runtime.as_object_mut().unwrap().remove("fields");
     runtime["budgets"]["daily_v5"] = json!(0);
     assert_eq!(admin.json("PUT", "/settings", Some(runtime)).await.0, 200);
     let (_, _, body) = Call::new("GET", "/user/subscription")

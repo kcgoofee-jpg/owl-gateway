@@ -21,7 +21,6 @@ pub mod paid_v5;
 pub mod policy;
 pub mod primitives;
 pub mod quota;
-pub mod quota_limits;
 pub mod reasons;
 pub mod site_flags;
 pub mod snowflake;

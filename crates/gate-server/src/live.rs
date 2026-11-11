@@ -35,6 +35,28 @@ use std::sync::{Arc, Mutex};
 use tokio::sync::watch;
 use tokio::time::{Duration, Instant};
 
+/// 首页拦截条用的短字段。标题按原因码在页面上映射，这里只给灰字要用的时间，页面不再从中文里抠。
+fn blocked_payload(state: &AppState, reason: &Reason, now: f64) -> Value {
+    let mut obj = json!({"code": reason.code(), "text": reason.text()});
+    if reason.code() == gate_core::reasons::DAILY_CAP {
+        let phrase = state.guard.with(|g| g.clock.next_reset_phrase(now));
+        obj["when"] = json!(phrase);
+    } else if reason.code() == gate_core::reasons::BREAKER {
+        let (until, stored) = state
+            .guard
+            .with(|g| (g.breaker_until, g.breaker_reason.clone()));
+        let auto = stored.is_empty() || stored.contains("连续出错");
+        obj["manual"] = json!(!auto);
+        obj["when"] = if auto {
+            let left = (until - now).ceil().max(0.0) as i64;
+            json!(format!("约 {left} 秒后恢复"))
+        } else {
+            json!(stored)
+        };
+    }
+    obj
+}
+
 /// 「近 1 分钟」请求窗口（秒）。
 pub const WINDOW: f64 = 60.0;
 /// 快照新鲜度：1 秒。
@@ -198,7 +220,7 @@ pub async fn build(state: &AppState, now: f64) -> Result<Map<String, Value>, Int
                 }
             }
             if let Some(f) = first {
-                blocked = json!({"code": f.code(), "text": f.text()});
+                blocked = blocked_payload(state, f, now);
             }
         }
     }
@@ -367,8 +389,7 @@ pub async fn build_status(state: &AppState) -> Result<Value, InternalError> {
     }))
 }
 
-/// 每人每日 Anlas 上限：Key 手动设置的优先，否则全站默认 `member_daily_anlas`。0 = 不限。
-/// 都是今天的生效值。
+/// 成员规则里的每日 Anlas。0 = 停用，不是不限。
 pub async fn member_anlas_cap(
     state: &AppState,
     key: &crate::key::Key,

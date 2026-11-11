@@ -5,11 +5,12 @@ import { getJSON } from "../../../../lib/api";
 import { fullTime, rel, scopeText } from "../../../../lib/format";
 import { Badge, Button, CopyField, Dialog, Field, Notice, Skeleton } from "../../../../ui";
 import { Avatar, ConfirmDialog, TableWrap, useBusy } from "../_kit";
+import { parseField } from "../system/core";
 import { addBan, addTag, call, giveCoupon, removeBan, resetDailyQuota } from "./actions";
 import { scopeTextOf } from "./logic";
 import { Empty, ResetScopeChecks, useDebounced, usePageData } from "./shared";
 import type { Ban, Coupon } from "./types";
-import { isDiscordId, parseNum } from "./validate";
+import { isDiscordId } from "./validate";
 
 /* ---------------- 通用：带表单的对话框 ---------------- */
 function FormDialog(props: {
@@ -181,9 +182,15 @@ export function CouponDialog(props: {
   const [scope, setScope] = useState({ v5: false, anlas: false });
   const [err, setErr] = useState("");
   const [list, setList] = useState<Coupon[] | null>(null);
+  const [daysBound, setDaysBound] = useState<{ min: number; max: number; kind: string } | null>(null);
   useEffect(() => {
-    getJSON<{ coupons: Coupon[] }>(`/admin/api/keys/${props.keyId}/coupons`)
-      .then((r) => setList(r.coupons))
+    getJSON<{ coupons: Coupon[]; fields: { days: { kind: string; min: number; max: number } } }>(
+      `/admin/api/keys/${props.keyId}/coupons`,
+    )
+      .then((r) => {
+        setList(r.coupons);
+        setDaysBound(r.fields.days);
+      })
       .catch(() => setList([]));
   }, [props.keyId]);
   const now = Date.now() / 1000;
@@ -193,11 +200,21 @@ export function CouponDialog(props: {
       submitText="发出"
       onClose={props.onClose}
       onSubmit={async () => {
-        const d = parseNum(days, "有效期", { min: 1, max: 30 });
+        if (!daysBound) return "正在读取有效期范围";
+        const d = parseField(
+          {
+            kind: daysBound.kind === "float" ? "float" : "int",
+            label: "有效期",
+            min: daysBound.min,
+            max: daysBound.max,
+          },
+          days,
+        );
         if (!d.ok) {
           setErr(d.error);
           return "请先修正标红的内容";
         }
+        if (typeof d.value !== "number") return "有效期必须是数字";
         setErr("");
         const r = await giveCoupon(props.keyId, d.value, note.trim(), scope);
         if (!r.ok) return r.error;
@@ -212,13 +229,16 @@ export function CouponDialog(props: {
       </p>
       <ResetScopeChecks value={scope} onChange={setScope} />
       <div class="xa-form__grid">
-        <Field label="有效天数" hint={fieldErr(err) ?? "1～30 天"}>
+        <Field
+          label="有效天数"
+          hint={fieldErr(err) ?? (daysBound ? `${daysBound.min}～${daysBound.max} 天` : "")}
+        >
           <input
             class="input"
             type="number"
             inputMode="numeric"
-            min={1}
-            max={30}
+            min={daysBound?.min}
+            max={daysBound?.max}
             value={days}
             aria-invalid={err ? true : undefined}
             onInput={(e) => setDays(e.currentTarget.value)}

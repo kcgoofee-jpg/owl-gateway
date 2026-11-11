@@ -230,7 +230,10 @@ async fn list_key_coupons(
     AdminPath(key_id): AdminPath<i64>,
 ) -> R {
     let rows = state.db.list_coupons(key_id, false, state.now()).await?;
-    Ok(ok_json(&json!({"coupons": rows})))
+    Ok(ok_json(&json!({
+        "coupons": rows,
+        "fields": member_ops::coupon_fields(),
+    })))
 }
 
 // ----------------------------------------------------------------------------- 删除 Key

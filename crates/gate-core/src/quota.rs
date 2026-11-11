@@ -6,6 +6,8 @@ use serde_json::{Map, Value};
 
 /// V5 暂停时成员看到的话（拒绝 V5 时的 402，原因码 `v5_exhausted`）。
 pub const V5_PAUSED_TEXT: &str = "V5 暂停，未扣费。请使用 V4.5。";
+/// 首页圆环上的短句。拒绝文案是 [`V5_PAUSED_TEXT`]。
+pub const V5_PAUSED_HINT: &str = "V5 暂停，请使用 V4.5";
 /// Meter readings at or above this are treated as full (recovery is clipped, not measurable).
 pub const V5_FULL_PERCENT: f64 = 99.5;
 

@@ -106,76 +106,6 @@ pub static ISSUE_HOURLY_CAP: Spec = bounded(
     0,
     500,
 );
-pub static REGISTER_OPEN: Spec = spec(
-    "register_open",
-    Kind::Flag,
-    SpecDefault::Bool(false),
-    "registration",
-    "开放 /register 领取",
-);
-/// 全站每日 V5（手动，站长 10-23；以前由动态额度每轮写）。没设过按 150。
-pub static GLOBAL_DAILY_V5: Spec = bounded(
-    spec(
-        "global_daily_v5",
-        Kind::Int,
-        SpecDefault::Int(150),
-        "额度 / 首页 / 客户端",
-        "全站每日 V5 张数（0 = 停用）",
-    ),
-    0,
-    9999,
-);
-/// 全站每日 Anlas 池（Vibe PVP）。没设过按 200；2.x / 3.0 早期的默认值取环境变量 `GLOBAL_DAILY_ANLAS`，
-/// 现已删除（默认值直接写在登记表里）。
-pub static GLOBAL_DAILY_ANLAS: Spec = bounded(
-    spec(
-        "global_daily_anlas",
-        Kind::Int,
-        SpecDefault::Int(200),
-        "额度 / Vibe PVP",
-        "全站每日 Anlas 额度（0 = 停用，Vibe 对公不开放；Vibe PVP 抢额度）",
-    ),
-    0,
-    9999,
-);
-/// 全站每月 Anlas 预算。没设过按 10000；环境变量 `GLOBAL_MONTHLY_ANLAS` 已删除（默认值直接写在这里）。
-pub static GLOBAL_MONTHLY_ANLAS: Spec = bounded(
-    spec(
-        "global_monthly_anlas",
-        Kind::Float,
-        SpecDefault::Float(10000.0),
-        "额度 / Anlas 池",
-        "全站每月 Anlas 预算（0 = 停用）",
-    ),
-    0,
-    99999,
-);
-/// V4.5 每人每天张数（手动，站长 10-23：新号老号一样，算法不改；新号爬坡 `newbie_ramp_*` 已删除）。
-/// 额度同步任务把它下发给 `quota_auto=1` 的成员 Key，新领的 Key 也用它。没设过按 150，0 = 停用。
-pub static REGISTER_DAILY_IMAGES: Spec = bounded(
-    spec(
-        "register_daily_images",
-        Kind::Int,
-        SpecDefault::Int(150),
-        "额度 / V4.5",
-        "V4.5 每人每天张数（手动；0 = 停用）",
-    ),
-    0,
-    9999,
-);
-/// V5 每人每天张数（手动，站长 10-23：按电量自动定的 V5 方案已删除）。同步方式同 [`REGISTER_DAILY_IMAGES`]。
-/// 没设过按 9999（等于放开，只受全站每日 V5 管）。
-pub static REGISTER_DAILY_V5: Spec = bounded(
-    spec(
-        "register_daily_v5",
-        Kind::Int,
-        SpecDefault::Int(9999),
-        "额度 / V5",
-        "V5 每人每天张数（手动；0 = 停用）",
-    ),
-    0,
-    9999,
-);
 /// V5 暂停（手动开关，站长 10-23）：开着时 V5 请求在本地直接拒（402，不扣 Anlas、不发上游），
 /// 首页 / 成员页 / 客户端订阅信息都按暂停显示。
 pub static V5_PAUSED: Spec = spec(
@@ -192,13 +122,6 @@ pub static MAINTENANCE_MODE: Spec = spec(
     SpecDefault::Bool(false),
     "system",
     "维护模式：暂停公共网站与服务接口，后台和健康检查保留",
-);
-pub static ALGO_NOTICE: Spec = spec(
-    "algo_notice",
-    Kind::Str,
-    SpecDefault::Str(""),
-    "quota_algo → 首页",
-    "首页显示的今日额度说明",
 );
 pub static MEMBER_SWEEP: Spec = spec(
     "member_sweep",
@@ -220,19 +143,6 @@ pub static V5_MEDIUM_MODE: Spec = Spec {
         "V5 Medium 降档：off 关闭 / on 全部 V5 Full 请求改走 Medium",
     )
 };
-
-/// 登记表（已删除的设置不在里面；新增的追加在末尾）。
-pub static ALL: [&Spec; 9] = [
-    &MEMBER_SWEEP,
-    &ISSUE_HOURLY_CAP,
-    &REGISTER_OPEN,
-    &GLOBAL_DAILY_V5,
-    &GLOBAL_DAILY_ANLAS,
-    &GLOBAL_MONTHLY_ANLAS,
-    &ALGO_NOTICE,
-    &V5_MEDIUM_MODE,
-    &MAINTENANCE_MODE,
-];
 
 /// `default_of(spec)`：登记表里写死的默认值（不取环境变量）。
 pub fn default_of(spec: &Spec) -> Value {
@@ -354,29 +264,29 @@ mod tests {
     use super::*;
     use serde_json::json;
 
-    #[test]
-    fn clamps_with_int_edges() {
-        // float 设置被夹到边界时是 int，不是 float
-        let v = parse(&GLOBAL_MONTHLY_ANLAS, &json!("-5"), Value::Null);
-        assert!(v.is_i64() && v == json!(0));
-        let v = parse(&GLOBAL_MONTHLY_ANLAS, &json!("12.5"), Value::Null);
-        assert!(v.is_f64());
-        assert_eq!(
-            encode(&GLOBAL_MONTHLY_ANLAS, &json!("5000000")).unwrap(),
-            "99999"
-        );
+    fn sample_float() -> Spec {
+        bounded(
+            spec(
+                "sample_float",
+                Kind::Float,
+                SpecDefault::Float(10000.0),
+                "test",
+                "float clamp sample",
+            ),
+            0,
+            99999,
+        )
     }
 
     #[test]
-    fn anlas_budgets_have_fixed_defaults() {
-        // 默认值在登记表里，不再取环境变量
-        assert_eq!(get_from_raw(&GLOBAL_DAILY_ANLAS, None), json!(200));
-        assert_eq!(get_from_raw(&GLOBAL_MONTHLY_ANLAS, None), json!(10000.0));
-        assert_eq!(get_from_raw(&GLOBAL_DAILY_ANLAS, Some("abc")), json!(200));
-        assert_eq!(
-            encode(&GLOBAL_DAILY_ANLAS, &json!("100001")).unwrap(),
-            "9999"
-        );
+    fn clamps_with_int_edges() {
+        let spec = sample_float();
+        // float 设置被夹到边界时是 int，不是 float
+        let v = parse(&spec, &json!("-5"), Value::Null);
+        assert!(v.is_i64() && v == json!(0));
+        let v = parse(&spec, &json!("12.5"), Value::Null);
+        assert!(v.is_f64());
+        assert_eq!(encode(&spec, &json!("5000000")).unwrap(), "99999");
     }
 
     #[test]
@@ -397,7 +307,7 @@ mod tests {
     #[test]
     fn flags_fail_closed() {
         assert_eq!(
-            parse(&REGISTER_OPEN, &json!("maybe"), Value::Bool(false)),
+            parse(&V5_PAUSED, &json!("maybe"), Value::Bool(false)),
             Value::Bool(false)
         );
         assert_eq!(

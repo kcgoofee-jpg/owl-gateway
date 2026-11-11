@@ -12,7 +12,7 @@
 //!    [`Resolved::low`] 为真（额度偏低）时写一行日志。
 //!
 //! 不在这里的 IO（服务层负责）：
-//! - `read_alert_threshold(db)`：`db.get_setting("v5_alert_threshold", 20)`，取到的值交给 [`normalize_alert_threshold`]；
+//! - 余量「低」的线固定 [`DEFAULT_THRESHOLD`]（20）。服务层不再读库里的 `v5_alert_threshold`；[`normalize_alert_threshold`] 仍给快照和旧调用使用；
 //! - `_note_period` 的读写：第一次用时 `db.get_setting("v5_period_samples", "{}")` 交给 [`AllowanceCore::load_periods`]，
 //!   之后每次 `db.set_setting("v5_period_samples", <note_period 返回的文本>)`，写失败只忽略；
 //! - HTTP 请求与响应体读取本身；按 token 串行的锁；日志。

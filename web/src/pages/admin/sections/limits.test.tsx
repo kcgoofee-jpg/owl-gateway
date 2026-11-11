@@ -80,9 +80,26 @@ function reset() {
     budgets: { daily_v5: 150, daily_anlas: 300, monthly_anlas: 10000 },
     v5_paused: false,
     v5_medium_mode: "off",
+    fields: {
+      daily_v5: { kind: "int", min: 0, max: 9999 },
+      daily_anlas: { kind: "int", min: 0, max: 9999 },
+      monthly_anlas: { kind: "float", min: 0, max: 99999 },
+    },
   };
   store.ops = {
-    registration: { configured: true, active: 1, open: true, max_users: 20, expires_days: 0, roles: [] },
+    registration: {
+      configured: true,
+      active: 1,
+      open: true,
+      max_users: 20,
+      expires_days: 0,
+      roles: [],
+      fields: {
+        max_users: { kind: "int", min: 0, max: 100000 },
+        expires_days: { kind: "int", min: 0, max: 3650 },
+        roles: { kind: "int", min: 0, max: 6 },
+      },
+    },
     features: { global: { image: true }, labels: { image: "图片生成" } },
     log_retention: { origin_keep_days: 0 },
   };

@@ -8,7 +8,7 @@ import type { MemberPolicy } from "../../lib/member-policy";
 export type MineItem = { state: "running" } | { state: "waiting"; position: number };
 export type LiveMine = { mine?: MineItem[]; waiting?: number; running?: number };
 
-export type Blocked = { code?: string; text?: string };
+export type Blocked = { code?: string; text?: string; when?: string; manual?: boolean };
 
 export type Live = {
   quota?: {
@@ -53,6 +53,8 @@ export type ServerQuotaRow = {
   left?: number;
   paused?: boolean;
   reason?: QuotaReason;
+  /** site_paused 时服务端给的短句 */
+  hint?: string;
 };
 
 export type Discord = {
@@ -98,8 +100,6 @@ export type MeMember = {
     rows?: ServerQuotaRow[];
   };
   coupons?: Coupon[];
-  /** 我的平均出图耗时：只用来补状态卡那句「平均约 N 秒」 */
-  timing?: { avg_dur_s?: number | null } | null;
 };
 export type Me = MeGuest | MeMember;
 

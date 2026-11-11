@@ -2189,8 +2189,7 @@ async fn public_me_matches_legacy_and_coupons_work() {
             "policy",
             "today",
             "queue",
-            "coupons",
-            "timing"
+            "coupons"
         ]
     );
     let key = e
@@ -2216,10 +2215,6 @@ async fn public_me_matches_legacy_and_coupons_work() {
     assert!(me.2["today"].get("quota_limits").is_none());
     assert_eq!(me.2["queue"], json!([]));
     assert_eq!(me.2["coupons"], json!([]));
-    assert_eq!(
-        me.2["timing"],
-        json!({"count": 0, "avg_dur_s": null, "avg_wait_s": null, "site_avg_dur_s": 9.0})
-    );
     // 被停用的 Key：只说没有 Key
     // 券：别人的 / 过期的 / 用过的都不行
     let key_id = key["id"].as_i64().unwrap();

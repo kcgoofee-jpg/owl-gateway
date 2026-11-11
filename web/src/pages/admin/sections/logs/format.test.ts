@@ -18,11 +18,12 @@ describe("kindLabel", () => {
     { id: "augment", label: "导演工具（线稿、上色等）", short: "导演工具" },
   ];
   it("流式出图、导演工具等别名归到对应功能", () => {
-    expect(kindLabel("image_stream", features)).toBe("文生图");
-    expect(kindLabel("augment-image", features)).toBe("导演工具");
-    expect(kindLabel("chat", features)).toBe("文本 / 聊天");
-    expect(kindLabel("mystery", features)).toBe("mystery");
-    expect(kindLabel("", features)).toBe("—");
+    const kinds = { image_stream: "image", "augment-image": "augment" };
+    expect(kindLabel("image_stream", features, kinds)).toBe("文生图");
+    expect(kindLabel("augment-image", features, kinds)).toBe("导演工具");
+    expect(kindLabel("chat", features, kinds)).toBe("文本 / 聊天");
+    expect(kindLabel("mystery", features, kinds)).toBe("mystery");
+    expect(kindLabel("", features, kinds)).toBe("—");
   });
 });
 

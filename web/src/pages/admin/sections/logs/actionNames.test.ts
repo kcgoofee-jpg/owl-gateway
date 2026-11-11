@@ -10,16 +10,23 @@ describe("actionLabel", () => {
 });
 
 describe("actionKindGroups", () => {
-  it("按分组列出；同一显示名的多个旧名用 | 连成一个筛选值", () => {
+  it("只按当前还会写的后台操作分组；旧名并进对应项，其余进「其他」", () => {
     const g = actionKindGroups([
       "领取 Key 失败（/register）",
       "领取 Key 失败（授权回调）",
       "登录后台",
       "新建 Key",
+      "移除成员标签",
+      "修改预算",
     ]);
-    expect(g.map((x) => x.title)).toEqual(["成员", "后台 · 成员与 Key", "后台 · 设置"]);
-    const member = g.find((x) => x.title === "成员");
-    expect(member?.options).toEqual([
+    expect(g.map((x) => x.title)).toEqual(["后台 · 登录", "后台 · 成员与 Key", "后台 · 设置", "其他"]);
+    const keys = g.find((x) => x.title === "后台 · 成员与 Key");
+    expect(keys?.options).toEqual([
+      { value: "新建 Key", label: "新建 Key" },
+      { value: "移除成员标签", label: "成员标签" },
+    ]);
+    const other = g.find((x) => x.title === "其他");
+    expect(other?.options).toEqual([
       { value: "领取 Key 失败（/register）|领取 Key 失败（授权回调）", label: "领取 Key 失败" },
     ]);
   });

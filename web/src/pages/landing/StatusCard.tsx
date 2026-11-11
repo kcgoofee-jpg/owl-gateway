@@ -11,9 +11,7 @@ import { StatRows } from "./Usage";
 export function StatusCard(props: { class?: string }) {
   const { live, connection } = useStore();
   const data = live.value;
-  const view = deriveStatus(data, {
-    nowMs: Date.now(),
-  });
+  const view = deriveStatus(data);
   const generated = generatedToday(data);
 
   // 读屏只在实时状态变化时播报。

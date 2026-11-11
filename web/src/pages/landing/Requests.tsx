@@ -1,14 +1,14 @@
 import { useEffect, useRef, useState } from "preact/hooks";
 import { ApiError, getJSON } from "../../lib/api";
 import { secTime } from "../../lib/format";
+import { deliveryLabel, modelLabel, TOOL_LABELS as TOOL_KINDS } from "../../lib/request-label";
 import { Badge, Button, Card, Skeleton, Tabs } from "../../ui";
 import { RequestStatsPanel } from "./RequestStats";
-import { modelLabel, TOOL_KINDS } from "./request-model";
 import type { MyRequest, MyRequestStats, MyRequests } from "./types";
 
 type Status = "" | "ok" | "rejected" | "error";
 
-export { modelLabel } from "./request-model";
+export { deliveryLabel, modelLabel } from "../../lib/request-label";
 
 /** 成功的那条怎么算的：账号代付 / 扣 N Anlas / 用 V5 额度 / free；尺寸步数从说明里取。 */
 export function okLine(r: Pick<MyRequest, "message" | "anlas" | "site_paid" | "kind">): string {
@@ -34,23 +34,6 @@ const STATUS: Record<string, { text: string; tone: "ok" | "warn" | "danger" }> =
   error: { text: "失败", tone: "danger" },
   cancelled: { text: "已取消", tone: "warn" },
 };
-
-/**
- * 交付徽标只留异常态：传输完成不显示——图到没到成员自己看得到，服务端也无法确认客户端收到
- * （那需要客户端回执，没有这个机制），原提示是冗余的（站长 10-27）。老记录没有交付状态，同样不提示。
- */
-export function deliveryLabel(
-  state: MyRequest["delivery_state"],
-): { text: string; tone: "warn" | "danger" } | null {
-  switch (state) {
-    case "transport_interrupted":
-      return { text: "传输中断", tone: "danger" };
-    case "pending":
-      return { text: "传输中", tone: "warn" };
-    default:
-      return null;
-  }
-}
 
 export function settlementLabel(
   status: MyRequest["settlement_status"],

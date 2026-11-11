@@ -119,11 +119,11 @@ function Who(props: {
   );
 }
 
-function What(props: { l: UsageLog; features: Feature[] }) {
+function What(props: { l: UsageLog; features: Feature[]; kinds: Record<string, string> }) {
   const { l } = props;
   return (
     <span class="nowrap" title={l.model || undefined}>
-      {kindLabel(l.kind, props.features)}
+      {kindLabel(l.kind, props.features, props.kinds)}
       {l.model ? ` · ${shortModel(l.model)}` : ""}
     </span>
   );
@@ -191,8 +191,12 @@ export function Usage() {
   const { query, set } = useQueryState();
   const narrow = useMedia(NARROW);
   const members = useAdmin<{ members: Member[] }>("/admin/api/members");
-  const catalog = useAdmin<{ features: Array<{ id: string; label: string }> }>("/admin/api/features");
+  const catalog = useAdmin<{
+    features: Array<{ id: string; label: string }>;
+    kinds?: Record<string, string>;
+  }>("/admin/api/features");
   const features = useMemo(() => asFeatures(catalog.data?.features ?? []), [catalog.data]);
+  const kinds = catalog.data?.kinds ?? {};
   const featureOptions = useMemo(() => logFeatures(features), [features]);
   const [open, setOpen] = useState<Set<number>>(new Set());
 
@@ -384,7 +388,7 @@ export function Usage() {
                     </div>
                     <div class="lg-card__meta">
                       <Who l={l} memberOf={memberOf} memberByKey={memberByKey} onFilter={set} />
-                      <What l={l} features={features} />
+                      <What l={l} features={features} kinds={kinds} />
                     </div>
                     <div class="lg-card__meta small">
                       <Timing l={l} />
@@ -436,7 +440,7 @@ export function Usage() {
                             <Who l={l} memberOf={memberOf} memberByKey={memberByKey} onFilter={set} />
                           </td>
                           <td>
-                            <What l={l} features={features} />
+                            <What l={l} features={features} kinds={kinds} />
                           </td>
                           <td>
                             <Status l={l} onFilter={set} />

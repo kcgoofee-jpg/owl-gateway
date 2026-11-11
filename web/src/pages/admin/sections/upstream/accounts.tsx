@@ -15,9 +15,9 @@ import {
   queueText,
   quietText,
   reading,
-  TOKEN_SPECS,
   tokenState,
   type UpstreamAccount,
+  v5LimitSpecs,
   type WindowStats,
   yesterdayText,
 } from "./core";
@@ -91,6 +91,7 @@ function RequestStats({ a }: { a: UpstreamAccount }) {
 
 export function AccountCard(props: {
   a: UpstreamAccount;
+  limit: { min: number; max: number };
   only: boolean;
   onDetails: (a: UpstreamAccount) => void;
   onReplace: (a: UpstreamAccount) => void;
@@ -102,7 +103,7 @@ export function AccountCard(props: {
   const info = a.info;
   const b = a.balance;
   const st = tokenState(a);
-  const form = useForm(TOKEN_SPECS, a as unknown as Record<string, unknown>);
+  const form = useForm(v5LimitSpecs(props.limit), a as unknown as Record<string, unknown>);
   const [saving, setSaving] = useState(false);
   // 停用的账号默认收起明细，只留标题行和关键指标，避免一屏全是死账号的细节
   const [open, setOpen] = useState(a.admin_enabled && !a.disabled);

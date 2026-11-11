@@ -378,9 +378,16 @@ async fn public_live_blocked_reason_and_queue() {
         v["queue"],
         json!({"waiting": 1, "running": 0, "full": false})
     );
+    assert_eq!(v["guard"]["blocked"]["code"], "breaker");
+    assert_eq!(v["guard"]["blocked"]["manual"], false);
     assert_eq!(
-        v["guard"]["blocked"],
-        json!({"code": "breaker", "text": "NovelAI 连续出错，全站暂停出图 300 秒，未扣费。到时自动恢复。"})
+        v["guard"]["blocked"]["text"],
+        "NovelAI 连续出错，全站暂停出图 300 秒，未扣费。到时自动恢复。"
+    );
+    assert!(
+        v["guard"]["blocked"]["when"]
+            .as_str()
+            .is_some_and(|s| s.starts_with("约 ") && s.ends_with(" 秒后恢复"))
     );
     // 没登录的人看不到别人的排队位置
     assert_eq!(v["me"], Value::Null);
@@ -1178,8 +1185,7 @@ async fn landing_boot_for_member_with_key() {
             "policy",
             "today",
             "queue",
-            "coupons",
-            "timing"
+            "coupons"
         ]
     );
     assert_eq!(me["logged_in"], true);
@@ -1208,10 +1214,6 @@ async fn landing_boot_for_member_with_key() {
     );
     assert_eq!(me["queue"], json!([{"state": "waiting", "position": 1}]));
     assert_eq!(me["coupons"], json!([]));
-    assert_eq!(
-        me["timing"],
-        json!({"count": 0, "avg_dur_s": null, "avg_wait_s": null, "site_avg_dur_s": 9.0})
-    );
     // 看板里带我的排队
     assert_eq!(
         boot["live"]["me"],

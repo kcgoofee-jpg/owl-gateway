@@ -29,6 +29,8 @@ export type Member = {
   paused_until: number | null;
   reset_today: { count: number; last_ts: number } | null;
   tags: Tag[];
+  /** 服务端算好的待处理 id：paused / expired / expiring / reset_many。空数组表示不用处理。 */
+  issues?: string[];
   key_count: number;
   all_key_ids: number[];
 };

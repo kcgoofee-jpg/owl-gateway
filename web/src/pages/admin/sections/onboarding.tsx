@@ -9,7 +9,7 @@ import {
   policyFromForm,
   policySpecs,
 } from "./member-policy";
-import { claimBody, MAX_ROLE_RULES, type Ops, type RoleRule, validRole } from "./onboarding/core";
+import { claimBody, type Ops, type RoleRule, validRole } from "./onboarding/core";
 import { NumField, SaveBar, Sect, SwitchRow, useForm } from "./system/forms";
 
 function DefaultRules() {
@@ -45,10 +45,23 @@ function DefaultRules() {
 function ClaimForm({ ops }: { ops: Ops }) {
   const server = ops.registration;
   const record = useMemo(() => ({ ...server }), [server]);
+  const bounds = server.fields;
   const form = useForm(
     {
-      max_users: { kind: "int", label: "名额上限（0 不限）", min: 0, max: 100000, unit: "人" },
-      expires_days: { kind: "int", label: "Key 有效期（0 永久）", min: 0, max: 3650, unit: "天" },
+      max_users: {
+        kind: bounds.max_users.kind,
+        label: "名额上限（0 不限）",
+        min: bounds.max_users.min,
+        max: bounds.max_users.max,
+        unit: "人",
+      },
+      expires_days: {
+        kind: bounds.expires_days.kind,
+        label: "Key 有效期（0 永久）",
+        min: bounds.expires_days.min,
+        max: bounds.expires_days.max,
+        unit: "天",
+      },
     },
     record,
   );
@@ -129,7 +142,7 @@ function ClaimForm({ ops }: { ops: Ops }) {
           ))}
           <Button
             size="sm"
-            disabled={roles.length >= MAX_ROLE_RULES}
+            disabled={roles.length >= bounds.roles.max}
             onClick={() => change([...roles, { guild: "", role: "", note: "" }])}
           >
             添加身份组

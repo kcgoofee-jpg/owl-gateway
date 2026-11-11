@@ -378,7 +378,13 @@ fn same(a: &Value, b: &Value) -> bool {
 /// PUT 的请求体。
 fn put_body(sp: &Spec, value: &Value, current: &Value) -> Option<Value> {
     let mut body = match sp.ep {
-        Ep::Settings => current.clone(),
+        Ep::Settings => {
+            let mut body = current.clone();
+            if let Some(obj) = body.as_object_mut() {
+                obj.remove("fields");
+            }
+            body
+        }
         Ep::MemberDefaults => current.get("defaults")?.clone(),
         Ep::Registration => {
             let saved = current.get("registration")?.as_object()?;
@@ -787,11 +793,12 @@ mod tests {
 
     #[test]
     fn put_body_preserves_other_canonical_fields() {
-        let current = json!({"budgets":{"daily_v5":150,"daily_anlas":200,"monthly_anlas":10000},"v5_paused":false,"v5_medium_mode":"off"});
+        let current = json!({"budgets":{"daily_v5":150,"daily_anlas":200,"monthly_anlas":10000},"v5_paused":false,"v5_medium_mode":"off","fields":{"daily_v5":{"max":9999}}});
         let body = put_body(find("global_daily_v5").unwrap(), &json!(0), &current).unwrap();
         assert_eq!(body["budgets"]["daily_v5"], 0);
         assert_eq!(body["budgets"]["daily_anlas"], 200);
         assert_eq!(body["v5_paused"], false);
+        assert!(body.get("fields").is_none());
         let current = json!({"registration":{"configured":true,"active":5,"open":false,"max_users":20,"expires_days":0,"roles":[]}});
         assert_eq!(
             put_body(find("register_open").unwrap(), &json!(true), &current).unwrap(),

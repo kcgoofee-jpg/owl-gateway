@@ -1,8 +1,10 @@
 import type { FieldSpec } from "../system/core";
+export type Bound = { kind: "int" | "float"; min: number; max: number };
 export type Settings = {
   budgets: { daily_v5: number; daily_anlas: number; monthly_anlas: number };
   v5_paused: boolean;
   v5_medium_mode: "off" | "on";
+  fields: { daily_v5: Bound; daily_anlas: Bound; monthly_anlas: Bound };
 };
 
 /** /admin/api/runtime-limits：当前值旁边带 fields（min/max）。标题留在前端。 */
@@ -68,7 +70,7 @@ export type Guard = {
 export const GUARD_COPY: Record<string, { label: string; hint: string; unit?: string }> = {
   account_daily_cap: {
     label: "单号每天上限",
-    hint: "每个上游账号每天最多出几张；0 = 这个账号今天一张都不出（不是不限，要放开填 9999）",
+    hint: "每个上游账号每天最多出几张；0 = 这个账号今天一张都不出（不是不限，要放开填 {max}）",
     unit: "张",
   },
   post_jitter_min: {
@@ -85,7 +87,7 @@ export const GUARD_COPY: Record<string, { label: string; hint: string; unit?: st
   },
   v5_priority: {
     label: "V5 优先",
-    hint: "1 = V5 请求先于同条件的 4.5 开始（不抢正在出的那张；等满 45 秒的 4.5 仍会跳到最前）；0 = 全部按用量排队",
+    hint: "1 = V5 请求先于同条件的 4.5 开始（不抢正在出的那张；等满半个排队超时的 4.5 仍会跳到最前）；0 = 全部先来后到",
   },
 };
 
@@ -94,12 +96,13 @@ export function guardSpecs(g: Guard): Record<string, FieldSpec> {
   const out: Record<string, FieldSpec> = {};
   for (const [name, f] of Object.entries(g.fields)) {
     const copy = GUARD_COPY[name];
+    const hint = (copy?.hint ?? f.label).replaceAll("{max}", String(f.max));
     out[name] = {
       kind: "int",
       label: copy?.label ?? f.label,
       min: f.min,
       max: f.max,
-      hint: `${copy?.hint ?? f.label}（${f.min}～${f.max}，默认 ${f.default}）`,
+      hint: `${hint}（${f.min}～${f.max}，默认 ${f.default}）`,
       ...(copy?.unit ? { unit: copy.unit } : {}),
     };
   }
@@ -124,18 +127,3 @@ export type Records = {
     paid_v5: Array<{ position: number | null; max_anlas: number; spent: number; until: number }>;
   };
 };
-
-/** 「3 分钟前」「2 小时前」；没有为「没有」 */
-export function agoText(ts: number | null | undefined, nowMs: number): string {
-  if (!ts) return "没有";
-  const s = Math.max(0, Math.round(nowMs / 1000 - ts));
-  if (s < 60) return `${s} 秒前`;
-  if (s < 3600) return `${Math.floor(s / 60)} 分钟前`;
-  if (s < 86400) return `${Math.floor(s / 3600)} 小时前`;
-  return `${Math.floor(s / 86400)} 天前`;
-}
-
-/** 空值显示「—」 */
-export function dash(v: number | null | undefined, unit = ""): string {
-  return v == null ? "—" : `${v}${unit}`;
-}

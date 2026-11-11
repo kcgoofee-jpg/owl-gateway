@@ -54,10 +54,6 @@ export function createStore() {
   );
   const live = liveSub.data;
   const meta = stable<Meta>(() => mergeMeta(status.value, live.value));
-  /** 排队估算与规则说明用的那几个字段：只在它们变化时才通知 */
-  const facts = stable(() => ({
-    cycle: live.value?.cycle ?? 0,
-  }));
 
   const loadMe = async () => {
     try {
@@ -97,7 +93,7 @@ export function createStore() {
     };
   };
 
-  return { me, live, connection: liveSub.connected, meta, facts, reloadMe: loadMe, start };
+  return { me, live, connection: liveSub.connected, meta, reloadMe: loadMe, start };
 }
 
 export type Store = ReturnType<typeof createStore>;

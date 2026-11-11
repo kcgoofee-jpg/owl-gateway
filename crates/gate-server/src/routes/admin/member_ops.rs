@@ -45,6 +45,15 @@ pub(super) async fn reset_quota(
     Ok(json!({"ok": true, "key": key}))
 }
 
+/// 重置券有效期上限（天）。表单下限是 1；接口仍接受大于 0 且不超过这个上限的数。
+pub(super) const COUPON_DAYS_MAX: f64 = 30.0;
+
+pub(super) fn coupon_fields() -> Value {
+    json!({
+        "days": {"kind": "float", "min": 1, "max": COUPON_DAYS_MAX as i64}
+    })
+}
+
 /// 给指定 Key 发一张重置券（目前只有 `reset`，有效期 1～30 天）。
 pub(super) async fn add_reset_coupon(
     state: &AppState,
@@ -61,8 +70,11 @@ pub(super) async fn add_reset_coupon(
         Value::Number(n) => n.as_f64(),
         _ => None,
     };
-    let Some(days_f) = days_f.filter(|d| 0.0 < *d && *d <= 30.0) else {
-        return Err(http(422, "有效期 days 必须在 1～30 天之间"));
+    let Some(days_f) = days_f.filter(|d| 0.0 < *d && *d <= COUPON_DAYS_MAX) else {
+        return Err(http(
+            422,
+            format!("有效期 days 必须在 1～{} 天之间", COUPON_DAYS_MAX as i64),
+        ));
     };
     if load_key(state, key_id).await?.is_none() {
         return Err(http(404, NO_KEY));
