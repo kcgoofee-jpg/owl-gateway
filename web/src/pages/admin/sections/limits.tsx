@@ -2,7 +2,14 @@ import { useMemo, useState } from "preact/hooks";
 import { Card } from "../../../ui";
 import { act, useAdmin } from "../Admin";
 import { CardPending, SectionHead } from "./_kit";
-import { type Guard, guardSpecs, RUNTIME_SPECS, type Settings } from "./limits/core";
+import {
+  type Guard,
+  guardSpecs,
+  RUNTIME_NAMES,
+  type RuntimeLimits,
+  runtimeSpecs,
+  type Settings,
+} from "./limits/core";
 import { NumField, SaveBar, Sect, SelectField, SwitchRow, useForm } from "./system/forms";
 
 function BudgetCard() {
@@ -89,13 +96,20 @@ const GUARD_GROUPS: Array<{ title: string; names: string[] }> = [
 
 function GuardCard() {
   const guard = useAdmin<Guard>("/admin/api/guard");
-  const runtime = useAdmin<Record<string, number>>("/admin/api/runtime-limits");
+  const runtime = useAdmin<RuntimeLimits>("/admin/api/runtime-limits");
   const specs = useMemo(
-    () => (guard.data ? { ...RUNTIME_SPECS, ...guardSpecs(guard.data) } : RUNTIME_SPECS),
-    [guard.data],
+    () => (guard.data && runtime.data ? { ...runtimeSpecs(runtime.data), ...guardSpecs(guard.data) } : {}),
+    [guard.data, runtime.data],
   );
   const server = useMemo(
-    () => (guard.data && runtime.data ? { ...runtime.data, ...guard.data.values } : null),
+    () =>
+      guard.data && runtime.data
+        ? {
+            queue_timeout: runtime.data.queue_timeout,
+            image_429_cooldown_seconds: runtime.data.image_429_cooldown_seconds,
+            ...guard.data.values,
+          }
+        : null,
     [guard.data, runtime.data],
   );
   const form = useForm(specs, server);
@@ -112,7 +126,7 @@ function GuardCard() {
     const ch = form.changes();
     const run: Record<string, unknown> = {};
     const g: Record<string, unknown> = {};
-    for (const [k, v] of Object.entries(ch)) (k in RUNTIME_SPECS ? run : g)[k] = v;
+    for (const [k, v] of Object.entries(ch)) (RUNTIME_NAMES.includes(k) ? run : g)[k] = v;
     setSaving(true);
     let ok = true;
     if (Object.keys(run).length)

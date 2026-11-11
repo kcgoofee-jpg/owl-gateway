@@ -22,6 +22,32 @@ use crate::state::AppState;
 use axum::Router;
 use serde_json::{Value, json};
 
+/// 账号卡片和运行保护共用的出图节奏：周期、上次 429、排队、并发锁、排队上限。
+pub(super) fn pacing_fields(
+    pacing: Option<&gate_upstream::client::Pacing>,
+    queue_timeout: f64,
+) -> Value {
+    let cycle = pacing.map(|item| item.cycle).unwrap_or(0.0);
+    let last_429 = pacing.map(|item| item.last_429).unwrap_or(0.0);
+    json!({
+        "cycle": gate_core::primitives::round(cycle, 1),
+        "last_429": if last_429 > 0.0 { gate_core::values::float(last_429) } else { Value::Null },
+        "waiting": pacing.map(|item| item.waiting).unwrap_or(0),
+        "locked_today": pacing.map(|item| item.locked_today).unwrap_or(0),
+        "queue_cap": gate_upstream::pace::realistic_queue(queue_timeout, cycle)
+            .map_or(Value::Null, |n| json!(n)),
+    })
+}
+
+pub(super) fn merge_json(row: &mut Value, extra: &Value) {
+    let (Some(row), Some(extra)) = (row.as_object_mut(), extra.as_object()) else {
+        return;
+    };
+    for (key, value) in extra {
+        row.insert(key.clone(), value.clone());
+    }
+}
+
 pub fn router() -> Router<AppState> {
     Router::new()
         .merge(monitor::router())

@@ -54,9 +54,10 @@ async fn set_image_access(
 }
 
 async fn defaults(State(state): State<AppState>, _session: AdminSession) -> R {
-    Ok(ok_json(
-        &json!({"defaults":state.db.member_defaults().await?}),
-    ))
+    Ok(ok_json(&json!({
+        "defaults": state.db.member_defaults().await?,
+        "fields": gate_core::member_policy::policy_fields(),
+    })))
 }
 
 async fn set_defaults(State(state): State<AppState>, session: AdminSession, request: Request) -> R {
@@ -78,7 +79,11 @@ async fn member(
     if !gate_core::member_policy::is_discord_id(&subject) {
         return Err(HttpError::new(422, "Discord ID 无效").into());
     }
-    Ok(ok_json(&json!(state.db.member_policy(&subject).await?)))
+    let mut body = json!(state.db.member_policy(&subject).await?);
+    if let Some(obj) = body.as_object_mut() {
+        obj.insert("fields".into(), gate_core::member_policy::policy_fields());
+    }
+    Ok(ok_json(&body))
 }
 
 async fn set_member(

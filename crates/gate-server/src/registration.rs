@@ -10,6 +10,8 @@
 //! - 后台循环不在这里起：见文件末尾的 [`registrar_jobs`]，由任务调度方安排。
 //!   每日清空自助注册（旧的 `REGISTER_RESET_AT`）已删除（线上从来没配过）。
 
+use std::time::Duration;
+
 use crate::action_log::log_action;
 use crate::defaults;
 use crate::env::{EnvConfig, RegistrationEnv};
@@ -26,8 +28,6 @@ use gate_db::repo::registration::{NewRegistration, RegistrationProfile};
 use gate_db::{Db, DbError};
 use reqwest::Method;
 use serde_json::{Value, json};
-use std::time::Duration;
-
 /// 身份组同步每轮最多摘几个（不制造突发请求）。
 pub const SYNC_ROLES_PER_RUN: usize = 5;
 
@@ -333,13 +333,7 @@ impl RegistrationService {
     /// `configured_service`：全部配置来自环境变量；缺任意一项（或桥接密钥太短）则自助注册保持关闭。
     pub fn from_env(env: &EnvConfig, db: Db) -> Option<Self> {
         let cfg = env.registration.clone()?;
-        let http = reqwest::Client::builder()
-            // Discord 要求机器人带可识别的 User-Agent（空的 / 默认的会被 Cloudflare 1010 拦），与告警、运维命令共用
-            .user_agent(gate_core::discord_ua::DISCORD_USER_AGENT)
-            // httpx 默认不跟随重定向；也避免把机器人 Token 带到别处
-            .redirect(reqwest::redirect::Policy::none())
-            .build()
-            .ok()?;
+        let http = crate::discord_share::client().clone();
         Some(Self {
             db,
             cfg,

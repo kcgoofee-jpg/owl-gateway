@@ -3,6 +3,7 @@
  * （与 NovelAI 官方格式一致，客户端直接显示 message）。
  */
 export class ApiError extends Error {
+  retryAfter?: number;
   constructor(
     public status: number,
     message: string,
@@ -30,7 +31,10 @@ async function parse(res: Response): Promise<unknown> {
     } | null;
     let msg = b?.error?.message ?? b?.message ?? b?.detail ?? `请求失败（HTTP ${res.status}）`;
     if (msg.startsWith(NOTICE_PREFIX)) msg = msg.slice(NOTICE_PREFIX.length);
-    throw new ApiError(res.status, msg, b?.error?.request_id);
+    const error = new ApiError(res.status, msg, b?.error?.request_id);
+    const retry = Number(res.headers.get("Retry-After"));
+    if (Number.isFinite(retry) && retry > 0) error.retryAfter = Math.ceil(retry);
+    throw error;
   }
   return body;
 }

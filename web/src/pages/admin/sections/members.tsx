@@ -176,10 +176,11 @@ export default function Members() {
     if (!dlg) return null;
     switch (dlg.t) {
       case "edit": {
-        if (!target) return null;
+        if (!target || !mem.data?.fields) return null;
         return (
           <KeyDialog
             target={target}
+            fields={mem.data.fields}
             onClose={close}
             onSaved={(text) => {
               close();

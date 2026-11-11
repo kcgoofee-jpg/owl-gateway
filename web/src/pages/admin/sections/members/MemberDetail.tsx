@@ -4,7 +4,7 @@ import { useState } from "preact/hooks";
 import { dayOf, fullTime, rel, usedOf } from "../../../../lib/format";
 import { Badge, Button, copyText, Menu, toast } from "../../../../ui";
 import { useAdmin } from "../../Admin";
-import { exceptionCount, FEATURE_FIELDS, POLICY_SPECS } from "../member-policy";
+import { exceptionCount, FEATURE_FIELDS, policyLabel } from "../member-policy";
 import { call } from "./actions";
 import { type Issue, type IssueAction, memberIssues, memberLabel, memberVerdict, userTags } from "./logic";
 import type { KeyRow, MemberRow } from "./types";
@@ -123,7 +123,7 @@ export function MemberDetail(props: { m: MemberRow; now: number; act: DetailActi
               <span class="mb-chips">
                 {FEATURE_FIELDS.filter((name) => policy[name]).map((name) => (
                   <span class="xa-chip" key={name}>
-                    {POLICY_SPECS[name].label}
+                    {policyLabel(name)}
                   </span>
                 ))}
               </span>

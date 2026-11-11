@@ -3,28 +3,17 @@
  * 原生 <dialog> 盖在 toast 上面，所以出错要把原因交给对话框自己显示，成功再由调用方 toast。
  * 成功后触发一次全局刷新（tick）。
  */
-import { ApiError, sendJSON } from "../../../../lib/api";
-import { tick } from "../../Admin";
-import { edits } from "../live";
+import { adminWrite, type WriteResult } from "../../Admin";
 import type { Coupon } from "./types";
 
-export type Res<T = unknown> = { ok: true; data: T } | { ok: false; error: string };
+export type Res<T = unknown> = WriteResult<T>;
 
 export async function call<T = unknown>(
   method: "POST" | "PUT" | "PATCH" | "DELETE",
   url: string,
   body?: unknown,
 ): Promise<Res<T>> {
-  try {
-    const data = await sendJSON<T>(method, url, body);
-    edits.value++;
-    tick.value++;
-    return { ok: true, data };
-  } catch (e) {
-    // 登录过期：触发一次刷新，数据钩子读到 401 会回到登录页
-    if (e instanceof ApiError && e.status === 401) tick.value++;
-    return { ok: false, error: e instanceof Error ? e.message : String(e) };
-  }
+  return adminWrite<T>(method, url, body, { notify: "return" });
 }
 
 const A = "/admin/api";

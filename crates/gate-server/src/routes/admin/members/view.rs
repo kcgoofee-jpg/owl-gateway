@@ -391,5 +391,6 @@ pub(super) async fn members_view(state: &AppState, filter_raw: &str) -> Result<V
         "total": total,
         "attention": attention,
         "filter": filter,
+        "fields": gate_core::member_policy::policy_fields(),
     }))
 }

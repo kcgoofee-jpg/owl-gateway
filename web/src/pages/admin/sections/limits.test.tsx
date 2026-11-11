@@ -2,18 +2,36 @@ import { render } from "preact";
 import { act as flush } from "preact/test-utils";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { MemberPolicy } from "../../../lib/member-policy";
+import type { PolicyBound } from "./member-policy";
+
+const RULE_FIELDS: Record<string, PolicyBound> = {
+  daily_images: { kind: "int", min: 0, max: 9999 },
+  daily_v5: { kind: "int", min: 0, max: 9999 },
+  daily_anlas: { kind: "int", min: 0, max: 9999 },
+  monthly_anlas: { kind: "float", min: 0, max: 99999 },
+  rpm: { kind: "int", min: 1, max: 600 },
+  image: { kind: "bool" },
+  v5: { kind: "bool" },
+  vibe: { kind: "bool" },
+  tags: { kind: "bool" },
+  img2img: { kind: "bool" },
+  upscale: { kind: "bool" },
+  augment: { kind: "bool" },
+  paid_parameters: { kind: "bool" },
+};
 
 const store = vi.hoisted(
   () =>
-    ({ rules: { defaults: {} }, runtime: {}, ops: {} }) as {
-      rules: { defaults: MemberPolicy };
+    ({ rules: { defaults: {}, fields: {} }, runtime: {}, ops: {} }) as {
+      rules: { defaults: MemberPolicy; fields: Record<string, PolicyBound> };
       runtime: Record<string, unknown>;
       ops: Record<string, unknown>;
     },
 );
 const write = vi.hoisted(() =>
   vi.fn(async (_method: string, url: string, body: Record<string, unknown>) => {
-    if (url === "/admin/api/member-rules") store.rules = { defaults: body as MemberPolicy };
+    if (url === "/admin/api/member-rules")
+      store.rules = { defaults: body as MemberPolicy, fields: store.rules.fields };
     if (url === "/admin/api/settings") store.runtime = body;
     return true;
   }),
@@ -56,6 +74,7 @@ function reset() {
       img2img: false,
       paid_parameters: false,
     },
+    fields: RULE_FIELDS,
   };
   store.runtime = {
     budgets: { daily_v5: 150, daily_anlas: 300, monthly_anlas: 10000 },
@@ -105,7 +124,7 @@ describe("规则与运行保护表单", () => {
     reset();
     await mount("rules");
     await input("V4.5 免费图/天", "250");
-    store.rules = { defaults: { ...store.rules.defaults, daily_images: 300 } };
+    store.rules = { ...store.rules, defaults: { ...store.rules.defaults, daily_images: 300 } };
     await mount("rules");
     expect(number("V4.5 免费图/天").value).toBe("250");
     await flush(async () => {

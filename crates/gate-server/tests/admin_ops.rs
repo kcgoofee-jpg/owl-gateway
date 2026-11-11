@@ -337,12 +337,27 @@ async fn runtime_limits_validate_apply_and_persist() {
     let e = setup(&[]).await;
     let api = Admin::login_bare(&e.state).await;
     // 每 Key 出图间隔 key_image_min_interval、账号出图间隔 image_min_interval 已删除：只剩两项，传它们算未知设置
+    let limits = api.get_ok("/runtime-limits").await;
     assert_eq!(
-        api.text("GET", "/runtime-limits", None).await,
         (
-            200,
-            r#"{"queue_timeout":5,"image_429_cooldown_seconds":60}"#.into()
-        )
+            limits["queue_timeout"].clone(),
+            limits["image_429_cooldown_seconds"].clone()
+        ),
+        (json!(5), json!(60))
+    );
+    assert_eq!(
+        (
+            limits["fields"]["queue_timeout"]["min"].clone(),
+            limits["fields"]["queue_timeout"]["max"].clone()
+        ),
+        (json!(15), json!(300))
+    );
+    assert_eq!(
+        (
+            limits["fields"]["image_429_cooldown_seconds"]["min"].clone(),
+            limits["fields"]["image_429_cooldown_seconds"]["max"].clone()
+        ),
+        (json!(60), json!(3600))
     );
     let before = settings(&e).await;
     for (body, detail) in [
@@ -392,10 +407,16 @@ async fn runtime_limits_validate_apply_and_persist() {
     assert_eq!(settings(&e).await, before);
 
     let all = json!({"queue_timeout": 120, "image_429_cooldown_seconds": 90});
+    let (status, saved) = api.json("PUT", "/runtime-limits", Some(all.clone())).await;
+    assert_eq!(status, 200);
     assert_eq!(
-        api.text("PUT", "/runtime-limits", Some(all.clone())).await,
-        (200, all.to_string())
+        (
+            saved["queue_timeout"].clone(),
+            saved["image_429_cooldown_seconds"].clone()
+        ),
+        (json!(120), json!(90))
     );
+    assert!(saved.get("fields").is_some());
     let l = e.state.limits();
     assert_eq!(
         (l.queue_timeout, l.image_429_cooldown_seconds),
@@ -408,14 +429,17 @@ async fn runtime_limits_validate_apply_and_persist() {
             ("runtime_image_429_cooldown_seconds", "90"),
         ])
     );
-    // 只改一项：响应仍是两项全量
+    // 只改一项：响应仍带上两项当前值
+    let (status, partial) = api
+        .json("PUT", "/runtime-limits", Some(json!({"queue_timeout": 20})))
+        .await;
+    assert_eq!(status, 200);
     assert_eq!(
-        api.text("PUT", "/runtime-limits", Some(json!({"queue_timeout": 20})))
-            .await,
         (
-            200,
-            r#"{"queue_timeout":20,"image_429_cooldown_seconds":90}"#.into()
-        )
+            partial["queue_timeout"].clone(),
+            partial["image_429_cooldown_seconds"].clone()
+        ),
+        (json!(20), json!(90))
     );
     assert_eq!(api.get_ok("/runtime-limits").await["queue_timeout"], 20);
 

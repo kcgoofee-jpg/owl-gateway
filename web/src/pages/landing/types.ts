@@ -43,6 +43,18 @@ export type Meta = {
 
 export type Coupon = { id: number; kind?: string; note?: string; expires_at: number; scope?: string };
 
+/** /public/me 的 today.rows。reason 为空表示还能用。 */
+export type QuotaReason = "disabled" | "member_off" | "site_paused" | "upstream_exhausted" | "site_empty";
+
+export type ServerQuotaRow = {
+  id: "legacy" | "v5" | "anlas";
+  used?: number;
+  cap?: number;
+  left?: number;
+  paused?: boolean;
+  reason?: QuotaReason;
+};
+
 export type Discord = {
   id?: string;
   username?: string | null;
@@ -78,10 +90,12 @@ export type MeMember = {
     v5_access_reason?: string;
     anlas?: number;
     daily_anlas?: number;
-    /** 全站今天还剩多少 Anlas（和个人剩余取较小值才是真正能用的）。 */
+    /** 全站今天还剩多少 Anlas。圆环用 rows，不再和个人剩余自己取较小值。 */
     site_anlas_left?: number | null;
     site_anlas_cap?: number | null;
     reset_hour?: number | null;
+    /** 服务端算好的圆环行。没有这份数据就不画圆环。 */
+    rows?: ServerQuotaRow[];
   };
   coupons?: Coupon[];
   /** 我的平均出图耗时：只用来补状态卡那句「平均约 N 秒」 */

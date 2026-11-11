@@ -190,21 +190,12 @@ async fn attach_runtime(
     } else {
         None
     };
-    let (cycle, last_429, waiting, locked_today) = input.token.map_or((0.0, 0.0, 0, 0), |token| {
-        let p = state.nai.pacing(token);
-        (p.cycle, p.last_429, p.waiting, p.locked_today)
-    });
+    let pacing = input.token.map(|token| state.nai.pacing(token));
     row["yesterday"] = json!({"images": y.images, "v5": y.v5});
-    row["cycle"] = json!(primitives::round(cycle, 1));
-    row["last_429"] = if last_429 > 0.0 {
-        values::float(last_429)
-    } else {
-        Value::Null
-    };
-    row["waiting"] = json!(waiting);
-    row["queue_cap"] = gate_upstream::pace::realistic_queue(input.queue_timeout, cycle)
-        .map_or(Value::Null, |n| json!(n));
-    row["locked_today"] = json!(locked_today);
+    super::merge_json(
+        row,
+        &super::pacing_fields(pacing.as_ref(), input.queue_timeout),
+    );
     row["quiet_rate"] = quiet;
     row["manual_cap"] = manual.unwrap_or(Value::Null);
     row["paid_v5"] = paid.unwrap_or(Value::Null);

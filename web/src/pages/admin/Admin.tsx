@@ -220,24 +220,44 @@ export function useAdmin<T>(url: string | null): {
   return state;
 }
 
-/** 后台写操作：成功 toast，失败 toast 错误；返回结果或 null。成功后触发一次全局刷新。 */
+export type WriteResult<T> = { ok: true; data: T } | { ok: false; error: string };
+
+/**
+ * 后台写操作。成功后触发一次全局刷新。
+ * notify 为 toast 时成功和失败都用 toast；为 return 时把错误交回调用方（对话框盖在 toast 上面）。
+ * 401 都回到登录页。
+ */
+export async function adminWrite<T = unknown>(
+  method: "POST" | "PUT" | "PATCH" | "DELETE",
+  url: string,
+  body?: unknown,
+  options?: { okText?: string; notify?: "toast" | "return"; headers?: Record<string, string> },
+): Promise<WriteResult<T>> {
+  const notify = options?.notify ?? "toast";
+  const okText = options?.okText ?? (notify === "toast" ? "已保存" : "");
+  try {
+    const data = await sendJSON<T>(method, url, body, options?.headers);
+    if (notify === "toast" && okText) toast(okText);
+    edits.value++;
+    tick.value++;
+    return { ok: true, data };
+  } catch (e) {
+    if (e instanceof ApiError && e.status === 401) authed.value = false;
+    const error = e instanceof Error ? e.message : String(e);
+    if (notify === "toast") toast(error, { error: true });
+    return { ok: false, error };
+  }
+}
+
+/** 成功 toast，失败 toast 错误；返回结果或 null。 */
 export async function act<T = unknown>(
   method: "POST" | "PUT" | "PATCH" | "DELETE",
   url: string,
   body?: unknown,
   okText = "已保存",
 ): Promise<T | null> {
-  try {
-    const r = await sendJSON<T>(method, url, body);
-    if (okText) toast(okText);
-    edits.value++;
-    tick.value++;
-    return r;
-  } catch (e) {
-    if (e instanceof ApiError && e.status === 401) authed.value = false;
-    toast(e instanceof Error ? e.message : String(e), { error: true });
-    return null;
-  }
+  const result = await adminWrite<T>(method, url, body, { okText, notify: "toast" });
+  return result.ok ? result.data : null;
 }
 
 /* ---------------- 登录 ---------------- */

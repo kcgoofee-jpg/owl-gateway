@@ -153,9 +153,6 @@
 .lp-dot--bad {
   color: var(--danger);
 }
-.lp-dot--paced {
-  color: var(--info);
-}
 /* Discord 主操作：Discord 官方 Blurple，白字，Clyde 标志 22px。 */
 .btn--discord {
   gap: 8px;

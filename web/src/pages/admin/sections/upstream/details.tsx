@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from "preact/hooks";
+import { ApiError, sendJSON } from "../../../../lib/api";
 import { fullTime } from "../../../../lib/format";
 import { Button, Dialog, Notice } from "../../../../ui";
 import type { UpstreamAccount } from "./core";
@@ -98,42 +99,36 @@ export function AccountDetails({
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
   const [remaining, setRemaining] = useState(0);
-  const pending = useRef<AbortController | null>(null);
+  const generation = useRef(0);
   const read = async () => {
-    pending.current?.abort();
-    const controller = new AbortController();
-    pending.current = controller;
+    const mine = ++generation.current;
     setBusy(true);
     setError("");
     setData(null);
     try {
-      const response = await fetch(`/admin/api/upstream/${encodeURIComponent(account.token_id)}/details`, {
-        method: "POST",
-        credentials: "same-origin",
-        cache: "no-store",
-        signal: controller.signal,
-        headers: { "Content-Type": "application/json", "X-NAI-Admin-CSRF": csrf },
-        body: "{}",
-      });
-      const body = await response.json();
-      if (controller.signal.aborted) return;
-      if (!response.ok) {
-        const seconds = Number(response.headers.get("retry-after") ?? 0);
-        if (Number.isFinite(seconds) && seconds > 0) setRemaining(Math.ceil(seconds));
-        throw new Error(body.detail ?? "账号信息查询失败");
-      }
+      const body = await sendJSON<Details>(
+        "POST",
+        `/admin/api/upstream/${encodeURIComponent(account.token_id)}/details`,
+        {},
+        { "X-NAI-Admin-CSRF": csrf },
+      );
+      if (mine !== generation.current) return;
       if (body.token_id !== account.token_id) throw new Error("账号已变更，请重新打开详情");
-      setData(body as Details);
+      setData(body);
       setRemaining(60);
     } catch (cause) {
-      if (!controller.signal.aborted) setError(cause instanceof Error ? cause.message : "账号信息查询失败");
+      if (mine !== generation.current) return;
+      if (cause instanceof ApiError && cause.retryAfter) setRemaining(cause.retryAfter);
+      setError(cause instanceof Error ? cause.message : "账号信息查询失败");
     } finally {
-      if (!controller.signal.aborted) setBusy(false);
+      if (mine === generation.current) setBusy(false);
     }
   };
   useEffect(() => {
     void read();
-    return () => pending.current?.abort();
+    return () => {
+      generation.current += 1;
+    };
   }, [account.token_id, csrf]);
   useEffect(() => {
     if (remaining <= 0) return;

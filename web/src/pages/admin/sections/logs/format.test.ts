@@ -13,12 +13,16 @@ describe("shortModel", () => {
 });
 
 describe("kindLabel", () => {
+  const features = [
+    { id: "image", label: "文生图", short: "文生图" },
+    { id: "augment", label: "导演工具（线稿、上色等）", short: "导演工具" },
+  ];
   it("流式出图、导演工具等别名归到对应功能", () => {
-    expect(kindLabel("image_stream")).toBe("文生图");
-    expect(kindLabel("augment-image")).toBe("导演工具");
-    expect(kindLabel("chat")).toBe("文本 / 聊天");
-    expect(kindLabel("mystery")).toBe("mystery");
-    expect(kindLabel("")).toBe("—");
+    expect(kindLabel("image_stream", features)).toBe("文生图");
+    expect(kindLabel("augment-image", features)).toBe("导演工具");
+    expect(kindLabel("chat", features)).toBe("文本 / 聊天");
+    expect(kindLabel("mystery", features)).toBe("mystery");
+    expect(kindLabel("", features)).toBe("—");
   });
 });
 

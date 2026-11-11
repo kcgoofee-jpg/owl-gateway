@@ -1198,6 +1198,14 @@ async fn landing_boot_for_member_with_key() {
     assert_eq!(me["today"]["v5_access_allowed"], true);
     assert_eq!(me["today"]["reset_hour"], 7);
     assert!(me["today"].get("quota_limits").is_none());
+    assert_eq!(
+        me["today"]["rows"],
+        json!([
+            {"id": "legacy", "used": 0, "cap": 100, "left": 100, "paused": false},
+            {"id": "v5", "used": 0, "cap": 10, "left": 10, "paused": false},
+            {"id": "anlas", "used": 0, "cap": 50, "left": 50, "paused": false}
+        ])
+    );
     assert_eq!(me["queue"], json!([{"state": "waiting", "position": 1}]));
     assert_eq!(me["coupons"], json!([]));
     assert_eq!(
@@ -1209,13 +1217,17 @@ async fn landing_boot_for_member_with_key() {
         boot["live"]["me"],
         json!({"mine": [{"state": "waiting", "position": 1}], "waiting": 1, "running": 0})
     );
-    // 全站 V5 池停用（global_daily_v5=0，10-27 语义）：首页 V5 圆环显示 0 / 0
+    // 全站 V5 池停用（global_daily_v5=0，10-27 语义）：剩余数字是 0，原因是停用，不是用完。
     common::budgets_for(&p.state, json!({"daily_v5":0})).await;
     let (_, _, body) = raw(&p.state, "GET", "/", &[("cookie", &cookie)], b"").await;
     let today = &boot_of(&String::from_utf8(body).unwrap())["me"]["today"];
     assert_eq!(
         (&today["site_v5_left"], &today["site_v5_cap"]),
         (&json!(0), &json!(0))
+    );
+    assert_eq!(
+        today["rows"][1],
+        json!({"id": "v5", "used": 0, "cap": 10, "left": 0, "paused": true, "reason": "disabled"})
     );
 }
 

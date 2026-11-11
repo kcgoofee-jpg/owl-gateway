@@ -1,23 +1,16 @@
 import { describe, expect, it } from "vitest";
 import { countdown, quotaRows, resetHour } from "./helpers";
 import { mergeMeta } from "./store";
-import type { MeMember } from "./types";
+import type { MeMember, QuotaReason, ServerQuotaRow } from "./types";
 
 const member = (over: Partial<MeMember> = {}): MeMember => ({
   logged_in: true,
   has_key: true,
-  today: {
-    images: 30,
-    v5: 4,
-    legacy: 20,
-    daily_images: 150,
-    daily_v5: 6,
-    anlas: 12,
-    daily_anlas: 50,
-    reset_hour: 7,
-  },
+  today: { reset_hour: 7 },
   ...over,
 });
+
+const withRows = (rows: ServerQuotaRow[], reset_hour = 7) => member({ today: { reset_hour, rows } });
 
 describe("countdown", () => {
   const now = 1_000_000;
@@ -34,83 +27,50 @@ describe("countdown", () => {
 });
 
 describe("quotaRows", () => {
-  it("V4.5 用 legacy 免费图张数；V5 / Anlas 各自有上限时显示", () => {
-    const rows = quotaRows(member());
-    expect(rows.map((r) => [r.id, r.used, r.cap])).toEqual([
-      ["legacy", 20, 150],
-      ["v5", 4, 6],
-      ["anlas", 12, 50],
+  it("照服务端的行填标签，不再自己算剩余", () => {
+    const rows = quotaRows(
+      withRows([
+        { id: "legacy", used: 20, cap: 150, left: 130 },
+        { id: "v5", used: 4, cap: 6, left: 2 },
+        { id: "anlas", used: 12, cap: 50, left: 38 },
+      ]),
+    );
+    expect(rows.map((r) => [r.id, r.label, r.used, r.cap, r.left])).toEqual([
+      ["legacy", "V4.5", 20, 150, 130],
+      ["v5", "V5", 4, 6, 2],
+      ["anlas", "Anlas", 12, 50, 38],
     ]);
   });
-  it("没有 legacy 字段时退回 images − v5", () => {
-    const rows = quotaRows(member({ today: { images: 30, v5: 4, daily_images: 150, daily_v5: 6 } }));
-    expect(rows[0]?.used).toBe(26);
+  it("没有 rows 就不显示", () => {
+    expect(quotaRows(member())).toEqual([]);
   });
-  it("个人 V5 上限 0（10-27 = 停用）且模型范围是 all：仍显示，圆环暂停", () => {
-    const v5 = quotaRows(
-      member({ today: { images: 1, v5: 2, legacy: 1, daily_images: 150, daily_v5: 0 } }),
-    ).find((r) => r.id === "v5");
-    expect(v5?.cap).toBe(0);
-    expect(v5?.paused).toBe(true);
-    expect(v5?.hint).toContain("已停用");
-  });
-  it("没配 V5 上限且模型范围不是 all：不显示 V5；没配 Anlas 上限：不显示 Anlas", () => {
+  it("个人额度为 0：停用文案", () => {
     const rows = quotaRows(
-      member({
-        today: { images: 1, v5: 0, legacy: 1, daily_images: 150, daily_v5: 0, daily_anlas: 0 },
-      }),
+      withRows([
+        { id: "legacy", used: 1, cap: 0, left: 0, paused: true, reason: "disabled" },
+        { id: "v5", used: 2, cap: 0, left: 0, paused: true, reason: "disabled" },
+      ]),
     );
-    expect(rows.map((r) => r.id)).toEqual(["legacy"]);
+    expect(rows[0]?.hint).toBe("V4.5 已停用（个人额度为 0）");
+    expect(rows[1]?.hint).toContain("已停用");
+    expect(rows[1]?.paused).toBe(true);
   });
-  it("个人 V4.5 上限 0（10-27 = 停用）：圆环暂停", () => {
-    const rows = quotaRows(member({ today: { images: 1, legacy: 1, daily_images: 0 } }));
-    expect(rows[0]?.cap).toBe(0);
-    expect(rows[0]?.paused).toBe(true);
+  it("全站池停用和用完不是同一句话", () => {
+    const v5 = (reason: QuotaReason, cap = 20) =>
+      quotaRows(withRows([{ id: "v5", used: 2, cap, left: 0, paused: true, reason }])).find(
+        (r) => r.id === "v5",
+      );
+    expect(v5("disabled")?.hint).toBe("全站 V5 已停用");
+    expect(v5("site_empty")?.hint).toBe("全站今天的 V5 额度用完了，7 点重置后恢复");
+    expect(v5("member_off")?.hint).toBe("此成员未开放 V5");
+    expect(v5("site_paused")?.hint).toBe("V5 暂停，请使用 V4.5");
+    expect(v5("upstream_exhausted")?.hint).toBe("全站 V5 免费额度暂时用完，正在逐步恢复，可以先用 V4.5");
   });
-  it("V5 能用的是个人剩余和全站剩余的较小值；全站不设限只看个人", () => {
-    const v5 = (today: Record<string, unknown>) =>
-      quotaRows(
-        member({ today: { images: 4, v5: 4, legacy: 0, daily_images: 150, daily_v5: 20, ...today } }),
-      ).find((r) => r.id === "v5");
-    expect(v5({ site_v5_left: 3, site_v5_cap: 300 })?.left).toBe(3);
-    expect(v5({ site_v5_left: 100, site_v5_cap: 300 })?.left).toBe(16);
-    expect(v5({ site_v5_left: null, site_v5_cap: null })?.left).toBeUndefined();
-    expect(v5({ site_v5_left: null })?.paused).toBeFalsy();
-  });
-  it("全站 V5 用完：圆环暂停", () => {
-    const rows = (today: Record<string, unknown>) =>
-      quotaRows(
-        member({
-          today: { images: 0, v5: 2, legacy: 0, daily_images: 150, daily_v5: 20, ...today },
-        }),
-      ).find((r) => r.id === "v5");
-    expect(rows({ site_v5_left: 0, site_v5_cap: 300 })?.paused).toBe(true);
-    const open = rows({ site_v5_left: 3, site_v5_cap: 300 });
-    expect([open?.cap, open?.used, open?.left, open?.paused]).toEqual([20, 2, 3, undefined]);
-  });
-});
-
-describe("quotaRows: upstream V5 exhausted", () => {
-  const v5 = (today: Record<string, unknown>) =>
-    quotaRows(
-      member({
-        today: { images: 0, v5: 0, legacy: 0, daily_images: 150, daily_v5: 20, ...today },
-      }),
-    ).find((r) => r.id === "v5");
-  it("false pauses the ring with a hint that names no reset time", () => {
-    const row = v5({ upstream_v5_free: false });
-    expect([row?.paused, row?.left]).toEqual([true, 0]);
-    expect(row?.hint).toBe("全站 V5 免费额度暂时用完，正在逐步恢复，可以先用 V4.5");
-    expect(v5({ upstream_v5_free: false, site_v5_left: 50, site_v5_cap: 300 })?.paused).toBe(true);
-  });
-  it("plan-paused V5 (battery low) pauses the ring with its own hint", () => {
-    const row = v5({ v5_paused: true, upstream_v5_free: false });
-    expect([row?.paused, row?.left]).toEqual([true, 0]);
-    expect(row?.hint).toBe("V5 暂停，请使用 V4.5");
-  });
-  it("a missing field counts as true", () => {
-    expect(v5({})?.paused).toBeUndefined();
-    expect(v5({ upstream_v5_free: true })?.paused).toBeUndefined();
+  it("没有原因码就不加说明，剩余原样显示", () => {
+    const row = quotaRows(withRows([{ id: "v5", used: 2, cap: 20, left: 3 }]))[0];
+    expect(row?.hint).toBeUndefined();
+    expect(row?.paused).toBeUndefined();
+    expect(row?.left).toBe(3);
   });
 });
 
@@ -138,18 +98,19 @@ describe("mergeMeta", () => {
   });
 });
 
-describe("anlas 圆环要和全站池取较小值", () => {
-  const base = { today: { daily_anlas: 300, anlas: 181, site_anlas_left: 200 } } as never;
-  it("全站还有余量时取较小值", () => {
-    const row = quotaRows(base).find((r) => r.id === "anlas")!;
-    expect(row.left).toBe(119);
-    expect(row.paused).toBeFalsy();
+describe("anlas 原因码", () => {
+  it("全站池用完时带重置时间", () => {
+    const row = quotaRows(
+      withRows([{ id: "anlas", used: 181, cap: 300, left: 0, paused: true, reason: "site_empty" }]),
+    )[0];
+    expect(row?.paused).toBe(true);
+    expect(row?.left).toBe(0);
+    expect(row?.hint).toContain("全站今天的 Anlas 额度用完了");
   });
-  it("全站池用完时显示暂停", () => {
-    const me = { today: { daily_anlas: 300, anlas: 181, site_anlas_left: 0 } } as never;
-    const row = quotaRows(me).find((r) => r.id === "anlas")!;
-    expect(row.paused).toBe(true);
-    expect(row.left).toBe(0);
-    expect(row.hint).toContain("全站今天的 Anlas 额度用完了");
+  it("全站池停用时不说用完", () => {
+    const row = quotaRows(
+      withRows([{ id: "anlas", used: 0, cap: 300, left: 0, paused: true, reason: "disabled" }]),
+    )[0];
+    expect(row?.hint).toBe("全站 Anlas 已停用");
   });
 });

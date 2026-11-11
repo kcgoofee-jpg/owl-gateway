@@ -5,18 +5,41 @@ export type Settings = {
   v5_medium_mode: "off" | "on";
 };
 
-/** /admin/api/runtime-limits 的范围（与后端 RUNTIME_LIMIT_BOUNDS 一致）；全部手动 */
-export const RUNTIME_SPECS: Record<string, FieldSpec> = {
-  queue_timeout: { kind: "int", label: "排队超时", min: 15, max: 300, unit: "秒", hint: "最多排多久" },
+/** /admin/api/runtime-limits：当前值旁边带 fields（min/max）。标题留在前端。 */
+export type RuntimeField = { kind?: string; min: number; max: number };
+export type RuntimeLimits = {
+  queue_timeout: number;
+  image_429_cooldown_seconds: number;
+  fields: Record<string, RuntimeField>;
+};
+
+const RUNTIME_COPY: Record<string, { label: string; unit: string; hint: string }> = {
+  queue_timeout: { label: "排队超时", unit: "秒", hint: "最多排多久" },
   image_429_cooldown_seconds: {
-    kind: "int",
     label: "429 冷却",
-    min: 60,
-    max: 3600,
     unit: "秒",
     hint: "上游返回 429 后，全站暂停出图多久（上游要求更久时按上游；那个账号另按上游要求单独冷却）",
   },
 };
+
+export const RUNTIME_NAMES = Object.keys(RUNTIME_COPY);
+
+export function runtimeSpecs(data: RuntimeLimits): Record<string, FieldSpec> {
+  const out: Record<string, FieldSpec> = {};
+  for (const [name, copy] of Object.entries(RUNTIME_COPY)) {
+    const field = data.fields[name];
+    if (!field) continue;
+    out[name] = {
+      kind: "int",
+      label: copy.label,
+      min: field.min,
+      max: field.max,
+      unit: copy.unit,
+      hint: copy.hint,
+    };
+  }
+  return out;
+}
 
 /** /admin/api/guard */
 export type GuardField = { default: number; min: number; max: number; label: string };

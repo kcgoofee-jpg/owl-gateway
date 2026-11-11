@@ -14,6 +14,7 @@ pub mod features;
 pub mod guard;
 pub mod json;
 pub mod key_status;
+pub mod landing_quota;
 pub mod member_flags;
 pub mod member_policy;
 pub mod paid_v5;

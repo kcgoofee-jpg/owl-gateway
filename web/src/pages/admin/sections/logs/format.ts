@@ -1,6 +1,6 @@
 /** 日志相关的显示格式化（纯函数）：模型短名、功能名、耗时。 */
 import { secondsText } from "../../../../lib/format";
-import { FEATURES, RETIRED } from "../features";
+import { type Feature, RETIRED } from "../features";
 
 /** 请求日志 kind → 功能 id（后端 features.KIND_FEATURE 的副本） */
 const KIND_FEATURE: Record<string, string> = {
@@ -15,9 +15,9 @@ const KIND_FEATURE: Record<string, string> = {
   voice: "voice",
 };
 
-export function kindLabel(kind: string | null | undefined): string {
+export function kindLabel(kind: string | null | undefined, features: Feature[] = []): string {
   const id = KIND_FEATURE[kind ?? ""];
-  const f = FEATURES.find((x) => x.id === id) ?? RETIRED.find((x) => x.id === id);
+  const f = features.find((x) => x.id === id) ?? RETIRED.find((x) => x.id === id);
   return f ? f.short : kind || "—";
 }
 

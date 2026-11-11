@@ -2,15 +2,24 @@ import { useMemo, useState } from "preact/hooks";
 import { Button, Card } from "../../../ui";
 import { act, useAdmin } from "../Admin";
 import { CardPending, SectionHead, useBusy } from "./_kit";
-import { type MemberPolicy, POLICY_SPECS, PolicyFields, policyFromForm } from "./member-policy";
+import {
+  type MemberPolicy,
+  type PolicyBound,
+  PolicyFields,
+  policyFromForm,
+  policySpecs,
+} from "./member-policy";
 import { claimBody, MAX_ROLE_RULES, type Ops, type RoleRule, validRole } from "./onboarding/core";
 import { NumField, SaveBar, Sect, SwitchRow, useForm } from "./system/forms";
 
 function DefaultRules() {
-  const query = useAdmin<{ defaults: MemberPolicy }>("/admin/api/member-rules");
+  const query = useAdmin<{ defaults: MemberPolicy; fields: Record<string, PolicyBound> }>(
+    "/admin/api/member-rules",
+  );
   const data = query.data;
   const server = useMemo(() => (data ? { ...data.defaults } : null), [data]);
-  const form = useForm(POLICY_SPECS, server);
+  const specs = useMemo(() => (data ? policySpecs(data.fields) : {}), [data]);
+  const form = useForm(specs, server);
   const [saving, setSaving] = useState(false);
   if (!data) return <CardPending title="默认规则" loading={query.loading} error={query.error} />;
   const save = async () => {

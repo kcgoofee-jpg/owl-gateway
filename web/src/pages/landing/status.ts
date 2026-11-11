@@ -8,7 +8,7 @@
 import { bjHour } from "../../lib/format";
 import type { Live } from "./types";
 
-export type Tone = "ok" | "busy" | "full" | "mine" | "warn" | "bad" | "paced";
+export type Tone = "ok" | "busy" | "full" | "mine" | "warn" | "bad";
 
 export type StatusView = {
   tone: Tone;
@@ -49,10 +49,7 @@ function nextReset(text: string, nowMs: number): { word: string; hour: number } 
 
 /** 全站被站点规则拦下（guard.blocked）时的说法；text 就是成员收到的 429 原因。 */
 function blockedView(code: string, text: string, nowMs: number): StatusView {
-  const wait = firstInt(text, /约 (\d+) 分钟/);
   switch (code) {
-    case "paced":
-      return view("paced", "本时段份额已用完", wait ? `约 ${wait} 分钟后有空位` : "稍后有空位");
     case "daily_cap": {
       const r = nextReset(text, nowMs);
       return view("warn", "今日出图已满", `${r.word} ${r.hour} 点恢复`);

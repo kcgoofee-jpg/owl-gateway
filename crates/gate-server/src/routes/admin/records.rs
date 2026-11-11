@@ -19,8 +19,18 @@ use serde_json::{Value, json};
 pub fn router() -> Router<AppState> {
     Router::new()
         .route("/admin/api/logs", get(logs))
+        .route("/admin/api/features", get(feature_names))
         .route("/admin/api/actions", get(admin_actions))
         .route("/admin/api/ops/reset-all-keys", post(ops_reset_all_keys))
+}
+
+/// 后台功能名。日志筛选里按模型拆开的名字不在这里。
+async fn feature_names(_session: AdminSession) -> R {
+    let items: Vec<Value> = features::FEATURES
+        .iter()
+        .map(|(id, label)| json!({"id": id, "label": label}))
+        .collect();
+    Ok(ok_json(&json!({"features": items})))
 }
 
 /// 页数：至少 1 页。

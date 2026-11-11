@@ -1,6 +1,33 @@
 //! 成员的统一规则：默认值加字段例外。身份组和 Key 凭据不参与规则计算。
 
 use serde::{Deserialize, Serialize};
+use serde_json::{Value, json};
+
+/// 每日张数 / Anlas 的上限。0 表示停用，不是不限。
+pub const DAILY_MAX: u32 = 9999;
+/// 每月 Anlas 的上限。
+pub const MONTHLY_MAX: f64 = 99999.0;
+pub const RPM_MIN: u32 = 1;
+pub const RPM_MAX: u32 = 600;
+
+/// 后台表单用的字段范围。数字范围和 [`MemberPolicy::validate`] 是同一份。
+pub fn policy_fields() -> Value {
+    json!({
+        "daily_images": {"kind": "int", "min": 0, "max": DAILY_MAX},
+        "daily_v5": {"kind": "int", "min": 0, "max": DAILY_MAX},
+        "daily_anlas": {"kind": "int", "min": 0, "max": DAILY_MAX},
+        "monthly_anlas": {"kind": "float", "min": 0, "max": MONTHLY_MAX},
+        "rpm": {"kind": "int", "min": RPM_MIN, "max": RPM_MAX},
+        "image": {"kind": "bool"},
+        "v5": {"kind": "bool"},
+        "vibe": {"kind": "bool"},
+        "tags": {"kind": "bool"},
+        "img2img": {"kind": "bool"},
+        "upscale": {"kind": "bool"},
+        "augment": {"kind": "bool"},
+        "paid_parameters": {"kind": "bool"},
+    })
+}
 
 pub fn is_discord_id(value: &str) -> bool {
     value
@@ -75,10 +102,10 @@ impl SharedBudgets {
     }
 
     pub fn validate(&self) -> Result<(), &'static str> {
-        if self.daily_v5 > 9999 || self.daily_anlas > 9999 {
+        if self.daily_v5 > DAILY_MAX || self.daily_anlas > DAILY_MAX {
             return Err("全站每日额度必须是 0～9999 的整数");
         }
-        if !self.monthly_anlas.is_finite() || !(0.0..=99999.0).contains(&self.monthly_anlas) {
+        if !self.monthly_anlas.is_finite() || !(0.0..=MONTHLY_MAX).contains(&self.monthly_anlas) {
             return Err("全站每月 Anlas 必须是 0～99999 的数字");
         }
         Ok(())
@@ -154,13 +181,16 @@ impl MemberPolicy {
         }
     }
     pub fn validate(&self) -> Result<(), &'static str> {
-        if self.daily_images > 9999 || self.daily_v5 > 9999 || self.daily_anlas > 9999 {
+        if self.daily_images > DAILY_MAX
+            || self.daily_v5 > DAILY_MAX
+            || self.daily_anlas > DAILY_MAX
+        {
             return Err("每日额度必须是 0～9999 的整数");
         }
-        if !self.monthly_anlas.is_finite() || !(0.0..=99999.0).contains(&self.monthly_anlas) {
+        if !self.monthly_anlas.is_finite() || !(0.0..=MONTHLY_MAX).contains(&self.monthly_anlas) {
             return Err("每月 Anlas 必须是 0～99999 的数字");
         }
-        if !(1..=600).contains(&self.rpm) {
+        if !(RPM_MIN..=RPM_MAX).contains(&self.rpm) {
             return Err("每分钟请求数必须是 1～600 的整数");
         }
         Ok(())

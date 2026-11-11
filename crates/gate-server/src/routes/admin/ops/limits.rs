@@ -90,9 +90,17 @@ async fn put_settings(
 /// 当前生效的运行期限制（取整；每 Key 出图间隔、账号出图间隔已删除，见 [`RUNTIME_LIMIT_BOUNDS`]）。
 fn runtime_limits_snapshot(state: &AppState) -> Value {
     let l = state.limits();
+    let mut fields = serde_json::Map::new();
+    for (name, lo, hi) in RUNTIME_LIMIT_BOUNDS {
+        fields.insert(
+            (*name).to_string(),
+            json!({"kind": "int", "min": lo, "max": hi}),
+        );
+    }
     json!({
         "queue_timeout": l.queue_timeout as i64,
         "image_429_cooldown_seconds": l.image_429_cooldown_seconds as i64,
+        "fields": fields,
     })
 }
 
@@ -157,21 +165,17 @@ async fn guard_view(state: &AppState) -> Result<Value, ApiError> {
         let full = state
             .guard
             .with(|g| g.at_daily_cap(&t.token_id, c.images, now));
-        accounts.push(json!({
+        let mut account = json!({
             "position": f.position,
             "usable": t.usable(now),
             "full": full,
             "today": c.images,
-            "cycle": r1(p.cycle),
             "gen_secs": r1(p.gen_secs),
-            "last_429": if p.last_429 > 0.0 { values::float(p.last_429) } else { Value::Null },
             "cooling": if f.admin_enabled && !f.disabled { ((f.blocked_until - now) as i64).max(0) } else { 0 },
-            "waiting": p.waiting,
             "next_start_in": if full { Value::Null } else { json!(r1(p.next_start_in)) },
-            // 上游并发锁（上一张还没释放）今天的次数：网关自动在同一账号上重试，不算 429
-            "locked_today": p.locked_today,
-            "queue_cap": gate_upstream::pace::realistic_queue(queue_timeout, p.cycle),
-        }));
+        });
+        super::merge_json(&mut account, &super::pacing_fields(Some(&p), queue_timeout));
+        accounts.push(account);
     }
     let queued: i64 = state.guard.with(|g| g.image_inflight.values().sum());
     let queue_cap = crate::admission::queue_cap(state).await;

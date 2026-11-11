@@ -1,7 +1,14 @@
 import { useId, useMemo, useState } from "preact/hooks";
 import { Button, Dialog, Notice } from "../../../../ui";
 import { useBusy } from "../_kit";
-import { overridesOf, POLICY_FIELDS, POLICY_SPECS, PolicyFields, policyFromForm } from "../member-policy";
+import {
+  overridesOf,
+  POLICY_FIELDS,
+  type PolicyBound,
+  PolicyFields,
+  policyFromForm,
+  policySpecs,
+} from "../member-policy";
 import { toRaw } from "../system/core";
 import { useForm } from "../system/forms";
 import { call } from "./actions";
@@ -11,12 +18,14 @@ import type { MemberRow } from "./types";
 
 export function KeyDialog(props: {
   target: MemberRow;
+  fields: Record<string, PolicyBound>;
   onClose: () => void;
   onSaved: (message: string) => void;
 }) {
   const snapshot = props.target.policy;
   const server = useMemo(() => ({ ...snapshot.effective }), [snapshot]);
-  const form = useForm(POLICY_SPECS, server);
+  const specs = useMemo(() => policySpecs(props.fields), [props.fields]);
+  const form = useForm(specs, server);
   const id = useId();
   const [pending, setPending] = useState(false);
   const [error, setError] = useState("");
@@ -24,7 +33,10 @@ export function KeyDialog(props: {
   useBusy();
   const subject = props.target.discord_id ?? props.target.discord?.id;
   const reset = () => {
-    for (const name of POLICY_FIELDS) form.set(name, toRaw(POLICY_SPECS[name], snapshot.defaults[name]));
+    for (const name of POLICY_FIELDS) {
+      const spec = specs[name];
+      if (spec) form.set(name, toRaw(spec, snapshot.defaults[name]));
+    }
   };
   const save = async () => {
     if (!subject || !form.valid || pending) return;

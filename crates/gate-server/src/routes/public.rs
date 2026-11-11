@@ -990,6 +990,26 @@ async fn admin_events(State(state): State<AppState>, _s: AdminSession, req: Requ
 
 // ------------------------------------------------------------------ 首页首屏数据
 
+fn quota_rows_json(rows: &[gate_core::landing_quota::Row]) -> Value {
+    Value::Array(
+        rows.iter()
+            .map(|row| {
+                let mut value = json!({
+                    "id": row.id,
+                    "used": row.used,
+                    "cap": row.cap,
+                    "left": row.left,
+                    "paused": row.paused,
+                });
+                if !row.reason.is_empty() {
+                    value["reason"] = json!(row.reason);
+                }
+                value
+            })
+            .collect(),
+    )
+}
+
 /// 登录成员的个人状态（`/public/me` 的内容）。
 pub(super) async fn me_payload(
     state: &AppState,
@@ -1030,9 +1050,10 @@ pub(super) async fn me_payload(
             item.remove("start_at");
         }
     }
-    // 全站今天还剩多少张 V5（首页 V5 圆环取「个人剩余」和它的较小值）。
-    // null = 不受全站限制（只剩一种情况：这把 Key 不计入全站 V5）。10-27 起全站池 0 = 停用（0 剩余）。
-    let g = i64::from(state.db.shared_budgets().await?.daily_v5);
+    // 全站今天还剩多少张 V5。圆环用 `rows`，不再拿这个数和个人剩余自己取较小值。
+    // 10-27 起全站池 0 = 停用（0 剩余），和「今天用完」不是同一件事。
+    let budgets = state.db.shared_budgets().await?;
+    let g = i64::from(budgets.daily_v5);
     let paused = crate::ops::v5_paused(&state.db).await?;
     let allowed = key.policy.allows("v5");
     let used = state.db.day_v5_total(&state.day()).await?;
@@ -1041,10 +1062,30 @@ pub(super) async fn me_payload(
     } else {
         (g - used).max(0)
     };
-    // 全站今天的 Anlas 池还剩多少：和「全站今日 Anlas 额度已用完」的拒绝口径一致，
-    // 首页的 Anlas 圆环要拿它和「个人剩余」取较小值，用完时显示暂停。
-    let anlas_budget = f64::from(state.db.shared_budgets().await?.daily_anlas);
+    // 全站今天的 Anlas 池还剩多少：和「全站今日 Anlas 额度已用完」的拒绝口径一致。
+    let anlas_budget = f64::from(budgets.daily_anlas);
     let site_anlas_left = (anlas_budget - state.db.day_anlas_total(&state.day()).await?).max(0.0);
+    let daily_anlas = live::member_anlas_cap(state, key).await?;
+    let upstream_free = live::upstream_v5_free(state).await;
+    let quota_rows = quota_rows_json(&gate_core::landing_quota::rows(
+        &gate_core::landing_quota::Input {
+            legacy: Some(c.legacy_free_images),
+            images: c.images,
+            v5_used: c.v5,
+            daily_images: key.daily_images(),
+            image_on: key.policy.image,
+            daily_v5: key.daily_v5(),
+            v5_on: allowed,
+            v5_paused: paused,
+            upstream_v5_free: upstream_free,
+            site_v5_cap: g,
+            site_v5_used: used,
+            anlas_used: gate_core::primitives::round0(c.anlas),
+            daily_anlas,
+            site_anlas_cap: anlas_budget.trunc() as i64,
+            site_anlas_left: site_anlas_left.trunc() as i64,
+        },
+    ));
     let now = state.now();
     out.insert("has_key".into(), json!(true));
     out.insert("key".into(), json!(key.token()));
@@ -1060,15 +1101,16 @@ pub(super) async fn me_payload(
             "images": c.images, "v5": c.v5, "legacy": c.legacy_free_images,
             "daily_images": key.daily_images(), "daily_v5": key.daily_v5(),
             "site_v5_left": site_v5_left, "site_v5_cap": g,
-            "upstream_v5_free": live::upstream_v5_free(state).await && !paused,
+            "upstream_v5_free": upstream_free && !paused,
             "v5_paused": paused,
             "v5_access_allowed": allowed,
             "v5_access_reason": if allowed { "" } else { "此成员未开放 V5" },
             "anlas": gate_core::primitives::round0(c.anlas),
-            "daily_anlas": live::member_anlas_cap(state, key).await?,
+            "daily_anlas": daily_anlas,
             "site_anlas_left": site_anlas_left.trunc() as i64,
             "site_anlas_cap": anlas_budget.trunc() as i64,
             "reset_hour": state.guard.with(|g| g.reset_hour),
+            "rows": quota_rows,
         }),
     );
     out.insert("queue".into(), queue);

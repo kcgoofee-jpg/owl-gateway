@@ -1,5 +1,5 @@
 /** 成员相关接口的数据形状（/admin/api/members、/admin/api/keys、/admin/api/bans 等）。 */
-import type { PolicySnapshot } from "../member-policy";
+import type { PolicyBound, PolicySnapshot } from "../member-policy";
 export type Tag = { tag: string; note: string; by: string; ts: number };
 export type Discord = {
   id: string;
@@ -58,6 +58,7 @@ export type MembersResp = {
   total?: number;
   attention?: number;
   filter?: "all" | "attention";
+  fields?: Record<string, PolicyBound>;
 };
 export type KeysResp = { keys: KeyRow[] };
 

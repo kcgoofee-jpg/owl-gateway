@@ -8,8 +8,6 @@ import type { Live } from "./types";
  */
 const API = {
   daily: "本站今天的出图总量用完了（为保护 NovelAI 账号，每个账号每天 1000 张），没有扣费。明天 7 点恢复",
-  paced:
-    "这个时段全站的出图份额用完了（每天 1000 张平均分到 24 小时，晚来的人也有图出），没有扣费。约 5 分钟后有空位",
   breaker: "NovelAI 连续出错，本站暂停出图，没有扣费。约 30 秒后自动恢复，请稍后再试",
   breakerTripped: "NovelAI 连续出错，本站暂停出图 60 秒，没有扣费。到点自动恢复，请稍后再试",
   cooldown: "NovelAI 那边正在限流，全站暂停出图约 45 秒，没有扣费。请稍后再试",
@@ -95,10 +93,8 @@ describe("deriveStatus：与 API 的 429 原因同一句话", () => {
     );
   });
 
-  it("按时段放行：约 5 分钟后有空位", () => {
-    const v = deriveStatus(blocked("paced", API.paced));
-    expect(v?.tone).toBe("paced");
-    expect(v?.sentence).toBe("本时段份额已用完 · 约 5 分钟后有空位");
+  it("不再发出的原因码：原文照搬", () => {
+    expect(sentence(blocked("paced", "这个时段全站的出图份额用完了"))).toBe("这个时段全站的出图份额用完了");
   });
 
   it("熔断：标题只说原因，灰字只留时间", () => {
@@ -121,12 +117,12 @@ describe("deriveStatus：与 API 的 429 原因同一句话", () => {
       queue: { waiting: 9, running: 0, full: true },
       guard: {
         cooldown: 10,
-        blocked: { code: "paced", text: API.paced },
+        blocked: { code: "daily_cap", text: API.daily },
       },
     };
     expect(deriveStatus(idle(base))?.headline).toBe("NovelAI 限流中");
     expect(deriveStatus(idle({ ...base, guard: { ...base.guard, cooldown: 0 } }))?.headline).toBe(
-      "本时段份额已用完",
+      "今日出图已满",
     );
     expect(
       deriveStatus(idle({ ...base, guard: { ...base.guard, cooldown: 0, blocked: null } }))?.headline,

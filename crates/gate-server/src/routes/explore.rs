@@ -459,16 +459,9 @@ fn human_size(bytes: usize) -> String {
     }
 }
 
-/// 共享的 Discord 上传客户端：连接池复用，省掉每次上传的 TLS 握手。
+/// Discord 上传走和分享、注册同一份客户端（30 秒、不跟随重定向、固定 UA）。
 fn http_client() -> &'static reqwest::Client {
-    static HTTP: std::sync::OnceLock<reqwest::Client> = std::sync::OnceLock::new();
-    HTTP.get_or_init(|| {
-        reqwest::Client::builder()
-            .timeout(std::time::Duration::from_secs(30))
-            .user_agent(gate_core::discord_ua::DISCORD_USER_AGENT)
-            .build()
-            .expect("reqwest 客户端配置固定，不会失败")
-    })
+    crate::discord_share::client()
 }
 
 async fn post_to_discord(

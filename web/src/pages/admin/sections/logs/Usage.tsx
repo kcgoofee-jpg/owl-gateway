@@ -1,12 +1,12 @@
 /** 请求日志：每次请求一行；按成员 / 功能 / 文生图版本 / 状态 / 编号筛选，服务端分页。完整 IP 放在展开详情中。 */
 import { ChevronDown } from "lucide-preact";
 
-import { useEffect, useRef, useState } from "preact/hooks";
+import { useEffect, useMemo, useRef, useState } from "preact/hooks";
 import { fullTime, num, withUnit } from "../../../../lib/format";
 import { Badge, Button, CopyField, cx, SearchSelect, Skeleton } from "../../../../ui";
 import { useAdmin } from "../../Admin";
 import { LoadError, TableWrap } from "../_kit";
-import { LOG_FEATURES } from "../features";
+import { asFeatures, type Feature, logFeatures } from "../features";
 import { FreshBar, useFrozenList, useScrolledPast } from "../live";
 import { memberKeyOptions, memberLabel } from "../members/logic";
 import { Empty, MemberIdent, NARROW, Pager, useDebounced, useMedia, usePageData } from "../members/shared";
@@ -119,11 +119,11 @@ function Who(props: {
   );
 }
 
-function What(props: { l: UsageLog }) {
+function What(props: { l: UsageLog; features: Feature[] }) {
   const { l } = props;
   return (
     <span class="nowrap" title={l.model || undefined}>
-      {kindLabel(l.kind)}
+      {kindLabel(l.kind, props.features)}
       {l.model ? ` · ${shortModel(l.model)}` : ""}
     </span>
   );
@@ -191,6 +191,9 @@ export function Usage() {
   const { query, set } = useQueryState();
   const narrow = useMedia(NARROW);
   const members = useAdmin<{ members: Member[] }>("/admin/api/members");
+  const catalog = useAdmin<{ features: Array<{ id: string; label: string }> }>("/admin/api/features");
+  const features = useMemo(() => asFeatures(catalog.data?.features ?? []), [catalog.data]);
+  const featureOptions = useMemo(() => logFeatures(features), [features]);
   const [open, setOpen] = useState<Set<number>>(new Set());
 
   const page = intParam(query.page, 1);
@@ -200,7 +203,7 @@ export function Usage() {
     query.feature === "image" && (query.model_version === "v45" || query.model_version === "v5")
       ? `image_${query.model_version}`
       : query.feature;
-  const selectedFeature = LOG_FEATURES.some((f) => f.id === requestedFeature)
+  const selectedFeature = featureOptions.some((f) => f.id === requestedFeature)
     ? (requestedFeature as string)
     : "";
   const feature = selectedFeature.startsWith("image_") ? "image" : selectedFeature;
@@ -275,7 +278,7 @@ export function Usage() {
           }}
         >
           <option value="">全部</option>
-          {LOG_FEATURES.map((f) => (
+          {featureOptions.map((f) => (
             <option key={f.id} value={f.id}>
               {f.short}
             </option>
@@ -381,7 +384,7 @@ export function Usage() {
                     </div>
                     <div class="lg-card__meta">
                       <Who l={l} memberOf={memberOf} memberByKey={memberByKey} onFilter={set} />
-                      <What l={l} />
+                      <What l={l} features={features} />
                     </div>
                     <div class="lg-card__meta small">
                       <Timing l={l} />
@@ -433,7 +436,7 @@ export function Usage() {
                             <Who l={l} memberOf={memberOf} memberByKey={memberByKey} onFilter={set} />
                           </td>
                           <td>
-                            <What l={l} />
+                            <What l={l} features={features} />
                           </td>
                           <td>
                             <Status l={l} onFilter={set} />
