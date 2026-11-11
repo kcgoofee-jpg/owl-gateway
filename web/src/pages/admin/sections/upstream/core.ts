@@ -1,4 +1,5 @@
 /** 上游：接口类型与文案（纯函数，可单测）。数据来自聚合接口 GET /admin/api/upstream，一页一次取全。 */
+import { rel } from "../../../../lib/format";
 import type { FieldSpec } from "../system/core";
 
 /** 一行官方余量读数（/user/subscription 的缓存，只有真实出图或定时查询会刷新）。 */
@@ -98,6 +99,24 @@ export type UpstreamAccount = {
   v5: V5Row | null;
   /** 账号状态（/user/information 缓存） */
   info: InfoRow | null;
+  /** 昨天这个账号出了多少张，其中几张是 V5 */
+  yesterday?: { images: number; v5: number };
+  /** 两次开始出图的平均间距（秒）。0 = 还没有节奏 */
+  cycle?: number;
+  /** 最近一次被上游限流的时刻；没有则为 null */
+  last_429?: number | null;
+  /** 正在等这个账号的张数 */
+  waiting?: number;
+  /** 排队超时内这个账号最多能开始几张；null = 不限 */
+  queue_cap?: number | null;
+  /** 今天上一张还没画完又塞进来、网关自己重试的次数 */
+  locked_today?: number;
+  /** 账号闲着时电量自己涨的速度；数据不够则为 null */
+  quiet_rate?: { rate: number; hours: number } | null;
+  /** 还在生效的临时每天上限 */
+  manual_cap?: { cap: number; until: number } | null;
+  /** 还在生效的站付 V5 */
+  paid_v5?: { max_anlas: number; spent: number; until: number } | null;
 };
 
 export type UpstreamPage = {
@@ -184,3 +203,21 @@ export function duration(seconds: number | null | undefined): string {
 
 export const answer = (v: boolean | null | undefined, yes: string, no: string): string =>
   v == null ? "—" : v ? yes : no;
+
+export function yesterdayText(images: number | null | undefined, v5: number | null | undefined): string {
+  if (images == null && v5 == null) return "—";
+  return `${reading(images ?? 0)} 张，V5 ${reading(v5 ?? 0)} 张`;
+}
+
+export function queueText(waiting: number | null | undefined, cap: number | null | undefined): string {
+  const waitingText = (waiting ?? 0) === 0 ? "没有在等" : `${reading(waiting)} 张在等`;
+  return cap == null ? waitingText : `${waitingText}，最多 ${reading(cap)} 张`;
+}
+
+export function limitAgo(ts: number | null | undefined, now = Date.now() / 1000): string {
+  return ts ? rel(ts, now) : "没有";
+}
+
+export function quietText(rate: number | null | undefined): string {
+  return rate == null || !Number.isFinite(rate) ? "—" : `${reading(rate)}% / 天`;
+}

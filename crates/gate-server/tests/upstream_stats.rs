@@ -157,4 +157,12 @@ async fn per_account_stats_read_balance_from_snapshots() {
     assert_eq!(fa["balance"]["v5_percent"], 4.0);
     assert_eq!(fa["balance"]["stale"], false);
     assert_eq!(fa["balance_share"], 49);
+    assert_eq!(fa["yesterday"], json!({"images": 0, "v5": 0}));
+    assert!(fa["last_429"].is_null());
+    assert_eq!(fa["waiting"], 0);
+    assert_eq!(fa["locked_today"], 0);
+    assert!(fa["quiet_rate"].is_null());
+    assert!(fa["manual_cap"].is_null());
+    assert!(fa["paid_v5"].is_null());
+    assert!(fa["cycle"].as_f64().is_some_and(|n| n >= 0.0));
 }

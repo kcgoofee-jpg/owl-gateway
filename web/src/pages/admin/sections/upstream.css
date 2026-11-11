@@ -204,10 +204,6 @@
   }
 }
 
-/* 上游账号：不可用的沉底并弱化，点「展开」才看明细 */
-.up-row--muted td {
-  color: var(--muted);
-}
 .link-button {
   padding: 0;
   border: 0;

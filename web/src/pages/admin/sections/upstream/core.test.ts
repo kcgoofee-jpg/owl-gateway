@@ -5,9 +5,13 @@ import {
   anlasText,
   answer,
   duration,
+  limitAgo,
+  queueText,
+  quietText,
   reading,
   tokenFormatProblem,
   tokenState,
+  yesterdayText,
 } from "./core";
 
 describe("tokenState", () => {
@@ -48,6 +52,17 @@ describe("readings text", () => {
     expect(ageText(0.2)).toBe("刚刚");
     expect(ageText(3.4)).toBe("3 天前");
   });
+});
+
+it("账号卡片上的运行文案", () => {
+  expect(yesterdayText(3129, 35)).toBe("3,129 张，V5 35 张");
+  expect(yesterdayText(undefined, undefined)).toBe("—");
+  expect(queueText(0, 6)).toBe("没有在等，最多 6 张");
+  expect(queueText(5, null)).toBe("5 张在等");
+  expect(limitAgo(null, 1_000)).toBe("没有");
+  expect(limitAgo(1_000 - 120, 1_000)).toBe("2 分钟前");
+  expect(quietText(10.78)).toBe("10.78% / 天");
+  expect(quietText(null)).toBe("—");
 });
 
 it("读数保留零与否定值，缺失值留空", () => {

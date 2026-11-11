@@ -11,11 +11,15 @@ import {
   anlasText,
   answer,
   duration,
+  limitAgo,
+  queueText,
+  quietText,
   reading,
   TOKEN_SPECS,
   tokenState,
   type UpstreamAccount,
   type WindowStats,
+  yesterdayText,
 } from "./core";
 
 type Fact = [string, ComponentChildren];
@@ -171,6 +175,17 @@ export function AccountCard(props: {
           </small>
         </div>
       </div>
+      {a.manual_cap && (
+        <Notice tone="warn">
+          临时每天上限 {reading(a.manual_cap.cap)} 张，到 {fullTime(a.manual_cap.until)}
+        </Notice>
+      )}
+      {a.paid_v5 && (
+        <Notice tone="warn">
+          站付 V5 已用 {reading(Math.round(a.paid_v5.spent))} / {reading(Math.round(a.paid_v5.max_anlas))}{" "}
+          Anlas，到 {fullTime(a.paid_v5.until)}
+        </Notice>
+      )}
       {!(a.admin_enabled && !a.disabled) && (
         <button
           type="button"
@@ -214,6 +229,7 @@ export function AccountCard(props: {
               ["下次恢复", duration(v?.time_until_next_percent_seconds)],
               ["当前推算恢复", reading(v?.current_response_recharge_per_day_estimate, "% / 天")],
               ["历史推算恢复", reading(v?.historical_sample_based_recharge_per_day_estimate, "% / 天")],
+              ["闲时实测恢复", quietText(a.quiet_rate?.rate)],
               [
                 "电量读数",
                 v?.checked_at == null ? "未查询" : v.stale ? "已陈旧" : v.uncertain ? "不确定" : "已更新",
@@ -238,6 +254,11 @@ export function AccountCard(props: {
           <RequestStats a={a} />
           <Facts
             rows={[
+              ["昨天出图", yesterdayText(a.yesterday?.images, a.yesterday?.v5)],
+              ["排队", queueText(a.waiting, a.queue_cap)],
+              ["出图间隔", a.cycle ? duration(a.cycle) : "—"],
+              ["最近限流", limitAgo(a.last_429)],
+              ["今天并发锁", `${reading(a.locked_today ?? 0)} 次`],
               ["在途 / 并发", `${a.image_active} / ${a.image_concurrency}`],
               ["连续失败", reading(a.fails)],
               ["冷却剩余", duration(a.blocked_for)],

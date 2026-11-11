@@ -18,9 +18,11 @@ use axum::body::Body;
 use axum::extract::{Path, Request, State};
 use axum::http::request::Parts;
 use axum::routing::{get, post, put};
-use gate_core::{primitives, validation, values};
-use gate_upstream::{headers::token_id, token_store};
+use gate_core::{primitives, quota, validation, values};
+use gate_upstream::{headers::token_id, pool::Token, token_store};
 use serde_json::{Map, Value, json};
+use std::collections::{BTreeMap, HashMap};
+use std::sync::Arc;
 
 /// 上游 Token 请求体的上限：一个 Token 绰绰有余。
 const TOKEN_BODY_LIMIT: usize = 4096;
@@ -49,11 +51,23 @@ pub(super) fn router() -> Router<AppState> {
 }
 
 /// 「上游」页的一次性读数：账号行 + 核对 + 未知预留 + 冷却 + 会话 CSRF。
-/// 除 `refresh-info` 外，页面不需要再发第二个请求。
+/// 除 `refresh-info` 外，页面不需要再发第二个请求。每行另带运行读数（昨天出图、排队、
+/// 最近限流、出图间隔、并发锁、闲时实测恢复、临时上限、站付 V5），供账号卡片直接显示。
 async fn page(State(state): State<AppState>, _s: AdminSession, req: Request) -> ApiResult {
     let (parts, _) = req.into_parts();
     let now = state.now();
     let pool = pool_status(&state).await?;
+    let tokens: HashMap<String, Arc<Token>> = state
+        .nai
+        .status_rows()
+        .await
+        .into_iter()
+        .map(|(token, _)| (token.token_id.clone(), token))
+        .collect();
+    let queue_timeout = state.limits().queue_timeout;
+    let yesterday = state.clock.day(now - 86400.0);
+    let caps = state.guard.with(|g| g.token_daily_caps.clone());
+    let raw_paid = state.db.get_setting(gate_core::paid_v5::KEY).await?;
     let stats = super::account_stats::account_rows(&state, &pool, now).await?;
     let ids: Vec<String> = pool
         .iter()
@@ -93,6 +107,20 @@ async fn page(State(state): State<AppState>, _s: AdminSession, req: Request) -> 
             row["v5"] = allowance_rows.get(i).cloned().unwrap_or(Value::Null);
             // 账号状态（/user/information 的缓存）
             row["info"] = info_by_id.get(id).cloned().unwrap_or(Value::Null);
+            attach_runtime(
+                &state,
+                &mut row,
+                RuntimeInput {
+                    token: tokens.get(id),
+                    id,
+                    now,
+                    queue_timeout,
+                    yesterday: &yesterday,
+                    caps: &caps,
+                    raw_paid: raw_paid.as_deref(),
+                },
+            )
+            .await?;
         }
         accounts.push(row);
     }
@@ -120,6 +148,67 @@ async fn page(State(state): State<AppState>, _s: AdminSession, req: Request) -> 
         "csrf_token": csrf_token(&state, &session),
         "csrf_info": super::upstream_information::scoped_csrf_public(&state, &session),
     })))
+}
+
+struct RuntimeInput<'a> {
+    token: Option<&'a Arc<Token>>,
+    id: &'a str,
+    now: f64,
+    queue_timeout: f64,
+    yesterday: &'a str,
+    caps: &'a BTreeMap<String, (i64, f64)>,
+    raw_paid: Option<&'a str>,
+}
+
+/// 账号卡片用的运行读数。电量百分比、Anlas 和今天张数已经在别的字段里，这里不重复。
+async fn attach_runtime(
+    state: &AppState,
+    row: &mut Value,
+    input: RuntimeInput<'_>,
+) -> Result<(), ApiError> {
+    let y = state
+        .db
+        .get_upstream_counter(input.id, input.yesterday)
+        .await?;
+    let quiet = quota::quiet_recovery(&state.db.quota_quiet_inputs_for(input.id, input.now).await?)
+        .map_or(Value::Null, |q| q.to_value());
+    let manual = input
+        .caps
+        .get(input.id)
+        .filter(|(_, until)| input.now < *until)
+        .map(|(cap, until)| json!({"cap": cap, "until": values::float(*until)}));
+    let paid = if let Some(g) = gate_core::paid_v5::grant(input.raw_paid, input.id, input.now) {
+        let spent = state
+            .db
+            .site_paid_spent(input.id, gate_core::paid_v5::MARKER)
+            .await?;
+        Some(json!({
+            "max_anlas": values::float(g.max_anlas),
+            "spent": values::float(spent),
+            "until": values::float(g.until),
+        }))
+    } else {
+        None
+    };
+    let (cycle, last_429, waiting, locked_today) = input.token.map_or((0.0, 0.0, 0, 0), |token| {
+        let p = state.nai.pacing(token);
+        (p.cycle, p.last_429, p.waiting, p.locked_today)
+    });
+    row["yesterday"] = json!({"images": y.images, "v5": y.v5});
+    row["cycle"] = json!(primitives::round(cycle, 1));
+    row["last_429"] = if last_429 > 0.0 {
+        values::float(last_429)
+    } else {
+        Value::Null
+    };
+    row["waiting"] = json!(waiting);
+    row["queue_cap"] = gate_upstream::pace::realistic_queue(input.queue_timeout, cycle)
+        .map_or(Value::Null, |n| json!(n));
+    row["locked_today"] = json!(locked_today);
+    row["quiet_rate"] = quiet;
+    row["manual_cap"] = manual.unwrap_or(Value::Null);
+    row["paid_v5"] = paid.unwrap_or(Value::Null);
+    Ok(())
 }
 
 async fn release_request_settlement(
