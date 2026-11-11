@@ -20,6 +20,7 @@ pub mod guard;
 pub mod keys;
 pub mod member_policy;
 pub mod member_stats;
+pub mod patron;
 pub mod public;
 pub mod registration;
 pub mod settings;

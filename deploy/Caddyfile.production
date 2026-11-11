@@ -36,7 +36,7 @@ gate.davidzhao.top {
 
 	# 只压缩网页、后台、前端资源和公开 JSON；出图接口与两条实时推送（SSE）不压缩，避免缓冲
 	@compress {
-		path / /admin /admin/* /public/* /_owl/*
+		path / /admin /admin/* /patron /patron/* /public/* /_owl/*
 		not path /public/live/stream /admin/api/events
 	}
 	encode @compress zstd gzip

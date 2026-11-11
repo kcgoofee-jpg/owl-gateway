@@ -20,6 +20,10 @@ pub fn router() -> Router<AppState> {
             axum::routing::put(set_image_access),
         )
         .route(
+            "/admin/api/members/{discord_id}/patron",
+            axum::routing::put(set_patron),
+        )
+        .route(
             "/admin/api/members/{discord_id}/rules",
             get(member).put(set_member),
         )
@@ -117,4 +121,79 @@ async fn set_member(
     }
     state.db.set_member_overrides(&subject, &overrides).await?;
     member(State(state), session, AdminPath(subject)).await
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct PatronSeat {
+    enabled: bool,
+    queue_jump: Option<bool>,
+    self_service: Option<bool>,
+    bound_token_id: Option<String>,
+    #[serde(default)]
+    reset_password: bool,
+}
+
+async fn set_patron(
+    State(state): State<AppState>,
+    _session: AdminSession,
+    AdminPath(subject): AdminPath<String>,
+    request: Request,
+) -> R {
+    let (_, body) = json_of(request).await?;
+    let seat: PatronSeat = serde_json::from_value(Value::Object(body))
+        .map_err(|_| HttpError::new(422, "赞助席格式无效"))?;
+    if !gate_core::member_policy::is_discord_id(&subject) {
+        return Err(HttpError::new(422, "成员身份无效").into());
+    }
+    let bound = seat
+        .bound_token_id
+        .as_deref()
+        .map(str::trim)
+        .filter(|s| !s.is_empty())
+        .map(str::to_string);
+    if let Some(id) = bound.as_deref() {
+        let known = state.nai.tokens().await.iter().any(|t| t.token_id == id);
+        if !known {
+            return Err(HttpError::new(422, "上游 Token 不存在").into());
+        }
+        let taken =
+            state.db.patrons().await?.iter().any(|p| {
+                p.enabled && p.subject != subject && p.bound_token_id.as_deref() == Some(id)
+            });
+        if taken {
+            return Err(HttpError::new(409, "这把上游 Token 已绑定其他赞助席").into());
+        }
+    }
+    let existing = state.db.patron(&subject).await?;
+    let mut password = None;
+    let mut password_hash = existing
+        .as_ref()
+        .map(|p| p.password_hash.clone())
+        .unwrap_or_default();
+    if seat.enabled && (seat.reset_password || password_hash.is_empty()) {
+        let generated = crate::session::generate_portal_password();
+        password_hash = crate::session::hash_password(&generated);
+        password = Some(generated);
+    }
+    state
+        .db
+        .upsert_patron(gate_db::repo::patron::PatronRecord {
+            subject: subject.clone(),
+            enabled: seat.enabled,
+            queue_jump: seat.queue_jump.unwrap_or(true),
+            self_service: seat.self_service.unwrap_or(true),
+            bound_token_id: bound,
+            password_hash,
+        })
+        .await?;
+    state.refresh_exclusive_tokens().await;
+    let mut body = json!(state.db.member_policy(&subject).await?);
+    if let Some(obj) = body.as_object_mut() {
+        obj.insert("fields".into(), gate_core::member_policy::policy_fields());
+        if let Some(password) = password {
+            obj.insert("portal_password".into(), json!(password));
+        }
+    }
+    Ok(ok_json(&body))
 }

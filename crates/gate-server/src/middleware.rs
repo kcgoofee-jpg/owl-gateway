@@ -70,7 +70,8 @@ pub async fn request_context(mut req: Request, next: Next) -> Response {
 
 /// 第 3 步：后台接口禁止缓存。
 pub async fn admin_no_store(req: Request, next: Next) -> Response {
-    let is_admin_api = req.uri().path().starts_with("/admin/api/");
+    let is_admin_api =
+        req.uri().path().starts_with("/admin/api/") || req.uri().path().starts_with("/patron/api/");
     let mut resp = next.run(req).await;
     if is_admin_api {
         let h = resp.headers_mut();

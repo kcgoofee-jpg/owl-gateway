@@ -22,6 +22,7 @@ const ENDPOINTS: &[(&str, &str)] = &[
     ("PUT", "/member-rules"),
     ("GET", "/members/900000000000000001/rules"),
     ("PUT", "/members/900000000000000001/rules"),
+    ("PUT", "/members/900000000000000001/patron"),
     ("GET", "/bans"),
     ("POST", "/bans"),
     ("DELETE", "/bans/9"),

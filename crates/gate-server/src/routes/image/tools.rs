@@ -59,7 +59,7 @@ pub(super) async fn tool(
         .detail("派发前客户端断开，未向上游发送、未扣费")
         .reason("client_disconnected");
     shielded(&state, &ctx, cancelled, async move {
-        let admission = image_admission(&s, &c, &key, key.owner_image_full).await?;
+        let admission = image_admission(&s, &c, &key, key.queue_jump).await?;
         let slots = acquire_slots(&s);
         check_image_cooldown(&s)?;
         let reserved = Arc::new(
@@ -88,6 +88,7 @@ pub(super) async fn tool(
             );
             opts.requires_anlas = cost > 0;
             opts.image_lane = true;
+            opts.prefer_token_id = key.bound_token_id.clone();
             opts.max_response_bytes = Some(MAX_RESPONSE_BYTES);
             opts.queue_timeout = state.limits().queue_timeout;
             let cb = Callbacks {
@@ -250,7 +251,7 @@ pub(super) async fn vibe(state: AppState, req: Request) -> Result<Response, ApiE
     shielded(&state, &ctx, cancelled, async move {
         let snapshot = admission::budget_snapshot(&s).await;
         admission::quota_image_check(&s, &snapshot, &key, &est, 0, None).await?;
-        let admission = image_admission(&s, &c, &key, key.owner_image_full).await?;
+        let admission = image_admission(&s, &c, &key, key.queue_jump).await?;
         let slots = acquire_slots(&s);
         check_image_cooldown(&s)?;
         let reserved = Arc::new(
@@ -274,6 +275,7 @@ pub(super) async fn vibe(state: AppState, req: Request) -> Result<Response, ApiE
         opts.accept = "application/octet-stream";
         opts.requires_anlas = true;
         opts.image_lane = true;
+        opts.prefer_token_id = key.bound_token_id.clone();
         opts.max_response_bytes = Some(MAX_RESPONSE_BYTES);
         opts.queue_timeout = state.limits().queue_timeout;
         let cb = Callbacks {

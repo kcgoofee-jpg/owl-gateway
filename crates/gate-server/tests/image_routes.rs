@@ -2163,42 +2163,51 @@ async fn medium_mode_on_leaves_other_models_alone() {
 }
 
 #[tokio::test]
-async fn v5_beyond_free_spec_is_refused_even_with_anlas() {
-    // 站长 10-22：V5 只用免费额度；多张等要花 Anlas 的 V5 直接拒，即使这把 Key 开了 Anlas
+async fn v5_beyond_free_spec_is_clamped_without_the_paid_switch() {
+    // 没有高规格开关时按免费档裁剪：两张变一张，不花 Anlas。
     let e = setup(&[]).await;
     allow_v5(&e.state).await;
-    common::policy_for(&e.state, 1, json!({"paid_parameters":true})).await;
-    let before = e.mock.requests_to("/ai/generate-image").len();
     let (status, body) = v5_post(&e, image_body("nai-diffusion-5-full", 2)).await;
-    assert_eq!(status, 403, "{}", String::from_utf8_lossy(&body));
-    assert!(String::from_utf8_lossy(&body).contains("V5 仅支持免费规格"));
-    assert_eq!(
-        e.mock.requests_to("/ai/generate-image").len(),
-        before,
-        "不该发到上游"
-    );
+    assert_eq!(status, 200, "{}", String::from_utf8_lossy(&body));
+    let sent = e.mock.requests_to("/ai/generate-image");
+    assert_eq!(sent.len(), 1);
+    assert_eq!(sent[0].json()["parameters"]["n_samples"], 1);
+    assert_eq!(member_anlas(&e.state).await, 0.0);
 }
 
-/// A single oversized V5 image has no free allowance in its estimate at all, so it never reaches the
-/// V5 confirmation step: it is refused at the door instead of being billed to the member's Anlas.
 #[tokio::test]
-async fn single_oversized_v5_is_refused_before_queueing() {
+async fn paid_parameters_keep_paid_v5_spec() {
+    // 金钱赞助打开高规格后，挂费 V5 按请求发出，花 Anlas（全站池）。
     let e = setup(&[]).await;
     allow_v5(&e.state).await;
     common::policy_for(
         &e.state,
         1,
-        json!({"daily_anlas":5000,"paid_parameters":true}),
+        json!({"paid_parameters": true, "daily_anlas": 5000}),
     )
     .await;
+    let (status, body) = v5_post(&e, image_body("nai-diffusion-5-full", 2)).await;
+    assert_eq!(status, 200, "{}", String::from_utf8_lossy(&body));
+    let sent = e.mock.requests_to("/ai/generate-image");
+    assert_eq!(sent.len(), 1);
+    assert_eq!(sent[0].json()["parameters"]["n_samples"], 2);
+}
+
+/// A single oversized V5 image is snapped to a free preset unless the paid switch (or exclusive token) is on.
+#[tokio::test]
+async fn single_oversized_v5_is_clamped_without_the_paid_switch() {
+    let e = setup(&[]).await;
+    allow_v5(&e.state).await;
+    common::policy_for(&e.state, 1, json!({"daily_anlas": 5000})).await;
     let mut body = image_body("nai-diffusion-5-full", 1);
     body["parameters"]["width"] = json!(1216);
     body["parameters"]["height"] = json!(1600);
     let (status, body) = v5_post(&e, body).await;
-    let text = String::from_utf8_lossy(&body).to_string();
-    assert_eq!(status, 403, "{text}");
-    assert!(text.contains("V5 仅支持免费规格"), "{text}");
-    assert!(e.mock.requests_to("/ai/generate-image").is_empty());
+    assert_eq!(status, 200, "{}", String::from_utf8_lossy(&body));
+    let sent = e.mock.requests_to("/ai/generate-image");
+    assert_eq!(sent.len(), 1);
+    let p = &sent[0].json()["parameters"];
+    assert!(p["width"] != 1216 || p["height"] != 1600, "{p}");
     assert_eq!(member_anlas(&e.state).await, 0.0);
 }
 

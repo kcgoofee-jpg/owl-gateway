@@ -44,6 +44,13 @@ for p in /admin /favicon.svg; do
   echo "  $p -> $code"
   [[ $code == 200 ]] || { echo "hot update verification failed" >&2; exit 1; }
 done
+# /patron is served by the gateway image. A hot-web onto an older image 404s until cutover.
+code=$(curl -s -o /dev/null -w '%{http_code}' "https://$DOMAIN/patron" || true)
+echo "  /patron -> $code"
+if [[ $code != 200 && $code != 404 ]]; then
+  echo "hot update verification failed" >&2
+  exit 1
+fi
 asset=$(cd web/dist && ls landing-*.js | head -1)
 code=$(curl -s -o /dev/null -w '%{http_code}' "https://$DOMAIN/_owl/$asset" || true)
 echo "  /_owl/$asset -> $code"

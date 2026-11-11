@@ -153,7 +153,7 @@ pub(super) async fn prepare(
     // 未开放高规格生图时钳制到免费规格；费用仍由个人与全站预算共同限制。
     // 上限写死（与 policy 的免费条件、SYSTEM-FACTS 的文案同一口径），不再读环境变量
     let mut notes: Vec<String> = Vec::new();
-    if !key.allows_paid_parameters() {
+    if !key.skip_free_clamp() {
         let (b, n, problem) = policy::clamp_image_params(
             &body,
             policy::FREE_MAX_PIXELS,
@@ -175,6 +175,7 @@ pub(super) async fn prepare(
         // 站长临时降档：V5 Full（含局部重绘）改走 Medium，放在整理参数和费用估算之前，这样价格和免费额度都按 Medium 算。
         if let Some(medium) = policy::v5_medium_of(&text(body.get("model").unwrap_or(&Value::Null)))
             && !key.owner_image_full
+            && !key.skip_site_budget()
             && crate::v5_medium::active(state).await
         {
             body["model"] = Value::String(medium.into());
@@ -225,14 +226,14 @@ pub(super) async fn prepare(
         )
     })?);
     // 普通成员仍限制为免费 V5；绑定站长的完整权限允许在现有预算内支付高规格费用。
-    if tier == "v5" && est.anlas > 0.0 && !key.owner_image_full {
+    if tier == "v5" && est.anlas > 0.0 && !key.allows_paid_v5() {
         reject(&model, "V5 超出免费规格");
         return Err(
             GateError::with_code(403, super::settle::V5_PAID_REFUSED, reasons::PARAM).into(),
         );
     }
     // Paid owner V5 outputs still count toward the personal/shared V5 limits.
-    if tier == "v5" && key.owner_image_full {
+    if tier == "v5" && (key.owner_image_full || key.bound_token_id.is_some()) {
         est.v5 = image_count;
     }
     let legacy_free_images = if tier == "legacy"

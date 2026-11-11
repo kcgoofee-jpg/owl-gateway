@@ -4,7 +4,13 @@ import { parseField, toRaw } from "./system/core";
 import { type Form, NumField, SwitchRow } from "./system/forms";
 import "./member-rules.css";
 
-import { FEATURE_FIELDS, type MemberPolicy, NUMBER_FIELDS, POLICY_FIELDS } from "../../../lib/member-policy";
+import {
+  FEATURE_COPY,
+  FEATURE_FIELDS,
+  type MemberPolicy,
+  NUMBER_FIELDS,
+  POLICY_FIELDS,
+} from "../../../lib/member-policy";
 
 export * from "../../../lib/member-policy";
 
@@ -17,14 +23,14 @@ const POLICY_LABELS: Record<keyof MemberPolicy, { label: string; unit?: string }
   daily_anlas: { label: "Anlas 每天", unit: "Anlas" },
   monthly_anlas: { label: "Anlas 每月", unit: "Anlas" },
   rpm: { label: "每分钟请求数", unit: "次" },
-  image: { label: "图片生成" },
-  v5: { label: "V5" },
-  vibe: { label: "Vibe 与参考图" },
-  tags: { label: "标签补全" },
-  img2img: { label: "图生图与局部重绘" },
-  upscale: { label: "放大" },
-  augment: { label: "导演工具" },
-  paid_parameters: { label: "高规格生图（大图、多步数与批量）" },
+  image: FEATURE_COPY.image,
+  v5: FEATURE_COPY.v5,
+  vibe: FEATURE_COPY.vibe,
+  tags: FEATURE_COPY.tags,
+  img2img: FEATURE_COPY.img2img,
+  upscale: FEATURE_COPY.upscale,
+  augment: FEATURE_COPY.augment,
+  paid_parameters: FEATURE_COPY.paid_parameters,
 };
 
 export const policyLabel = (name: keyof MemberPolicy): string => POLICY_LABELS[name].label;

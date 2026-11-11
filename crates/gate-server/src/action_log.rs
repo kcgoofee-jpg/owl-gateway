@@ -5,7 +5,7 @@ use gate_core::primitives::take_chars;
 use gate_db::Db;
 use serde_json::{Map, Value};
 
-const SECRET_FIELDS: [&str; 9] = [
+const SECRET_FIELDS: [&str; 10] = [
     "token",
     "password",
     "current",
@@ -15,6 +15,7 @@ const SECRET_FIELDS: [&str; 9] = [
     "old_password",
     "html",
     "secret",
+    "portal_password",
 ];
 
 /// (方法, 路由模板) → 操作名；模板不含 /admin/api 前缀。
@@ -53,6 +54,7 @@ pub const ADMIN_ACTIONS: &[(&str, &str, &str)] = &[
         "/members/{discord_id}/image-access",
         "切换站长生图权限",
     ),
+    ("PUT", "/members/{discord_id}/patron", "设置赞助席"),
     ("PUT", "/settings", "修改预算"),
     ("POST", "/ops/manual", "手动改设置"),
     ("PUT", "/ops/registration", "修改开放注册设置"),

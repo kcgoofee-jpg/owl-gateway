@@ -60,6 +60,19 @@ impl Db {
         .await
     }
 
+    pub async fn key_token_for_subject(&self, subject: &str) -> Result<Option<String>> {
+        let subject = subject.to_string();
+        self.read(move |c| {
+            c.query_row(
+                "SELECT token FROM api_keys WHERE discord_id=? ORDER BY id LIMIT 1",
+                [subject],
+                |row| row.get(0),
+            )
+            .optional()
+        })
+        .await
+    }
+
     pub async fn get_key_by_token(&self, token: &str) -> Result<Option<Value>> {
         let token = token.to_string();
         self.read(move |c| {

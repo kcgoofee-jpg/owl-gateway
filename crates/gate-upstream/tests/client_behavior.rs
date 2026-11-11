@@ -451,6 +451,7 @@ async fn token_disabled_during_slot_wait_is_not_used_for_nonstream_or_stream_pos
                 &Callbacks::default(),
                 None,
                 &NoObserver,
+                None,
             )
             .await
     });
@@ -725,6 +726,7 @@ async fn image_stream_settles_completed_images() {
             &Callbacks::default(),
             None,
             &NoObserver,
+            None,
         )
         .await
         .unwrap();
@@ -888,6 +890,7 @@ async fn compressed_msgpack_stream_is_complete() {
                 &Callbacks::default(),
                 None,
                 &NoObserver,
+                None,
             )
             .await
             .unwrap();
@@ -954,6 +957,7 @@ async fn compressed_msgpack_stream_is_not_buffered() {
                 &Callbacks::default(),
                 None,
                 &NoObserver,
+                None,
             )
             .await
             .unwrap();

@@ -142,7 +142,10 @@ impl Reserved {
         if let Some(error) = crate::auth::key_status_error(&current, self.state.now()) {
             return Err(error.into());
         }
-        if current.owner_image_full != self.key.owner_image_full {
+        if current.owner_image_full != self.key.owner_image_full
+            || current.queue_jump != self.key.queue_jump
+            || current.bound_token_id != self.key.bound_token_id
+        {
             return Err(GateError::with_code(
                 403,
                 "生图权限已切换，请按当前规则重新提交，未扣费。",
@@ -152,7 +155,8 @@ impl Reserved {
         }
         crate::auth::require_feature(&current, self.requirements.feature)?;
         if self.requirements.v5
-            && (!current.policy.v5 || crate::ops::v5_paused(&self.state.db).await?)
+            && (!current.policy.v5
+                || (!current.skip_site_budget() && crate::ops::v5_paused(&self.state.db).await?))
         {
             return Err(GateError::with_code(
                 403,
@@ -165,7 +169,7 @@ impl Reserved {
             crate::auth::require_feature(&current, "vibe")?;
         }
         if (self.requirements.img2img && !current.policy.img2img)
-            || (self.requirements.paid_parameters && !current.policy.paid_parameters)
+            || (self.requirements.paid_parameters && !current.skip_free_clamp())
         {
             return Err(GateError::with_code(
                 403,

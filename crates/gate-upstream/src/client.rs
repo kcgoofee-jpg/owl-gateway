@@ -92,6 +92,8 @@ pub struct RequestOpts<'a> {
     pub wait_for_image_slot: bool,
     pub max_response_bytes: Option<usize>,
     pub queue_timeout: f64,
+    /// 赞助席绑定的专属 Token：只派这把，冷却 / 见底时不改走站账号。
+    pub prefer_token_id: Option<String>,
 }
 
 impl<'a> RequestOpts<'a> {
@@ -118,6 +120,7 @@ impl<'a> RequestOpts<'a> {
             wait_for_image_slot: true,
             max_response_bytes: None,
             queue_timeout: 90.0,
+            prefer_token_id: None,
         }
     }
 }
@@ -267,12 +270,14 @@ impl<H: Hooks> NaiClient<H> {
 
     /// 每个现在可用的账号在排队超时 `queue_timeout` 秒内真能开始几张（⌈超时 ÷ 周期⌉；None = 不限，
     /// 见 [`crate::pace::realistic_queue`]）。全站排队上限按它算（再以「每个账号排队数」封顶）。
+    /// 专属捐赠 Token 不计入全站名额。
     pub async fn queue_caps(&self, queue_timeout: f64) -> Vec<Option<i64>> {
         let now = self.inner.hooks.now();
+        let exclusive = self.inner.pool.exclusive_ids().await;
         self.tokens()
             .await
             .iter()
-            .filter(|t| t.usable(now))
+            .filter(|t| t.usable(now) && !exclusive.contains(&t.token_id))
             .map(|t| {
                 crate::pace::realistic_queue(
                     queue_timeout,
@@ -282,12 +287,25 @@ impl<H: Hooks> NaiClient<H> {
             .collect()
     }
 
+    pub async fn set_exclusive_tokens(&self, ids: std::collections::HashSet<String>) {
+        self.inner.pool.set_exclusive(ids).await;
+    }
+
+    pub async fn exclusive_tokens(&self) -> std::collections::HashSet<String> {
+        self.inner.pool.exclusive_ids().await
+    }
+
     /// 没有可用 Token 时给成员的说明：先区分「冷却 / 停用」和「额度真的用完」。
-    pub async fn unavailable(&self, requires_anlas: bool, v5_free: bool) -> UpstreamError {
+    pub async fn unavailable(
+        &self,
+        requires_anlas: bool,
+        v5_free: bool,
+        prefer_token_id: Option<&str>,
+    ) -> UpstreamError {
         let inner = &self.inner;
         inner
             .pool
-            .unavailable(&inner.hooks, requires_anlas, v5_free)
+            .unavailable(&inner.hooks, requires_anlas, v5_free, prefer_token_id)
             .await
     }
 

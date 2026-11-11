@@ -252,6 +252,7 @@ async fn release_request_settlement(
 /// 令牌池的当前状态：Token 打码，另附当天用量。
 pub(super) async fn pool_status(state: &AppState) -> Result<Vec<Value>, ApiError> {
     let now = state.now();
+    let exclusive = state.nai.exclusive_tokens().await;
     let mut out = Vec::new();
     for (t, f) in state.nai.status_rows().await {
         let c = state
@@ -279,6 +280,7 @@ pub(super) async fn pool_status(state: &AppState) -> Result<Vec<Value>, ApiError
             "v5_daily_limit": f.v5_daily_limit,
             "v5_used": c.v5,
             "images_today": c.images,
+            "exclusive": exclusive.contains(&t.token_id),
         }));
     }
     Ok(out)
@@ -414,14 +416,18 @@ async fn commit_edit(state: &AppState, edit: Edit) -> Result<(), ApiError> {
                 .map_err(InternalError)?;
         }
         Edit::Replace { id, token } => {
+            state.db.unbind_patron_token(&id).await?;
             state
                 .nai
                 .replace_token(&id, token)
                 .await
                 .map_err(InternalError)?;
+            state.refresh_exclusive_tokens().await;
         }
         Edit::Remove { id } => {
+            state.db.unbind_patron_token(&id).await?;
             state.nai.remove_token(&id).await.map_err(InternalError)?;
+            state.refresh_exclusive_tokens().await;
         }
     }
     // The committed candidate is already restart-safe. Remove old credentials

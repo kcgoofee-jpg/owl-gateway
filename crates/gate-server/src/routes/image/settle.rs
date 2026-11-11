@@ -217,6 +217,7 @@ pub(super) async fn perform_generation(
     opts.image_count = prep.image_count as usize;
     opts.image_lane = true;
     opts.v5_lane = super::fast_lane(state, &key, &model);
+    opts.prefer_token_id = key.bound_token_id.clone();
     opts.max_response_bytes = Some(MAX_RESPONSE_BYTES);
     opts.queue_timeout = state.limits().queue_timeout;
     let allowance = state

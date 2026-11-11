@@ -220,10 +220,7 @@ async fn run_stream(
             &key,
             &prep.est,
             prep.legacy_free_images,
-            crate::admission::DispatchRequirements::image(
-                &prep.body,
-                prep.key.allows_paid_parameters(),
-            )?,
+            crate::admission::DispatchRequirements::image(&prep.body, prep.key.skip_free_clamp())?,
         )
         .await?;
         Ok::<_, ApiError>((admission, slots, reserved))
@@ -399,6 +396,7 @@ async fn perform_stream(
                 &cb,
                 allow,
                 ctx,
+                prep.key.bound_token_id.as_deref(),
             );
             tokio::pin!(open);
             let mut seen_cancel = false;

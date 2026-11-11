@@ -36,15 +36,16 @@ fn guard_io(e: crate::guard::GuardIoError) -> ApiError {
     InternalError(e.to_string()).into()
 }
 
-/// 当前可用的上游账号（`[t for t in pool if t.usable]`）。
+/// 当前可用的上游账号（`[t for t in pool if t.usable]`）。专属捐赠 Token 不计入全站池。
 pub async fn usable_token_ids(state: &AppState) -> Vec<String> {
     let now = state.now();
+    let exclusive = state.nai.exclusive_tokens().await;
     state
         .nai
         .tokens()
         .await
         .into_iter()
-        .filter(|t| t.usable(now))
+        .filter(|t| t.usable(now) && !exclusive.contains(&t.token_id))
         .map(|t| t.token_id.clone())
         .collect()
 }
@@ -154,9 +155,9 @@ async fn wait_key_turn(state: &AppState, key_id: i64, entry_id: i64) -> Result<(
         .map_err(|_| queue_timeout())
 }
 
-/// `fast` = 短作业车道（V5，或站长号复用同一条车道）：只影响同一把 Key 里能不能越过
+/// `fast` = 短作业车道（V5，或插队复用同一条车道）：只影响同一把 Key 里能不能越过
 /// 还没开始的普通条目（[`gate_core::guard::GuardCore::key_turn`]），不影响额度。
-/// 站长号（`owner_image_full`）越过全站排队满，每人排队上限照旧。
+/// 插队（站长号 / 赞助席 `queue_jump`）越过全站排队满，每人排队上限照旧。
 pub async fn image_admission(
     state: &AppState,
     ctx: &ReqCtx,
@@ -167,7 +168,7 @@ pub async fn image_admission(
     let cap = queue_cap(state).await;
     let key_id = key.id();
     let now = state.now();
-    let skip_site_cap = key.owner_image_full;
+    let skip_site_cap = key.queue_jump;
     // 登记与取编号在同一次加锁里完成，不会被别人插队
     let admitted =
         state.guard.with(

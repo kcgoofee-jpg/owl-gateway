@@ -1,5 +1,6 @@
 //! 成员规则存取。一次读取同时取得默认值与例外，避免跨版本拼接。
 
+use crate::repo::patron::{PatronView, patron_view, patron_views};
 use crate::{Db, DbError, Result};
 use gate_core::member_policy::{ClaimRules, MemberOverrides, MemberPolicy, SharedBudgets};
 use rusqlite::{Connection, OptionalExtension, params};
@@ -86,6 +87,8 @@ fn apply_owner(
 pub struct PolicySnapshot {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub owner_image: Option<OwnerImageState>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub patron: Option<PatronView>,
     pub defaults: MemberPolicy,
     pub overrides: MemberOverrides,
     pub effective: MemberPolicy,
@@ -95,6 +98,7 @@ pub struct PolicyDirectory {
     owner: Option<OwnerImageProfile>,
     defaults: MemberPolicy,
     overrides: BTreeMap<String, MemberOverrides>,
+    patrons: BTreeMap<String, PatronView>,
 }
 
 impl PolicyDirectory {
@@ -106,16 +110,21 @@ impl PolicyDirectory {
             }
             None => MemberOverrides::default(),
         };
-        Ok(apply_owner(
+        let mut snapshot = apply_owner(
             PolicySnapshot {
                 owner_image: None,
+                patron: None,
                 effective: self.defaults.resolve(&overrides).map_err(invalid)?,
                 defaults: self.defaults.clone(),
                 overrides,
             },
             subject,
             self.owner.as_ref(),
-        ))
+        );
+        if let Some(subject) = subject.filter(|s| !s.is_empty()) {
+            snapshot.patron = self.patrons.get(subject).cloned();
+        }
+        Ok(snapshot)
     }
 }
 
@@ -155,16 +164,19 @@ fn snapshot(conn: &Connection, subject: &str) -> Result<PolicySnapshot> {
         .transpose()?
         .unwrap_or_default();
     let effective = defaults.resolve(&overrides).map_err(invalid)?;
-    Ok(apply_owner(
+    let mut snapshot = apply_owner(
         PolicySnapshot {
             owner_image: None,
+            patron: None,
             defaults,
             overrides,
             effective,
         },
         Some(subject),
         owner_profile(conn)?.as_ref(),
-    ))
+    );
+    snapshot.patron = patron_view(conn, subject)?;
+    Ok(snapshot)
 }
 
 impl Db {
@@ -271,11 +283,14 @@ impl Db {
             }
             let owner = owner_profile(&transaction)
                 .map_err(|e| rusqlite::Error::ToSqlConversionFailure(Box::new(e)))?;
+            let patrons = patron_views(&transaction)
+                .map_err(|e| rusqlite::Error::ToSqlConversionFailure(Box::new(e)))?;
             transaction.commit()?;
             Ok(PolicyDirectory {
                 owner,
                 defaults,
                 overrides,
+                patrons,
             })
         })
         .await

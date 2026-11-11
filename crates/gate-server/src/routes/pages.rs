@@ -1,4 +1,4 @@
-//! 页面与静态资源：`/`、`/workbench`、`/admin`（含 `/admin/*` 前端路由，`/admin/api/*` 除外）、`/_owl/*`、图标、健康检查。
+//! 页面与静态资源：`/`、`/workbench`、`/admin`、`/patron`（各自 SPA 前端路由，API 前缀除外）、`/_owl/*`、图标、健康检查。
 
 use crate::AppState;
 use crate::error::ok_json;
@@ -24,6 +24,12 @@ pub fn router() -> Router<AppState> {
             get(|| async { axum::response::Redirect::temporary("/admin") }),
         )
         .route("/admin/{*rest}", get(admin_spa))
+        .route("/patron", get(patron))
+        .route(
+            "/patron/",
+            get(|| async { axum::response::Redirect::temporary("/patron") }),
+        )
+        .route("/patron/{*rest}", get(patron_spa))
         .route("/_owl/{*path}", get(asset))
         // 官网构建产物的绝对路径：全部映射到 dist/nai-app 下
         .route("/bridge.js", get(mirror_file))
@@ -96,6 +102,21 @@ async fn admin_spa(State(st): State<AppState>, Path(rest): Path<String>) -> Resp
             .into_response();
     }
     st.assets.page(Page::Admin, None)
+}
+
+async fn patron(State(st): State<AppState>) -> Response {
+    st.assets.page(Page::Patron, None)
+}
+
+async fn patron_spa(State(st): State<AppState>, Path(rest): Path<String>) -> Response {
+    if rest.starts_with("api/") || rest == "api" {
+        return (
+            axum::http::StatusCode::NOT_FOUND,
+            axum::Json(json!({"detail": "Not Found"})),
+        )
+            .into_response();
+    }
+    st.assets.page(Page::Patron, None)
 }
 
 async fn asset(State(st): State<AppState>, Path(path): Path<String>) -> Response {

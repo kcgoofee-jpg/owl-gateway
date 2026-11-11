@@ -2,6 +2,8 @@
 //!
 //! - 后台 `nai_gate_admin`：`<到期秒>.<HMAC-SHA256 hex>`，密钥 = `secret + ":" + sha256(密码哈希或 ADMIN_PASSWORD)`，
 //!   改密码即令所有旧会话失效；有效期 7 天；SameSite=Strict。
+//! - 赞助席 `nai_gate_patron`：`<discord_id>.<到期秒>.<HMAC>`，`Path=/patron`；
+//!   密钥 = `secret + ":patron:" + subject + ":" + sha256(密码哈希)`，改密或撤权即失效。
 //! - 成员 `owl_member`：`<discord_id>:<到期秒>:<Key 指纹>.<HMAC>`，密钥 = `secret + ":member-login"`；
 //!   Key 指纹 = sha256(Key)[:16]，换 Key 后旧会话立刻失效；有效期 30 天；SameSite=Lax。
 //! - 后台密码：`scrypt$<盐 hex>$<摘要 hex>`（n=2^14, r=8, p=1, 32 字节）。
@@ -16,6 +18,8 @@ use hmac::{Hmac, KeyInit, Mac};
 use sha2::{Digest, Sha256};
 
 pub const ADMIN_COOKIE: &str = "nai_gate_admin";
+pub const PATRON_COOKIE: &str = "nai_gate_patron";
+pub const PATRON_COOKIE_PATH: &str = "/patron";
 pub const MEMBER_COOKIE: &str = "owl_member";
 pub const STATE_COOKIE: &str = "owl_login_state";
 pub const ADMIN_SESSION_SECS: i64 = 7 * 86400;
@@ -61,7 +65,19 @@ pub fn set_cookie_header(
     secure: bool,
     samesite: &str,
 ) -> HeaderValue {
-    let mut s = format!("{name}={value}; HttpOnly; Max-Age={max_age}; Path=/; SameSite={samesite}");
+    set_cookie_header_path(name, value, max_age, secure, samesite, "/")
+}
+
+pub fn set_cookie_header_path(
+    name: &str,
+    value: &str,
+    max_age: i64,
+    secure: bool,
+    samesite: &str,
+    path: &str,
+) -> HeaderValue {
+    let mut s =
+        format!("{name}={value}; HttpOnly; Max-Age={max_age}; Path={path}; SameSite={samesite}");
     if secure {
         s.push_str("; Secure");
     }
@@ -75,11 +91,21 @@ pub fn delete_cookie_header(
     samesite: &str,
     httponly: bool,
 ) -> HeaderValue {
+    delete_cookie_header_path(name, secure, samesite, httponly, "/")
+}
+
+pub fn delete_cookie_header_path(
+    name: &str,
+    secure: bool,
+    samesite: &str,
+    httponly: bool,
+    path: &str,
+) -> HeaderValue {
     let mut s = format!("{name}=\"\"; expires=Thu, 01 Jan 1970 00:00:00 GMT;");
     if httponly {
         s.push_str(" HttpOnly;");
     }
-    s.push_str(" Max-Age=0; Path=/");
+    s.push_str(&format!(" Max-Age=0; Path={path}"));
     if !samesite.is_empty() {
         s.push_str(&format!("; SameSite={samesite}"));
     }
@@ -240,6 +266,91 @@ impl FromRequestParts<AppState> for AdminSession {
         }
         Ok(AdminSession)
     }
+}
+
+fn patron_session_key(secret: &str, subject: &str, password_hash: &str) -> String {
+    format!("{secret}:patron:{subject}:{}", sha256_hex(password_hash))
+}
+
+pub fn make_patron_cookie(state: &AppState, subject: &str, password_hash: &str) -> String {
+    let exp = state.now() as i64 + ADMIN_SESSION_SECS;
+    let payload = format!("{subject}.{exp}");
+    let sig = hmac_hex(
+        &patron_session_key(&state.secret_key, subject, password_hash),
+        &payload,
+    );
+    format!("{payload}.{sig}")
+}
+
+pub fn parse_patron_cookie(raw: &str) -> Option<(String, i64, String)> {
+    let (rest, sig) = raw.rsplit_once('.')?;
+    let (subject, exp) = rest.rsplit_once('.')?;
+    if subject.is_empty() || sig.is_empty() {
+        return None;
+    }
+    let exp = gate_core::primitives::parse_int(exp)?;
+    Some((subject.to_string(), exp, sig.to_string()))
+}
+
+pub async fn load_patron_session(
+    state: &AppState,
+    raw: &str,
+) -> Result<Option<PatronSession>, HttpError> {
+    let Some((subject, exp, sig)) = parse_patron_cookie(raw) else {
+        return Ok(None);
+    };
+    if (exp as f64) <= state.now() {
+        return Ok(None);
+    }
+    let Some(profile) = state.db.patron(&subject).await.map_err(|e| {
+        tracing::error!(error = %e, "读取赞助席失败");
+        HttpError::new(500, "读取赞助席失败")
+    })?
+    else {
+        return Ok(None);
+    };
+    if !profile.enabled || profile.password_hash.is_empty() {
+        return Ok(None);
+    }
+    let expected = hmac_hex(
+        &patron_session_key(&state.secret_key, &subject, &profile.password_hash),
+        &format!("{subject}.{exp}"),
+    );
+    if !ct_eq(sig.as_bytes(), expected.as_bytes()) {
+        return Ok(None);
+    }
+    Ok(Some(PatronSession { subject, profile }))
+}
+
+/// 赞助席接口的鉴权：写请求先校验来源，再校验会话。
+pub struct PatronSession {
+    pub subject: String,
+    pub profile: gate_db::repo::patron::PatronRecord,
+}
+
+impl FromRequestParts<AppState> for PatronSession {
+    type Rejection = HttpError;
+
+    async fn from_request_parts(parts: &mut Parts, state: &AppState) -> Result<Self, HttpError> {
+        if !matches!(parts.method, Method::GET | Method::HEAD | Method::OPTIONS)
+            && !origin_ok(state, &parts.headers)
+        {
+            return Err(HttpError::new(403, "来源校验失败"));
+        }
+        let raw = cookie(&parts.headers, PATRON_COOKIE).unwrap_or_default();
+        load_patron_session(state, &raw)
+            .await?
+            .ok_or_else(|| HttpError::new(401, "未登录或会话已过期"))
+    }
+}
+
+pub fn generate_portal_password() -> String {
+    const ALPH: &[u8] = b"abcdefghijkmnopqrstuvwxyzABCDEFGHJKLMNPQRSTUVWXYZ23456789";
+    let bytes: [u8; 20] = rand::random();
+    bytes
+        .iter()
+        .map(|b| ALPH[*b as usize % ALPH.len()] as char)
+        .collect()
 }
 
 // ------------------------------------------------------------------ 成员

@@ -18,7 +18,7 @@ use crate::hooks::{Allowance, Hooks};
 use crate::limiter::AdjustableLimiter;
 use crate::pace::{Arrival, fair_cmp};
 use crate::scheduler::Scheduler;
-use std::collections::{BTreeMap, HashMap};
+use std::collections::{BTreeMap, HashMap, HashSet};
 use std::sync::{Arc, Mutex};
 
 /// 新 Token 的免费 V5 日限默认值（= 放开，只受全站管；10-27 起 0 的语义是「停用」）。
@@ -423,6 +423,7 @@ pub(crate) fn event_401(hooks: &dyn Hooks, token_id: &str) {
 struct PoolState {
     tokens: Vec<Arc<Token>>,
     rr: usize,
+    exclusive: HashSet<String>,
 }
 
 /// 排队票（只给要等出图间隔的请求）：登记在某把 Token 的 `waiting` 里，前面有几张决定估算的开始时间；
@@ -500,7 +501,11 @@ impl Pool {
             .map(|(i, (t, v5, anlas))| Arc::new(Token::new(t, i, v5, anlas)))
             .collect();
         Self {
-            state: tokio::sync::Mutex::new(PoolState { tokens, rr: 0 }),
+            state: tokio::sync::Mutex::new(PoolState {
+                tokens,
+                rr: 0,
+                exclusive: HashSet::new(),
+            }),
             waiters: Arc::default(),
         }
     }
@@ -685,6 +690,14 @@ impl Pool {
     /// 要花 Anlas 的图跳过不能付 Anlas 的 Token（见 [`Token::can_pay_anlas`]）。
     /// `image_job`（图片车道）时还要过账号保护，并在选中的 Token 上登记排队票（见 [`Ticket`]）；
     /// 估算开始时间按排队顺序里这张会排在第几（`arrival`）。
+    pub(crate) async fn set_exclusive(&self, ids: HashSet<String>) {
+        self.state.lock().await.exclusive = ids;
+    }
+
+    pub(crate) async fn exclusive_ids(&self) -> HashSet<String> {
+        self.state.lock().await.exclusive.clone()
+    }
+
     #[allow(clippy::too_many_arguments)] // 费用要求、车道、公平信息都只在选号这一层用
     pub(crate) async fn pick(
         &self,
@@ -695,6 +708,7 @@ impl Pool {
         image_job: bool,
         allowance: Option<&dyn Allowance>,
         arrival: Arrival,
+        prefer_token_id: Option<&str>,
     ) -> Result<Option<(Arc<Token>, Option<Ticket>)>, UpstreamError> {
         let mut pool = self.state.lock().await;
         let now = hooks.now();
@@ -704,6 +718,11 @@ impl Pool {
             .filter(|t| t.usable(now) && (!requires_anlas || t.can_pay_anlas(now, allowance)))
             .cloned()
             .collect();
+        if let Some(prefer) = prefer_token_id {
+            usable.retain(|t| t.token_id == prefer);
+        } else {
+            usable.retain(|t| !pool.exclusive.contains(&t.token_id));
+        }
         if usable.is_empty() {
             return Ok(None);
         }
@@ -811,6 +830,8 @@ impl Pool {
         let mut best: Option<(f64, Arc<Token>)> = None;
         for t in &pool.tokens {
             if Arc::ptr_eq(t, &ticket.token)
+                || pool.exclusive.contains(&t.token_id)
+                || pool.exclusive.contains(&ticket.token.token_id)
                 || !t.quick_eligible(now, requires_anlas, v5_free, allowance)
             {
                 continue;
@@ -871,6 +892,7 @@ impl Pool {
         let now = hooks.now();
         for t in &pool.tokens {
             if !std::ptr::eq(t.as_ref(), token)
+                && !pool.exclusive.contains(&t.token_id)
                 && t.usable(now)
                 && v5_room(hooks, t, now).await.unwrap_or(false)
             {
@@ -888,7 +910,7 @@ impl Pool {
         let now = hooks.now();
         let mut any = false;
         for t in &pool.tokens {
-            if !t.with(|f| f.admin_enabled && !f.disabled) {
+            if pool.exclusive.contains(&t.token_id) || !t.with(|f| f.admin_enabled && !f.disabled) {
                 continue;
             }
             any = true;
@@ -933,10 +955,18 @@ impl Pool {
         hooks: &dyn Hooks,
         requires_anlas: bool,
         v5_free: bool,
+        prefer_token_id: Option<&str>,
     ) -> UpstreamError {
+        if let Some(id) = prefer_token_id {
+            return self.unavailable_preferred(hooks, id, requires_anlas).await;
+        }
         let pool = self.state.lock().await;
         let now = hooks.now();
-        let usable: Vec<_> = pool.tokens.iter().filter(|t| t.usable(now)).collect();
+        let usable: Vec<_> = pool
+            .tokens
+            .iter()
+            .filter(|t| t.usable(now) && !pool.exclusive.contains(&t.token_id))
+            .collect();
         if usable.is_empty() {
             let cooling: Vec<f64> = pool
                 .tokens
@@ -975,6 +1005,34 @@ impl Pool {
             503,
             "本站 NovelAI 账号暂时均在限流或不可用，未扣费。请稍后重试。",
         )
+    }
+
+    async fn unavailable_preferred(
+        &self,
+        hooks: &dyn Hooks,
+        token_id: &str,
+        requires_anlas: bool,
+    ) -> UpstreamError {
+        let pool = self.state.lock().await;
+        let now = hooks.now();
+        let Some(token) = pool.tokens.iter().find(|t| t.token_id == token_id) else {
+            return UpstreamError::new(503, "专属账号不可用，未扣费。请联系站长。");
+        };
+        let fields = token.fields();
+        if !fields.admin_enabled || fields.disabled {
+            return UpstreamError::new(503, "专属账号已停用，未扣费。请联系站长。");
+        }
+        if now < fields.blocked_until {
+            let wait = ((fields.blocked_until - now) as i64).max(1);
+            return UpstreamError::new(
+                429,
+                format!("专属账号正在冷却，未扣费。约 {wait} 秒后恢复。"),
+            );
+        }
+        if requires_anlas && !token.can_pay_anlas(now, None) {
+            return UpstreamError::new(503, "专属账号额度不足，未扣费。请稍后再试。");
+        }
+        UpstreamError::new(503, "专属账号暂时不能出图，未扣费。请稍后再试。")
     }
 
     /// 后台「上游令牌池」的状态行（不含当天计数，由调用方补）。

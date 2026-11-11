@@ -161,9 +161,9 @@ pub(super) fn v5_lane(state: &AppState, model: &str) -> bool {
     gate_core::policy::is_v5_model(model) && state.guard.with(|g| g.v5_priority())
 }
 
-/// 短作业车道：V5（见 [`v5_lane`]）或站长号。站长号复用同一条 `Arrival::fast_lane`，不另开第三车道。
+/// 短作业车道：V5（见 [`v5_lane`]）或插队（站长号 / 赞助席）。复用同一条 `Arrival::fast_lane`，不另开第三车道。
 pub(super) fn fast_lane(state: &AppState, key: &crate::key::Key, model: &str) -> bool {
-    key.owner_image_full || v5_lane(state, model)
+    key.queue_jump || v5_lane(state, model)
 }
 
 /// 上游 429：暂停全站图片请求（两种响应都在收尾时记日志，回调只更新冷却）。
@@ -443,10 +443,7 @@ async fn generate(state: AppState, req: Request, streaming: bool) -> ApiResult {
             &key,
             &prep.est,
             prep.legacy_free_images,
-            crate::admission::DispatchRequirements::image(
-                &prep.body,
-                prep.key.allows_paid_parameters(),
-            )?,
+            crate::admission::DispatchRequirements::image(&prep.body, prep.key.skip_free_clamp())?,
         )
         .await?;
         let reserved = Arc::new(reserved);

@@ -39,6 +39,17 @@ test("member entry lands on the mirrored image page", async ({ page, context }) 
   await expect(page.locator("button", { hasText: /Generate \d+ Image/ }).first()).toBeVisible();
 });
 
+test("patron portal is a separate login from admin", async ({ page, request }) => {
+  const response = await request.get("/patron");
+  test.skip(response.status() === 503 && (await response.text()).includes("前端未构建"), "前端未构建");
+  expect(response.status()).toBe(200);
+  await page.goto("/patron");
+  await expect(page.getByRole("heading", { name: "赞助席" })).toBeVisible();
+  await expect(page.getByLabel("门户密码")).toBeVisible();
+  expect((await request.get("/patron/api/me")).status()).toBe(401);
+  expect((await request.get("/admin/api/me")).status()).toBe(401);
+});
+
 test("admin login loads member management", async ({ page, context, browser, baseURL }) => {
   const cookies = await adminSession(browser, baseURL, readCreds().admin_password ?? "");
   await context.addCookies(cookies);

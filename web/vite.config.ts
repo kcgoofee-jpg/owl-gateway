@@ -3,7 +3,7 @@ import preact from "@preact/preset-vite";
 import type { Plugin } from "vite";
 import { defineConfig } from "vitest/config";
 
-// 开发时模拟网关的页面路由：/ → landing.html，/admin、/admin/* → admin.html
+// 开发时模拟网关的页面路由：/ → landing.html，/admin → admin.html，/patron → patron.html
 function pageRoutes(): Plugin {
   return {
     name: "owl-page-routes",
@@ -19,6 +19,8 @@ function pageRoutes(): Plugin {
           return;
         } else if ((path === "/admin" || path.startsWith("/admin/")) && !path.startsWith("/admin/api/"))
           req.url = `/_owl/admin.html${qs}`;
+        else if ((path === "/patron" || path.startsWith("/patron/")) && !path.startsWith("/patron/api/"))
+          req.url = `/_owl/patron.html${qs}`;
         next();
       });
     },
@@ -26,7 +28,7 @@ function pageRoutes(): Plugin {
 }
 
 // 本站前端使用 /_owl/ 前缀，和官网镜像的静态资源路径分开。
-// 多页：首页和后台各一个入口，网关按路径返回对应的 HTML（并注入首屏数据）。
+// 多页：首页、后台、赞助席各一个入口，网关按路径返回对应的 HTML（并注入首屏数据）。
 export default defineConfig({
   base: "/_owl/",
   plugins: [pageRoutes(), preact()],
@@ -42,6 +44,7 @@ export default defineConfig({
       input: {
         landing: resolve(import.meta.dirname, "landing.html"),
         admin: resolve(import.meta.dirname, "admin.html"),
+        patron: resolve(import.meta.dirname, "patron.html"),
       },
     },
   },
@@ -53,7 +56,7 @@ export default defineConfig({
       "^/(image|bridge.js|_next|tokenizer|cf-fonts|icons|manifest.json|updateReload.json)": {
         target: process.env.VITE_GATE ?? "http://127.0.0.1:18000",
       },
-      "^/(public|admin/api|self-register|login|logout|member|v1|ai|nai|status|livez|readyz|healthz|announcement|_owl/status-page)":
+      "^/(public|admin/api|patron/api|self-register|login|logout|member|v1|ai|nai|status|livez|readyz|healthz|announcement|_owl/status-page)":
         {
           target: process.env.VITE_GATE ?? "http://127.0.0.1:18000",
           // Preserve the browser authority so strict same-origin checks also run in development.

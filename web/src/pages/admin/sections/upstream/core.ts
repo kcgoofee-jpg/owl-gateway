@@ -117,6 +117,8 @@ export type UpstreamAccount = {
   manual_cap?: { cap: number; until: number } | null;
   /** 还在生效的站付 V5 */
   paid_v5?: { max_anlas: number; spent: number; until: number } | null;
+  /** 赞助席专属捐赠账号：不进普通选号池 */
+  exclusive?: boolean;
 };
 
 export type UpstreamPage = {

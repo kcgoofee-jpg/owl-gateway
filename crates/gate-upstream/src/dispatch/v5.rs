@@ -55,10 +55,11 @@ impl<H: Hooks> NaiClient<H> {
         cb: &Callbacks<'_>,
         allowance: Option<&dyn Allowance>,
         obs: &dyn Observer,
+        prefer_token_id: Option<&str>,
     ) -> Result<ImageStream<H>, UpstreamError> {
         let inner = &self.inner;
         let hooks: &dyn Hooks = &inner.hooks;
-        let mut may_switch = true;
+        let mut may_switch = prefer_token_id.is_none();
         let started = tokio::time::Instant::now();
         let deadline = started + Duration::from_secs_f64(queue_timeout.max(0.0));
         let patient = started + Duration::from_secs_f64(queue_timeout.max(0.0) / 2.0);
@@ -76,10 +77,13 @@ impl<H: Hooks> NaiClient<H> {
                     true,
                     allowance,
                     arrival,
+                    prefer_token_id,
                 )
                 .await?
             else {
-                return Err(self.unavailable(requires_anlas, v5_free).await);
+                return Err(self
+                    .unavailable(requires_anlas, v5_free, prefer_token_id)
+                    .await);
             };
             obs.picked(&token.token_id);
             let mut fl = InFlight::new(inner.clone(), token.clone(), v5_free, 0);
@@ -112,7 +116,7 @@ impl<H: Hooks> NaiClient<H> {
                         &mut fl,
                         deadline,
                         patient,
-                        moves < MAX_MOVES,
+                        moves < MAX_MOVES && prefer_token_id.is_none(),
                         needs_anlas,
                         free_now,
                         allowance,

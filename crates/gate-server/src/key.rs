@@ -20,6 +20,10 @@ pub struct Key {
     credential: Credential,
     pub policy: MemberPolicy,
     pub owner_image_full: bool,
+    /// 站长号或赞助席插队：复用 V5 短作业车道，并越过全站排队满。
+    pub queue_jump: bool,
+    /// 赞助席绑定的专属上游 Token；有则出图只走这把，不进全站池。
+    pub bound_token_id: Option<String>,
 }
 
 impl std::fmt::Debug for Key {
@@ -37,21 +41,29 @@ impl Key {
         if credential.id <= 0 || !matches!(credential.enabled, 0 | 1) {
             return Err(DbError::Invalid("Key 凭据值无效".into()));
         }
-        let (policy, owner_image_full) =
+        let (policy, owner_image_full, queue_jump, bound_token_id) =
             match credential.discord_id.as_deref().filter(|s| !s.is_empty()) {
                 Some(subject) => {
                     let snapshot = db.member_policy(subject).await?;
+                    let owner_image_full = snapshot.owner_image.is_some_and(|p| p.enabled);
+                    let patron = snapshot.patron.as_ref().filter(|p| p.enabled);
+                    let bound_token_id = patron.and_then(|p| p.bound_token_id.clone());
+                    let queue_jump = owner_image_full || patron.is_some_and(|p| p.queue_jump);
                     (
                         snapshot.effective,
-                        snapshot.owner_image.is_some_and(|p| p.enabled),
+                        owner_image_full,
+                        queue_jump,
+                        bound_token_id,
                     )
                 }
-                None => (db.member_defaults().await?, false),
+                None => (db.member_defaults().await?, false, false, None),
             };
         Ok(Self {
             credential,
             policy,
             owner_image_full,
+            queue_jump,
+            bound_token_id,
         })
     }
 
@@ -103,5 +115,20 @@ impl Key {
     }
     pub fn allows_paid_parameters(&self) -> bool {
         self.policy.paid_parameters
+    }
+
+    /// 专属捐赠账号，或已打开高规格开关：不再套免费档钳制。
+    pub fn skip_free_clamp(&self) -> bool {
+        self.allows_paid_parameters() || self.bound_token_id.is_some()
+    }
+
+    /// 挂费 V5：站长号、专属账号或已打开高规格开关。
+    pub fn allows_paid_v5(&self) -> bool {
+        self.owner_image_full || self.skip_free_clamp()
+    }
+
+    /// 专属 Token 的 Anlas / V5 不占全站池，也不受全站 V5 暂停。
+    pub fn skip_site_budget(&self) -> bool {
+        self.bound_token_id.is_some()
     }
 }

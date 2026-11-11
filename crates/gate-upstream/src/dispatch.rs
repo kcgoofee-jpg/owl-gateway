@@ -67,10 +67,13 @@ impl<H: Hooks> NaiClient<H> {
                     o.image_lane,
                     allowance,
                     arrival,
+                    o.prefer_token_id.as_deref(),
                 )
                 .await?
             else {
-                return Err(self.unavailable(o.requires_anlas, o.v5_free).await);
+                return Err(self
+                    .unavailable(o.requires_anlas, o.v5_free, o.prefer_token_id.as_deref())
+                    .await);
             };
             obs.picked(&token.token_id);
             let mut fl = InFlight::new(inner.clone(), token.clone(), o.v5_free, o.image_count);
@@ -136,6 +139,8 @@ impl<H: Hooks> NaiClient<H> {
         let mut token = fl.token.clone();
         // 这次是不是按免费 V5 选的号（确认成「按 Anlas 计」之后 o.v5_free 会变）
         let v5_attempt = o.v5_free;
+        let dedicated = o.prefer_token_id.is_some();
+        let may_switch = may_switch && !dedicated;
         let deadline =
             tokio::time::Instant::now() + Duration::from_secs_f64(o.queue_timeout.max(0.0));
         // V5 计费确认在排队之前做一次（见底 / 余额不够就当场换号或拒绝，不让成员白等），
@@ -159,7 +164,7 @@ impl<H: Hooks> NaiClient<H> {
                         fl,
                         deadline,
                         patient,
-                        moves < MAX_MOVES,
+                        moves < MAX_MOVES && !dedicated,
                         o.requires_anlas,
                         o.v5_free,
                         allowance,

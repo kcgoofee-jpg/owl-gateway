@@ -41,6 +41,7 @@ pub enum Page {
     /// 官网生图页镜像（/image）：NovelAI 官方构建产物 + 本站桥接层。
     Image,
     Admin,
+    Patron,
 }
 
 impl Page {
@@ -49,6 +50,7 @@ impl Page {
             Page::Landing => "landing.html",
             Page::Image => "nai-app/image.html",
             Page::Admin => "admin.html",
+            Page::Patron => "patron.html",
         }
     }
 }
@@ -188,7 +190,7 @@ pub fn apply_page_headers(h: &mut HeaderMap, page: Page) {
     );
     h.insert("referrer-policy", HeaderValue::from_static("no-referrer"));
     match page {
-        Page::Admin => {
+        Page::Admin | Page::Patron => {
             h.insert(
                 "content-security-policy",
                 HeaderValue::from_static(ADMIN_CSP),

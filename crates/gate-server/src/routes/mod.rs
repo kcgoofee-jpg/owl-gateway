@@ -6,6 +6,7 @@ mod image;
 mod me;
 mod member;
 mod pages;
+mod patron;
 pub(crate) mod public;
 mod registration;
 
@@ -30,6 +31,7 @@ pub fn router(state: AppState) -> Router {
         .merge(me::router())
         .merge(registration::router())
         .merge(member::router())
+        .merge(patron::router())
         .merge(admin::router(state.clone()))
         // 没有的路径：浏览器（Accept: text/html）给一个简单的 404 页面，API / 客户端仍回 JSON
         .fallback(not_found)
@@ -47,6 +49,8 @@ pub fn router(state: AppState) -> Router {
 fn maintenance_bypass(path: &str) -> bool {
     path == "/admin"
         || path.starts_with("/admin/")
+        || path == "/patron"
+        || path.starts_with("/patron/")
         || path.starts_with("/_owl/")
         || matches!(
             path,
