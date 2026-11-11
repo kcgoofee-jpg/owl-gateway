@@ -128,9 +128,9 @@ pub struct Entry {
     pub key: i64,
     pub since: f64,
     pub running: bool,
-    /// 上游客户端估计的开始时刻（墙钟）：已经排到某个账号上才有。排队位次按它排（见 [`GuardCore::queue_view`]）。
+    /// 上游客户端估计的开始时刻（墙钟）：已经排到某个账号上才有。首页位次：有估计按它排，还没有时按车道再按入队先后（见 [`GuardCore::queue_view`]）。
     pub eta: Option<f64>,
-    /// 短作业车道（V5）：同一把 Key 里它可以越过还没开始的普通条目（见 [`GuardCore::key_turn`]）。
+    /// 短作业车道（V5，或站长号复用同一条车道）：同一把 Key 里它可以越过还没开始的普通条目（见 [`GuardCore::key_turn`]）。
     pub fast: bool,
 }
 
@@ -408,7 +408,7 @@ impl GuardCore {
         self.v("v5_priority") != 0
     }
 
-    /// 全站排队满了吗（排队 + 正在生成 ≥ [`queue_cap`](Self::queue_cap)）：入队判断和 /public/live 的 `queue.full` 共用这一处。
+    /// 全站排队满了吗（排队 + 正在生成 ≥ [`queue_cap`](Self::queue_cap)）：普通入队和 /public/live 的 `queue.full` 共用这一处；站长号可越过（见 [`admit_image_priority`](Self::admit_image_priority)）。
     pub fn queue_full(&self, cap: Option<i64>) -> bool {
         let total: i64 = self.image_inflight.values().sum();
         cap.is_some_and(|c| total >= c)
@@ -416,7 +416,7 @@ impl GuardCore {
 
     /// 每个成员最多同时排 `queue_per_member` 张（还没发往上游的；同一把 Key 仍然一次只生成 1 张，见 [`key_turn`](Self::key_turn)）；
     /// 全站排队总数有上限（`cap`，见 [`queue_cap`](Self::queue_cap)）。
-    /// `fast` = 短作业车道（V5），登记进条目里供 [`key_turn`](Self::key_turn) 用。
+    /// `fast` = 短作业车道（V5 / 站长号），登记进条目里供 [`key_turn`](Self::key_turn) 用。
     /// 返回拒绝原因或 None。通过时登记一个排队条目（编号 = `self.seq`，取 `entries.last()` 可得）；`now` 是 `time.time()`。
     pub fn admit_image(
         &mut self,
@@ -424,6 +424,19 @@ impl GuardCore {
         cap: Option<i64>,
         now: f64,
         fast: bool,
+    ) -> Option<Reason> {
+        self.admit_image_priority(key_id, cap, now, fast, false)
+    }
+
+    /// 与 [`admit_image`] 相同；`skip_site_cap` 时越过全站排队满（每人上限仍生效）。
+    /// 站长号入队用：复用 V5 短作业车道，不另占名额公式、不提高 RPM。
+    pub fn admit_image_priority(
+        &mut self,
+        key_id: i64,
+        cap: Option<i64>,
+        now: f64,
+        fast: bool,
+        skip_site_cap: bool,
     ) -> Option<Reason> {
         let mine = self.image_inflight.get(&key_id).copied().unwrap_or(0);
         let per = self.v("queue_per_member").max(1);
@@ -440,7 +453,7 @@ impl GuardCore {
         }
         // 文案不报全站并发闸门的具体张数：那是站点内部数字（还随上游账号数变），
         // 成员在报错里看到只会困惑「我一次只发了一张，怎么说我排了 8 张」。
-        if cap.is_some() && self.queue_full(cap) {
+        if !skip_site_cap && cap.is_some() && self.queue_full(cap) {
             return Some(Reason::new(
                 "全站排队已满，这轮没排上，未扣费。请稍后重试。",
                 reasons::QUEUE_FULL,
@@ -466,19 +479,24 @@ impl GuardCore {
         }
     }
 
-    /// 轮到这把 Key 的这一张了吗：每把 Key 同时只生成 1 张，排在后面的那张等它。
+    /// 轮到这把 Key 的这一张了吗：每把 Key 同时只生成 1 张，下一名额只有一张能过闸。
     ///
-    /// 普通请求等**所有**更早的条目（原来那张，或被取消 / 被拒掉的那张）；
-    /// 短作业车道（V5）只等**正在生成**的更早条目 —— 没开始的普通条目可以越过，
-    /// 因为 V5 实测只占上游 3–5 秒，等一张 20–40 秒的 4.5 不划算（站长 11-07）。
+    /// 正在生成的占着名额，后面都等。没人在生成时，短作业车道（V5 / 站长号）先于还没开始的普通条目；
+    /// 同一车道里仍按登记顺序。条目已经不在了（取消 / 被拒）当成轮到，别把等着的请求卡死。
     pub fn key_turn(&self, key_id: i64, entry_id: i64) -> bool {
-        let Some(me) = self.entries.iter().find(|e| e.id == entry_id) else {
+        if !self.entries.iter().any(|e| e.id == entry_id) {
             return true;
-        };
-        !self
-            .entries
+        }
+        let mine: Vec<&Entry> = self.entries.iter().filter(|e| e.key == key_id).collect();
+        if mine.iter().any(|e| e.running) {
+            return false;
+        }
+        let next = mine
             .iter()
-            .any(|e| e.key == key_id && e.id < entry_id && (e.running || !me.fast))
+            .copied()
+            .find(|e| e.fast)
+            .or_else(|| mine.first().copied());
+        next.is_some_and(|e| e.id == entry_id)
     }
 
     /// 这把 Key 的一张排队中的图开始发往上游；给了 `entry_id` 就标记那一张。
@@ -492,7 +510,7 @@ impl GuardCore {
     }
 
     /// 排队中的条目，按预计开始的先后：已经排到账号上的按上游估计的开始时刻（两个账号各排各的，
-    /// 先来的不一定先出），还没排到账号的（在等同一把 Key 的前一张）排在后面；再按进入时间。稳定排序。
+    /// 先来的不一定先出）；还没排到账号的排在有估计的后面，其中短作业车道先于普通，再按进入时间。
     fn waiting_sorted(&self) -> Vec<&Entry> {
         let mut w: Vec<&Entry> = self.entries.iter().filter(|e| !e.running).collect();
         w.sort_by(|a, b| {
@@ -500,7 +518,9 @@ impl GuardCore {
                 a.eta.unwrap_or(f64::INFINITY),
                 b.eta.unwrap_or(f64::INFINITY),
             );
-            ea.total_cmp(&eb).then(a.since.total_cmp(&b.since))
+            ea.total_cmp(&eb)
+                .then(b.fast.cmp(&a.fast))
+                .then(a.since.total_cmp(&b.since))
         });
         w
     }
@@ -534,7 +554,7 @@ impl GuardCore {
         }
     }
 
-    /// 匿名的排队视图：waiting / running 数量；给定 key_id 时附上这把 Key 的图所处位置（1 起，按预计开始先后）。
+    /// 匿名的排队视图：waiting / running 数量；给定 key_id 时附上这把 Key 的图所处位置（1 起，见 [`waiting_sorted`](Self::waiting_sorted)）。
     /// 10-27 起不再附上游的预计开始时刻（`start_at`）：首页只显示位次，不做时间估算。
     pub fn queue_view(&self, key_id: Option<i64>) -> Value {
         let waiting = self.waiting_sorted();
@@ -636,6 +656,16 @@ mod tests {
         // 成员一次只发一张却看到「最多同时排 4 张」只会以为是自己占了名额。
         assert!(r.text().contains("全站排队已满"), "{}", r.text());
         assert!(!r.text().contains("最多同时排"), "{}", r.text());
+        // 站长号越过全站满，仍受每人排队上限；入队后占着名额，别人照样满
+        assert_eq!(
+            g.admit_image_priority(99, two, NOON, true, true),
+            None,
+            "站长号全站满时仍能入队"
+        );
+        assert!(g.queue_full(two));
+        let r = g.admit_image(6, two, NOON, false).unwrap();
+        assert_eq!(r.code(), reasons::QUEUE_FULL);
+        g.release_image(99, None);
         // 账号多了，上限跟着变；一个可用账号都没有按一个算；None = 不限
         assert!(!g.queue_full(g.queue_cap(&[None, None, None])));
         assert_eq!(g.queue_cap(&[]), Some(2));
@@ -680,6 +710,17 @@ mod tests {
     }
 
     #[test]
+    fn queue_position_puts_the_fast_lane_ahead_before_eta() {
+        let mut g = guard();
+        g.values.insert("queue_per_member".into(), 3);
+        assert_eq!(g.admit_image(1, None, NOON, false), None);
+        assert_eq!(g.admit_image(2, None, NOON + 1.0, true), None);
+        let pos = |g: &GuardCore, key| g.queue_view(Some(key))["mine"][0]["position"].clone();
+        assert_eq!(pos(&g, 2), 1, "短作业还没分到账号也排在普通前面");
+        assert_eq!(pos(&g, 1), 2);
+    }
+
+    #[test]
     fn key_turn_is_first_come_first_served() {
         let mut g = guard();
         let one = g.queue_cap(&[None]);
@@ -702,6 +743,22 @@ mod tests {
         // 前一张出完（或被取消）：轮到后一张
         g.release_image(7, Some(first));
         assert!(g.key_turn(7, second));
+    }
+
+    #[test]
+    fn key_turn_lets_one_fast_image_pass_unstarted_work() {
+        let mut g = guard();
+        g.values.insert("queue_per_member".into(), 3);
+        assert_eq!(g.admit_image(7, None, NOON, false), None);
+        let slow = g.entries.last().unwrap().id;
+        assert_eq!(g.admit_image(7, None, NOON + 1.0, true), None);
+        let fast = g.entries.last().unwrap().id;
+        assert!(g.key_turn(7, fast), "短作业越过还没开始的普通条目");
+        assert!(!g.key_turn(7, slow), "同一把 Key 同时只放行一张");
+        g.mark_running(7, Some(fast));
+        assert!(!g.key_turn(7, slow), "正在生成时后面都等");
+        g.release_image(7, Some(fast));
+        assert!(g.key_turn(7, slow));
     }
 
     #[test]

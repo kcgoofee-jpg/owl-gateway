@@ -3,7 +3,7 @@
 mod common;
 use axum::body::Body;
 use axum::http::{Request, StatusCode};
-use common::{Call, TOKEN, settle, setup};
+use common::{Call, SUBJECT, TOKEN, settle, setup};
 use futures::StreamExt;
 use gate_db::repo::usage::{LogFilter, Success};
 use gate_server::AppState;
@@ -1078,6 +1078,44 @@ async fn one_image_per_key_at_a_time_without_per_key_interval() {
         ["member_queue_full", "member_queue_full"],
         "{rows:?}"
     );
+}
+
+/// 站长号复用 V5 短作业车道：全站排队满时普通 Key 进不去，站长号仍能入队出图。
+#[tokio::test]
+async fn owner_reuses_v5_lane_when_the_site_queue_is_full() {
+    let e = setup(&[]).await;
+    e.state.db.bind_image_owner(SUBJECT).await.unwrap();
+    assert!(
+        e.state
+            .db
+            .set_owner_image_enabled(SUBJECT, true)
+            .await
+            .unwrap()
+    );
+    e.state.guard.with(|g| {
+        g.values.insert("queue_per_account".into(), 2);
+        let cap = g.queue_cap(&[None]);
+        assert_eq!(cap, Some(2));
+        assert_eq!(g.admit_image(10, cap, 1.0, false), None);
+        assert_eq!(g.admit_image(11, cap, 1.0, false), None);
+        assert!(g.queue_full(cap));
+        assert_eq!(
+            g.admit_image(12, cap, 1.0, false)
+                .expect("ordinary key blocked")
+                .code(),
+            gate_core::reasons::QUEUE_FULL
+        );
+    });
+    let (status, _, body) = call(
+        &e.state,
+        "POST",
+        "/ai/generate-image",
+        Some(TOKEN),
+        Some(image_body("nai-diffusion-4-5-full", 1)),
+    )
+    .await;
+    assert_eq!(status, 200, "{}", String::from_utf8_lossy(&body));
+    assert_eq!(e.mock.requests_to("/ai/generate-image").len(), 1);
 }
 
 /// 「V5 续杯」已删除：旧版 `anlas_auto` 的 Key 当天个人 V5 用完、

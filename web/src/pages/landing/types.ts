@@ -17,7 +17,7 @@ export type Live = {
     images_cap?: number;
     v5_today?: number;
   };
-  /** full：网关此刻会不会以「排队满」拒绝新图 */
+  /** full：普通成员此刻会不会以「排队满」拒绝新图（站长号可越过） */
   queue?: { waiting?: number; running?: number; full?: boolean };
   guard?: {
     cooldown?: number;

@@ -65,7 +65,7 @@ export function deriveStatus(live: Live | null): StatusView | null {
   } else if (blocked && (blocked.code || blocked.text)) {
     out = blockedView(blocked);
   } else if (
-    // 网关在 live.queue.full 里直接给出「现在会不会以排队满拒绝」（与 guard.admit_image 同一判断）
+    // 网关在 live.queue.full 里直接给出「普通成员现在会不会以排队满拒绝」（与 guard.admit_image 同一判断；站长号可越过）
     live.queue?.full === true
   ) {
     // 站长 10-31：排队满 = 红灯；有排队但还有空位 = 黄灯；空位 = 绿灯

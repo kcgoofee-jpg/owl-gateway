@@ -96,7 +96,7 @@ export function MemberDetail(props: { m: MemberRow; now: number; act: DetailActi
           <h4 class="mb-h4">站长生图权限</h4>
           <p>
             {k.policy.owner_image.enabled
-              ? "全部生图功能已启用，保留个人额度和全站预算。"
+              ? "全部生图功能已启用，保留个人额度和全站预算。排队走 V5 短作业车道，全站排满时仍能入队。"
               : "普通测试：实时使用普通成员默认规则，站长配置已保留。"}
           </p>
           <OwnerImageButtons subject={dcId || ""} enabled={k.policy.owner_image.enabled} />

@@ -255,7 +255,7 @@ pub async fn build(state: &AppState, now: f64) -> Result<Map<String, Value>, Int
             "v5_today": state.db.day_v5_total(&day).await?,
         }),
     );
-    // queue.full：网关此刻是否会以「排队满」拒绝新图（与 guard.admit_image 同一判断），首页直接用它，不在前端重算
+    // queue.full：普通成员此刻会不会被「排队满」拒绝（与 guard.admit_image 同一判断）；站长号可越过，首页仍报全站已满
     let queue_cap = crate::admission::queue_cap(state).await;
     body.insert(
         "queue".into(),

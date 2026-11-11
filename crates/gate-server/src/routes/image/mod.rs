@@ -161,6 +161,11 @@ pub(super) fn v5_lane(state: &AppState, model: &str) -> bool {
     gate_core::policy::is_v5_model(model) && state.guard.with(|g| g.v5_priority())
 }
 
+/// 短作业车道：V5（见 [`v5_lane`]）或站长号。站长号复用同一条 `Arrival::fast_lane`，不另开第三车道。
+pub(super) fn fast_lane(state: &AppState, key: &crate::key::Key, model: &str) -> bool {
+    key.owner_image_full || v5_lane(state, model)
+}
+
 /// 上游 429：暂停全站图片请求（两种响应都在收尾时记日志，回调只更新冷却）。
 pub(super) fn on_429(state: &AppState) -> Box<dyn Fn(f64) -> BoxFuture<'static, ()> + Send + Sync> {
     let s = state.clone();
@@ -428,7 +433,7 @@ async fn generate(state: AppState, req: Request, streaming: bool) -> ApiResult {
         .reason("client_disconnected");
     let (s, c) = (state.clone(), ctx.clone());
     shielded(&state, &ctx, cancelled, async move {
-        let admission = image_admission(&s, &c, &key, v5_lane(&s, &prep.model)).await?;
+        let admission = image_admission(&s, &c, &key, fast_lane(&s, &key, &prep.model)).await?;
         let slots = acquire_slots(&s);
         // 排队 / 预算等待之后再查一次冷却和额度
         check_image_cooldown(&s)?;
