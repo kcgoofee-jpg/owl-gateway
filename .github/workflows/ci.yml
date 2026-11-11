@@ -107,8 +107,9 @@ jobs:
         with:
           path: ~/.cache/ms-playwright
           key: playwright-${{ runner.os }}-${{ hashFiles('web/pnpm-lock.yaml') }}
-      - run: bash tools/ci/apt-ubuntu.sh
-      - run: pnpm exec playwright install --with-deps chromium
+      # Hosted runners often cannot resolve archive.ubuntu.com; the image already
+      # has Chromium's system libraries. Only fetch the browser itself.
+      - run: pnpm exec playwright install chromium
         working-directory: web
         timeout-minutes: 10
       - run: cargo build --locked -p xtask
@@ -185,13 +186,18 @@ jobs:
     timeout-minutes: 20
     steps:
       - uses: actions/checkout@v7
-      - run: bash tools/ci/apt-ubuntu.sh
-      - run: sudo apt-get update && sudo apt-get install -y -o Acquire::Retries=3 --no-install-recommends musl-tools
-      - run: rustup target add x86_64-unknown-linux-musl
-      - uses: Swatinem/rust-cache@v2
-        with:
-          key: musl
-      - run: cargo build --release --locked --target x86_64-unknown-linux-musl -p gate-ops --bin nai-ops
+      # Host Ubuntu apt DNS fails (archive.ubuntu.com / azure mirrors). The image
+      # job already proves rust:1.99-bookworm can apt-get via Debian mirrors.
+      - name: Build static musl nai-ops in Debian
+        run: |
+          docker run --rm -v "$PWD":/src -w /src rust:1.99-bookworm bash -lc '
+            set -euo pipefail
+            apt-get update
+            apt-get install -y --no-install-recommends musl-tools
+            rustup target add x86_64-unknown-linux-musl
+            cargo build --release --locked --target x86_64-unknown-linux-musl -p gate-ops --bin nai-ops
+          '
+          sudo chmod -R a+rX target/x86_64-unknown-linux-musl/release
       - uses: actions/upload-artifact@v7
         with:
           name: nai-ops-linux-musl

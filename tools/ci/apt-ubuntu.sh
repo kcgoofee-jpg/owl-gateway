@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
-# Hosted Ubuntu runners list azure.archive.ubuntu.com first. When that name
-# does not resolve, apt-get stalls then fails, taking musl-tools and Playwright
-# --with-deps with it. Point the mirror list at archive.ubuntu.com instead.
+# Hosted Ubuntu runners list azure.archive.ubuntu.com first. Switching this
+# file is not enough: archive.ubuntu.com often fails DNS too. CI no longer
+# installs musl-tools or Playwright OS packages via host apt (see ci.yml).
+# Keep this helper for any leftover apt-get on the runner.
 set -euo pipefail
 mirrors=/etc/apt/apt-mirrors.txt
 if [ ! -f "$mirrors" ]; then
