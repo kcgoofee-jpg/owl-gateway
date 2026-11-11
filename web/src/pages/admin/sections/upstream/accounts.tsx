@@ -154,6 +154,7 @@ export function AccountCard(props: {
         <div>
           <span>V5 电量</span>
           <strong>{meter.label}</strong>
+          {meter.images != null ? <small>约 {reading(meter.images)} 张（官网 23 步估）</small> : null}
           <Meter
             label={<span class="sr-only">V5 电量</span>}
             value={meter.value}
@@ -230,8 +231,8 @@ export function AccountCard(props: {
               ["负额度", answer(v?.is_negative, "是", "否")],
               ["Usage Boost 额外电量", reading(v?.purchased_percent, "%")],
               ["下次恢复", duration(v?.time_until_next_percent_seconds)],
-              ["当前推算恢复", reading(v?.current_response_recharge_per_day_estimate, "% / 天")],
-              ["历史推算恢复", reading(v?.historical_sample_based_recharge_per_day_estimate, "% / 天")],
+              ["当前推算恢复", quietText(v?.current_response_recharge_per_day_estimate)],
+              ["历史推算恢复", quietText(v?.historical_sample_based_recharge_per_day_estimate)],
               ["闲时实测恢复", quietText(a.quiet_rate?.rate)],
               [
                 "电量读数",

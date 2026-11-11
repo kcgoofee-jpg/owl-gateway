@@ -221,8 +221,25 @@ export function limitAgo(ts: number | null | undefined, now = Date.now() / 1000)
   return ts ? rel(ts, now) : "没有";
 }
 
+/**
+ * 官网生图页把电量百分比换成张数的系数。
+ * `/user/subscription` 只返回 percent / purchasedPercent；官网前端用 `Math.round(17.3 * 剩余%)`。
+ * 估的是默认 23 步、约 100 万像素，不是本站常用的 28 步。
+ */
+export const OFFICIAL_V5_IMAGES_PER_PERCENT = 17.3;
+
+export function officialV5Images(percent: number): number {
+  return Math.round(OFFICIAL_V5_IMAGES_PER_PERCENT * percent);
+}
+
+export function officialV5ImagesText(percent: number): string {
+  return `约 ${officialV5Images(percent).toLocaleString("zh-CN")} 张`;
+}
+
 export function quietText(rate: number | null | undefined): string {
-  return rate == null || !Number.isFinite(rate) ? "—" : `${reading(rate)}% / 天`;
+  return rate == null || !Number.isFinite(rate)
+    ? "—"
+    : `${reading(rate)}% / 天（${officialV5ImagesText(rate)}）`;
 }
 
 /** 账号卡片上的 V5 电量：常规电量用完后 Extra Usage 仍是免费额度。 */
@@ -233,15 +250,18 @@ export function v5Highlight(
   value: number;
   status: string;
   warn: boolean;
+  images: number | null;
 } {
-  if (v?.percent == null) return { label: "—", value: 0, status: "", warn: false };
-  const extra = v.purchased_percent ?? 0;
+  if (v?.percent == null) return { label: "—", value: 0, status: "", warn: false, images: null };
+  const extra = Math.max(0, v.purchased_percent ?? 0);
   const remaining = v.percent + extra;
   const exhausted = extra <= 0 && v.is_negative === true;
+  const regular = v.is_negative === true ? 0 : Math.max(0, v.percent);
   return {
     label: extra > 0 ? `${v.percent}% + ${extra}% 额外` : `${v.percent}%`,
     value: Math.max(0, Math.min(100, v.percent <= 0 && extra > 0 ? extra : v.percent)),
     status: exhausted ? "负额度" : remaining < 20 ? "余量低" : extra > 0 && v.percent <= 0 ? "额外电量" : "",
     warn: remaining < 20 || exhausted,
+    images: officialV5Images(regular + extra),
   };
 }

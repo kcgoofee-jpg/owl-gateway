@@ -6,6 +6,7 @@ import {
   answer,
   duration,
   limitAgo,
+  officialV5Images,
   queueText,
   quietText,
   reading,
@@ -62,8 +63,14 @@ it("账号卡片上的运行文案", () => {
   expect(queueText(5, null)).toBe("5 张在等");
   expect(limitAgo(null, 1_000)).toBe("没有");
   expect(limitAgo(1_000 - 120, 1_000)).toBe("2 分钟前");
-  expect(quietText(10.78)).toBe("10.78% / 天");
+  expect(quietText(10.78)).toBe("10.78% / 天（约 186 张）");
   expect(quietText(null)).toBe("—");
+});
+
+it("官网估张按 17.3×百分比四舍五入，和截图 98%→1695、11%→190 对得上", () => {
+  expect(officialV5Images(98)).toBe(1695);
+  expect(officialV5Images(11)).toBe(190);
+  expect(officialV5Images(100)).toBe(1730);
 });
 
 it("常规电量为空时仍显示 Usage Boost 额外电量", () => {
@@ -73,17 +80,20 @@ it("常规电量为空时仍显示 Usage Boost 额外电量", () => {
     value: 98,
     status: "额外电量",
     warn: false,
+    images: 1695,
   });
   expect(v5Highlight({ percent: 0, purchased_percent: 0, is_negative: true })).toMatchObject({
     label: "0%",
     status: "负额度",
     warn: true,
+    images: 0,
   });
   expect(v5Highlight({ percent: 40, purchased_percent: 0, is_negative: false })).toEqual({
     label: "40%",
     value: 40,
     status: "",
     warn: false,
+    images: 692,
   });
 });
 
