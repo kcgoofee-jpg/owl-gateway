@@ -1,7 +1,7 @@
-/** 成员展开后的详情：一句话结论 → 待处理 → 额度与权限 / 资料 → 日常操作。出图张数在列表行，这里只写额度。 */
+/** 成员展开后的详情：席位 / 要处理 → 规则与资料 → 日常操作。今日额度只在列表进度条里。 */
 import { ExternalLink, Plus } from "lucide-preact";
 import { useEffect, useState } from "preact/hooks";
-import { dayOf, fullTime, rel, usedOf } from "../../../../lib/format";
+import { dayOf, fullTime, rel } from "../../../../lib/format";
 import { Badge, Button, copyText, Menu, toast } from "../../../../ui";
 import { useAdmin } from "../../data";
 import { exceptionCount, FEATURE_FIELDS, type PatronView, policyLabel } from "../member-policy";
@@ -95,19 +95,16 @@ export function MemberDetail(props: { m: MemberRow; now: number; act: DetailActi
   const exceptions = exceptionCount(k.policy.overrides);
   return (
     <div class="mb-detail">
-      <div>
-        <p class="mb-verdict">{verdict.title}</p>
-        {verdict.sub && <p class="small muted">{verdict.sub}</p>}
-      </div>
+      {verdict.title || verdict.sub ? (
+        <div>
+          {verdict.title && <p class="mb-verdict">{verdict.title}</p>}
+          {verdict.sub && <p class="small muted">{verdict.sub}</p>}
+        </div>
+      ) : null}
 
       {k.policy.owner_image && (
-        <section class="mb-sec" aria-label="站长生图权限">
-          <h4 class="mb-h4">站长生图权限</h4>
-          <p>
-            {k.policy.owner_image.enabled
-              ? "全部生图功能已启用，保留个人额度和全站预算。排队走插队车道，排在所有等待中的生图前面；全站排满时仍能入队。"
-              : "普通测试：实时使用普通成员默认规则，站长配置已保留。"}
-          </p>
+        <section class="mb-patron" aria-label="站长生图权限">
+          <h4 class="mb-h4">站长生图</h4>
           <OwnerImageButtons subject={dcId || ""} enabled={k.policy.owner_image.enabled} />
         </section>
       )}
@@ -118,20 +115,12 @@ export function MemberDetail(props: { m: MemberRow; now: number; act: DetailActi
         <section class="mb-sec" aria-label="有效规则">
           <h4 class="mb-h4">有效规则</h4>
           <dl class="mb-kv">
-            <dt>V4.5 免费额度</dt>
-            <dd>
-              {policy.image && policy.daily_images > 0
-                ? usedOf(m.today.legacy_free_images, policy.daily_images)
-                : "停用"}
-            </dd>
-            <dt>V5 额度</dt>
-            <dd>
-              {policy.image && policy.v5 && policy.daily_v5 > 0
-                ? usedOf(m.today.v5, policy.daily_v5)
-                : "停用"}
-            </dd>
-            <dt>Anlas 额度</dt>
-            <dd>{policy.daily_anlas > 0 ? usedOf(Math.round(m.today.anlas), policy.daily_anlas) : "停用"}</dd>
+            <dt>V4.5 免费图</dt>
+            <dd>{policy.image && policy.daily_images > 0 ? `${policy.daily_images} 张` : "停用"}</dd>
+            <dt>V5 每天</dt>
+            <dd>{policy.image && policy.v5 && policy.daily_v5 > 0 ? `${policy.daily_v5} 张` : "停用"}</dd>
+            <dt>Anlas 每天</dt>
+            <dd>{policy.daily_anlas > 0 ? policy.daily_anlas : "停用"}</dd>
             <dt>Anlas 每月</dt>
             <dd>{policy.monthly_anlas}</dd>
             <dt>每分钟请求</dt>
@@ -146,15 +135,19 @@ export function MemberDetail(props: { m: MemberRow; now: number; act: DetailActi
                 ))}
               </span>
             </dd>
-            <dt>成员例外</dt>
-            <dd class="mb-key">
-              {exceptions ? `${exceptions} 项` : "无"}
-              {exceptions > 0 && !k.policy.owner_image && (
-                <Button size="sm" variant="ghost" onClick={() => act.resetRules(m)}>
-                  恢复默认
-                </Button>
-              )}
-            </dd>
+            {exceptions > 0 && (
+              <>
+                <dt>成员例外</dt>
+                <dd class="mb-key">
+                  {exceptions} 项
+                  {!k.policy.owner_image && (
+                    <Button size="sm" variant="ghost" onClick={() => act.resetRules(m)}>
+                      恢复默认
+                    </Button>
+                  )}
+                </dd>
+              </>
+            )}
           </dl>
         </section>
 
@@ -218,8 +211,6 @@ export function MemberDetail(props: { m: MemberRow; now: number; act: DetailActi
                 修改
               </Button>
             </dd>
-            <dt>最近使用</dt>
-            <dd title={fullTime(k.last_used_at)}>{k.last_used_at ? rel(k.last_used_at, now) : "从未使用"}</dd>
             <dt>标签</dt>
             <dd>
               <span class="mb-chips">
@@ -253,9 +244,6 @@ export function MemberDetail(props: { m: MemberRow; now: number; act: DetailActi
         <Button size="sm" onClick={() => act.resetQuota(m)}>
           重置今日额度{m.reset_today?.count ? `（${m.reset_today.count}）` : ""}
         </Button>
-        <a class="btn btn--sm" href={memberLogsHref(m)}>
-          请求记录
-        </a>
         <a class="btn btn--sm btn--ghost" href={memberLogsHref(m, { status: "error" })}>
           出错
         </a>
@@ -332,12 +320,10 @@ export function PatronSeatButtons({ subject, patron }: { subject: string; patron
   return (
     <section class="mb-patron" aria-label="赞助席">
       <h4 class="mb-h4">赞助席</h4>
-      {enabled ? (
+      {enabled && (
         <Badge tone="ok" title={patron?.has_password ? "门户密码已有，需要时再重置" : "还没有门户密码"}>
           已开
         </Badge>
-      ) : (
-        <span class="muted small">未开</span>
       )}
       {enabled && (
         <>
@@ -453,12 +439,15 @@ export function OwnerImageButtons({ subject, enabled }: { subject: string; enabl
   };
   return (
     <span class="mb-inline">
-      <Button size="sm" disabled={pending || enabled} onClick={() => void change(true)}>
-        启用全部生图功能
-      </Button>
-      <Button size="sm" disabled={pending || !enabled} onClick={() => void change(false)}>
-        恢复普通默认
-      </Button>
+      {enabled ? (
+        <Button size="sm" disabled={pending} onClick={() => void change(false)}>
+          恢复普通默认
+        </Button>
+      ) : (
+        <Button size="sm" disabled={pending} onClick={() => void change(true)}>
+          启用全部生图功能
+        </Button>
+      )}
       {error && (
         <p role="alert" class="xa-formerr">
           {error}

@@ -134,22 +134,21 @@ describe("memberIssues / needsAttention", () => {
 });
 
 describe("memberVerdict / memberStatus", () => {
-  it("按优先级给一句话结论", () => {
-    expect(memberVerdict(mk({ first_image_at: null }), NOW).title).toContain("还没出过图");
+  it("健康成员不再写一句话结论：进度条和状态列已经够了", () => {
+    expect(memberVerdict(mk({ first_image_at: null }), NOW).title).toBe("");
     expect(
       memberVerdict(
         mk({ today: { images: 100, legacy_free_images: 100, v5: 0, anlas: 0, requests: 3 } }),
         NOW,
       ).title,
-    ).toContain("额度用完");
+    ).toBe("");
     expect(
       memberVerdict(mk({ today: { images: 7, v5: 0, anlas: 0, requests: 3, legacy_free_images: 7 } }), NOW)
         .title,
-    ).toBe("正常使用");
+    ).toBe("");
   });
   it("V5 图片不消耗 V4.5 免费图额度", () => {
     const member = mk({ today: { images: 125, legacy_free_images: 25, v5: 100, anlas: 0, requests: 125 } });
-    expect(memberVerdict(member, NOW).title).toContain("正常使用");
     expect(memberStatus(member, NOW)?.text).not.toBe("额度用完");
   });
   it("正常成员没有状态徽标", () => {

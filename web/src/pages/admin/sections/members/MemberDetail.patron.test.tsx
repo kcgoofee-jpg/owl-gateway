@@ -29,7 +29,6 @@ it("opens a patron seat with queue jump and optional bound token", async () => {
   document.body.append(root);
   vi.mocked(call).mockResolvedValue({ ok: true, data: { portal_password: "once-only-password" } });
   await act(() => render(<PatronSeatButtons subject="900000000000000001" />, root));
-  expect(root.textContent).toContain("未开");
   expect(root.textContent).not.toContain("插队");
   const enable = [...root.querySelectorAll("button")].find((b) => b.textContent === "开启");
   expect([...root.querySelectorAll("button")].map((b) => b.textContent)).toEqual(["开启"]);

@@ -19,18 +19,17 @@ it("switches the bound member using the existing admin API without changing cred
   document.body.append(root);
   vi.mocked(call).mockResolvedValue({ ok: true, data: {} });
   await act(() => render(<OwnerImageButtons subject="synthetic-subject" enabled={false} />, root));
-  const buttons = root.querySelectorAll("button");
-  expect(buttons[1]?.disabled).toBe(true);
+  expect([...root.querySelectorAll("button")].map((b) => b.textContent)).toEqual(["启用全部生图功能"]);
   await act(async () => {
-    buttons[0]?.click();
+    root.querySelector("button")?.click();
   });
   expect(call).toHaveBeenCalledWith("PUT", "/admin/api/members/synthetic-subject/image-access", {
     enabled: true,
   });
   await act(() => render(<OwnerImageButtons subject="synthetic-subject" enabled />, root));
-  expect(root.querySelectorAll("button")[0]?.disabled).toBe(true);
+  expect([...root.querySelectorAll("button")].map((b) => b.textContent)).toEqual(["恢复普通默认"]);
   await act(async () => {
-    root.querySelectorAll("button")[1]?.click();
+    root.querySelector("button")?.click();
   });
   expect(call).toHaveBeenLastCalledWith("PUT", "/admin/api/members/synthetic-subject/image-access", {
     enabled: false,

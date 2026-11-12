@@ -128,27 +128,10 @@ export const needsAttention = (m: Member, _now?: number): boolean => (m.issues ?
 
 /* ---------------- 一句话结论与列表状态 ---------------- */
 export function memberVerdict(m: Member, now: number): { title: string; sub: string } {
-  const issues = memberIssues(m, now);
-  const cap = m.policy.effective.daily_images;
-  const used = m.today.images;
-  let title: string;
-  const bad = issues.find((x) => x.level === "bad");
-  if (bad) title = bad.title;
-  else if (issues.some((x) => x.need)) {
-    title = `有 ${issues.filter((x) => x.need).length} 件事要看一眼`;
-  } else if (!m.first_image_at) {
-    title = `领了 Key ${m.registered_at ? `${ago(now - m.registered_at)}了` : ""}，还没出过图`;
-  } else if (cap > 0 && m.today.legacy_free_images >= cap) title = "今天的额度用完了";
-  else if (used > 0) title = "正常使用";
-  else title = `今天还没用${m.last_used_at ? `，上次是 ${rel(m.last_used_at, now)}` : ""}`;
+  // 列表状态、进度条、「要处理」已经说清的事，这里不再复述。
   const ack = m.tags.find((t) => t.tag === ACK_TAG);
-  const sub = [
-    m.reset_today?.count ? `站长今天重置过 ${m.reset_today.count} 次额度` : "",
-    acked(m, now) && ack ? `${rel(ack.ts, now)}点过「没问题」` : "",
-  ]
-    .filter(Boolean)
-    .join(" · ");
-  return { title, sub };
+  const sub = acked(m, now) && ack ? `${rel(ack.ts, now)}点过「没问题」` : "";
+  return { title: "", sub };
 }
 
 export type StatusBadge = {
