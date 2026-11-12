@@ -33,6 +33,7 @@ pub fn router() -> Router<AppState> {
         .route("/_owl/{*path}", get(asset))
         // 官网构建产物的绝对路径：全部映射到 dist/nai-app 下
         .route("/bridge.js", get(mirror_file))
+        .route("/workbench-i18n.json", get(mirror_file))
         .route("/manifest.json", get(mirror_file))
         .route("/updateReload.json", get(mirror_file))
         .route("/_next/{*path}", get(mirror_file))
@@ -152,7 +153,7 @@ async fn mirror_file(State(st): State<AppState>, uri: axum::http::Uri) -> Respon
     let path = uri.path().trim_start_matches('/');
     let mut resp = st.assets.asset(&format!("nai-app/{path}"));
     // 桥接层会随版本变，不能吃 1 小时缓存
-    if path == "bridge.js" {
+    if path == "bridge.js" || path == "workbench-i18n.json" {
         resp.headers_mut()
             .insert(header::CACHE_CONTROL, HeaderValue::from_static("no-store"));
     }

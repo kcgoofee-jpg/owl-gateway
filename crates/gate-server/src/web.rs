@@ -161,6 +161,11 @@ impl Assets {
                 r#"<script>window.__NAI_BRIDGE__={};</script><script src="/bridge.js"></script>"#,
                 json_for_html(&cfg)
             );
+            html = html.replacen(
+                "<html lang=\"en\"",
+                "<html lang=\"en\" translate=\"no\" class=\"notranslate\"",
+                1,
+            );
             html = html.replacen("<!--owl-nai-boot-->", &inject, 1);
             let mut resp = Response::new(Body::from(html));
             let h = resp.headers_mut();

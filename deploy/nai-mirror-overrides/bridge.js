@@ -1,11 +1,21 @@
 /* owl ⇄ NovelAI 生图页桥：把官网前端的 API 调用改到本站网关。
-   只做三件事：改 base、带 Key、隐藏账号横幅。 */
+   改 base、带 Key、隐藏账号横幅；工作台默认英文，左上角可切中文（自管词表，不走浏览器翻译）。 */
 (function () {
-  window.__BRIDGE_VERSION__ = "2026-11-06-share-settings-v4";
+  window.__BRIDGE_VERSION__ = "2026-11-13-wb-i18n";
   var CFG = window.__NAI_BRIDGE__ || {};
   var GATE = CFG.gate || "";
   var KEY = CFG.key || "";
   var HOSTS = ["image.novelai.net", "api.novelai.net", "text.novelai.net", "explore.novelai.net"];
+
+  try {
+    document.documentElement.setAttribute("translate", "no");
+    document.documentElement.classList.add("notranslate");
+    document.documentElement.lang = "en";
+    var anti = document.createElement("meta");
+    anti.name = "google";
+    anti.content = "notranslate";
+    (document.head || document.documentElement).appendChild(anti);
+  } catch (e) {}
 
   function map(url) {
     try {
@@ -1164,5 +1174,196 @@
   }
   document.addEventListener("click", uploadToExplore, true);
   document.addEventListener("click", openOwlDiscord, true);
+
+  /* ---- 工作台语言：默认英文。浏览器翻译会把 Full/Landscape/Prompt Guidance 译成「完整/横图/提示词指导」。
+     中文只走我们词表的整节点替换；专有名词在 keep 里，不替换。 ---- */
+  var WB_LANG_KEY = "owl_wb_lang";
+  var wbLang = "en";
+  var wbMap = {};
+  var wbKeep = {};
+  var wbPainting = false;
+  var wbObs = null;
+  try {
+    var saved = localStorage.getItem(WB_LANG_KEY);
+    if (saved === "zh" || saved === "en") wbLang = saved;
+  } catch (e) {}
+
+  function wbLog(message, data) {
+    // #region agent log
+    fetch("http://127.0.0.1:7919/ingest/c6bd5a92-1e26-4042-987b-ecfb5a55bff3", {
+      method: "POST",
+      headers: { "Content-Type": "application/json", "X-Debug-Session-Id": "fd2bf8" },
+      body: JSON.stringify({
+        sessionId: "fd2bf8",
+        location: "bridge.js:i18n",
+        message: message,
+        data: data || {},
+        timestamp: Date.now(),
+        hypothesisId: "chrome-translate",
+        runId: "wb-i18n",
+      }),
+    }).catch(function () {});
+    // #endregion
+  }
+
+  function wbSkip(el) {
+    if (!el || el.nodeType !== 1) return true;
+    if (el.id === "owl-lang-toggle" || (el.closest && el.closest("#owl-lang-toggle"))) return true;
+    if (el.closest && el.closest("[data-owl-queue],[data-owl-cooling],.owl-share-dialog,[data-owl-toast]")) return true;
+    var tag = (el.tagName || "").toLowerCase();
+    return tag === "script" || tag === "style" || tag === "textarea" || tag === "input";
+  }
+
+  function wbRender(s) {
+    if (!s || wbKeep[s]) return s;
+    if (wbMap[s]) return wbMap[s];
+    var m = /^Generate (\d+) Images?$/.exec(s);
+    if (m) return "生成 " + m[1] + " 张";
+    return s;
+  }
+
+  function wbWalk(root) {
+    if (!root || wbLang !== "zh") return 0;
+    var n = 0;
+    var walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT, {
+      acceptNode: function (node) {
+        var p = node.parentElement;
+        if (wbSkip(p)) return NodeFilter.FILTER_REJECT;
+        var t = node.nodeValue;
+        if (!t || !t.trim()) return NodeFilter.FILTER_REJECT;
+        return NodeFilter.FILTER_ACCEPT;
+      },
+    });
+    var node;
+    while ((node = walker.nextNode())) {
+      var raw = node.nodeValue;
+      var key = raw.trim();
+      var next = wbRender(key);
+      if (next === key) continue;
+      if (node.owlSrc == null) node.owlSrc = raw;
+      var lead = raw.match(/^\s*/)[0];
+      var tail = raw.match(/\s*$/)[0];
+      node.nodeValue = lead + next + tail;
+      n++;
+    }
+    return n;
+  }
+
+  function wbRestore(root) {
+    if (!root) return;
+    var walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT, null);
+    var node;
+    while ((node = walker.nextNode())) {
+      if (node.owlSrc != null) {
+        node.nodeValue = node.owlSrc;
+        node.owlSrc = null;
+      }
+    }
+  }
+
+  function wbApply() {
+    if (wbPainting) return;
+    wbPainting = true;
+    try {
+      if (wbLang === "zh") wbWalk(document.body);
+      else wbRestore(document.body);
+    } finally {
+      wbPainting = false;
+    }
+  }
+
+  function wbSetLang(next) {
+    wbLang = next === "zh" ? "zh" : "en";
+    try { localStorage.setItem(WB_LANG_KEY, wbLang); } catch (e) {}
+    var btn = document.getElementById("owl-lang-toggle");
+    if (btn) {
+      btn.textContent = wbLang === "zh" ? "中" : "EN";
+      btn.setAttribute("aria-label", wbLang === "zh" ? "Switch to English" : "切换到中文");
+      btn.title = wbLang === "zh" ? "中文 · 点按切英文" : "English · click for 中文";
+    }
+    wbApply();
+    wbLog("lang-set", { lang: wbLang, translate: document.documentElement.getAttribute("translate") });
+  }
+
+  function wbHideMark() {
+    var nodes = document.querySelectorAll("button, a");
+    for (var i = 0; i < nodes.length; i++) {
+      var el = nodes[i];
+      if (el.id === "owl-lang-toggle") continue;
+      var r = el.getBoundingClientRect();
+      if (r.left < 0 || r.top < 0 || r.left > 24 || r.top > 24) continue;
+      if (r.width < 28 || r.width > 80 || r.height < 28 || r.height > 80) continue;
+      el.setAttribute("data-owl-hidden-mark", "1");
+      el.style.visibility = "hidden";
+      return true;
+    }
+    return false;
+  }
+
+  function wbMountToggle() {
+    if (document.getElementById("owl-lang-toggle")) return;
+    var btn = document.createElement("button");
+    btn.id = "owl-lang-toggle";
+    btn.type = "button";
+    btn.textContent = wbLang === "zh" ? "中" : "EN";
+    btn.setAttribute("aria-label", wbLang === "zh" ? "Switch to English" : "切换到中文");
+    btn.title = wbLang === "zh" ? "中文 · 点按切英文" : "English · click for 中文";
+    btn.style.cssText = [
+      "position:fixed", "top:8px", "left:8px", "z-index:2147483000",
+      "width:48px", "height:48px", "padding:0", "margin:0",
+      "border:1px solid #3a3560", "border-radius:12px",
+      "background:#1b1836", "color:#f4f0ff",
+      "font:700 14px/48px system-ui,-apple-system,'Segoe UI',sans-serif",
+      "letter-spacing:.02em", "cursor:pointer", "box-shadow:0 4px 16px rgba(0,0,0,.35)",
+    ].join(";");
+    btn.addEventListener("click", function (ev) {
+      ev.preventDefault();
+      ev.stopPropagation();
+      wbSetLang(wbLang === "zh" ? "en" : "zh");
+    });
+    (document.body || document.documentElement).appendChild(btn);
+    wbHideMark();
+  }
+
+  function wbBootI18n(dict) {
+    var keep = (dict && dict.keep) || [];
+    var map = (dict && dict.map) || {};
+    wbKeep = {};
+    for (var i = 0; i < keep.length; i++) wbKeep[keep[i]] = 1;
+    wbMap = map;
+    wbMountToggle();
+    if (wbLang === "zh") wbApply();
+    if (wbObs) wbObs.disconnect();
+    wbObs = new MutationObserver(function () {
+      wbHideMark();
+      if (wbLang === "zh") wbApply();
+    });
+    wbObs.observe(document.documentElement, { childList: true, subtree: true });
+    wbLog("i18n-ready", {
+      lang: wbLang,
+      keep: keep.length,
+      map: Object.keys(map).length,
+      htmlLang: document.documentElement.lang,
+      translate: document.documentElement.getAttribute("translate"),
+    });
+  }
+
+  function wbStartI18n() {
+    function load(url) {
+      return fetch(url, { cache: "no-store", credentials: "same-origin" }).then(function (r) {
+        if (!r.ok) throw new Error("missing");
+        return r.json();
+      });
+    }
+    load("/workbench-i18n.json")
+      .catch(function () { return load("/_next/workbench-i18n.json"); })
+      .then(wbBootI18n)
+      .catch(function () { wbBootI18n({ keep: [], map: {} }); });
+  }
+  if (document.readyState === "loading") {
+    document.addEventListener("DOMContentLoaded", wbStartI18n);
+  } else {
+    wbStartI18n();
+  }
 
 })();
