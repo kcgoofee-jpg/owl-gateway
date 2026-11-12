@@ -408,13 +408,12 @@ struct MyRequestItem {
 fn request_size(detail: &str) -> String {
     for (i, _) in detail.match_indices('x') {
         let left = &detail[..i];
-        let w_at = left
-            .rfind(|c: char| !c.is_ascii_digit())
-            .map_or(0, |j| j + 1);
-        let w = &left[w_at..];
-        if w.is_empty() {
+        // 只往回吃 ASCII 数字，避免 `rfind` 的字节偏移切进多字节字符。
+        let w_len = left.bytes().rev().take_while(u8::is_ascii_digit).count();
+        if w_len == 0 {
             continue;
         }
+        let w = &left[left.len() - w_len..];
         let rest = &detail[i + 1..];
         let h_len = rest.bytes().take_while(u8::is_ascii_digit).count();
         if h_len == 0 {
@@ -587,6 +586,11 @@ mod request_item_tests {
         );
         assert_eq!(request_size("402 你今天的 Anlas 额度不够这次用"), "");
         assert_eq!(request_size("Vibe 编码 2 Anlas"), "");
+        assert_eq!(
+            request_size("400 尺寸832x1216/28step无效"),
+            "832 × 1216 / 28 步"
+        );
+        assert_eq!(request_size("寸x1216/28step"), "");
     }
 
     #[test]
