@@ -223,6 +223,21 @@ function Page({ store }: { store: Store }) {
         loginOpen={me !== undefined && !member}
         workbench={Boolean(member?.has_key)}
       />
+      {member?.has_key && member.share_lock && (
+        <div class="lp-gate" role="alert">
+          <p>{member.share_lock.message}</p>
+          <div class="lp-gate__actions">
+            <a
+              class="btn btn--primary btn--sm"
+              href={member.share_lock.channel_url}
+              target="_blank"
+              rel="noreferrer"
+            >
+              去发一张图
+            </a>
+          </div>
+        </div>
+      )}
       {member?.has_key && member.requires_web_login && !loginGateDismissed && (
         <div class="lp-gate" role="status">
           <p>本站已要求每位成员在网页用 Discord 登录一次。你还没登录，现在出图会被 403。</p>

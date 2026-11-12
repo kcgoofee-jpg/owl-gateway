@@ -79,14 +79,26 @@ v3_to_v4() {
     echo "  删掉 $gone 张表"
 }
 
-MIGRATIONS=(v2_to_v3 v3_to_v4)
+# v4 → v5：存图频道的分享记录（谁、哪条消息、何时）。不存正文和图片。
+v4_to_v5() {
+    q "CREATE TABLE IF NOT EXISTS share_posts (
+           message_id TEXT PRIMARY KEY,
+           discord_id TEXT NOT NULL,
+           channel_id TEXT NOT NULL,
+           created_at REAL NOT NULL
+       );
+       CREATE INDEX IF NOT EXISTS idx_share_posts_member ON share_posts (discord_id, created_at);"
+    echo "  share_posts 已就绪"
+}
+
+MIGRATIONS=(v2_to_v3 v3_to_v4 v4_to_v5)
 
 before=$(q "PRAGMA user_version")
 echo "库：$DB"
 echo "当前结构版本：$before"
 while :; do
     v=$(q "PRAGMA user_version")
-    if [ "$v" -ge 4 ]; then
+    if [ "$v" -ge 5 ]; then
         break
     fi
     fn="v${v}_to_v$((v + 1))"

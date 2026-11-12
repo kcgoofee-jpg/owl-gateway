@@ -295,3 +295,12 @@ CREATE TABLE IF NOT EXISTS device_battery (
     discord_id TEXT NOT NULL, ts REAL NOT NULL, level REAL NOT NULL, charging INTEGER NOT NULL);
 CREATE INDEX IF NOT EXISTS idx_device_battery_ts ON device_battery (ts);
 
+-- 存图频道里成员自己发的图（新帖或已有帖子里的新内容）。只记谁、哪条消息、何时，不存正文和图片。
+CREATE TABLE IF NOT EXISTS share_posts (
+    message_id TEXT PRIMARY KEY,
+    discord_id TEXT NOT NULL,
+    channel_id TEXT NOT NULL,
+    created_at REAL NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_share_posts_member ON share_posts (discord_id, created_at);
+

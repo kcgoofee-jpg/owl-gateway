@@ -187,6 +187,20 @@ impl DiscordApi {
         response.model().await.map_err(ApiError::Body)
     }
 
+    /// `GET /guilds/{id}/threads/active`：现在还开着的帖子（含父频道 id）。
+    pub async fn active_threads(&self, guild_id: u64) -> Result<Vec<Value>, ApiError> {
+        let route = Route::GetActiveThreads { guild_id };
+        let response = self
+            .client
+            .request::<Value>(Request::builder(&route).build()?)
+            .await?;
+        let v = response.model().await.map_err(ApiError::Body)?;
+        Ok(v.get("threads")
+            .and_then(Value::as_array)
+            .cloned()
+            .unwrap_or_default())
+    }
+
     /// `GET /channels/{cid}/messages/{mid}` —— 单条消息（帖子首楼：帖子的频道 id 即首楼 id）。
     pub async fn message_by_id(&self, channel_id: u64, message_id: u64) -> Result<Value, ApiError> {
         let route = Route::GetMessage {

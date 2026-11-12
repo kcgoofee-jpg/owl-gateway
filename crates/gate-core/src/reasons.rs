@@ -40,6 +40,8 @@ pub const PARAM: &str = "param"; // 参数不被支持（模型、采样器、�
 /// 站长开了「每位成员到网页登录一次」之后，还没登录过的 Key 被拦：登录一次立即恢复。
 /// 不是处罚性暂停（那是 [`KEY_PAUSED`]），两个码必须分得开，站长看日志才不会误会。
 pub const WEB_LOGIN: &str = "web_login";
+/// 上一个重置日用满 V4.5 或 V5 之后，要在存图频道发一张图才能继续出图。
+pub const SHARE_LOCK: &str = "share_lock";
 
 /// 带原因码的拒绝说明（`Deref<Target = str>` 并实现 `Display`，调用方照常当字符串用）。
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -184,6 +186,7 @@ pub const BACKFILL: &[(&str, &str)] = &[
     (KEY_INVALID, "%API Key 无效%"),
     (KEY_INVALID, "%无效 Key 请求次数过多%"),
     (PARAM, "%角色数量超限%"),
+    (SHARE_LOCK, "%存图备份专用%"),
 ];
 
 /// 原因码 → 给站长看的短说明（`LABELS`，新增的码追加在末尾）。
@@ -211,6 +214,7 @@ pub const LABELS: &[(&str, &str)] = &[
     (KEY_DISABLED, "Key 已停用"),
     (KEY_INVALID, "Key 无效"),
     (WEB_LOGIN, "请先网页登录"),
+    (SHARE_LOCK, "需要分享图片"),
 ];
 
 /// `^\d{3}\s*`：开头三个十进制数字（HTTP 状态码）加后面的空白。

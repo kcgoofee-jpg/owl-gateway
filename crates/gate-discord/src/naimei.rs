@@ -5,7 +5,8 @@
 //! - `/register /resetkey`：先 `defer()`（3 秒内确认），再去问网关，最后用跟进消息（ephemeral）回话；
 //! - 命令出错 → 打 `[bug]` 日志，并回一句「出了点问题……」（已确认过就用跟进消息，否则直接回复）；
 //! - AI 对话：成员 @奶妹 或回复奶妹的消息 → 检索知识库 → 调 LLM → 出口过滤 → 分片公开发送。
-//!   只在配置的服务器里说话；不私信、不点赞、不碰论坛；一个频道同时只处理一条、冷却 3 秒；
+//!   只在配置的服务器里说话；不私信、不点赞、不评论；一个频道同时只处理一条、冷却 3 秒。
+//!   存图频道里成员发的图会记给网关（新帖和帖子里后补的都算），用来解开昨天额度用满后的出图限制。
 //!   管理员命令都在网页后台，机器人里没有。
 
 use std::collections::{HashMap, HashSet, VecDeque};
@@ -27,10 +28,11 @@ use crate::commands::{self, Command, NAIMEI_INTENTS};
 use crate::config::NaimeiConfig;
 use crate::events::{
     self, Gateway, GuildInfo, INTERACTION_APPLICATION_COMMAND, Interaction, MessageInfo, ReadyInfo,
-    User,
+    ThreadInfo, User,
 };
 use crate::handlers::{self, Backend, HandlerError};
 use crate::kb;
+use crate::share;
 
 /// 心跳间隔。
 pub const SYNC_INTERVAL: Duration = Duration::from_secs(60);
@@ -94,6 +96,8 @@ struct Inner {
     busy: HashSet<u64>,
     /// 每个频道上次对话的 Unix 秒（冷却用）。
     last_chat: HashMap<u64, f64>,
+    /// 帖子 id → 父频道 id。用来判断一条帖子内的新内容是不是发在存图频道里。
+    thread_parents: HashMap<String, String>,
 }
 
 /// 墙钟（Unix 秒）。测试里换成固定值，「Key 剩余有效期」才不会随时间漂移。
@@ -294,8 +298,9 @@ impl Naimei {
 
     // ---------- AI 对话 ----------
 
-    /// 处理一条 MESSAGE_CREATE：@奶妹 或回复奶妹 → AI 对话；其余一律忽略。
+    /// 处理一条 MESSAGE_CREATE：存图频道里的图记一笔；@奶妹 或回复奶妹 → AI 对话；其余一律忽略。
     pub async fn handle_message(self: &Arc<Self>, m: MessageInfo) {
+        self.record_forum_share(&m).await;
         let Some(bot_id) = self.lock().bot_id.clone() else {
             return; // READY 之前收到的消息不带触发信息
         };
@@ -791,6 +796,160 @@ impl Naimei {
         }
     }
 
+    // ---------- 存图频道 ----------
+
+    /// 启动后把还开着的存图帖子加一遍，这样已有帖子里的新图也能收到。
+    async fn catch_up_forum(self: Arc<Self>) {
+        let threads = match self.api.active_threads(self.cfg.guild_id).await {
+            Ok(v) => v,
+            Err(e) => {
+                warn!("[bot] 读取活跃帖子失败：{e}");
+                return;
+            }
+        };
+        let mut n = 0u32;
+        for thread in threads {
+            let parent = thread
+                .get("parent_id")
+                .and_then(|v| v.as_str())
+                .unwrap_or("");
+            if parent != share::FORUM_CHANNEL_ID {
+                continue;
+            }
+            let Some(id) = thread.get("id").and_then(|v| v.as_str()) else {
+                continue;
+            };
+            self.remember_parent(id, parent);
+            self.join_thread(id).await;
+            self.scan_forum_thread(id).await;
+            n += 1;
+        }
+        if n > 0 {
+            info!("[bot] 已加入 {n} 个存图帖子");
+        }
+    }
+
+    async fn on_thread(&self, t: ThreadInfo, created: bool) {
+        let forum = t.parent_id.as_deref() == Some(share::FORUM_CHANNEL_ID);
+        if created || forum {
+            self.join_thread(&t.id).await;
+        }
+        if !forum {
+            return;
+        }
+        self.remember_parent(&t.id, share::FORUM_CHANNEL_ID);
+        if let Some(raw) = t.message.clone()
+            && let Ok(message) = serde_json::from_value::<MessageInfo>(raw)
+        {
+            self.record_forum_share(&message).await;
+        }
+        if created || !t.archived {
+            self.scan_forum_thread(&t.id).await;
+        }
+    }
+
+    async fn join_thread(&self, thread_id: &str) {
+        let Ok(tid) = thread_id.parse::<u64>() else {
+            return;
+        };
+        if let Err(e) = self.api.join_thread(tid).await {
+            debug!("[bot] 加入帖子失败：{e}");
+        }
+    }
+
+    async fn scan_forum_thread(&self, thread_id: &str) {
+        let Ok(tid) = thread_id.parse::<u64>() else {
+            return;
+        };
+        let Ok(rows) = self.api.recent_messages(tid).await else {
+            return;
+        };
+        for raw in rows {
+            if let Ok(message) = serde_json::from_value::<MessageInfo>(raw) {
+                self.record_forum_share(&message).await;
+            }
+        }
+    }
+
+    fn remember_parent(&self, thread_id: &str, parent_id: &str) {
+        let mut inner = self.lock();
+        if inner.thread_parents.len() > 4000 {
+            inner.thread_parents.clear();
+        }
+        inner
+            .thread_parents
+            .insert(thread_id.to_string(), parent_id.to_string());
+    }
+
+    fn cached_parent(&self, channel_id: &str) -> Option<String> {
+        self.lock().thread_parents.get(channel_id).cloned()
+    }
+
+    /// 这条消息若是成员自己发在存图频道（或它下面的帖子）里的图，就告诉网关。
+    async fn record_forum_share(&self, m: &MessageInfo) {
+        let Some(author) = m.author.as_ref() else {
+            return;
+        };
+        if author.bot || m.webhook_id.is_some() || author.id.is_empty() || m.id.is_empty() {
+            return;
+        }
+        if self.lock().bot_id.as_deref() == Some(author.id.as_str()) {
+            return;
+        }
+        if m.guild_id
+            .as_deref()
+            .is_some_and(|g| g.parse::<u64>().ok() != Some(self.cfg.guild_id))
+        {
+            return;
+        }
+        if !share::has_image(m) {
+            return;
+        }
+        let Some(parent) = self.share_parent(&m.channel_id).await else {
+            return;
+        };
+        if parent != share::FORUM_CHANNEL_ID && m.channel_id != share::FORUM_CHANNEL_ID {
+            return;
+        }
+        let Some(at) = share::snowflake_unix(&m.id) else {
+            return;
+        };
+        let _ = self
+            .bridge
+            .bot(
+                "/share",
+                &json!({
+                    "discord_id": author.id,
+                    "guild_id": self.cfg.guild_id.to_string(),
+                    "message_id": m.id,
+                    "channel_id": m.channel_id,
+                    "parent_id": parent,
+                    "at": at,
+                }),
+            )
+            .await;
+    }
+
+    async fn share_parent(&self, channel_id: &str) -> Option<String> {
+        if channel_id == share::FORUM_CHANNEL_ID {
+            return Some(share::FORUM_CHANNEL_ID.to_string());
+        }
+        if let Some(parent) = self.cached_parent(channel_id) {
+            return Some(parent);
+        }
+        let id = channel_id.parse::<u64>().ok()?;
+        let info = self.api.channel_info(id).await.ok()?;
+        let parent = info
+            .get("parent_id")
+            .and_then(|v| v.as_str())
+            .unwrap_or("")
+            .to_string();
+        if !parent.is_empty() {
+            self.remember_parent(channel_id, &parent);
+        }
+        Some(parent)
+    }
+
     // ---------- 启动 / 同步 ----------
 
     /// READY：把斜杠命令同步到指定服务器，然后（只启动一次）开始每分钟的心跳。
@@ -815,6 +974,7 @@ impl Naimei {
         };
         if start {
             tokio::spawn(self.clone().sync_loop());
+            tokio::spawn(self.clone().catch_up_forum());
         }
     }
 
@@ -989,17 +1149,12 @@ pub fn dispatch(app: &Arc<Naimei>, raw: &str) {
             tokio::spawn(async move { app.handle_message(*m).await });
         }
         Ok(Gateway::ThreadCreate(t)) => {
-            // 不自动加入帖子就收不到帖子内的消息（Discord 机制），这里一律加入
             let app = app.clone();
-            tokio::spawn(async move {
-                if let Ok(tid) = t.id.parse::<u64>() {
-                    if let Err(e) = app.api.join_thread(tid).await {
-                        debug!("[bot] 加入帖子失败：{e}");
-                    } else {
-                        info!("[bot] 已加入新帖子 {}", t.name.as_deref().unwrap_or(""));
-                    }
-                }
-            });
+            tokio::spawn(async move { app.on_thread(*t, true).await });
+        }
+        Ok(Gateway::ThreadUpdate(t)) => {
+            let app = app.clone();
+            tokio::spawn(async move { app.on_thread(*t, false).await });
         }
         Ok(Gateway::Other) => {}
         Err(e) => warn!("无法解析的网关消息：{e}"),

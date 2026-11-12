@@ -143,6 +143,7 @@ impl Reserved {
         if let Some(error) = crate::auth::key_status_error(&current, self.state.now()) {
             return Err(error.into());
         }
+        crate::share_lock::enforce(&self.state, &current).await?;
         if current.owner_image_full != self.key.owner_image_full
             || current.queue_jump != self.key.queue_jump
             || current.bound_token_id != self.key.bound_token_id

@@ -30,6 +30,7 @@ pub mod reqctx;
 pub mod runtime;
 pub mod session;
 pub mod settings;
+pub mod share_lock;
 pub mod state;
 pub mod time;
 pub mod v5_medium;

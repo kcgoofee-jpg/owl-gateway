@@ -191,6 +191,12 @@
 - 被占名额：停用的成员仍占名额（避免停用后空出名额、启用后超限）。
 - 封禁（拉黑）：写入封禁表，撤销现有 Key 与身份组，之后不能再领。
 
+### 8.5 用满后分享才能继续出图
+
+2026-11-13 07:00（北京时间，也是当天重置点）起生效。上一个重置日把个人 V4.5（`legacy_free_images` ≥ `daily_images`）或个人 V5（`v5` ≥ `daily_v5`）用满，且该项上限大于 0，则本重置日在发图之前：出图、Vibe、放大、导演工具回 403，原因码 `share_lock`。首页登录后显示同一句说明和频道入口。标签补全不拦。
+
+算分享的是论坛频道 `1558068804934705222`（存图备份专用）里成员自己发的图：新帖，或已有帖子里后补的一条，包括转发来的图。纯文字不算。奶妹只把「谁、哪条消息、何时」写入 `share_posts`，不存正文和图片。本重置日 7 点之后的一条记录即可解开今天；昨天的旧图不解开今天。不把 Key 停用，也不摘身份组。站长号（`owner_image_full`）和已开通的赞助席不参加。读库失败时这道闸放行，不把出图整个拦住。
+
 ## 9. 共用站点设置（登记表 `site_flags.rs`）
 
 仍在登记、代码还在读的是下面 5 项。额度预算在 `SharedBudgets` 和成员规则里，不在这张表。`register_open`、`global_daily_v5`、`global_daily_anlas`、`global_monthly_anlas`、`register_daily_images`、`register_daily_v5`、`algo_notice`、`member_daily_anlas` 不再登记；库里的旧键不删。web_login_paused、home_join_open、global_daily_anlas_until、audit_image_retention_days 早已删除，残留值读到也忽略。

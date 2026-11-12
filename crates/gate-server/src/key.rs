@@ -20,6 +20,8 @@ pub struct Key {
     credential: Credential,
     pub policy: MemberPolicy,
     pub owner_image_full: bool,
+    /// 已开通的赞助席。和站长号一样，不参加「用满后分享才能出图」。
+    pub patron: bool,
     /// 站长号或赞助席插队：排在所有等待中的生图前面，并越过全站排队满。
     pub queue_jump: bool,
     /// 赞助席绑定的专属上游 Token；有则出图只走这把，不进全站池。
@@ -41,27 +43,30 @@ impl Key {
         if credential.id <= 0 || !matches!(credential.enabled, 0 | 1) {
             return Err(DbError::Invalid("Key 凭据值无效".into()));
         }
-        let (policy, owner_image_full, queue_jump, bound_token_id) =
+        let (policy, owner_image_full, patron_on, queue_jump, bound_token_id) =
             match credential.discord_id.as_deref().filter(|s| !s.is_empty()) {
                 Some(subject) => {
                     let snapshot = db.member_policy(subject).await?;
                     let owner_image_full = snapshot.owner_image.is_some_and(|p| p.enabled);
                     let patron = snapshot.patron.as_ref().filter(|p| p.enabled);
+                    let patron_on = patron.is_some();
                     let bound_token_id = patron.and_then(|p| p.bound_token_id.clone());
                     let queue_jump = owner_image_full || patron.is_some_and(|p| p.queue_jump);
                     (
                         snapshot.effective,
                         owner_image_full,
+                        patron_on,
                         queue_jump,
                         bound_token_id,
                     )
                 }
-                None => (db.member_defaults().await?, false, false, None),
+                None => (db.member_defaults().await?, false, false, false, None),
             };
         Ok(Self {
             credential,
             policy,
             owner_image_full,
+            patron: patron_on,
             queue_jump,
             bound_token_id,
         })

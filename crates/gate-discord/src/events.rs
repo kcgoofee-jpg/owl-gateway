@@ -165,16 +165,44 @@ pub struct MessageInfo {
     /// 回复目标消息；「回复奶妹触发对话」看它的作者是不是奶妹。
     #[serde(default)]
     pub referenced_message: Option<ReferencedMessage>,
+    /// 转发来的原消息。存图频道里「已转发」的图记在这里，不在本条的附件上。
+    #[serde(default)]
+    pub message_snapshots: Vec<MessageSnapshot>,
+    /// Webhook 代发。这种消息的作者不是成员本人。
+    #[serde(default)]
+    pub webhook_id: Option<String>,
 }
 
-/// THREAD_CREATE 里我们关心的部分：新帖子 id（自动入帖用）+ 可选的首楼内容。
+/// 转发快照里我们要的部分：原消息的附件和 embed。
+#[derive(Debug, Clone, Default, Deserialize)]
+pub struct MessageSnapshot {
+    #[serde(default)]
+    pub message: Option<SnapshotMessage>,
+}
+
+#[derive(Debug, Clone, Default, Deserialize)]
+pub struct SnapshotMessage {
+    #[serde(default)]
+    pub attachments: Vec<Attachment>,
+    #[serde(default)]
+    pub embeds: Vec<Value>,
+}
+
+/// THREAD_CREATE / THREAD_UPDATE 里我们关心的部分。
 #[derive(Debug, Clone, Default, Deserialize)]
 pub struct ThreadInfo {
     pub id: String,
     #[serde(default)]
-    pub name: Option<String>,
+    pub parent_id: Option<String>,
     #[serde(default)]
-    pub message: Option<ReferencedMessage>,
+    pub owner_id: Option<String>,
+    #[serde(default)]
+    pub name: Option<String>,
+    /// 新帖的首楼。没有时再去拉；帖子 id 就是首楼消息 id。
+    #[serde(default)]
+    pub message: Option<Value>,
+    #[serde(default)]
+    pub archived: bool,
 }
 
 /// 回复目标消息：作者 + 内容 + 附件（引用的上下文和图片都要进模型）。
@@ -198,6 +226,7 @@ pub enum Gateway {
     Interaction(Box<Interaction>),
     MessageCreate(Box<MessageInfo>),
     ThreadCreate(Box<ThreadInfo>),
+    ThreadUpdate(Box<ThreadInfo>),
     /// 其他事件（含 HELLO / HEARTBEAT_ACK 等控制帧）：机器人不关心。
     Other,
 }
@@ -267,6 +296,9 @@ pub fn parse(raw: &str) -> Result<Gateway, serde_json::Error> {
         }
         Some("THREAD_CREATE") => {
             Gateway::ThreadCreate(Box::new(serde_json::from_str::<Frame<ThreadInfo>>(raw)?.d))
+        }
+        Some("THREAD_UPDATE") => {
+            Gateway::ThreadUpdate(Box::new(serde_json::from_str::<Frame<ThreadInfo>>(raw)?.d))
         }
         Some("MESSAGE_CREATE") => {
             Gateway::MessageCreate(Box::new(serde_json::from_str::<Frame<MessageInfo>>(raw)?.d))

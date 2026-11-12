@@ -71,6 +71,8 @@ export type MeMember = {
   has_key: boolean;
   /** 「每位成员网页登录一次」闸门生效、该成员还没登录：出图会被 403。 */
   requires_web_login?: boolean;
+  /** 上一个重置日用满 V4.5 或 V5：要在存图频道发一张图才能继续出图。 */
+  share_lock?: { message: string; channel_url: string };
   key?: string;
   expires_at?: number | null;
   policy?: MemberPolicy;

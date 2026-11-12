@@ -30,6 +30,7 @@ pub fn router() -> Router<AppState> {
         .route("/self-register/bot/report", post(bot_report))
         .route("/self-register/bot/stats", get(bot_stats))
         .route("/self-register/bot/context", post(bot_context))
+        .route("/self-register/bot/share", post(bot_share))
 }
 
 /// 桥接 / 成员页接口的请求体上限（正常请求都在几百字节）。
@@ -78,6 +79,34 @@ impl Model {
                     self.fail("missing", vec![name], "Field required", &whole);
                 }
                 default.unwrap_or("").to_string()
+            }
+        }
+    }
+
+    fn number(&mut self, name: &str) -> f64 {
+        match self.get(name) {
+            Some(Value::Number(n)) => n.as_f64().unwrap_or_else(|| {
+                self.fail(
+                    "float_type",
+                    vec![name],
+                    "Input should be a valid number",
+                    &Value::Null,
+                );
+                0.0
+            }),
+            Some(other) => {
+                self.fail(
+                    "float_type",
+                    vec![name],
+                    "Input should be a valid number",
+                    &other,
+                );
+                0.0
+            }
+            None => {
+                let whole = self.body.clone();
+                self.fail("missing", vec![name], "Field required", &whole);
+                0.0
             }
         }
     }
@@ -320,6 +349,38 @@ fn member_bot_projection(me: &Value) -> Value {
         json!(me["coupons"].as_array().map_or(0, Vec::len)),
     );
     Value::Object(out)
+}
+
+/// 奶妹见到存图频道里的一张图（新帖，或已有帖子里的新内容）就记一笔。
+async fn bot_share(State(state): State<AppState>, req: Request) -> ApiResult {
+    let (parts, body) = req.into_parts();
+    let mut m = read_model(&parts, body).await?;
+    let who = Who::read(&mut m);
+    let message_id = m.string("message_id", None);
+    let channel_id = m.string("channel_id", None);
+    let parent_id = m.string("parent_id", Some(""));
+    let at = m.number("at");
+    m.finish()?;
+    let svc = authorize(&state, &parts, false)?;
+    let discord_id = checked(svc, &who)?;
+    if !gate_core::validation::is_decimal(&message_id)
+        || !gate_core::validation::is_decimal(&channel_id)
+    {
+        return Err(HttpError::new(422, "message_id: Field required").into());
+    }
+    let forum = crate::share_lock::FORUM_CHANNEL_ID;
+    if channel_id != forum && parent_id != forum {
+        return Err(HttpError::new(403, "不是存图频道").into());
+    }
+    let now = state.now();
+    if !at.is_finite() || at < 1_000_000_000.0 || at > now + 120.0 {
+        return Err(HttpError::new(422, "at: Field required").into());
+    }
+    state
+        .db
+        .record_share(discord_id, &message_id, &channel_id, at)
+        .await?;
+    Ok(ok_json(&json!({"ok": true})))
 }
 
 async fn bot_report(State(state): State<AppState>, req: Request) -> ApiResult {

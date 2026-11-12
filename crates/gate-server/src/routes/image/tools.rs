@@ -28,6 +28,7 @@ pub(super) async fn tool(
     let (parts, body) = req.into_parts();
     let ctx = ctx_of(&parts);
     let key = authenticate(&state, &parts, false).await?;
+    crate::share_lock::enforce(&state, &key).await?;
     check_image_cooldown(&state)?;
     check_rpm(&state, &key)?;
     require_feature(
@@ -217,6 +218,7 @@ pub(super) async fn vibe(state: AppState, req: Request) -> Result<Response, ApiE
     let (parts, body) = req.into_parts();
     let ctx = ctx_of(&parts);
     let key = authenticate(&state, &parts, false).await?;
+    crate::share_lock::enforce(&state, &key).await?;
     check_image_cooldown(&state)?;
     check_rpm(&state, &key)?;
     require_feature(&key, "vibe")?;
