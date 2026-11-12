@@ -33,20 +33,40 @@ async fn share_lock_put(
 ) -> ApiResult {
     let (parts, body) = req.into_parts();
     let body = read_json_body(&parts.headers, body, BODY_LIMIT).await?;
-    let enabled = body
-        .get("enabled")
-        .and_then(Value::as_bool)
-        .filter(|_| body.len() == 1)
-        .ok_or_else(|| crate::error::HttpError::new(422, "只接受 {enabled: true/false}"))?;
+    if body.len() != 1 {
+        return Err(crate::error::HttpError::new(422, "只接受 enabled 或 mode 单字段").into());
+    }
+    let (key, value, detail) = if let Some(enabled) = body.get("enabled").and_then(Value::as_bool) {
+        (
+            crate::share_lock::ENABLED_KEY,
+            if enabled { "1" } else { "0" },
+            if enabled { "开启" } else { "关闭" },
+        )
+    } else if let Some(mode) = body.get("mode").and_then(Value::as_str) {
+        let detail = match mode {
+            "quota" => "昨日用满后需分享",
+            "daily" => "所有非豁免成员每天需分享",
+            _ => {
+                return Err(crate::error::HttpError::new(422, "mode 必须是 quota 或 daily").into());
+            }
+        };
+        (crate::share_lock::MODE_KEY, mode, detail)
+    } else {
+        return Err(crate::error::HttpError::new(
+            422,
+            "enabled 必须是布尔值；mode 必须是 quota 或 daily",
+        )
+        .into());
+    };
     state
         .db
         .set_setting_logged(
-            crate::share_lock::ENABLED_KEY,
-            Some(if enabled { "1" } else { "0" }),
+            key,
+            Some(value),
             &super::super::actor(&state, &parts),
             "分享限制",
             "成员规则",
-            if enabled { "开启" } else { "关闭" },
+            detail,
             state.now(),
         )
         .await?;

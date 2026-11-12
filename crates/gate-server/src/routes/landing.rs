@@ -113,11 +113,11 @@ pub(super) async fn me_payload(
     if key.owner_image_full {
         out.insert("owner_image_full".into(), json!(true));
     }
-    if crate::share_lock::is_locked(state, key).await {
+    if let Some(message) = crate::share_lock::restriction(state, key).await {
         out.insert(
             "share_lock".into(),
             json!({
-                "message": crate::share_lock::MESSAGE,
+                "message": message,
                 "channel_url": crate::share_lock::channel_url(),
             }),
         );

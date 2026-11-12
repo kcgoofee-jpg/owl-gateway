@@ -375,3 +375,171 @@ async fn queued_request_rechecks_the_reset_and_current_switch_before_dispatch() 
         0
     );
 }
+
+#[tokio::test]
+async fn concurrent_share_burst_commits_every_member_without_losing_records() {
+    use futures::StreamExt;
+    use std::sync::{Arc, Mutex};
+    let now = share_lock::starts_at() + 3600.0;
+    let _clock = clock(Some(now)).await;
+    let e = setup_registration(
+        "http://127.0.0.1:9",
+        &[
+            ("DISCORD_GUILD_ID", GUILD),
+            ("REGISTRATION_BRIDGE_SECRET", SECRET),
+        ],
+    )
+    .await;
+    let discord_listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let discord_addr = discord_listener.local_addr().unwrap();
+    let discord = axum::Router::new()
+        .fallback(|| async { axum::Json(json!({"parent_id":share_lock::FORUM_CHANNEL_ID})) });
+    tokio::spawn(async move {
+        axum::serve(discord_listener, discord).await.unwrap();
+    });
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let addr = listener.local_addr().unwrap();
+    let gateway = gate_server::app(e.state.clone());
+    tokio::spawn(async move {
+        axum::serve(listener, gateway.into_make_service())
+            .await
+            .unwrap();
+    });
+    let bot = gate_discord::naimei::Naimei::with_clock(
+        gate_discord::config::NaimeiConfig {
+            token: "synthetic".into(),
+            guild_id: GUILD.parse().unwrap(),
+            backend: format!("http://{addr}"),
+            site: "https://site.test".into(),
+            secret: SECRET.into(),
+            chat: None,
+            owner_ids: vec![],
+            chat_log: None,
+        },
+        Some(discord_addr.to_string()),
+        Box::new(move || now),
+    );
+    let base = (((now * 1000.0) as u64 - 1_420_070_400_000) << 22) + 1;
+    let message = move |i: u64| {
+        serde_json::from_value(
+            json!({"id":(base+i).to_string(),"channel_id":THREAD,"guild_id":GUILD,
+        "author":{"id":(900_000_000_000_001_000+i).to_string(),"username":"synthetic"},
+        "attachments":[{"id":"1","filename":"image.png","content_type":"image/png"}]}),
+        )
+        .unwrap()
+    };
+    bot.handle_message(message(0)).await; // warm the thread-parent cache like THREAD_CREATE does
+    let durations = Arc::new(Mutex::new(Vec::new()));
+    let started = std::time::Instant::now();
+    futures::stream::iter(1..=200u64)
+        .for_each_concurrent(200, |i| {
+            let bot = bot.clone();
+            let durations = durations.clone();
+            let m = message(i);
+            async move {
+                let t = std::time::Instant::now();
+                bot.handle_message(m).await;
+                durations.lock().unwrap().push(t.elapsed().as_millis());
+            }
+        })
+        .await;
+    let mut durations = durations.lock().unwrap().clone();
+    durations.sort_unstable();
+    println!(
+        "concurrent_shares=200 total_ms={} p95_ms={} max_ms={}",
+        started.elapsed().as_millis(),
+        durations[189],
+        durations[199]
+    );
+    assert_eq!(
+        query(&e.state.db, "SELECT count(*) AS n FROM share_posts").await[0]["n"],
+        201
+    );
+    assert_eq!(bot.share_detection_report().pending, 0);
+}
+
+#[tokio::test]
+async fn daily_mode_requires_each_non_exempt_member_to_share_even_without_previous_usage() {
+    let now = share_lock::starts_at() + 3600.0;
+    let _clock = clock(Some(now)).await;
+    let e = setup_registration(
+        "http://127.0.0.1:9",
+        &[
+            ("DISCORD_GUILD_ID", GUILD),
+            ("REGISTRATION_BRIDGE_SECRET", SECRET),
+        ],
+    )
+    .await;
+    report(&e.state, now).await;
+    let admin = Admin::login_bare(&e.state).await;
+    assert!(!share_lock::is_locked(&e.state, &key(&e.state).await).await);
+    for bad in [
+        json!({"mode":"all"}),
+        json!({"mode":1}),
+        json!({"mode":"daily","extra":true}),
+    ] {
+        assert_eq!(admin.put("/ops/share-lock", bad).await.status, 422);
+    }
+    let ctx = gate_server::reqctx::ReqCtx::new();
+    let reserved = gate_server::admission::reserve_image_budget(
+        &e.state,
+        &ctx,
+        &key(&e.state).await,
+        &gate_server::admission::Est::default(),
+        1,
+        gate_server::admission::DispatchRequirements::feature("image"),
+    )
+    .await
+    .unwrap();
+    assert_eq!(
+        admin
+            .put("/ops/share-lock", json!({"mode":"daily"}))
+            .await
+            .status,
+        200
+    );
+    assert_eq!(admin.get_ok("/ops/share-lock").await["mode"], "daily");
+    assert!(share_lock::is_locked(&e.state, &key(&e.state).await).await);
+    assert!(
+        share_lock::restriction(&e.state, &key(&e.state).await)
+            .await
+            .unwrap()
+            .contains("今天还没有分享")
+    );
+    let error = reserved
+        .prepare_dispatch("abc124", "1100000002")
+        .await
+        .unwrap_err();
+    assert!(matches!(error,gate_server::error::ApiError::Gate(ref g) if g.code=="share_lock"));
+    let mut exempt = key(&e.state).await;
+    exempt.owner_image_full = true;
+    assert!(!share_lock::is_locked(&e.state, &exempt).await);
+    exempt.owner_image_full = false;
+    exempt.patron = true;
+    assert!(!share_lock::is_locked(&e.state, &exempt).await);
+    assert_eq!(share(&e.state, now - 86400.0, json!({})).await, 200);
+    assert!(share_lock::is_locked(&e.state, &key(&e.state).await).await);
+    assert_eq!(share(&e.state, now, json!({})).await, 200);
+    assert!(!share_lock::is_locked(&e.state, &key(&e.state).await).await);
+    reserved
+        .prepare_dispatch("abc124", "1100000002")
+        .await
+        .unwrap();
+    let reset = e.state.clock.day_start(now) + 86400.0;
+    gate_server::time::freeze(Some(reset));
+    report(&e.state, reset).await;
+    assert!(share_lock::is_locked(&e.state, &key(&e.state).await).await);
+    assert_eq!(
+        admin
+            .put("/ops/share-lock", json!({"enabled":false}))
+            .await
+            .status,
+        200
+    );
+    assert!(!share_lock::is_locked(&e.state, &key(&e.state).await).await);
+    let restarted = e.restart().await;
+    assert_eq!(
+        share_lock::detection(&restarted).await.unwrap()["mode"],
+        "daily"
+    );
+}

@@ -7,7 +7,7 @@ use twilight_model::util::Timestamp;
 #[derive(Clone)]
 struct Pending {
     payload: Value,
-    failed_at: f64,
+    failed_at: Option<f64>,
     next_at: f64,
     attempts: u32,
 }
@@ -66,7 +66,7 @@ impl Naimei {
         report.oldest_failure_at = state
             .pending
             .values()
-            .map(|p| p.failed_at)
+            .filter_map(|p| p.failed_at)
             .chain(report.oldest_failure_at)
             .reduce(f64::min);
         report
@@ -130,7 +130,7 @@ impl Naimei {
             }
             state.pending.entry(m.id.clone()).or_insert(Pending {
                 payload,
-                failed_at: self.now(),
+                failed_at: None,
                 next_at: self.now(),
                 attempts: 0,
             });
@@ -139,6 +139,12 @@ impl Naimei {
     }
 
     async fn deliver_share(&self, id: &str) -> bool {
+        // Bound concurrent TCP connections and protect the gateway during a sharing burst.
+        let _slot = self
+            .share_delivery_slots
+            .acquire()
+            .await
+            .expect("分享发送池不会关闭");
         let now = self.now();
         let payload = {
             let mut state = self.shares();
@@ -167,6 +173,7 @@ impl Naimei {
             }
             ShareDelivery::Retry => {
                 if let Some(p) = state.pending.get_mut(id) {
+                    p.failed_at.get_or_insert(now);
                     p.attempts = p.attempts.saturating_add(1);
                     p.next_at = now + f64::from((1u32 << p.attempts.min(6)).min(60));
                 }
@@ -365,12 +372,13 @@ impl Naimei {
 
     pub(super) async fn on_thread(&self, t: ThreadInfo, created: bool) {
         if t.parent_id.as_deref() != Some(share::FORUM_CHANNEL_ID) {
+            // Preserve the assistant's existing access to other newly created threads.
+            if created {
+                self.join_thread(&t.id).await;
+            }
             return;
         }
         self.remember_parent(&t.id, share::FORUM_CHANNEL_ID);
-        if created || !t.archived {
-            self.join_thread(&t.id).await;
-        }
         if let Some(raw) = t.message {
             if let Ok(m) = serde_json::from_value(raw) {
                 self.record_forum_share(&m).await;
@@ -381,6 +389,9 @@ impl Naimei {
             && let Ok(m) = serde_json::from_value(raw)
         {
             self.record_forum_share(&m).await;
+        }
+        if created || !t.archived {
+            self.join_thread(&t.id).await;
         }
         self.forum_wake.notify_one();
     }

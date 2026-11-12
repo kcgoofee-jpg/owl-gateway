@@ -1,4 +1,4 @@
-//! 用满上一个重置日的 V4.5 或 V5 之后，要在存图频道发一张图才能继续出图。
+//! 分享闸：昨日用满后需分享，或所有非豁免成员每天先分享。
 //!
 //! 不把 Key 停用：停用会摘掉身份组，人就进不了那个频道，发不了图，也解不开。
 //! 数据库暂时读失败时放行，避免一次存储抖动把所有出图都拦住。
@@ -9,12 +9,38 @@ use crate::state::AppState;
 use gate_core::clock::Clock;
 use gate_core::reasons;
 use gate_core::share_detection::Report;
+use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 
 pub const ENABLED_KEY: &str = "share_lock_enabled";
+pub const MODE_KEY: &str = "share_lock_mode";
+
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum Mode {
+    #[default]
+    Quota,
+    Daily,
+}
+impl Mode {
+    pub fn from_setting(raw: Option<&str>) -> Self {
+        if raw == Some("daily") {
+            Self::Daily
+        } else {
+            Self::Quota
+        }
+    }
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Quota => "quota",
+            Self::Daily => "daily",
+        }
+    }
+}
 
 pub async fn detection(state: &AppState) -> Result<Value, crate::error::InternalError> {
     let enabled = state.db.get_setting(ENABLED_KEY).await?.as_deref() != Some("0");
+    let mode = Mode::from_setting(state.db.get_setting(MODE_KEY).await?.as_deref());
     let raw = state
         .db
         .get_setting(gate_core::bot_config::STATUS_KEY)
@@ -34,6 +60,7 @@ pub async fn detection(state: &AppState) -> Result<Value, crate::error::Internal
     let enforcing = enabled && report.enforceable(seen_at, now, day_start);
     Ok(json!({
         "enabled": enabled,
+        "mode": mode,
         "enforcing": enforcing,
         "healthy": report.healthy(seen_at, now, day_start),
         "bot_online": now - seen_at < gate_core::bot_config::ONLINE_WINDOW,
@@ -48,6 +75,15 @@ pub const FORUM_CHANNEL_ID: &str = "1558068804934705222";
 const START_DAY: &str = "2026-11-13";
 
 pub const MESSAGE: &str = "昨天的 V4.5 或 V5 额度已经用完。请到 Discord「存图备份专用」发一张图（新开一帖，或在已有帖子里再补一张），发成功后会自动恢复出图。";
+
+pub const DAILY_MESSAGE: &str = "今天还没有分享图片。请到 Discord「存图备份专用」发一张图（新开一帖，或在已有帖子里再补一张），确认后自动恢复生图。每天北京时间 07:00 重置。";
+
+fn message(mode: Mode) -> &'static str {
+    match mode {
+        Mode::Quota => MESSAGE,
+        Mode::Daily => DAILY_MESSAGE,
+    }
+}
 
 pub fn channel_url() -> String {
     format!("https://discord.com/channels/1549726297876594720/{FORUM_CHANNEL_ID}")
@@ -79,45 +115,69 @@ pub fn quota_filled(u: DayUsage) -> bool {
 
 /// `exempt`：站长号或已开通的赞助席。`shared_today`：本重置日已经发过图。
 pub fn locked(now: f64, yesterday: DayUsage, shared_today: bool, exempt: bool) -> bool {
-    now >= starts_at() && !exempt && !shared_today && quota_filled(yesterday)
+    locked_for_mode(Mode::Quota, now, yesterday, shared_today, exempt)
 }
 
-/// 这把 Key 此刻要不要被分享闸拦住。读库失败按没有拦住。
-pub async fn is_locked(state: &AppState, key: &Key) -> bool {
+pub fn locked_for_mode(
+    mode: Mode,
+    now: f64,
+    yesterday: DayUsage,
+    shared_today: bool,
+    exempt: bool,
+) -> bool {
+    now >= starts_at()
+        && !exempt
+        && !shared_today
+        && (mode == Mode::Daily || quota_filled(yesterday))
+}
+
+/// Requests, landing and assistant context share the same restriction decision.
+pub async fn restriction(state: &AppState, key: &Key) -> Option<&'static str> {
     match lookup(state, key).await {
-        Ok(v) => v,
+        Ok(mode) => mode.map(message),
         Err(e) => {
             tracing::warn!(target: "share_lock", "读取分享闸失败，本轮放行：{}", e.0);
-            false
+            None
         }
     }
 }
 
+pub async fn is_locked(state: &AppState, key: &Key) -> bool {
+    restriction(state, key).await.is_some()
+}
+
 pub async fn enforce(state: &AppState, key: &Key) -> Result<(), ApiError> {
-    if is_locked(state, key).await {
-        return Err(GateError::with_code(403, client_message(), reasons::SHARE_LOCK).into());
+    if let Some(message) = restriction(state, key).await {
+        return Err(GateError::with_code(
+            403,
+            format!("{message} {}", channel_url()),
+            reasons::SHARE_LOCK,
+        )
+        .into());
     }
     Ok(())
 }
 
-async fn lookup(state: &AppState, key: &Key) -> Result<bool, crate::error::InternalError> {
+async fn lookup(state: &AppState, key: &Key) -> Result<Option<Mode>, crate::error::InternalError> {
     let now = state.now();
     if now < starts_at() || key.owner_image_full || key.patron {
-        return Ok(false);
+        return Ok(None);
     }
-    if !detection(state).await?["enforcing"]
-        .as_bool()
-        .unwrap_or(false)
-    {
-        return Ok(false);
+    let detection = detection(state).await?;
+    if !detection["enforcing"].as_bool().unwrap_or(false) {
+        return Ok(None);
     }
     let discord_id = key.subject();
     if discord_id.is_empty() {
-        return Ok(false);
+        return Ok(None);
     }
     let day_start = state.clock.day_start(now);
     if state.db.has_share_since(discord_id, day_start).await? {
-        return Ok(false);
+        return Ok(None);
+    }
+    let mode = Mode::from_setting(detection["mode"].as_str());
+    if mode == Mode::Daily {
+        return Ok(Some(mode));
     }
     let yesterday = state.clock.day(day_start - 1.0);
     let counter = state.db.get_counter(key.id(), &yesterday).await?;
@@ -126,7 +186,8 @@ async fn lookup(state: &AppState, key: &Key) -> Result<bool, crate::error::Inter
         v5: counter.v5,
         daily_images: key.daily_images(),
         daily_v5: key.daily_v5(),
-    }))
+    })
+    .then_some(mode))
 }
 
 #[cfg(test)]

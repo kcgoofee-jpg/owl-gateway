@@ -287,3 +287,68 @@ async fn rate_limited_share_delivery_is_retryable() {
     assert_eq!(app.share_detection_report().pending, 0);
     assert!(app.catch_up_forum().await);
 }
+
+#[tokio::test]
+async fn joining_other_new_threads_preserves_chat_access_without_counting_them_as_shares() {
+    let (mock, app, _, _) = setup().await;
+    gate_discord::naimei::dispatch(
+        &app,
+        &json!({"op":0,"s":1,"t":"THREAD_CREATE",
+        "d":{"id":THREAD,"parent_id":"900000000000000090"}})
+        .to_string(),
+    );
+    tokio::time::timeout(std::time::Duration::from_secs(1), async {
+        loop {
+            if mock
+                .calls
+                .lock()
+                .unwrap()
+                .iter()
+                .any(|r| r["path"].as_str().unwrap().ends_with("/thread-members/@me"))
+            {
+                break;
+            }
+            tokio::time::sleep(std::time::Duration::from_millis(2)).await;
+        }
+    })
+    .await
+    .unwrap();
+    assert_eq!(shares(&mock), 0);
+}
+
+#[tokio::test]
+async fn new_post_starter_is_recorded_before_thread_join_can_delay_it() {
+    let (mock, app, _, _) = setup().await;
+    gate_discord::naimei::dispatch(
+        &app,
+        &json!({"op":0,"s":1,"t":"THREAD_CREATE",
+        "d":{"id":THREAD,"parent_id":FORUM_CHANNEL_ID,"message":image(NOW-1,THREAD)}})
+        .to_string(),
+    );
+    tokio::time::timeout(std::time::Duration::from_secs(1), async {
+        loop {
+            if mock
+                .calls
+                .lock()
+                .unwrap()
+                .iter()
+                .any(|r| r["path"].as_str().unwrap().ends_with("/thread-members/@me"))
+            {
+                break;
+            }
+            tokio::time::sleep(std::time::Duration::from_millis(2)).await;
+        }
+    })
+    .await
+    .unwrap();
+    let calls = mock.calls.lock().unwrap();
+    let share = calls
+        .iter()
+        .position(|r| r["path"] == "/self-register/bot/share")
+        .unwrap();
+    let join = calls
+        .iter()
+        .position(|r| r["path"].as_str().unwrap().ends_with("/thread-members/@me"))
+        .unwrap();
+    assert!(share < join);
+}

@@ -179,15 +179,14 @@ pub(super) async fn members_view(state: &AppState, filter_raw: &str) -> Result<V
     let today_counters = st.db.counter_map(&today).await?;
     // Batch the same policy inputs used by the request gate; no per-member database reads.
     let share_inputs = async {
-        if !crate::share_lock::detection(&st).await?["enforcing"]
-            .as_bool()
-            .unwrap_or(false)
-        {
+        let detection = crate::share_lock::detection(&st).await?;
+        if !detection["enforcing"].as_bool().unwrap_or(false) {
             return Ok::<_, crate::error::InternalError>(None);
         }
         Ok(Some((
             st.db.counter_map(&st.clock.day(day_start - 1.0)).await?,
             st.db.sharing_members_since(day_start).await?,
+            crate::share_lock::Mode::from_setting(detection["mode"].as_str()),
         )))
     }
     .await
@@ -206,28 +205,31 @@ pub(super) async fn members_view(state: &AppState, filter_raw: &str) -> Result<V
         let reg_row = reg.get(&id);
         let _ms = milestones.get(&id);
         let policy = policies.for_subject(row.get("discord_id").and_then(Value::as_str))?;
-        let share_locked = share_inputs.as_ref().is_some_and(|(counters, shared)| {
-            let Some(subject) = row
-                .get("discord_id")
-                .and_then(Value::as_str)
-                .filter(|s| !s.is_empty())
-            else {
-                return false;
-            };
-            let used = counters.get(&id).cloned().unwrap_or_default();
-            crate::share_lock::locked(
-                now,
-                crate::share_lock::DayUsage {
-                    legacy: used.legacy_free_images,
-                    v5: used.v5,
-                    daily_images: i64::from(policy.effective.daily_images),
-                    daily_v5: i64::from(policy.effective.daily_v5),
-                },
-                shared.contains(subject),
-                policy.owner_image.as_ref().is_some_and(|p| p.enabled)
-                    || policy.patron.as_ref().is_some_and(|p| p.enabled),
-            )
-        });
+        let share_locked = share_inputs
+            .as_ref()
+            .is_some_and(|(counters, shared, mode)| {
+                let Some(subject) = row
+                    .get("discord_id")
+                    .and_then(Value::as_str)
+                    .filter(|s| !s.is_empty())
+                else {
+                    return false;
+                };
+                let used = counters.get(&id).cloned().unwrap_or_default();
+                crate::share_lock::locked_for_mode(
+                    *mode,
+                    now,
+                    crate::share_lock::DayUsage {
+                        legacy: used.legacy_free_images,
+                        v5: used.v5,
+                        daily_images: i64::from(policy.effective.daily_images),
+                        daily_v5: i64::from(policy.effective.daily_v5),
+                    },
+                    shared.contains(subject),
+                    policy.owner_image.as_ref().is_some_and(|p| p.enabled)
+                        || policy.patron.as_ref().is_some_and(|p| p.enabled),
+                )
+            });
         let mut m = Obj::new();
         let mut put = |k: &str, v: Value| {
             m.insert(k.to_string(), v);

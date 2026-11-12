@@ -7,6 +7,7 @@ import { Kv, SwitchRow } from "./system/forms";
 
 export type ShareLockStatus = {
   enabled: boolean;
+  mode: "quota" | "daily";
   enforcing: boolean;
   healthy: boolean;
   bot_online: boolean;
@@ -25,33 +26,49 @@ export function ShareLockCard() {
   const query = useAdmin<ShareLockStatus>("/admin/api/ops/share-lock");
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
-  if (!query.data)
-    return <CardPending title="用满额度后需分享" loading={query.loading} error={query.error} />;
+  if (!query.data) return <CardPending title="分享要求" loading={query.loading} error={query.error} />;
   const data = query.data;
-  const change = async (enabled: boolean) => {
+  const change = async (changes: { enabled: boolean } | { mode: "quota" | "daily" }) => {
     setSaving(true);
     setError("");
-    const result = await act("PUT", "/admin/api/ops/share-lock", { enabled }, "分享限制已保存");
+    const result = await act("PUT", "/admin/api/ops/share-lock", changes, "分享限制已保存");
     if (result === null) setError("保存失败，请重试；开关仍按已保存的设置执行。");
     setSaving(false);
   };
   return (
-    <Card title="用满额度后需分享">
+    <Card title="分享要求">
       <div class="stack-sm">
         <SwitchRow
           title="开启分享限制"
           checked={data.enabled}
           disabled={saving}
-          onChange={(v) => void change(v)}
+          onChange={(v) => void change({ enabled: v })}
         />
+        <div class="field">
+          <label class="field__label" for="share-lock-mode">
+            执行档位
+          </label>
+          <select
+            id="share-lock-mode"
+            class="select"
+            value={data.mode}
+            disabled={saving}
+            onChange={(e) => void change({ mode: e.currentTarget.value === "daily" ? "daily" : "quota" })}
+          >
+            <option value="quota">昨日用满额度后需分享</option>
+            <option value="daily">所有非豁免成员每天需分享</option>
+          </select>
+        </div>
         {error && (
           <p class="field__error" role="alert">
             {error}
           </p>
         )}
         <p>
-          每天北京时间 07:00 重置。昨日用满 V4.5 或 V5
-          个人额度后，今天需在指定频道发一张图才能继续。新帖和已有帖子补图都算，站长和赞助席豁免。
+          {data.mode === "daily"
+            ? "每天北京时间 07:00 重置。除站长和已开通赞助席的成员外，所有成员今天都需先分享一张图才能生图，不要求昨天用满额度。"
+            : "每天北京时间 07:00 重置。昨日用满 V4.5 或 V5 个人额度后，今天需在指定频道发一张图才能继续。站长和赞助席豁免。"}
+          新帖和已有帖子补图都算。
         </p>
         <p>只暂停生图，保留 Key、登录和频道身份组；图片被确认后自动恢复。</p>
         <p>
@@ -70,7 +87,7 @@ export function ShareLockCard() {
               "最近完整核对",
               data.detection.last_complete_at ? fullTime(data.detection.last_complete_at) : "尚未完成",
             ],
-            ["待重试记录", data.detection.pending],
+            ["待确认 / 重试", data.detection.pending],
             ["最早异常", data.detection.oldest_failure_at ? fullTime(data.detection.oldest_failure_at) : "—"],
           ]}
         />

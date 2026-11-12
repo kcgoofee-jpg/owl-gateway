@@ -8,6 +8,7 @@ vi.mock("../data", () => ({ act: vi.fn(), useAdmin: vi.fn() }));
 let root: HTMLDivElement;
 const status = (): ShareLockStatus => ({
   enabled: true,
+  mode: "quota",
   enforcing: true,
   healthy: true,
   bot_online: true,
@@ -71,4 +72,17 @@ it("distinguishes an online bot from a broken detector and explains fail-open", 
   expect(root.textContent).toContain("分享检测待恢复");
   expect(root.textContent).toContain("现暂时放行");
   expect(root.textContent).toContain("读取历史权限不足");
+});
+
+it("saves the independent daily mode and explains that quota exhaustion is not required", async () => {
+  await show({ ...status(), mode: "daily" });
+  expect(root.textContent).toContain("所有成员今天都需先分享一张图");
+  vi.mocked(act).mockResolvedValue({ mode: "quota" });
+  await renderAct(async () => {
+    const select = root.querySelector<HTMLSelectElement>("#share-lock-mode");
+    if (!select) throw new Error("mode selector missing");
+    select.value = "quota";
+    select.dispatchEvent(new Event("change", { bubbles: true }));
+  });
+  expect(act).toHaveBeenCalledWith("PUT", "/admin/api/ops/share-lock", { mode: "quota" }, "分享限制已保存");
 });

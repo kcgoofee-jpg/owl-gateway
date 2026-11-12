@@ -124,6 +124,7 @@ pub struct Naimei {
     gateway_connected: AtomicBool,
     gateway_seen_at: AtomicU64,
     ready_at: AtomicU64,
+    share_delivery_slots: tokio::sync::Semaphore,
 }
 
 fn unix_now() -> f64 {
@@ -159,6 +160,7 @@ impl Naimei {
             gateway_connected: AtomicBool::new(false),
             gateway_seen_at: AtomicU64::new(0),
             ready_at: AtomicU64::new(0),
+            share_delivery_slots: tokio::sync::Semaphore::new(16),
         })
     }
 
