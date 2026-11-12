@@ -138,9 +138,20 @@ async fn uncertain_site_paid_dispatch_survives_restart_and_blocks_the_next_image
     assert_ne!(a, b.unwrap());
     let (first, second) = if a { ("a", "b") } else { ("b", "a") };
     assert!(db.reserve_site_paid(first, "t", 8.0, 1.0).await.unwrap());
-    db.dispatch_request_settlement(first, "correlation", "day", "month", false, 0.0, 1, 0, 2.0)
-        .await
-        .unwrap();
+    db.dispatch_request_settlement(
+        first,
+        "correlation",
+        "00deadbeef",
+        "day",
+        "month",
+        false,
+        0.0,
+        1,
+        0,
+        2.0,
+    )
+    .await
+    .unwrap();
     drop(db);
     let db = Db::open(dir.path().join("t.db")).unwrap();
     db.close_request_reservation(first, 3.0).await.unwrap();

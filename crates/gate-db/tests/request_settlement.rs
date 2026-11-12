@@ -43,6 +43,7 @@ async fn identical_short_rid_links_only_to_its_internal_request_and_owner() {
         db.dispatch_request_settlement(
             id,
             "ABC123",
+            "11deadbeef",
             "2026-10-25",
             "2026-10",
             false,
@@ -108,6 +109,7 @@ async fn recovery_commits_saved_success_once_and_retains_unknown_budget() {
         db.dispatch_request_settlement(
             "known",
             "ABC123",
+            "11deadbeef",
             "2026-10-26",
             "2026-10",
             false,
@@ -158,6 +160,7 @@ async fn recovery_commits_saved_success_once_and_retains_unknown_budget() {
     db.dispatch_request_settlement(
         "fault",
         "ABC123",
+        "11deadbeef",
         "2026-10-26",
         "2026-10",
         false,
@@ -223,6 +226,7 @@ async fn recovery_commits_saved_success_once_and_retains_unknown_budget() {
     db.dispatch_request_settlement(
         "unknown",
         "ABC123",
+        "11deadbeef",
         "2026-10-26",
         "2026-10",
         false,
@@ -400,6 +404,7 @@ async fn unknown_failure_usage_log_is_linked_by_internal_id_and_exposes_remainin
     db.dispatch_request_settlement(
         "internal-unknown",
         "ABC123",
+        "11deadbeef",
         "2026-10-25",
         "2026-10",
         false,

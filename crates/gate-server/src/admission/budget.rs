@@ -126,6 +126,7 @@ impl Reserved {
     pub async fn prepare_dispatch(
         &self,
         correlation_id: &str,
+        rid: &str,
     ) -> Result<(String, String), ApiError> {
         let row = self.state.db.get_key(self.key.id()).await?.ok_or_else(|| {
             GateError::with_code(403, "这把 Key 已失效，未扣费。", reasons::KEY_DISABLED)
@@ -195,6 +196,7 @@ impl Reserved {
             .dispatch_request_settlement(
                 &self.request_id,
                 correlation_id,
+                rid,
                 &day,
                 &month,
                 r.is_vibe,

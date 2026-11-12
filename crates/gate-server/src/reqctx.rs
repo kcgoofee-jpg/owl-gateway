@@ -32,6 +32,7 @@ impl std::fmt::Debug for ReqCtx {
 
 struct Inner {
     internal_id: String,
+    correlation_id: String,
     settlement_reserved: bool,
     settlement_day: Option<String>,
     execution_unknown: bool,
@@ -83,6 +84,7 @@ impl ReqCtx {
         Self(
             Arc::new(Mutex::new(Inner {
                 internal_id: hex::encode(rand::random::<[u8; 16]>()),
+                correlation_id: new_correlation_id(),
                 settlement_reserved: false,
                 settlement_day: None,
                 execution_unknown: false,
@@ -196,9 +198,9 @@ impl ReqCtx {
         self.with(|i| i.internal_id.clone())
     }
 
-    /// Same as [`rid`][Self::rid]; sent to NovelAI as `x-correlation-id`.
+    /// Six-character NovelAI support code sent as `x-correlation-id`. Separate from the public rid.
     pub fn correlation_id(&self) -> String {
-        self.rid()
+        self.with(|i| i.correlation_id.clone())
     }
 
     fn stamp_account(&self, code: u8) {
@@ -352,6 +354,14 @@ pub fn current_execution_unknown() -> bool {
     current().is_some_and(|c| c.execution_unknown())
 }
 
+fn new_correlation_id() -> String {
+    const ALPHANUM: &[u8; 62] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789";
+    rand::random::<[u8; 6]>()
+        .into_iter()
+        .map(|b| ALPHANUM[(b as usize) % ALPHANUM.len()] as char)
+        .collect()
+}
+
 /// 编号：`AARRRRRRRR`。AA 是账号（`00` 还没派到号，`1N` 官方第 N 号，`2N` 拼车第 N 号），后 8 位随机。
 fn new_rid() -> String {
     format!("00{:08x}", rand::random::<u32>())
@@ -375,7 +385,7 @@ impl gate_upstream::client::Observer for ReqCtx {
         self.stamp_account(token.account_code());
     }
     fn public_id(&self) -> String {
-        self.rid()
+        self.correlation_id()
     }
     fn queued(&self, _token_id: &str, wait: f64) {
         let hook = self.with(|i| i.on_queued.clone());
@@ -437,12 +447,14 @@ mod tests {
         assert_eq!(ctx.rid().len(), 10);
         assert!(ctx.rid().starts_with("00"));
         assert!(ctx.rid().bytes().all(|b| b.is_ascii_hexdigit()));
-        assert_eq!(ctx.correlation_id(), ctx.rid());
+        let correlation = ctx.correlation_id();
+        assert_eq!(correlation.len(), 6);
+        assert!(correlation.bytes().all(|b| b.is_ascii_alphanumeric()));
+        assert_ne!(correlation, ctx.rid());
         let unique = ctx.rid()[2..].to_string();
         ctx.stamp_account(21);
         assert_eq!(ctx.rid(), format!("21{unique}"));
-        assert_eq!(ctx.correlation_id(), ctx.rid());
+        assert_eq!(ctx.correlation_id(), correlation);
         assert_eq!(ctx.internal_id().len(), 32);
-        assert_ne!(ctx.internal_id(), ctx.rid());
     }
 }

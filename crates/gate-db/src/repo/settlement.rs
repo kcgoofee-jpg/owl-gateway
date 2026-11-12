@@ -49,6 +49,7 @@ impl Db {
         &self,
         request_id: &str,
         correlation_id: &str,
+        rid: &str,
         day: &str,
         month: &str,
         is_vibe: bool,
@@ -57,14 +58,15 @@ impl Db {
         legacy: i64,
         now: f64,
     ) -> Result<bool> {
-        let (request_id, correlation_id, day, month) = (
+        let (request_id, correlation_id, rid, day, month) = (
             request_id.to_owned(),
             correlation_id.to_owned(),
+            rid.to_owned(),
             day.to_owned(),
             month.to_owned(),
         );
         self.write(move |tx| Ok(tx.execute("UPDATE request_settlements SET status='dispatched',correlation_id=?,rid=?,day=?,month=?,anlas=?,v5=?,legacy=?,is_vibe=?,dispatched_at=CASE WHEN dispatched_at IS NULL THEN ? ELSE dispatched_at END,updated_at=? WHERE request_id=? AND status IN ('reserved','dispatched')",
-            params![correlation_id, correlation_id, day, month, anlas, v5, legacy, is_vibe, now, now, request_id])? == 1)).await
+            params![correlation_id, rid, day, month, anlas, v5, legacy, is_vibe, now, now, request_id])? == 1)).await
     }
 
     #[allow(clippy::too_many_arguments)]

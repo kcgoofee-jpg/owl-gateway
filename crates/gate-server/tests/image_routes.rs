@@ -66,9 +66,7 @@ fn correlation_of(r: &gate_testkit::Recorded) -> String {
 }
 
 fn valid_correlation_id(id: &str) -> bool {
-    id.len() == 10
-        && id.bytes().all(|b| b.is_ascii_hexdigit())
-        && matches!(id.as_bytes().first().copied(), Some(b'0' | b'1' | b'2'))
+    id.len() == 6 && id.bytes().all(|b| b.is_ascii_alphanumeric())
 }
 
 /// 成员自己的 Key（id=1）累计花掉的 Anlas。
@@ -131,12 +129,13 @@ async fn generate_image_ok_records_usage() {
         .unwrap();
     assert_eq!(request_id.len(), 32);
     assert_eq!(bound_rid, headers["x-request-id"]);
-    assert_eq!(bound_correlation, correlation_id);
-    assert_eq!(correlation_id, headers["x-request-id"]);
+    assert_eq!(bound_rid.len(), 10);
     assert!(
-        correlation_id.starts_with("11"),
-        "one official token is account 11, got {correlation_id}"
+        bound_rid.starts_with("11"),
+        "one official token is account 11, got {bound_rid}"
     );
+    assert_eq!(bound_correlation, correlation_id);
+    assert_ne!(correlation_id, bound_rid);
     let owned = e.state.db.member_logs(1, 0.0, 0, "", 10).await.unwrap();
     assert_eq!(owned[0]["correlation_id"], correlation_id);
     assert!(

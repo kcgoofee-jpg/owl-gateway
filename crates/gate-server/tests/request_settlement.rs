@@ -34,6 +34,7 @@ async fn restart_commits_result_saved_without_replaying_upstream_post() {
         .dispatch_request_settlement(
             "saved-only",
             "ABC123",
+            "11deadbeef",
             &e.state.day(),
             &e.state.month(),
             false,

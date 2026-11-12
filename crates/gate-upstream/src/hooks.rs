@@ -72,7 +72,7 @@ pub trait Observer: Send + Sync {
     fn picked_token(&self, token: &Token) {
         self.picked(&token.token_id);
     }
-    /// 发给上游的 `x-correlation-id`，与成员看到的编号相同。选号之后会带上账号位。
+    /// 发给上游的 `x-correlation-id`（NovelAI 支持用的 6 位码）。成员编号是另一串。
     fn public_id(&self) -> String {
         String::new()
     }

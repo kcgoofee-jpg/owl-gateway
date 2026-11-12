@@ -207,7 +207,10 @@ pub(super) fn on_dispatch(
                     .into(),
                 ));
             }
-            match reserved.prepare_dispatch(&c.correlation_id()).await {
+            match reserved
+                .prepare_dispatch(&c.correlation_id(), &c.rid())
+                .await
+            {
                 Ok((day, _month)) => {
                     c.set_settlement_day(day);
                     c.dispatch_persisted();
