@@ -914,7 +914,7 @@ impl Naimei {
         let Some(at) = share::snowflake_unix(&m.id) else {
             return;
         };
-        let _ = self
+        if self
             .bridge
             .bot(
                 "/share",
@@ -927,7 +927,11 @@ impl Naimei {
                     "at": at,
                 }),
             )
-            .await;
+            .await
+            .is_none()
+        {
+            warn!("[bot] 存图记录没有写上");
+        }
     }
 
     async fn share_parent(&self, channel_id: &str) -> Option<String> {

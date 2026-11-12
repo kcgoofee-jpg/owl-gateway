@@ -44,10 +44,10 @@ fn embed_is_image(v: &serde_json::Value) -> bool {
         })
 }
 
-/// Discord 雪花 id 里的创建时间（Unix 秒）。
+/// Discord 雪花 id 里的创建时间（Unix 秒）。纪元是 2015-01-01T00:00:00Z。
 pub fn snowflake_unix(id: &str) -> Option<f64> {
     let id: u64 = id.parse().ok()?;
-    let ms = (id >> 22) + 1_420_074_000_000;
+    let ms = (id >> 22) + 1_420_070_400_000;
     Some(ms as f64 / 1000.0)
 }
 
@@ -100,9 +100,10 @@ mod tests {
     }
 
     #[test]
-    fn snowflake_time_is_stable() {
-        let at = snowflake_unix("1866540800000000000").unwrap();
-        assert!(at > 1_700_000_000.0);
+    fn snowflake_time_uses_the_discord_epoch() {
+        // 早一小时会让刚发出的图被网关当成「未来时间」丢掉。
+        let at = snowflake_unix("175928847299117063").unwrap();
+        assert!((at - 1_462_015_105.796).abs() < 0.001);
         assert!(snowflake_unix("nope").is_none());
     }
 }
