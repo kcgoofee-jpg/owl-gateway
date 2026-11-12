@@ -155,11 +155,11 @@ pub(super) fn detail160(status: u16, message: &str) -> String {
     take_chars(&format!("{status} {message}"), 160).to_string()
 }
 
-/// 这张图走不走短作业车道（V5 优先）：只看请求体里的模型族，加上 `guard_v5_priority` 开关。
-/// 判定全在服务端，客户端的参数 / 请求头改不了；关掉开关就回到全部按先来后到。
-/// 站长号 / 赞助席插队不走这条，见 `Key::queue_jump` / `Arrival::jump_lane`。
-pub(super) fn v5_lane(state: &AppState, model: &str) -> bool {
-    gate_core::policy::is_v5_model(model) && state.guard.with(|g| g.v5_priority())
+/// 这张图的排队车道。插队来自成员（站长号 / 赞助席），短作业来自模型族 + `guard_v5_priority`。
+/// 判定全在服务端，客户端的参数 / 请求头改不了；关掉开关后非插队请求按先来后到。
+pub(super) fn lane(state: &AppState, key: &crate::key::Key, model: &str) -> gate_core::lane::Lane {
+    let fast = gate_core::policy::is_v5_model(model) && state.guard.with(|g| g.v5_priority());
+    gate_core::lane::Lane::of(key.queue_jump, fast)
 }
 
 /// 上游 429：暂停全站图片请求（两种响应都在收尾时记日志，回调只更新冷却）。
@@ -429,7 +429,7 @@ async fn generate(state: AppState, req: Request, streaming: bool) -> ApiResult {
         .reason("client_disconnected");
     let (s, c) = (state.clone(), ctx.clone());
     shielded(&state, &ctx, cancelled, async move {
-        let admission = image_admission(&s, &c, &key, v5_lane(&s, &prep.model)).await?;
+        let admission = image_admission(&s, &c, &key, lane(&s, &key, &prep.model)).await?;
         let slots = acquire_slots(&s);
         // 排队 / 预算等待之后再查一次冷却和额度
         check_image_cooldown(&s)?;

@@ -258,12 +258,16 @@ fn replay(c: &Case, tally: &mut Tally) -> Vec<Value> {
                 let accounts = step["accounts"].as_i64().unwrap().max(1) as usize;
                 let cap = g.queue_cap(&vec![None; accounts]);
                 // 用例可以带 "fast": true 走短作业车道（默认普通）
-                let fast = step.get("fast").and_then(|v| v.as_bool()).unwrap_or(false);
+                let lane = if step.get("fast").and_then(|v| v.as_bool()).unwrap_or(false) {
+                    gate_core::lane::Lane::Fast
+                } else {
+                    gate_core::lane::Lane::Normal
+                };
                 Ok(pair(g.admit_image(
                     step["key"].as_i64().unwrap(),
                     cap,
                     now,
-                    fast,
+                    lane,
                 )))
             }
             "mark_running" => {

@@ -8,6 +8,7 @@ use gate_testkit::{MockUpstream, Reply};
 use gate_upstream::client::{
     Callbacks, Config, Hooks, NaiClient, NoObserver, Observer, RequestOpts,
 };
+use gate_upstream::pace::Lane;
 use serde_json::json;
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
@@ -446,8 +447,7 @@ async fn token_disabled_during_slot_wait_is_not_used_for_nonstream_or_stream_pos
                 1,
                 false,
                 true,
-                false,
-                false,
+                Lane::Normal,
                 10.0,
                 &Callbacks::default(),
                 None,
@@ -722,8 +722,7 @@ async fn image_stream_settles_completed_images() {
             2,
             false,
             false,
-            false,
-            false,
+            Lane::Normal,
             90.0,
             &Callbacks::default(),
             None,
@@ -887,8 +886,7 @@ async fn compressed_msgpack_stream_is_complete() {
                 2,
                 false,
                 false,
-                false,
-                false,
+                Lane::Normal,
                 90.0,
                 &Callbacks::default(),
                 None,
@@ -955,8 +953,7 @@ async fn compressed_msgpack_stream_is_not_buffered() {
                 1,
                 false,
                 false,
-                false,
-                false,
+                Lane::Normal,
                 90.0,
                 &Callbacks::default(),
                 None,

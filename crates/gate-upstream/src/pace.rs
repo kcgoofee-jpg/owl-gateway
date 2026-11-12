@@ -13,6 +13,8 @@
 //!   不是限流——不冷却、不算 429；在同一个账号上等 [`lock_wait`] 秒再试，最多 [`LOCK_RETRIES`] 次
 //!   （不超过排队超时）。锁在响应返回后稍晚才释放，所以出完后歇的秒数下限是 1。
 
+pub use gate_core::lane::Lane;
+
 /// 上游并发锁后第一次重试前等几秒（之后每次翻倍：2、4、8）。
 pub const LOCK_RETRY_BASE: f64 = 2.0;
 /// 上游并发锁最多重试几次（还受排队超时限制）。
@@ -35,12 +37,8 @@ pub struct Arrival {
     /// 半个超时只在车道内抢先，是因为拥塞时几乎每张普通请求都过 45 秒，用两条不同的阈值才能既让 V5 真的先出、
     /// 又不把普通请求饿死。硬老化不能压过插队：赞助 / 站长号始终排在等待中的生图前面。
     pub hard_at: f64,
-    /// 短作业车道：V5（`guard_v5_priority`）。实测 V5 上游只占 4 秒左右、且没有长尾，让它先于同条件的普通请求开始。
-    /// 客户端指定无效。站长号 / 赞助席不走这条，见 [`Self::jump_lane`]。
-    pub fast_lane: bool,
-    /// 插队车道：站长号（`owner_image_full`）和赞助席（`queue_jump`）。同一个账号空出来时排在所有等待中的
-    /// V5 / V4.5 前面；不抢占已经发往上游的那张。多名插队按先来后到。
-    pub jump_lane: bool,
+    /// 插队 / V5 / 普通。客户端指定无效；见 [`Lane`]。
+    pub lane: Lane,
 }
 
 impl Arrival {
@@ -49,20 +47,13 @@ impl Arrival {
             since: now,
             patient_at: now + queue_timeout.max(0.0) / 2.0,
             hard_at: now + queue_timeout.max(0.0),
-            fast_lane: false,
-            jump_lane: false,
+            lane: Lane::Normal,
         }
     }
 
-    /// 标记成短作业车道（[`Self::fast_lane`]）。
-    pub fn fast_lane(mut self, fast: bool) -> Self {
-        self.fast_lane = fast;
-        self
-    }
-
-    /// 标记成插队车道（[`Self::jump_lane`]）。
-    pub fn jump_lane(mut self, jump: bool) -> Self {
-        self.jump_lane = jump;
+    /// 指定车道（[`Lane`]）。
+    pub fn lane(mut self, lane: Lane) -> Self {
+        self.lane = lane;
         self
     }
 }
@@ -83,13 +74,7 @@ pub fn fair_cmp(a: (&Arrival, u64), b: (&Arrival, u64), now: f64) -> std::cmp::O
     let key = |(x, id): (&Arrival, u64)| {
         let aged = now >= x.patient_at;
         let hard = now >= x.hard_at;
-        let lane = if x.jump_lane {
-            0u8
-        } else if x.fast_lane || hard {
-            1
-        } else {
-            2
-        };
+        let lane = x.lane.effective(hard) as u8;
         (lane, !aged, x.since, id)
     };
     let (ka, kb) = (key(a), key(b));
@@ -175,7 +160,7 @@ mod tests {
         use std::cmp::Ordering::*;
         // 普通先到、V5 后到：V5 先上
         let plain = Arrival::new(0.0, 90.0);
-        let v5 = Arrival::new(5.0, 90.0).fast_lane(true);
+        let v5 = Arrival::new(5.0, 90.0).lane(Lane::Fast);
         assert_eq!(fair_cmp((&v5, 2), (&plain, 1), 10.0), Less);
         // 普通等过 45 秒（半个超时）：只在普通车道内抢先，压不过车道
         assert_eq!(fair_cmp((&plain, 1), (&v5, 2), 45.0), Greater);
@@ -188,8 +173,8 @@ mod tests {
     #[test]
     fn fast_lane_keeps_the_arrival_order_inside_the_lane() {
         use std::cmp::Ordering::*;
-        let a = Arrival::new(0.0, 90.0).fast_lane(true);
-        let b = Arrival::new(1.0, 90.0).fast_lane(true);
+        let a = Arrival::new(0.0, 90.0).lane(Lane::Fast);
+        let b = Arrival::new(1.0, 90.0).lane(Lane::Fast);
         // 同车道：先来后到，车道不改变这一点
         assert_eq!(fair_cmp((&a, 1), (&b, 2), 10.0), Less);
         assert_eq!(fair_cmp((&b, 2), (&a, 1), 10.0), Greater);
@@ -199,16 +184,16 @@ mod tests {
     fn jump_lane_beats_v5_and_plain_even_after_hard_aging() {
         use std::cmp::Ordering::*;
         let plain = Arrival::new(0.0, 90.0);
-        let v5 = Arrival::new(1.0, 90.0).fast_lane(true);
-        let jump = Arrival::new(5.0, 90.0).jump_lane(true);
+        let v5 = Arrival::new(1.0, 90.0).lane(Lane::Fast);
+        let jump = Arrival::new(5.0, 90.0).lane(Lane::Jump);
         assert_eq!(fair_cmp((&jump, 3), (&v5, 2), 10.0), Less);
         assert_eq!(fair_cmp((&jump, 3), (&plain, 1), 10.0), Less);
         // 等满 90 秒的 V4.5 / V5 仍压不过刚来的插队
         assert_eq!(fair_cmp((&plain, 1), (&jump, 3), 91.0), Greater);
         assert_eq!(fair_cmp((&v5, 2), (&jump, 3), 92.0), Greater);
         // 两名插队：先来后到
-        let first = Arrival::new(0.0, 90.0).jump_lane(true);
-        let second = Arrival::new(1.0, 90.0).jump_lane(true);
+        let first = Arrival::new(0.0, 90.0).lane(Lane::Jump);
+        let second = Arrival::new(1.0, 90.0).lane(Lane::Jump);
         assert_eq!(fair_cmp((&first, 1), (&second, 2), 10.0), Less);
         assert_eq!(fair_cmp((&second, 2), (&first, 1), 10.0), Greater);
     }

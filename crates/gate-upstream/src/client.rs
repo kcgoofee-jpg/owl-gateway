@@ -8,6 +8,7 @@
 //! - `dispatch.rs`：一次请求的完整流程（`request` / `image_stream`）与取消安全的结算。
 
 use crate::http::Http;
+use crate::pace::Lane;
 use crate::pool::Pool;
 use crate::scheduler::Scheduler;
 use bytes::Bytes;
@@ -86,11 +87,10 @@ pub struct RequestOpts<'a> {
     pub requires_anlas: bool,
     pub v5_free: bool,
     pub image_count: usize,
+    /// 走图片账号这条路（出图 / 放大 / 标签补全）：要过账号保护和出图间隔。不是排队 [`Lane`]。
     pub image_lane: bool,
-    /// 短作业车道（V5）：同一个上游账号空出来时先于普通请求开始（见 `pace::Arrival::fast_lane`）。
-    pub v5_lane: bool,
-    /// 插队车道（站长号 / 赞助席）：同一个上游账号空出来时排在所有等待中的 V5 / V4.5 前面（见 `pace::Arrival::jump_lane`）。
-    pub jump_lane: bool,
+    /// 排队车道（插队 / V5 / 普通）。见 [`Lane`]。
+    pub lane: Lane,
     pub wait_for_image_slot: bool,
     pub max_response_bytes: Option<usize>,
     pub queue_timeout: f64,
@@ -118,8 +118,7 @@ impl<'a> RequestOpts<'a> {
             v5_free: false,
             image_count: 0,
             image_lane: false,
-            v5_lane: false,
-            jump_lane: false,
+            lane: Lane::Normal,
             wait_for_image_slot: true,
             max_response_bytes: None,
             queue_timeout: 90.0,

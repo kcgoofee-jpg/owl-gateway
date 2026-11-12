@@ -19,6 +19,7 @@
 //!   （`upstream_token_counters` 表的 `images`，没有记录是 0）：服务层取出 `used` 传进来。
 
 use crate::clock::Clock;
+use crate::lane::Lane;
 use crate::primitives;
 use crate::reasons::{self, Reason};
 use crate::validation::ValidationError;
@@ -96,7 +97,7 @@ pub const FIELDS: [Field; 6] = [
     ),
     // 短作业车道（2026-11-07）：V5 实测只占上游 4 秒左右且没有长尾，让它先开始能把
     // 自己的等待从 ~30 秒压到 ~15 秒，普通请求只多等 v5 那点忙时（有 1/(1-ρ_v5) 的硬上界）。
-    // 等满排队超时一半的老化仍然压过车道，所以不会饿死普通请求。
+    // 等满整个排队超时的老化才压过 V5 车道（不能压过插队），所以不会饿死普通请求。
     field(
         "v5_priority",
         1,
@@ -130,10 +131,8 @@ pub struct Entry {
     pub running: bool,
     /// 上游客户端估计的开始时刻（墙钟）：已经排到某个账号上才有。首页位次：插队始终最前，其余有估计按它排，还没有时按车道再按入队先后（见 [`GuardCore::queue_view`]）。
     pub eta: Option<f64>,
-    /// 短作业车道（V5）：同一把 Key 里它可以越过还没开始的普通条目（见 [`GuardCore::key_turn`]）。
-    pub fast: bool,
-    /// 插队（站长号 / 赞助席）：同一把 Key 里它先于还没开始的 V5 / 普通条目；全站位次也排在所有等待中的生图前面。
-    pub jump: bool,
+    /// 排队车道（插队 / V5 / 普通）。同一把 Key 里谁先发、全站位次都按 [`Lane`] 排。
+    pub lane: Lane,
 }
 
 /// `save(body)` 的结果。
@@ -418,26 +417,26 @@ impl GuardCore {
 
     /// 每个成员最多同时排 `queue_per_member` 张（还没发往上游的；同一把 Key 仍然一次只生成 1 张，见 [`key_turn`](Self::key_turn)）；
     /// 全站排队总数有上限（`cap`，见 [`queue_cap`](Self::queue_cap)）。
-    /// `fast` = 短作业车道（V5），登记进条目里供 [`key_turn`](Self::key_turn) 用。
+    /// `lane` 登记进条目，供 [`key_turn`](Self::key_turn) 与首页位次用。
     /// 返回拒绝原因或 None。通过时登记一个排队条目（编号 = `self.seq`，取 `entries.last()` 可得）；`now` 是 `time.time()`。
     pub fn admit_image(
         &mut self,
         key_id: i64,
         cap: Option<i64>,
         now: f64,
-        fast: bool,
+        lane: Lane,
     ) -> Option<Reason> {
-        self.admit_image_priority(key_id, cap, now, fast, false)
+        self.admit_image_priority(key_id, cap, now, lane, false)
     }
 
-    /// 与 [`admit_image`] 相同；`skip_site_cap` 时越过全站排队满（每人上限仍生效），并记成插队车道。
-    /// 站长号 / 赞助席入队用：插队排在所有等待中的 V5 / V4.5 前面，不另占名额公式、不提高 RPM。
+    /// 与 [`admit_image`] 相同；`skip_site_cap` 时越过全站排队满（每人上限仍生效）。
+    /// `lane` 是插队 / V5 / 普通；站长号 / 赞助席用 [`Lane::Jump`]，不另占名额公式、不提高 RPM。
     pub fn admit_image_priority(
         &mut self,
         key_id: i64,
         cap: Option<i64>,
         now: f64,
-        fast: bool,
+        lane: Lane,
         skip_site_cap: bool,
     ) -> Option<Reason> {
         let mine = self.image_inflight.get(&key_id).copied().unwrap_or(0);
@@ -469,8 +468,7 @@ impl GuardCore {
             since: now,
             running: false,
             eta: None,
-            fast,
-            jump: skip_site_cap,
+            lane,
         });
         None
     }
@@ -494,12 +492,7 @@ impl GuardCore {
         if mine.iter().any(|e| e.running) {
             return false;
         }
-        let next = mine
-            .iter()
-            .copied()
-            .find(|e| e.jump)
-            .or_else(|| mine.iter().copied().find(|e| e.fast))
-            .or_else(|| mine.first().copied());
+        let next = mine.iter().copied().min_by_key(|e| e.lane);
         next.is_some_and(|e| e.id == entry_id)
     }
 
@@ -523,10 +516,10 @@ impl GuardCore {
                 a.eta.unwrap_or(f64::INFINITY),
                 b.eta.unwrap_or(f64::INFINITY),
             );
-            b.jump
-                .cmp(&a.jump)
+            u8::from(!a.lane.is_jump())
+                .cmp(&u8::from(!b.lane.is_jump()))
                 .then(ea.total_cmp(&eb))
-                .then(b.fast.cmp(&a.fast))
+                .then(a.lane.cmp(&b.lane))
                 .then(a.since.total_cmp(&b.since))
         });
         w
@@ -654,10 +647,10 @@ mod tests {
         assert_eq!(two, Some(4));
         for (i, key) in [1, 2, 3, 4].into_iter().enumerate() {
             assert!(!g.queue_full(two), "第 {i} 张之前还没满");
-            assert_eq!(g.admit_image(key, two, NOON, false), None);
+            assert_eq!(g.admit_image(key, two, NOON, Lane::Normal), None);
         }
         assert!(g.queue_full(two));
-        let r = g.admit_image(5, two, NOON, false).unwrap();
+        let r = g.admit_image(5, two, NOON, Lane::Normal).unwrap();
         assert_eq!(r.code(), reasons::QUEUE_FULL);
         // 文案只说「排队满」，不报全站闸门张数：那是站点内部数字（还随账号数变），
         // 成员一次只发一张却看到「最多同时排 4 张」只会以为是自己占了名额。
@@ -665,12 +658,12 @@ mod tests {
         assert!(!r.text().contains("最多同时排"), "{}", r.text());
         // 站长号越过全站满，仍受每人排队上限；入队后占着名额，别人照样满
         assert_eq!(
-            g.admit_image_priority(99, two, NOON, false, true),
+            g.admit_image_priority(99, two, NOON, Lane::Jump, true),
             None,
             "站长号全站满时仍能入队"
         );
         assert!(g.queue_full(two));
-        let r = g.admit_image(6, two, NOON, false).unwrap();
+        let r = g.admit_image(6, two, NOON, Lane::Normal).unwrap();
         assert_eq!(r.code(), reasons::QUEUE_FULL);
         g.release_image(99, None);
         // 账号多了，上限跟着变；一个可用账号都没有按一个算；None = 不限
@@ -702,7 +695,7 @@ mod tests {
         g.values.insert("queue_per_member".into(), 3);
         // 1、2、3 号 Key 依次来；2 号排到了空着的账号上，估计比 1 号先开始
         for (key, at) in [(1, 0.0), (2, 1.0), (3, 2.0)] {
-            assert_eq!(g.admit_image(key, None, NOON + at, false), None);
+            assert_eq!(g.admit_image(key, None, NOON + at, Lane::Normal), None);
         }
         let ids: Vec<i64> = g.entries.iter().map(|e| e.id).collect();
         g.set_eta(ids[0], NOON + 20.0);
@@ -720,8 +713,8 @@ mod tests {
     fn queue_position_puts_the_fast_lane_ahead_before_eta() {
         let mut g = guard();
         g.values.insert("queue_per_member".into(), 3);
-        assert_eq!(g.admit_image(1, None, NOON, false), None);
-        assert_eq!(g.admit_image(2, None, NOON + 1.0, true), None);
+        assert_eq!(g.admit_image(1, None, NOON, Lane::Normal), None);
+        assert_eq!(g.admit_image(2, None, NOON + 1.0, Lane::Fast), None);
         let pos = |g: &GuardCore, key| g.queue_view(Some(key))["mine"][0]["position"].clone();
         assert_eq!(pos(&g, 2), 1, "短作业还没分到账号也排在普通前面");
         assert_eq!(pos(&g, 1), 2);
@@ -731,10 +724,10 @@ mod tests {
     fn queue_position_puts_jump_ahead_of_v5_and_plain() {
         let mut g = guard();
         g.values.insert("queue_per_member".into(), 3);
-        assert_eq!(g.admit_image(1, None, NOON, false), None);
-        assert_eq!(g.admit_image(2, None, NOON + 1.0, true), None);
+        assert_eq!(g.admit_image(1, None, NOON, Lane::Normal), None);
+        assert_eq!(g.admit_image(2, None, NOON + 1.0, Lane::Fast), None);
         assert_eq!(
-            g.admit_image_priority(3, None, NOON + 2.0, true, true),
+            g.admit_image_priority(3, None, NOON + 2.0, Lane::Jump, true),
             None
         );
         let ids: Vec<i64> = g.entries.iter().map(|e| e.id).collect();
@@ -744,7 +737,7 @@ mod tests {
         assert_eq!(pos(&g, 2), 2);
         assert_eq!(pos(&g, 1), 3);
         assert_eq!(
-            g.admit_image_priority(4, None, NOON + 3.0, false, true),
+            g.admit_image_priority(4, None, NOON + 3.0, Lane::Jump, true),
             None
         );
         assert_eq!(pos(&g, 3), 1, "两名插队按入队先后");
@@ -755,11 +748,11 @@ mod tests {
     fn key_turn_is_first_come_first_served() {
         let mut g = guard();
         let one = g.queue_cap(&[None]);
-        assert_eq!(g.admit_image(7, one, NOON, false), None);
+        assert_eq!(g.admit_image(7, one, NOON, Lane::Normal), None);
         let first = g.entries.last().unwrap().id;
-        assert_eq!(g.admit_image(7, one, NOON + 1.0, false), None);
+        assert_eq!(g.admit_image(7, one, NOON + 1.0, Lane::Normal), None);
         let second = g.entries.last().unwrap().id;
-        assert_eq!(g.admit_image(8, one, NOON + 2.0, false), None);
+        assert_eq!(g.admit_image(8, one, NOON + 2.0, Lane::Normal), None);
         let other = g.entries.last().unwrap().id;
         // 同一把 Key：先来的先生成，后来的等；别的 Key 不受影响
         assert!(g.key_turn(7, first));
@@ -767,7 +760,7 @@ mod tests {
         assert!(g.key_turn(8, other));
         // 第三张排不进来（每人最多同时排 2 张，两张都还没发出）
         assert_eq!(
-            g.admit_image(7, one, NOON + 3.0, false)
+            g.admit_image(7, one, NOON + 3.0, Lane::Normal)
                 .map(|r| r.code().to_string()),
             Some(reasons::MEMBER_QUEUE_FULL.to_string())
         );
@@ -780,9 +773,9 @@ mod tests {
     fn key_turn_lets_one_fast_image_pass_unstarted_work() {
         let mut g = guard();
         g.values.insert("queue_per_member".into(), 3);
-        assert_eq!(g.admit_image(7, None, NOON, false), None);
+        assert_eq!(g.admit_image(7, None, NOON, Lane::Normal), None);
         let slow = g.entries.last().unwrap().id;
-        assert_eq!(g.admit_image(7, None, NOON + 1.0, true), None);
+        assert_eq!(g.admit_image(7, None, NOON + 1.0, Lane::Fast), None);
         let fast = g.entries.last().unwrap().id;
         assert!(g.key_turn(7, fast), "短作业越过还没开始的普通条目");
         assert!(!g.key_turn(7, slow), "同一把 Key 同时只放行一张");
@@ -796,10 +789,10 @@ mod tests {
     fn key_turn_lets_jump_pass_unstarted_v5() {
         let mut g = guard();
         g.values.insert("queue_per_member".into(), 3);
-        assert_eq!(g.admit_image(7, None, NOON, true), None);
+        assert_eq!(g.admit_image(7, None, NOON, Lane::Fast), None);
         let v5 = g.entries.last().unwrap().id;
         assert_eq!(
-            g.admit_image_priority(7, None, NOON + 1.0, false, true),
+            g.admit_image_priority(7, None, NOON + 1.0, Lane::Jump, true),
             None
         );
         let jump = g.entries.last().unwrap().id;
@@ -815,7 +808,7 @@ mod tests {
     fn member_queue_cap_counts_only_images_not_yet_sent() {
         let mut g = guard();
         assert_eq!(g.v("queue_per_member"), QUEUE_PER_MEMBER_DEFAULT);
-        let admit = |g: &mut GuardCore, at: f64| g.admit_image(9, None, NOON + at, false);
+        let admit = |g: &mut GuardCore, at: f64| g.admit_image(9, None, NOON + at, Lane::Normal);
         assert_eq!(admit(&mut g, 0.0), None);
         let first = g.entries.last().unwrap().id;
         assert_eq!(admit(&mut g, 1.0), None);
@@ -838,11 +831,11 @@ mod tests {
         // 设置是手动的：调成 1
         g.values.insert("queue_per_member".into(), 1);
         assert_eq!(
-            g.admit_image(10, None, NOON, false).map(|_| ()),
+            g.admit_image(10, None, NOON, Lane::Normal).map(|_| ()),
             None,
             "别人不受影响"
         );
-        assert!(g.admit_image(10, None, NOON, false).is_some());
+        assert!(g.admit_image(10, None, NOON, Lane::Normal).is_some());
     }
 
     #[test]

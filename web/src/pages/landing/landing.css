@@ -560,10 +560,10 @@
   overflow: visible;
 }
 .stat--v45 {
-  --stat-c: var(--c-site);
+  --stat-c: var(--c-v45);
 }
 .stat--v5 {
-  --stat-c: var(--c-site-v5);
+  --stat-c: var(--c-v5);
 }
 .lp-site-gauge__track,
 .lp-site-gauge__fill {

@@ -33,12 +33,10 @@
   --info-soft: #0d2847;
   --v5: #4ccce6;
 
-  /* 额度类型色（V4.5 / V5 / Anlas）：圆环、进度条按类型区分。换配色只改这三对（亮 / 暗） */
+  /* 额度类型色（V4.5 / V5 / Anlas）：圆环、总进度条、图例共用。换配色只改这三色 */
   --c-v45: #8d8cf2;
   --c-v5: #4ccce6;
   --c-anlas: #ffca16;
-  --c-site: #d5ad6a;
-  --c-site-v5: #78aeb8;
 
   /* Discord 官方 Blurple（白字 4.61:1） */
   --discord: #5865f2;

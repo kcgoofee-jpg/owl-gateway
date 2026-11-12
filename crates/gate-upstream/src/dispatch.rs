@@ -50,9 +50,7 @@ impl<H: Hooks> NaiClient<H> {
         // 换号重试要按最初的费用策略重新选号（V5 确认成「按 Anlas 计」会改这两项）
         let (v5_free0, requires_anlas0) = (o.v5_free, o.requires_anlas);
         // 排队信息：开始排队的时刻 + 车道（重试 / 换号都不变）
-        let arrival = Arrival::new(inner.scheduler.mono(), o.queue_timeout)
-            .fast_lane(o.v5_lane)
-            .jump_lane(o.jump_lane);
+        let arrival = Arrival::new(inner.scheduler.mono(), o.queue_timeout).lane(o.lane);
         let mut attempts = 0;
         let mut switched = false;
         while attempts < 2 + usize::from(switched) {
@@ -64,8 +62,8 @@ impl<H: Hooks> NaiClient<H> {
                     &inner.scheduler,
                     o.requires_anlas,
                     o.v5_free,
-                    // 所有图片车道的请求都要过账号保护（含 tags）：它们都会打到同一个上游账号，
-                    // 也都要排队等出图间隔（见 request_once）。
+                    // 出图账号这条路（含标签补全）都要过账号保护：打到同一把上游账号，
+                    // 也要排队等出图间隔（见 request_once）。与排队 [`crate::pace::Lane`] 无关。
                     o.image_lane,
                     allowance,
                     arrival,

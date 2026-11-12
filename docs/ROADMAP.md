@@ -79,7 +79,7 @@
 
 **数据**（`docs/report-20261107-v5-queue.md`，33 小时窗口 4,454 张 ok）：`dur_ms` 是纯上游往返，v5 中位 **3.9 s**、上界 9.7 s，v4.5 中位 8.9 s、p90 42 s、上界 52 s；控尺寸/步数/时段后 v5 仍快 **64.6%**（95% CI 60.3–68.5%，Wilcoxon p=5.7e-91）。同期两者的排队等待**没有差异**（p=0.526），v5 把自己 4 秒的活排进 30 秒的队里。
 
-**机制**：`pace::Arrival::fast_lane` → `fair_cmp` 比的是 **车道 → 老化 → 先来后到**。老化两档：等满半个超时（45 秒）只在车道内抢先，等满整个超时（90 秒）才压过车道。**非抢占**：正在生成的那张不打断。同一把 Key 内部（`key_turn`）快车道可以越过还没开始的普通条目。
+**机制**：`pace::Arrival` 带 [`Lane`](../crates/gate-core/src/lane.rs) → `fair_cmp` 比的是 **车道 → 老化 → 先来后到**。老化两档：等满半个超时（45 秒）只在车道内抢先，等满整个超时（90 秒）才压过 **V5** 车道（不能压过插队，见 §7）。**非抢占**：正在生成的那张不打断。同一把 Key 内部（`key_turn`）按同一套车道顺序。
 
 **11-07 同日删除**：「这个成员今天出得最少的人先」（10-22 从 AI Horde 借来的公平层）。它让重度用户沉底、轻度用户又被后来的轻度用户插队，所有人一起多等；防饿死靠老化就够了。删除波及 `Observer::share`、`ReqCtx::set_share`、准入时对 `counters.images` 的那次读、`fair_cmp` 的排序键，以及两处模块注释和运维手册。**`counters.images` 本身保留**（统计用）。
 
@@ -87,10 +87,11 @@
 
 | 落点 | 内容 |
 |---|---|
-| `crates/gate-upstream/src/pace.rs` | `Arrival::fast_lane` + `fair_cmp` 排序键 |
+| `crates/gate-core/src/lane.rs` | `Lane`：插队 / V5 / 普通 |
+| `crates/gate-upstream/src/pace.rs` | `Arrival.lane` + `fair_cmp` 排序键 |
 | `crates/gate-upstream/src/dispatch.rs`、`dispatch/v5.rs` | 流式与非流式都带车道 |
-| `crates/gate-core/src/guard.rs` | 参数 `guard_v5_priority`（0/1，默认 **1**） |
-| `crates/gate-server/src/routes/image/{mod,settle,stream}.rs` | `v5_lane`：V5 看请求体模型 + 开关；站长 / 赞助走 `jump_lane` |
+| `crates/gate-core/src/guard.rs` | 参数 `guard_v5_priority`（0/1，默认 **1**）；`Entry.lane` |
+| `crates/gate-server/src/routes/image/{mod,settle,stream,tools}.rs` | `lane()` → `Lane::of(queue_jump, v5)` |
 | `crates/gate-server/src/live.rs` | `/public/live` 的 `mode` 报 `v5-priority` 或 `fifo` |
 
 回滚：`nai-ops set v5_priority 0`（热更新，无需发版）。验收：发版后 24 小时 v5 的 `wait_ms` 中位降 ≥50%、v4.5 升 ≤5%；`queue_timeout` 与断连率不上升。
@@ -104,7 +105,7 @@
 
 现有 `owner_image_full`（环境变量绑定的站长号）保持不动，插队和功能放行与赞助席共用同一套判断，避免第三套特例。
 
-**插队**（11-12）：`jump_lane = queue_jump`，`fast_lane` 只留给 V5，`skip_site_cap = queue_jump`。`queue_jump` = 站长号或赞助席插队。同一个账号空出来时插队排在所有等待中的 V5 / V4.5 前面；每人排队上限和 RPM 不提高；不抢占已经发往上游的那张；多名赞助者在插队车道里按先来后到。等满 90 秒的普通 / V5 可以压过 V5 车道，不能压过插队。
+**插队**（11-12）：`Lane::Jump` = 站长号或赞助席 `queue_jump`；V5 是 `Lane::Fast`；普通是 `Lane::Normal`。`skip_site_cap` 仍是 `queue_jump` 的另一面（全站排满仍能入队）。同一个账号空出来时插队排在所有等待中的 V5 / V4.5 前面；每人排队上限和 RPM 不提高；不抢占已经发往上游的那张；多名赞助者在插队车道里按先来后到。等满 90 秒的普通 / V5 可以压过 V5 车道，不能压过插队。准入、派发、`key_turn`、首页位次共用同一个 `Lane`。
 
 **专属 Token**：不进入普通选号池，也不计入全站 `queue_cap`。该成员出图只派到这把 Token；冷却 / 401 / 见底时用明确 429/503，不悄悄改走站账号。走专属 Token 或已打开 `paid_parameters` 时不再套免费档裁剪。专属 Token 的 Anlas 花在捐赠账号上，不扣全站池、不受全站 V5 暂停。金钱赞助开挂费开关仍花全站 Anlas / V5 池。
 

@@ -6,6 +6,7 @@ use axum::body::{Body, BodyDataStream};
 use axum::http::{HeaderMap, Request, StatusCode};
 use common::*;
 use futures::StreamExt;
+use gate_core::lane::Lane;
 use gate_server::AppState;
 use gate_server::key::Key;
 use gate_server::session;
@@ -371,7 +372,9 @@ async fn public_live_blocked_reason_and_queue() {
         .with(|g| g.trip_breaker(300.0, "", now))
         .unwrap();
     // 有人在排队
-    e.state.guard.with(|g| g.admit_image(77, None, now, false));
+    e.state
+        .guard
+        .with(|g| g.admit_image(77, None, now, Lane::Normal));
     e.state.live.invalidate();
     let (_, _, v) = get_json(&e.state, "/public/live", &[]).await;
     assert_eq!(
@@ -402,8 +405,10 @@ async fn public_live_me_for_logged_in_member_only() {
     e.state.nai.tokens().await[0].set_gen_secs(2.5);
     e.state
         .guard
-        .with(|g| g.admit_image(77, None, now - 5.0, false)); // 别人先到
-    e.state.guard.with(|g| g.admit_image(1, None, now, false)); // 测试成员排第 2
+        .with(|g| g.admit_image(77, None, now - 5.0, Lane::Normal)); // 别人先到
+    e.state
+        .guard
+        .with(|g| g.admit_image(1, None, now, Lane::Normal)); // 测试成员排第 2
     e.state.live.invalidate();
 
     let (_, _, guest) = get_json(&e.state, "/public/live", &[]).await;
@@ -998,7 +1003,9 @@ async fn live_stream_carries_my_queue_per_connection() {
     assert_eq!(g1["me"], Value::Null);
 
     let now = e.state.now();
-    e.state.guard.with(|g| g.admit_image(1, None, now, false));
+    e.state
+        .guard
+        .with(|g| g.admit_image(1, None, now, Lane::Normal));
     let m2 = member.next_data(Duration::from_secs(5)).await.unwrap();
     assert_eq!(
         m2["me"],
@@ -1082,7 +1089,9 @@ async fn admin_events_stream_snapshot_and_badges() {
     // 真有变化（队列里多了一张图）才推，隔至少 15 秒（后台每次刷新会重拉几页数据）
     let t0 = tokio::time::Instant::now();
     let now = e.state.now();
-    e.state.guard.with(|g| g.admit_image(9, None, now, false));
+    e.state
+        .guard
+        .with(|g| g.admit_image(9, None, now, Lane::Normal));
     let second = sse
         .next_data(Duration::from_secs(20))
         .await
@@ -1168,7 +1177,9 @@ async fn landing_boot_for_member_with_key() {
     let p = setup_with_static(&reg_env(), Some(LANDING_HTML)).await;
     let cookie = register_member(&p.state).await;
     let now = p.state.now();
-    p.state.guard.with(|g| g.admit_image(1, None, now, false));
+    p.state
+        .guard
+        .with(|g| g.admit_image(1, None, now, Lane::Normal));
     let (status, _, body) = raw(&p.state, "GET", "/", &[("cookie", &cookie)], b"").await;
     assert_eq!(status, 200);
     let boot = boot_of(&String::from_utf8(body).unwrap());

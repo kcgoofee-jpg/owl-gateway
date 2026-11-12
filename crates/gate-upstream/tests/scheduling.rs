@@ -8,6 +8,7 @@ use gate_testkit::{MockUpstream, Reply};
 use gate_upstream::client::{
     Callbacks, Config, Hooks, NaiClient, NoObserver, Observer, RequestOpts, UpstreamError,
 };
+use gate_upstream::pace::Lane;
 use gate_upstream::pool::Cooldown;
 use serde_json::json;
 use std::sync::Mutex;
@@ -535,8 +536,7 @@ async fn stream_retries_a_concurrency_lock_but_not_a_rate_limit() {
                 1,
                 false,
                 false,
-                false,
-                false,
+                Lane::Normal,
                 30.0,
                 &Callbacks::default(),
                 None,
@@ -637,25 +637,25 @@ async fn a_v5_request_takes_the_fast_lane_over_an_earlier_plain_one() {
     )
     .unwrap();
     let body = image_body();
-    let send = |obs: std::sync::Arc<Watch>, timeout: f64, v5_lane: bool| {
+    let send = |obs: std::sync::Arc<Watch>, timeout: f64, lane: Lane| {
         let (c, url, body) = (c.clone(), up.url(), body.clone());
         tokio::spawn(async move {
             let mut o = image_opts(&url, &body);
             o.queue_timeout = timeout;
-            o.v5_lane = v5_lane;
+            o.lane = lane;
             c.request(o, &Callbacks::default(), None, obs.as_ref())
                 .await
         })
     };
-    let first = send(std::sync::Arc::new(Watch::default()), 30.0, false);
+    let first = send(std::sync::Arc::new(Watch::default()), 30.0, Lane::Normal);
     tokio::time::sleep(Duration::from_millis(100)).await;
     // 普通请求（先登记）
     let plain = std::sync::Arc::new(Watch::default());
-    let p = send(plain.clone(), 30.0, false);
+    let p = send(plain.clone(), 30.0, Lane::Normal);
     tokio::time::sleep(Duration::from_millis(100)).await;
     // V5：来得更晚，但走快车道
     let v5 = std::sync::Arc::new(Watch::default());
-    let v = send(v5.clone(), 30.0, true);
+    let v = send(v5.clone(), 30.0, Lane::Fast);
     for r in [first, p, v] {
         r.await.unwrap().unwrap();
     }
@@ -689,24 +689,23 @@ async fn a_jump_request_starts_before_earlier_v5() {
     )
     .unwrap();
     let body = image_body();
-    let send = |obs: std::sync::Arc<Watch>, timeout: f64, v5_lane: bool, jump_lane: bool| {
+    let send = |obs: std::sync::Arc<Watch>, timeout: f64, lane: Lane| {
         let (c, url, body) = (c.clone(), up.url(), body.clone());
         tokio::spawn(async move {
             let mut o = image_opts(&url, &body);
             o.queue_timeout = timeout;
-            o.v5_lane = v5_lane;
-            o.jump_lane = jump_lane;
+            o.lane = lane;
             c.request(o, &Callbacks::default(), None, obs.as_ref())
                 .await
         })
     };
-    let first = send(std::sync::Arc::new(Watch::default()), 30.0, false, false);
+    let first = send(std::sync::Arc::new(Watch::default()), 30.0, Lane::Normal);
     tokio::time::sleep(Duration::from_millis(100)).await;
     let v5 = std::sync::Arc::new(Watch::default());
-    let v = send(v5.clone(), 30.0, true, false);
+    let v = send(v5.clone(), 30.0, Lane::Fast);
     tokio::time::sleep(Duration::from_millis(100)).await;
     let jump = std::sync::Arc::new(Watch::default());
-    let j = send(jump.clone(), 30.0, false, true);
+    let j = send(jump.clone(), 30.0, Lane::Jump);
     for r in [first, v, j] {
         r.await.unwrap().unwrap();
     }

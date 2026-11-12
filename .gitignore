@@ -52,3 +52,10 @@ web/tsconfig.tsbuildinfo
 
 # Codex 会话附件（本地缓存）
 .codex-attachments/
+
+# 本地探针 / 克隆残留（不进仓库）
+.ody-probe/
+/node_modules/
+docs/design-references/
+docs/research/novelai-image/
+docs/nai-workbench-absorption.md

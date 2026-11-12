@@ -7,7 +7,7 @@ type Row = { kind: "v45" | "v5"; value: number };
 
 /**
  * 今天重置以来全站生成了多少张：图例给出 V4.5 / V5 两个张数，
- * 弧线按「今日已出 ÷ 各账号今日上限合计」画进度（黄前蓝后），10-27 起不再折算剩余额度。
+ * 弧线按「今日已出 ÷ 各账号今日上限合计」画进度（V4.5 在前、V5 在后，颜色跟圆环同一套），10-27 起不再折算剩余额度。
  */
 export function SiteGauge({ rows, total, cap }: { rows: Row[]; total: number; cap: number }) {
   const v45 = rows.find((r) => r.kind === "v45")?.value ?? 0;

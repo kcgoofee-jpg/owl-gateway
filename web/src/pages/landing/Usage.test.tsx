@@ -19,7 +19,7 @@ describe("StatRows: generated-today legend with cap arc", () => {
     expect(arc?.getAttribute("stroke-dasharray")).toBe("2.1458333333333335 100");
   });
 
-  it("draws V4.5 first from the origin, V5 right after it（黄前蓝后）", () => {
+  it("draws V4.5 first from the origin, V5 right after it", () => {
     render(<StatRows generated={{ total: 100, v45: 80, v5: 20, cap: 4800 }} />, host);
     const all = host.querySelector("path.stat--v45");
     const subset = host.querySelector("path.stat--v5");

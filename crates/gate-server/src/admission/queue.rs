@@ -4,6 +4,7 @@ use crate::error::{ApiError, GateError, InternalError};
 use crate::key::Key;
 use crate::reqctx::ReqCtx;
 use crate::state::AppState;
+use gate_core::lane::Lane;
 use gate_core::reasons::{self, Reason};
 use std::sync::Arc;
 use std::sync::atomic::Ordering;
@@ -155,14 +156,13 @@ async fn wait_key_turn(state: &AppState, key_id: i64, entry_id: i64) -> Result<(
         .map_err(|_| queue_timeout())
 }
 
-/// `fast` = 短作业车道（V5）：只影响同一把 Key 里能不能越过还没开始的普通条目
-///（[`gate_core::guard::GuardCore::key_turn`]），不影响额度。
-/// 插队（站长号 / 赞助席 `queue_jump`）越过全站排队满，并排在所有等待中的 V5 / V4.5 前面；每人排队上限照旧。
+/// `lane` 决定同一把 Key 里谁先发、以及全站位次（[`gate_core::guard::GuardCore::key_turn`]）。
+/// 插队（站长号 / 赞助席 `queue_jump`）同时越过全站排队满；每人排队上限照旧。
 pub async fn image_admission(
     state: &AppState,
     ctx: &ReqCtx,
     key: &Key,
-    fast: bool,
+    lane: Lane,
 ) -> Result<Admission, ApiError> {
     guard_hard_block(state).await?;
     let cap = queue_cap(state).await;
@@ -172,7 +172,7 @@ pub async fn image_admission(
     // 登记与取编号在同一次加锁里完成，不会被别人插队
     let admitted =
         state.guard.with(
-            |g| match g.admit_image_priority(key_id, cap, now, fast, skip_site_cap) {
+            |g| match g.admit_image_priority(key_id, cap, now, lane, skip_site_cap) {
                 Some(r) => Err(r),
                 None => Ok(g.entries.last().map_or(0, |e| e.id)),
             },

@@ -50,8 +50,7 @@ impl<H: Hooks> NaiClient<H> {
         _image_count: i64,
         requires_anlas: bool,
         v5_free: bool,
-        v5_lane: bool,
-        jump_lane: bool,
+        lane: crate::pace::Lane,
         queue_timeout: f64,
         cb: &Callbacks<'_>,
         allowance: Option<&dyn Allowance>,
@@ -65,9 +64,7 @@ impl<H: Hooks> NaiClient<H> {
         let deadline = started + Duration::from_secs_f64(queue_timeout.max(0.0));
         let patient = started + Duration::from_secs_f64(queue_timeout.max(0.0) / 2.0);
         // 排队信息：开始排队的时刻（换号 / 402 换一把都不变）+ 车道
-        let arrival = Arrival::new(inner.scheduler.mono(), queue_timeout)
-            .fast_lane(v5_lane)
-            .jump_lane(jump_lane);
+        let arrival = Arrival::new(inner.scheduler.mono(), queue_timeout).lane(lane);
         let mut moves = 0;
         'pick: loop {
             let Some((mut token, ticket)) = inner

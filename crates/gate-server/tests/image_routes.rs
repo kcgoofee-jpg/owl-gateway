@@ -5,6 +5,7 @@ use axum::body::Body;
 use axum::http::{Request, StatusCode};
 use common::{Call, SUBJECT, TOKEN, settle, setup};
 use futures::StreamExt;
+use gate_core::lane::Lane;
 use gate_db::repo::usage::{LogFilter, Success};
 use gate_server::AppState;
 use gate_testkit::Reply;
@@ -1096,11 +1097,11 @@ async fn owner_skips_site_cap_when_the_site_queue_is_full() {
         g.values.insert("queue_per_account".into(), 2);
         let cap = g.queue_cap(&[None]);
         assert_eq!(cap, Some(2));
-        assert_eq!(g.admit_image(10, cap, 1.0, false), None);
-        assert_eq!(g.admit_image(11, cap, 1.0, false), None);
+        assert_eq!(g.admit_image(10, cap, 1.0, Lane::Normal), None);
+        assert_eq!(g.admit_image(11, cap, 1.0, Lane::Normal), None);
         assert!(g.queue_full(cap));
         assert_eq!(
-            g.admit_image(12, cap, 1.0, false)
+            g.admit_image(12, cap, 1.0, Lane::Normal)
                 .expect("ordinary key blocked")
                 .code(),
             gate_core::reasons::QUEUE_FULL

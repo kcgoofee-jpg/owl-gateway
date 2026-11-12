@@ -2,6 +2,7 @@
 
 mod common;
 use common::{Admin, Call, SUBJECT, TOKEN, policy_for, send, settle, setup};
+use gate_core::lane::Lane;
 use gate_db::repo::keys::NewKey;
 use gate_db::repo::patron::PatronRecord;
 use gate_server::session::{PATRON_COOKIE, hash_password};
@@ -241,11 +242,11 @@ async fn patrons_skip_the_site_cap_and_keep_the_per_member_queue() {
         g.values.insert("queue_per_account".into(), 2);
         let cap = g.queue_cap(&[None]);
         assert_eq!(cap, Some(2));
-        assert_eq!(g.admit_image(10, cap, 1.0, false), None);
-        assert_eq!(g.admit_image(11, cap, 1.0, false), None);
+        assert_eq!(g.admit_image(10, cap, 1.0, Lane::Normal), None);
+        assert_eq!(g.admit_image(11, cap, 1.0, Lane::Normal), None);
         assert!(g.queue_full(cap));
         assert_eq!(
-            g.admit_image(12, cap, 1.0, false)
+            g.admit_image(12, cap, 1.0, Lane::Normal)
                 .expect("ordinary key blocked")
                 .code(),
             gate_core::reasons::QUEUE_FULL
