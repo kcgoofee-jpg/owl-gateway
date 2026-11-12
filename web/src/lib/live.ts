@@ -1,7 +1,7 @@
 import { signal } from "@preact/signals";
 import { getJSON } from "./api";
 
-/** Use polling during startup and reconnects. Opening the stream stops the active fallback. */
+/** 启动和重连时用轮询兜底。SSE 连上后停掉当前轮询。 */
 export function connectEvents(
   url: string,
   message: (event: MessageEvent) => void,
@@ -65,7 +65,7 @@ export function liveSubscription<T>(streamUrl: string, pollUrl: string, initial:
           data.value = JSON.parse(event.data) as T;
           connected.value = "sse";
         } catch {
-          /* Ignore malformed frames. */
+          /* 忽略坏帧 */
         }
       },
       startPolling,
