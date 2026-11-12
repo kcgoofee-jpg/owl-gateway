@@ -189,6 +189,14 @@ fn adapt_share_parameters(p0: &Map<String, Value>, model: String) -> Map<String,
     {
         p.insert("image_format".into(), Value::String("png".into()));
     }
+    if let Some(v) = p.get("negative_prompt")
+        && !v.is_string()
+    {
+        p.insert(
+            "negative_prompt".into(),
+            Value::String(str_or_empty(Some(v))),
+        );
+    }
     p
 }
 
@@ -245,6 +253,22 @@ mod tests {
         assert!(p.get("controlnet_model").is_none());
         assert!(p.get("lora_unet_weights").is_none());
         assert_eq!(p["width"], json!(832));
+    }
+
+    #[test]
+    fn coerces_non_string_negative_prompt_for_share() {
+        let body = json!({
+            "input": "1girl",
+            "model": "nai-diffusion-4-5-full",
+            "parameters": {"negative_prompt": 0.5, "width": 832}
+        });
+        let out = adapt_share_image_request(&body);
+        assert_eq!(out["parameters"]["negative_prompt"], json!("0.5"));
+        let already = json!({
+            "parameters": {"negative_prompt": "lowres"}
+        });
+        let kept = adapt_share_image_request(&already);
+        assert_eq!(kept["parameters"]["negative_prompt"], json!("lowres"));
     }
 
     #[test]

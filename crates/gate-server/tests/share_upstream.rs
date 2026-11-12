@@ -235,6 +235,48 @@ async fn share_generate_image_drops_website_extras() {
 }
 
 #[tokio::test]
+async fn share_generate_image_fills_character_coords_and_string_uc() {
+    let share = MockUpstream::start().await;
+    let e = setup(&[]).await;
+    let official_id = e.state.nai.tokens().await[0].token_id.clone();
+    add_share(&e.state, &share.url()).await;
+    assert!(e.state.nai.set_admin_enabled(&official_id, false).await);
+
+    let mut body = image_body();
+    body["parameters"]["negative_prompt"] = json!(12);
+    body["parameters"]["v4_prompt"] = json!({
+        "caption": {
+            "base_caption": "1girl, solo",
+            "char_captions": [{"char_caption": "owl girl", "centers": [{}]}]
+        },
+        "use_coords": false,
+        "use_order": true
+    });
+    body["parameters"]["v4_negative_prompt"] = json!({
+        "caption": {
+            "base_caption": "12",
+            "char_captions": [{"char_caption": ""}]
+        },
+        "legacy_uc": false
+    });
+
+    let (status, _, resp) = Call::new("POST", "/ai/generate-image")
+        .bearer(TOKEN)
+        .json(body)
+        .send(&e.state)
+        .await;
+    assert_eq!(status, 200, "{}", String::from_utf8_lossy(&resp));
+    let sent = share.requests_to("/ai/generate-image");
+    assert_eq!(sent.len(), 1);
+    let got = sent[0].json();
+    assert_eq!(got["parameters"]["negative_prompt"], json!("12"));
+    assert_eq!(
+        got["parameters"]["v4_prompt"]["caption"]["char_captions"][0]["centers"],
+        json!([{"x": 0.5, "y": 0.5}])
+    );
+}
+
+#[tokio::test]
 async fn share_422_unknown_fields_are_stripped_and_retried() {
     let share = MockUpstream::start().await;
     let e = setup(&[]).await;

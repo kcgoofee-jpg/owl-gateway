@@ -225,6 +225,50 @@ mod tests {
     }
 
     #[test]
+    fn existing_v4_prompt_missing_coords_are_filled() {
+        let payload = json!({
+            "model": "nai-diffusion-4-5-full",
+            "input": "1girl",
+            "parameters": {
+                "negative_prompt": "lowres",
+                "v4_prompt": {
+                    "caption": {
+                        "base_caption": "1girl",
+                        "char_captions": [
+                            {"char_caption": "owl girl", "centers": [{}]},
+                            {"char_caption": "cat girl", "centers": [{"y": 0.25}]},
+                            {"char_caption": "fox", "centers": []},
+                            {"char_caption": "wolf", "centers": [{"x": "q", "y": 0.9}]},
+                            {"char_caption": "kept", "centers": [{"x": 0.1, "y": 0.0}]}
+                        ]
+                    },
+                    "use_coords": false,
+                    "use_order": true
+                },
+                "v4_negative_prompt": {
+                    "caption": {
+                        "base_caption": "lowres",
+                        "char_captions": [{"char_caption": "bad hands"}]
+                    },
+                    "legacy_uc": false
+                }
+            }
+        });
+        let (filled, notes) = fill_v4_prompt(&payload);
+        assert!(notes.iter().any(|n| n.contains("角色坐标")), "{notes:?}");
+        let chars = &filled["parameters"]["v4_prompt"]["caption"]["char_captions"];
+        assert_eq!(chars[0]["centers"], json!([{"x": 0.5, "y": 0.5}]));
+        assert_eq!(chars[1]["centers"], json!([{"x": 0.5, "y": 0.25}]));
+        assert_eq!(chars[2]["centers"], json!([{"x": 0.5, "y": 0.5}]));
+        assert_eq!(chars[3]["centers"], json!([{"x": 0.5, "y": 0.9}]));
+        assert_eq!(chars[4]["centers"], json!([{"x": 0.1, "y": 0.0}]));
+        assert_eq!(
+            filled["parameters"]["v4_negative_prompt"]["caption"]["char_captions"][0]["centers"],
+            json!([{"x": 0.5, "y": 0.5}])
+        );
+    }
+
+    #[test]
     fn v5_structured_prompts_are_added_even_without_characters() {
         let payload = json!({
             "model": "nai-diffusion-5-full",

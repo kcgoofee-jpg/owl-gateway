@@ -365,16 +365,86 @@ pub fn upstream_parameter_problem(body: &Value) -> Option<String> {
 
 // ----------------------------------------------------------------------------- V4 结构化提示词
 
+/// 官网网页端每个角色坐标都是有限数字；缺了、null、非数字按中心 0.5 补，已有数字（含 0、越界）不动。
+fn coord_value(v: Option<&Value>) -> Value {
+    match v {
+        Some(Value::Number(n)) if n.as_f64().is_some_and(f64::is_finite) => {
+            Value::Number(n.clone())
+        }
+        _ => float_value(0.5),
+    }
+}
+
+fn default_center_point() -> Value {
+    let mut pt = Obj::new();
+    pt.insert("x".into(), float_value(0.5));
+    pt.insert("y".into(), float_value(0.5));
+    Value::Object(pt)
+}
+
+fn repair_center_point(pt: &Obj) -> (Obj, bool) {
+    let x = coord_value(pt.get("x"));
+    let y = coord_value(pt.get("y"));
+    let changed = pt.get("x") != Some(&x) || pt.get("y") != Some(&y);
+    let mut out = pt.clone();
+    out.insert("x".into(), x);
+    out.insert("y".into(), y);
+    (out, changed)
+}
+
+fn repair_centers_array(centers: Option<&Value>) -> (Value, bool) {
+    match centers {
+        Some(Value::Array(items)) if !items.is_empty() => {
+            let mut changed = false;
+            let repaired: Vec<Value> = items
+                .iter()
+                .map(|item| match item {
+                    Value::Object(m) => {
+                        let (pt, c) = repair_center_point(m);
+                        changed |= c;
+                        Value::Object(pt)
+                    }
+                    _ => {
+                        changed = true;
+                        default_center_point()
+                    }
+                })
+                .collect();
+            (Value::Array(repaired), changed)
+        }
+        _ => (Value::Array(vec![default_center_point()]), true),
+    }
+}
+
+fn repair_v4_char_centers(v4: &mut Obj) -> bool {
+    let Some(Value::Object(cap)) = v4.get_mut("caption") else {
+        return false;
+    };
+    let Some(Value::Array(chars)) = cap.get_mut("char_captions") else {
+        return false;
+    };
+    let mut changed = false;
+    for item in chars {
+        let Some(obj) = item.as_object_mut() else {
+            continue;
+        };
+        let (centers, c) = repair_centers_array(obj.get("centers"));
+        if c {
+            obj.insert("centers".into(), centers);
+            changed = true;
+        }
+    }
+    changed
+}
+
 pub(crate) fn centers(c: &Obj) -> Value {
-    let default = || float_value(0.5);
     let cen = match c.get("center") {
         Some(Value::Object(m)) => Some(m),
         _ => None,
     };
-    let get = |k: &str| cen.and_then(|m| m.get(k)).cloned().unwrap_or_else(default);
     let mut pt = Obj::new();
-    pt.insert("x".into(), get("x"));
-    pt.insert("y".into(), get("y"));
+    pt.insert("x".into(), coord_value(cen.and_then(|m| m.get("x"))));
+    pt.insert("y".into(), coord_value(cen.and_then(|m| m.get("y"))));
     Value::Array(vec![Value::Object(pt)])
 }
 
@@ -456,6 +526,16 @@ pub fn fill_v4_prompt(payload: &Value) -> (Value, Vec<String>) {
             ])),
         );
         notes.push("已按官方格式补上 v4_negative_prompt".to_string());
+    }
+    let mut repaired_coords = false;
+    if let Some(Value::Object(v4)) = p.get_mut("v4_prompt") {
+        repaired_coords |= repair_v4_char_centers(v4);
+    }
+    if let Some(Value::Object(v4)) = p.get_mut("v4_negative_prompt") {
+        repaired_coords |= repair_v4_char_centers(v4);
+    }
+    if repaired_coords {
+        notes.push("已按官方格式补上角色坐标".to_string());
     }
     out.insert("parameters".into(), Value::Object(p));
     (Value::Object(out), notes)
