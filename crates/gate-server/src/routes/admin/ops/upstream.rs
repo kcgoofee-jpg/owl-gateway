@@ -56,13 +56,23 @@ pub(super) fn router() -> Router<AppState> {
 async fn page(State(state): State<AppState>, _s: AdminSession, req: Request) -> ApiResult {
     let (parts, _) = req.into_parts();
     let now = state.now();
-    let pool = pool_status(&state).await?;
+    let all = pool_status(&state).await?;
     let tokens: HashMap<String, Arc<Token>> = state
         .nai
         .status_rows()
         .await
         .into_iter()
         .map(|(token, _)| (token.token_id.clone(), token))
+        .collect();
+    let pool_size = all.len();
+    let pool: Vec<Value> = all
+        .into_iter()
+        .filter(|p| {
+            p["token_id"]
+                .as_str()
+                .and_then(|id| tokens.get(id))
+                .is_none_or(|t| !t.is_share())
+        })
         .collect();
     let queue_timeout = state.limits().queue_timeout;
     let yesterday = state.clock.day(now - 86400.0);
@@ -129,6 +139,7 @@ async fn page(State(state): State<AppState>, _s: AdminSession, req: Request) -> 
     Ok(ok_json(&json!({
         "generated_at": values::float(now),
         "pool_configured": state.nai.configured().await,
+        "pool_size": pool_size,
         "accounts": accounts,
         "threshold": allowance["threshold"],
         "settlements": state
@@ -286,13 +297,23 @@ pub(super) async fn pool_status(state: &AppState) -> Result<Vec<Value>, ApiError
     Ok(out)
 }
 
-enum Edit {
-    Add { token: String, allow_anlas: bool },
-    Replace { id: String, token: String },
-    Remove { id: String },
+pub(super) enum Edit {
+    Add {
+        token: String,
+        allow_anlas: bool,
+        image_host: Option<String>,
+    },
+    Replace {
+        id: String,
+        token: String,
+        image_host: Option<String>,
+    },
+    Remove {
+        id: String,
+    },
 }
 
-async fn edit_pool(state: &AppState, edit: Edit) -> Result<(), ApiError> {
+pub(super) async fn edit_pool(state: &AppState, edit: Edit) -> Result<(), ApiError> {
     // Disconnecting the administrator must not cancel publication after the DB commit.
     let worker = state.clone();
     state
@@ -312,6 +333,7 @@ async fn commit_edit(state: &AppState, edit: Edit) -> Result<(), ApiError> {
         .map(|t| token_store::Entry {
             token: t.token.clone(),
             allow_anlas: t.fields().allow_anlas,
+            image_host: t.image_host.clone(),
         })
         .collect();
     let mut next = previous.clone();
@@ -321,7 +343,11 @@ async fn commit_edit(state: &AppState, edit: Edit) -> Result<(), ApiError> {
     let mut saved_v5 = None;
     let mut saved_enabled = None;
     match &edit {
-        Edit::Add { token, allow_anlas } => {
+        Edit::Add {
+            token,
+            allow_anlas,
+            image_host,
+        } => {
             let id = token_id(token);
             if position(&id).is_some() {
                 return Err(HttpError::new(409, "这把 Token 已经在令牌池里").into());
@@ -344,9 +370,14 @@ async fn commit_edit(state: &AppState, edit: Edit) -> Result<(), ApiError> {
             next.push(token_store::Entry {
                 token: token.clone(),
                 allow_anlas: *allow_anlas,
+                image_host: image_host.clone(),
             });
         }
-        Edit::Replace { id, token } => {
+        Edit::Replace {
+            id,
+            token,
+            image_host,
+        } => {
             let i = position(id).ok_or_else(|| HttpError::new(404, NOT_FOUND))?;
             let new_id = token_id(token);
             if position(&new_id).is_some_and(|other| other != i) {
@@ -355,6 +386,9 @@ async fn commit_edit(state: &AppState, edit: Edit) -> Result<(), ApiError> {
             verified.extend([id.clone(), new_id.clone()]);
             replaced = Some((id.clone(), new_id));
             next[i].token = token.clone();
+            if let Some(host) = image_host {
+                next[i].image_host = Some(host.clone());
+            }
         }
         Edit::Remove { id } => {
             if previous.len() <= 1 {
@@ -408,18 +442,26 @@ async fn commit_edit(state: &AppState, edit: Edit) -> Result<(), ApiError> {
     // Membership and per-account settings are serialized by token_edits. The
     // operations below have no I/O and their preconditions were checked above.
     match edit {
-        Edit::Add { token, allow_anlas } => {
+        Edit::Add {
+            token,
+            allow_anlas,
+            image_host,
+        } => {
             state
                 .nai
-                .add_token(token, allow_anlas, saved_v5, saved_enabled)
+                .add_token(token, allow_anlas, saved_v5, saved_enabled, image_host)
                 .await
                 .map_err(InternalError)?;
         }
-        Edit::Replace { id, token } => {
+        Edit::Replace {
+            id,
+            token,
+            image_host,
+        } => {
             state.db.unbind_patron_token(&id).await?;
             state
                 .nai
-                .replace_token(&id, token)
+                .replace_token(&id, token, image_host)
                 .await
                 .map_err(InternalError)?;
             state.refresh_exclusive_tokens().await;
@@ -443,7 +485,7 @@ async fn exists(state: &AppState, id: &str) -> bool {
 }
 
 /// 上游 Token 被改动：记一条警告日志（告警渠道已下线）。
-fn alert_owner(_state: &AppState, text: &str) {
+pub(super) fn alert_owner(_state: &AppState, text: &str) {
     tracing::warn!(target: "upstream", "上游 Token 被改动：{text}");
 }
 
@@ -472,9 +514,20 @@ async fn token_payload(
 async fn verify(state: &AppState, token: &str, replacing: Option<&str>) -> Result<i64, ApiError> {
     state
         .nai
-        .verify_token(token, replacing)
+        .verify_token(token, replacing, None)
         .await
         .map_err(|msg| HttpError::new(422, msg).into())
+}
+
+async fn require_official(state: &AppState, id: &str) -> Result<(), ApiError> {
+    let tokens = state.nai.tokens().await;
+    let Some(token) = tokens.iter().find(|t| t.token_id == id) else {
+        return Err(HttpError::new(404, NOT_FOUND).into());
+    };
+    if token.is_share() {
+        return Err(HttpError::new(404, NOT_FOUND).into());
+    }
+    Ok(())
 }
 
 // ------------------------------------------------------------------ 增删改
@@ -485,7 +538,15 @@ async fn add_token(State(state): State<AppState>, _s: AdminSession, req: Request
     let (token, body) = token_payload(&parts, body).await?;
     let tier = verify(&state, &token, None).await?;
     let allow_anlas = body.get("allow_anlas").is_some_and(values::enabled);
-    edit_pool(&state, Edit::Add { token, allow_anlas }).await?;
+    edit_pool(
+        &state,
+        Edit::Add {
+            token,
+            allow_anlas,
+            image_host: None,
+        },
+    )
+    .await?;
     alert_owner(
         &state,
         &format!(
@@ -506,8 +567,17 @@ async fn replace_token(
 ) -> ApiResult {
     let (parts, body) = req.into_parts();
     let (token, _) = token_payload(&parts, body).await?;
+    require_official(&state, &old_id).await?;
     let tier = verify(&state, &token, Some(&old_id)).await?;
-    edit_pool(&state, Edit::Replace { id: old_id, token }).await?;
+    edit_pool(
+        &state,
+        Edit::Replace {
+            id: old_id,
+            token,
+            image_host: None,
+        },
+    )
+    .await?;
     alert_owner(
         &state,
         "后台替换了一把上游 Token。如果这不是你操作的，请立刻更换后台密码。",
@@ -550,9 +620,7 @@ async fn set_v5_limit(
         }
     };
     let _serial = state.token_edits.lock().await;
-    if !exists(&state, &id).await {
-        return Err(HttpError::new(404, NOT_FOUND).into());
-    }
+    require_official(&state, &id).await?;
     state.db.set_upstream_token_limit(&id, limit).await?;
     if !state.nai.set_v5_daily_limit(&id, limit).await {
         return Err(HttpError::new(404, NOT_FOUND).into());

@@ -453,6 +453,7 @@ async fn token_disabled_during_slot_wait_is_not_used_for_nonstream_or_stream_pos
                 None,
                 &NoObserver,
                 None,
+                false,
             )
             .await
     });
@@ -728,6 +729,7 @@ async fn image_stream_settles_completed_images() {
             None,
             &NoObserver,
             None,
+            false,
         )
         .await
         .unwrap();
@@ -801,7 +803,7 @@ async fn compressed_responses_are_decoded() {
         let tags: serde_json::Value = serde_json::from_slice(&resp.body).unwrap();
         assert_eq!(tags["tags"][0]["tag"], "1girl", "{enc}");
         // 订阅查询：Token 校验与额度查询
-        assert_eq!(c.verify_token(T2, None).await, Ok(3), "{enc}");
+        assert_eq!(c.verify_token(T2, None, None).await, Ok(3), "{enc}");
         let (status, _, sub) = c
             .get_json_with(
                 T1,
@@ -892,6 +894,7 @@ async fn compressed_msgpack_stream_is_complete() {
                 None,
                 &NoObserver,
                 None,
+                false,
             )
             .await
             .unwrap();
@@ -959,6 +962,7 @@ async fn compressed_msgpack_stream_is_not_buffered() {
                 None,
                 &NoObserver,
                 None,
+                false,
             )
             .await
             .unwrap();

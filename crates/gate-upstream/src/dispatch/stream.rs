@@ -16,6 +16,10 @@ impl<H: Hooks> ImageStream<H> {
         self.response.as_ref().map(|r| r.headers())
     }
 
+    pub fn is_share(&self) -> bool {
+        self.token.is_share()
+    }
+
     /// 取走正文字节流（只能取一次）。已按 Content-Encoding 解压，边收边给，不整包缓冲。
     pub fn take_body(
         &mut self,

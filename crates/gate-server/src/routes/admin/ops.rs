@@ -17,6 +17,7 @@ mod system;
 mod upstream;
 mod upstream_details;
 mod upstream_information;
+mod upstream_share;
 
 use crate::state::AppState;
 use axum::Router;
@@ -52,6 +53,7 @@ pub fn router() -> Router<AppState> {
     Router::new()
         .merge(monitor::router())
         .merge(upstream::router())
+        .merge(upstream_share::router())
         .merge(upstream_information::router())
         .merge(upstream_details::router())
         .merge(limits::router())

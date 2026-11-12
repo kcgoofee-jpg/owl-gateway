@@ -123,7 +123,13 @@ fn project(cache: &Value, tokens: &[std::sync::Arc<Token>], now: f64) -> Value {
 /// 顶层是手动查询的冷却状态。给「上游」页的聚合接口按 `token_id` 合并用。
 pub(super) async fn cached(state: &AppState) -> Result<Value, crate::error::ApiError> {
     let cache = read_cache(state).await?;
-    let tokens = state.nai.tokens().await;
+    let tokens: Vec<_> = state
+        .nai
+        .tokens()
+        .await
+        .into_iter()
+        .filter(|t| !t.is_share())
+        .collect();
     Ok(project(&cache, &tokens, state.now()))
 }
 
@@ -233,13 +239,22 @@ async fn refresh(State(state): State<AppState>, _session: AdminSession, req: Req
     cache["last_attempt_at"] = json!(now);
     write_cache(&state, &cache).await?;
 
-    let tokens = state.nai.tokens().await;
+    let tokens: Vec<_> = state
+        .nai
+        .tokens()
+        .await
+        .into_iter()
+        .filter(|t| !t.is_share())
+        .collect();
     let mut account_map = cache
         .get("accounts")
         .and_then(Value::as_object)
         .cloned()
         .unwrap_or_default();
     for token in &tokens {
+        if token.is_share() {
+            continue;
+        }
         let url = format!("{}/user/information", state.nai.image_host());
         let response = tokio::time::timeout(
             Duration::from_secs(8),

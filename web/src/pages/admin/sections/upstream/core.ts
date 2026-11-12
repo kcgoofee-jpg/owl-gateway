@@ -124,6 +124,8 @@ export type UpstreamAccount = {
 export type UpstreamPage = {
   generated_at: number;
   pool_configured: boolean;
+  /** 令牌池总数（含拼车号）。官方页只列出无 Host 的号。 */
+  pool_size?: number;
   accounts: UpstreamAccount[];
   threshold: number;
   settlements: Settlement[];
@@ -137,11 +139,11 @@ export type UpstreamPage = {
 
 export type TokenState = { text: string; tone: "ok" | "warn" | "danger" | undefined };
 export function tokenState(
-  p: Pick<UpstreamAccount, "admin_enabled" | "disabled" | "blocked_for" | "full">,
+  p: Pick<UpstreamAccount, "admin_enabled" | "disabled"> & { blocked_for?: number; full?: boolean },
 ): TokenState {
   if (!p.admin_enabled) return { text: "已停用", tone: undefined };
   if (p.disabled) return { text: "已失效（401）", tone: "danger" };
-  if (p.blocked_for > 0) return { text: `限流中 ${p.blocked_for} 秒`, tone: "warn" };
+  if ((p.blocked_for ?? 0) > 0) return { text: `限流中 ${p.blocked_for} 秒`, tone: "warn" };
   if (p.full) return { text: "今日已满", tone: "warn" };
   return { text: "正常", tone: "ok" };
 }
@@ -165,6 +167,53 @@ export function tokenFormatProblem(t: string): string | null {
   if (!v.startsWith("pst-"))
     return "Token 格式不对：应以 pst- 开头（NovelAI 账号设置 → Get Persistent API Token）";
   return null;
+}
+
+export type ShareAccount = {
+  token_id: string;
+  position: number;
+  token: string;
+  image_host: string | null;
+  usable: boolean;
+  admin_enabled: boolean;
+  disabled: boolean;
+  fails: number;
+  allow_anlas: boolean;
+  active: boolean | null;
+  usage_percent: number | null;
+  anlas: number | null;
+  error: string | null;
+};
+
+export type SharePage = {
+  pool_configured: boolean;
+  pool_size: number;
+  accounts: ShareAccount[];
+};
+
+export function shareTokenProblem(t: string): string | null {
+  const v = t.trim();
+  if (!v) return "请粘贴拼车网关 Key";
+  if (!v.startsWith("NAI-")) return "Key 格式不对：拼车网关的 Key 应以 NAI- 开头";
+  return null;
+}
+
+export function shareHostProblem(h: string): string | null {
+  const v = h.trim();
+  if (!v) return "请填写拼车网关地址";
+  let url: URL;
+  try {
+    url = new URL(v);
+  } catch {
+    return "地址不对：需要 https:// 开头的主机名，不要带路径";
+  }
+  if (url.pathname !== "/" || url.search || url.hash || url.username) {
+    return "地址不对：需要 https:// 开头的主机名，不要带路径";
+  }
+  const local = url.hostname === "127.0.0.1" || url.hostname.toLowerCase() === "localhost";
+  if (url.protocol === "https:") return null;
+  if (url.protocol === "http:" && local) return null;
+  return "地址不对：需要 https:// 开头的主机名，不要带路径";
 }
 
 export const anlasText = (n: number | null | undefined): string =>

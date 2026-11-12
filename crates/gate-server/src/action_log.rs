@@ -39,6 +39,9 @@ pub const ADMIN_ACTIONS: &[(&str, &str, &str)] = &[
     ("POST", "/upstream-tokens", "添加上游 Token"),
     ("PUT", "/upstream-tokens/{token_id}", "替换上游 Token"),
     ("DELETE", "/upstream-tokens/{token_id}", "删除上游 Token"),
+    ("POST", "/share-upstreams", "添加拼车网关"),
+    ("PUT", "/share-upstreams/{token_id}", "替换拼车网关"),
+    ("DELETE", "/share-upstreams/{token_id}", "删除拼车网关"),
     (
         "PUT",
         "/upstream-tokens/{token_id}/v5-limit",

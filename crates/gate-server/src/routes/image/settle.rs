@@ -210,8 +210,7 @@ pub(super) async fn perform_generation(
         before_dispatch: Some(before_dispatch(state)),
         on_dispatch: Some(on_dispatch(state, ctx, reserved.clone())),
     };
-    let url = format!("{}/ai/generate-image", state.nai.image_host());
-    let mut opts = RequestOpts::post(url, &prep.body);
+    let mut opts = RequestOpts::post("/ai/generate-image", &prep.body);
     opts.requires_anlas = est0.anlas > 0.0;
     opts.v5_free = est0.v5 > 0 && est0.anlas == 0.0;
     opts.image_count = prep.image_count as usize;

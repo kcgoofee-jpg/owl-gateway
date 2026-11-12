@@ -17,7 +17,7 @@ impl<H: Hooks> NaiClient<H> {
         may_switch: bool,
     ) -> Option<Attempt> {
         let inner = &self.inner;
-        if !o.v5_free {
+        if !o.v5_free || token.is_share() {
             return None;
         }
         let (Some(resolve), Some(a)) = (cb.resolve_v5_cost.as_ref(), allowance) else {
@@ -56,6 +56,7 @@ impl<H: Hooks> NaiClient<H> {
         allowance: Option<&dyn Allowance>,
         obs: &dyn Observer,
         prefer_token_id: Option<&str>,
+        official_only: bool,
     ) -> Result<ImageStream<H>, UpstreamError> {
         let inner = &self.inner;
         let hooks: &dyn Hooks = &inner.hooks;
@@ -78,6 +79,7 @@ impl<H: Hooks> NaiClient<H> {
                     allowance,
                     arrival,
                     prefer_token_id,
+                    official_only,
                 )
                 .await?
             else {
@@ -121,6 +123,7 @@ impl<H: Hooks> NaiClient<H> {
                         free_now,
                         allowance,
                         obs,
+                        official_only,
                     )
                     .await;
                 match wait {
@@ -184,13 +187,14 @@ impl<H: Hooks> NaiClient<H> {
             // 上游回「并发锁」时在同一账号上再发（见 retry_after_lock）；其余 429 / 409 在这里就结束
             let mut locks: u32 = 0;
             let (resp, status) = loop {
+                let request_url = crate::client::resolve_url(&inner.cfg.image_host, &token, url);
                 let mut req = inner
                     .http
                     .build(
                         token.profile_index(),
                         &token.token,
                         wreq::Method::POST,
-                        url,
+                        &request_url,
                         Some(body),
                         accept,
                     )
@@ -325,7 +329,7 @@ impl<H: Hooks> NaiClient<H> {
         may_switch: bool,
     ) -> Result<bool, UpstreamError> {
         let inner = &self.inner;
-        if !fl.v5_free {
+        if !fl.v5_free || token.is_share() {
             return Ok(true);
         }
         let (Some(resolve), Some(a)) = (cb.resolve_v5_cost.as_ref(), allowance) else {

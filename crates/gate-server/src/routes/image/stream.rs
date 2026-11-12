@@ -381,12 +381,12 @@ async fn perform_stream(
         .with(&state.nai)
         .paid_cost(super::settle::paid_cost(&prep.body));
     let allow: Option<&dyn gate_upstream::client::Allowance> = Some(&allowance);
-    let url = format!("{}/ai/generate-image-stream", state.nai.image_host());
+    let url = "/ai/generate-image-stream";
     let outcome: Result<Result<(), StreamFail>, GateError> = async {
         // 总时长上限：上游一直发进度帧也不能无限占着
         let work = async {
             let open = state.nai.image_stream(
-                &url,
+                url,
                 &prep.body,
                 image_count,
                 est0.anlas > 0.0,
@@ -397,6 +397,7 @@ async fn perform_stream(
                 allow,
                 ctx,
                 prep.key.bound_token_id.as_deref(),
+                false,
             );
             tokio::pin!(open);
             let mut seen_cancel = false;
@@ -439,12 +440,17 @@ async fn perform_stream(
                 .unwrap_or("")
                 .trim()
                 .to_lowercase();
+            let parse_msgpack = matches!(
+                media.as_str(),
+                "application/octet-stream" | "application/msgpack" | "application/x-msgpack"
+            );
             let mut allowed = vec![wire.media_type()];
-            if wire == WireFormat::Msgpack {
-                // 官方文档对这个端点仍写 SSE：即使是这个头也按二进制帧校验
+            if wire == WireFormat::Msgpack || handle.is_share() || parse_msgpack {
+                // 官方文档对这个端点仍写 SSE；拼车网关固定给 octet-stream 最终帧
                 allowed.extend([
                     "application/msgpack",
                     "application/octet-stream",
+                    "application/x-msgpack",
                     "text/event-stream",
                 ]);
             }
@@ -455,6 +461,26 @@ async fn perform_stream(
                     "NovelAI 返回的图片数据格式错误，未扣费。请稍后重试。".into(),
                     false,
                 ))));
+            }
+            if parse_msgpack && wire != WireFormat::Msgpack {
+                tracker = ImageEventTracker::new(image_count, wire)
+                    .map_err(|e| GateError::new(500, e.to_string()))?
+                    .parse_as(WireFormat::Msgpack);
+                if crate::backup::applies_to(&ctx.origin().2, key.subject()) {
+                    let backup_state = state.clone();
+                    let member = key.subject().to_string();
+                    let request_id = ctx.internal_id();
+                    if crate::backup::enabled(state, &member).await {
+                        tracker.set_image_sink(move |index, bytes| {
+                            backup_state.backup.enqueue(
+                                &member,
+                                &request_id,
+                                index,
+                                bytes.to_vec(),
+                            );
+                        });
+                    }
+                }
             }
             sink.start().await;
             let mut chunks = handle.take_body().expect("stream body");

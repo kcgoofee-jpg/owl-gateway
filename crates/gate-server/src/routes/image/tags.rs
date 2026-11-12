@@ -105,15 +105,20 @@ async fn suggest(
     };
     let _slots = acquire_slots(state);
     check_image_cooldown(state)?;
-    let url = reqwest::Url::parse_with_params(
-        &format!("{}/ai/generate-image/suggest-tags", state.nai.image_host()),
+    let encoded = reqwest::Url::parse_with_params(
+        "https://image.novelai.net/ai/generate-image/suggest-tags",
         [("prompt", &prompt), ("model", &model)],
     )
     .map_err(|e| InternalError(e.to_string()))?;
-    let mut opts = RequestOpts::get(url.to_string());
+    let path = match encoded.query() {
+        Some(q) => format!("{}?{q}", encoded.path()),
+        None => encoded.path().to_string(),
+    };
+    let mut opts = RequestOpts::get(path);
     opts.accept = "application/json";
     opts.image_lane = true;
     opts.wait_for_image_slot = false;
+    opts.official_only = true;
     let (s, c, k) = (state.clone(), ctx.clone(), key.clone());
     let cb = Callbacks {
         on_rate_limited: Some(Box::new(move |retry_after| {

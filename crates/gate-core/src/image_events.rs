@@ -1,7 +1,8 @@
 //! Validated image streams using standard JSON and MessagePack.
 use std::collections::HashSet;
 
-use serde_json::Value;
+use base64::Engine;
+use serde_json::{Value, json};
 use thiserror::Error;
 
 use crate::json;
@@ -98,6 +99,46 @@ pub fn encode_image_event(payload: &Value, wire: WireFormat) -> Result<Vec<u8>, 
     }
 }
 
+fn rmpv_to_json(value: &rmpv::Value) -> Value {
+    match value {
+        rmpv::Value::Nil => Value::Null,
+        rmpv::Value::Boolean(b) => json!(*b),
+        rmpv::Value::Integer(i) => i.as_i64().map_or_else(
+            || i.as_u64().map_or(Value::Null, |n| json!(n)),
+            |n| json!(n),
+        ),
+        rmpv::Value::F32(f) => json!(*f),
+        rmpv::Value::F64(f) => json!(*f),
+        rmpv::Value::String(s) => json!(s.as_str().unwrap_or_default()),
+        rmpv::Value::Binary(b) => json!(base64::engine::general_purpose::STANDARD.encode(b)),
+        rmpv::Value::Array(a) => Value::Array(a.iter().map(rmpv_to_json).collect()),
+        rmpv::Value::Map(entries) => {
+            let mut obj = serde_json::Map::new();
+            for (k, v) in entries {
+                if let Some(key) = k.as_str() {
+                    obj.insert(key.to_string(), rmpv_to_json(v));
+                }
+            }
+            Value::Object(obj)
+        }
+        rmpv::Value::Ext(_, data) => {
+            json!(base64::engine::general_purpose::STANDARD.encode(data))
+        }
+    }
+}
+
+fn emit_frame(
+    emit: WireFormat,
+    parsed: WireFormat,
+    original: Vec<u8>,
+    payload: impl FnOnce() -> Value,
+) -> Result<Vec<u8>, Reject> {
+    if emit == parsed {
+        return Ok(original);
+    }
+    encode_image_event(&payload(), emit).map_err(|_| Reject)
+}
+
 /// `_image_envelope`：只看格式与基本完整性，不解码像素。
 pub fn image_envelope(data: &[u8]) -> bool {
     const PNG_SIG: &[u8] = b"\x89PNG\r\n\x1a\n";
@@ -168,7 +209,10 @@ impl std::fmt::Debug for NamedSink {
 #[derive(Debug)]
 pub struct ImageEventTracker {
     expected_images: i64,
+    /// 上游帧格式。
     wire: WireFormat,
+    /// 转发给成员的格式。与 `wire` 不同时按 payload 重编码（拼车网关只给 msgpack 最终帧）。
+    emit: WireFormat,
     max_event: u64,
     max_stream: u64,
     failed: bool,
@@ -201,6 +245,7 @@ impl ImageEventTracker {
         Ok(Self {
             expected_images,
             wire,
+            emit: wire,
             max_event,
             max_stream,
             failed: false,
@@ -217,6 +262,12 @@ impl ImageEventTracker {
     /// 收集校验通过的 `final` 事件图片（samp_ix → 字节）。自动备份用；不设置则行为不变。
     pub fn set_image_sink(&mut self, sink: impl FnMut(i64, &[u8]) + Send + 'static) {
         self.image_sink = Some(NamedSink(Box::new(sink)));
+    }
+
+    /// 按另一种线上格式解析上游字节，再转成构造时指定的成员格式。
+    pub fn parse_as(mut self, wire: WireFormat) -> Self {
+        self.wire = wire;
+        self
     }
 
     pub fn failed(&self) -> bool {
@@ -309,8 +360,11 @@ impl ImageEventTracker {
                 if self.failed {
                     return Ok(());
                 }
+                let bytes = emit_frame(self.emit, WireFormat::Msgpack, wire, || {
+                    rmpv_to_json(&payload)
+                })?;
                 frames.push(Frame {
-                    bytes: wire,
+                    bytes,
                     completed_after: self.completed.len(),
                 });
             }
@@ -337,8 +391,10 @@ impl ImageEventTracker {
             if self.failed {
                 return Ok(());
             }
+            let original = encode_sse(&ev.data, &ev.event);
+            let bytes = emit_frame(self.emit, WireFormat::Sse, original, || json.clone())?;
             frames.push(Frame {
-                bytes: encode_sse(&ev.data, &ev.event),
+                bytes,
                 completed_after: self.completed.len(),
             });
         }
@@ -443,6 +499,32 @@ mod tests {
     fn sse_final(sample: i64) -> Vec<u8> {
         let payload = json!({"event_type": "final", "samp_ix": sample, "image": b64(&png())});
         encode_sse(json::dumps(&payload).as_bytes(), b"final")
+    }
+
+    #[test]
+    fn msgpack_final_transcodes_to_sse() {
+        let png = png();
+        let mut data = Vec::new();
+        rmpv::encode::write_value(
+            &mut data,
+            &rmpv::Value::Map(vec![
+                ("event_type".into(), "final".into()),
+                ("samp_ix".into(), 0.into()),
+                ("image".into(), rmpv::Value::Binary(png.clone())),
+            ]),
+        )
+        .unwrap();
+        let mut frame = (data.len() as u32).to_be_bytes().to_vec();
+        frame.extend(data);
+        let mut t = ImageEventTracker::new(1, WireFormat::Sse)
+            .unwrap()
+            .parse_as(WireFormat::Msgpack);
+        let out = t.frames(&frame);
+        assert_eq!(out.error, None);
+        assert_eq!(t.completed_images(), 1);
+        let text = std::str::from_utf8(&out.frames[0].bytes).unwrap();
+        assert!(text.starts_with("event: final\n"));
+        assert!(text.contains(&b64(&png)));
     }
 
     #[test]

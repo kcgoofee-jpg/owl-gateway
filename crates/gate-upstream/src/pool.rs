@@ -143,9 +143,42 @@ pub fn decode_cooldowns(raw: Option<&str>) -> HashMap<String, Cooldown> {
         .collect()
 }
 
+/// 建令牌池用的一行：官方号没有 `image_host`；拼车号带自己的 API 根地址。
+#[derive(Debug, Clone)]
+pub struct TokenSpec {
+    pub token: String,
+    pub v5_daily_limit: i64,
+    pub allow_anlas: bool,
+    pub image_host: Option<String>,
+}
+
+impl From<(String, i64, bool)> for TokenSpec {
+    fn from((token, v5_daily_limit, allow_anlas): (String, i64, bool)) -> Self {
+        Self {
+            token,
+            v5_daily_limit,
+            allow_anlas,
+            image_host: None,
+        }
+    }
+}
+
+impl From<&crate::token_store::Entry> for TokenSpec {
+    fn from(e: &crate::token_store::Entry) -> Self {
+        Self {
+            token: e.token.clone(),
+            v5_daily_limit: 0,
+            allow_anlas: e.allow_anlas,
+            image_host: e.image_host.clone(),
+        }
+    }
+}
+
 pub struct Token {
     pub token: String,
     pub token_id: String,
+    /// 拼车网关的 API 根地址。官方号为 `None`。
+    pub image_host: Option<String>,
     profile_index: usize,
     pub image_slots: AdjustableLimiter,
     /// 与「停用 Token」串行：之后发出的请求一定能看到新的启停状态（请求本身不持锁）。
@@ -154,17 +187,18 @@ pub struct Token {
 }
 
 impl Token {
-    fn new(token: String, index: usize, v5_daily_limit: i64, allow_anlas: bool) -> Self {
+    pub(crate) fn new(spec: TokenSpec, index: usize) -> Self {
         Self {
-            token_id: headers::token_id(&token),
-            token,
+            token_id: headers::token_id(&spec.token),
+            token: spec.token,
+            image_host: spec.image_host,
             profile_index: index % headers::POOL.len(),
             image_slots: AdjustableLimiter::new(1),
             dispatch_lock: tokio::sync::Mutex::new(()),
             fields: Mutex::new(TokenFields {
                 position: index + 1,
-                v5_daily_limit: v5_daily_limit.max(0),
-                allow_anlas,
+                v5_daily_limit: spec.v5_daily_limit.max(0),
+                allow_anlas: spec.allow_anlas,
                 pending_v5: 0,
                 admin_enabled: true,
                 fails: 0,
@@ -185,6 +219,17 @@ impl Token {
                 locked_day: String::new(),
             }),
         }
+    }
+
+    pub fn is_share(&self) -> bool {
+        self.image_host.is_some()
+    }
+
+    /// 这把号实际要打的上游根地址：拼车号用自己的 Host，官方号用全局 `NAI_IMAGE_HOST`。
+    pub fn base<'a>(&'a self, default_host: &'a str) -> &'a str {
+        self.image_host
+            .as_deref()
+            .unwrap_or_else(|| default_host.trim_end_matches('/'))
     }
 
     pub fn fields(&self) -> TokenFields {
@@ -493,12 +538,12 @@ pub(crate) struct MoveWatch {
 }
 
 impl Pool {
-    /// `tokens`：(Token, 每日免费 V5 上限, 是否允许 Anlas)。
-    pub(crate) fn new(tokens: Vec<(String, i64, bool)>) -> Self {
+    /// `tokens`：官方号或拼车号，见 [`TokenSpec`]。
+    pub(crate) fn new(tokens: Vec<TokenSpec>) -> Self {
         let tokens = tokens
             .into_iter()
             .enumerate()
-            .map(|(i, (t, v5, anlas))| Arc::new(Token::new(t, i, v5, anlas)))
+            .map(|(i, spec)| Arc::new(Token::new(spec, i)))
             .collect();
         Self {
             state: tokio::sync::Mutex::new(PoolState {
@@ -593,14 +638,18 @@ impl Pool {
         allow_anlas: bool,
         saved_v5: Option<i64>,
         saved_enabled: Option<bool>,
+        image_host: Option<String>,
     ) -> Result<Arc<Token>, String> {
         let mut pool = self.state.lock().await;
         // 10-27：新 Token 默认 9999（放开，站长再收紧）；0 现在是「停用」，不能再当默认
         let new = Token::new(
-            token,
+            TokenSpec {
+                token,
+                v5_daily_limit: V5_DAILY_LIMIT_DEFAULT,
+                allow_anlas,
+                image_host,
+            },
             pool.tokens.len(),
-            V5_DAILY_LIMIT_DEFAULT,
-            allow_anlas,
         );
         if pool.tokens.iter().any(|t| t.token_id == new.token_id) {
             return Err("这把 Token 已经在令牌池里".into());
@@ -624,6 +673,7 @@ impl Pool {
         &self,
         token_id: &str,
         token: String,
+        image_host: Option<String>,
     ) -> Result<(Arc<Token>, String), String> {
         let mut pool = self.state.lock().await;
         let Some(index) = pool.tokens.iter().position(|t| t.token_id == token_id) else {
@@ -631,7 +681,15 @@ impl Pool {
         };
         let old = pool.tokens[index].clone();
         let of = old.fields();
-        let new = Token::new(token, index, of.v5_daily_limit, of.allow_anlas);
+        let new = Token::new(
+            TokenSpec {
+                token,
+                v5_daily_limit: of.v5_daily_limit,
+                allow_anlas: of.allow_anlas,
+                image_host: image_host.or_else(|| old.image_host.clone()),
+            },
+            index,
+        );
         if new.token_id != old.token_id && pool.tokens.iter().any(|t| t.token_id == new.token_id) {
             return Err("这把 Token 已经在令牌池的另一个位置".into());
         }
@@ -709,6 +767,7 @@ impl Pool {
         allowance: Option<&dyn Allowance>,
         arrival: Arrival,
         prefer_token_id: Option<&str>,
+        official_only: bool,
     ) -> Result<Option<(Arc<Token>, Option<Ticket>)>, UpstreamError> {
         let mut pool = self.state.lock().await;
         let now = hooks.now();
@@ -718,6 +777,9 @@ impl Pool {
             .filter(|t| t.usable(now) && (!requires_anlas || t.can_pay_anlas(now, allowance)))
             .cloned()
             .collect();
+        if official_only {
+            usable.retain(|t| !t.is_share());
+        }
         if let Some(prefer) = prefer_token_id {
             usable.retain(|t| t.token_id == prefer);
         } else {
@@ -817,6 +879,7 @@ impl Pool {
         allowance: Option<&dyn Allowance>,
         patient_over: bool,
         watch: &mut MoveWatch,
+        official_only: bool,
     ) -> Result<Option<(Arc<Token>, Ticket)>, UpstreamError> {
         let pool = self.state.lock().await;
         let now = hooks.now();
@@ -832,6 +895,7 @@ impl Pool {
             if Arc::ptr_eq(t, &ticket.token)
                 || pool.exclusive.contains(&t.token_id)
                 || pool.exclusive.contains(&ticket.token.token_id)
+                || (official_only && t.is_share())
                 || !t.quick_eligible(now, requires_anlas, v5_free, allowance)
             {
                 continue;

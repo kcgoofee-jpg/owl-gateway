@@ -68,6 +68,7 @@ impl<H: Hooks> NaiClient<H> {
                     allowance,
                     arrival,
                     o.prefer_token_id.as_deref(),
+                    o.official_only,
                 )
                 .await?
             else {
@@ -169,6 +170,7 @@ impl<H: Hooks> NaiClient<H> {
                         o.v5_free,
                         allowance,
                         obs,
+                        o.official_only,
                     )
                     .await;
                 match wait {
@@ -229,11 +231,12 @@ impl<H: Hooks> NaiClient<H> {
             }
             fl.mark_sent();
             obs.sent();
+            let url = crate::client::resolve_url(&inner.cfg.image_host, token, &o.url);
             let mut req = inner.http.build(
                 token.profile_index(),
                 &token.token,
                 o.method.clone(),
-                &o.url,
+                &url,
                 o.json,
                 o.accept,
             );
@@ -391,6 +394,7 @@ impl<H: Hooks> NaiClient<H> {
         v5_free: bool,
         allowance: Option<&dyn Allowance>,
         obs: &dyn Observer,
+        official_only: bool,
     ) -> Result<Wait, UpstreamError> {
         let inner = &self.inner;
         let hooks: &dyn Hooks = &inner.hooks;
@@ -439,6 +443,7 @@ impl<H: Hooks> NaiClient<H> {
                             allowance,
                             patient_over,
                             &mut watch,
+                            official_only,
                         )
                         .await?
                     {

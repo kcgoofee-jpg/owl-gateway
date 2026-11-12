@@ -13,7 +13,7 @@ use crate::runtime::{
 use crate::web::Assets;
 use gate_core::clock::Clock;
 use gate_db::Db;
-use gate_upstream::client::{Config as UpConfig, NaiClient};
+use gate_upstream::client::{Config as UpConfig, NaiClient, TokenSpec};
 use std::collections::HashMap;
 use std::ops::Deref;
 use std::sync::atomic::AtomicI64;
@@ -159,22 +159,18 @@ impl AppState {
             .await?;
         let managed =
             gate_upstream::token_store::load(&env.upstream_tokens_path(), revision.as_deref())?;
-        let tokens: Vec<(String, i64, bool)> = match &managed {
-            Some(entries) => entries
-                .iter()
-                .map(|e| (e.token.clone(), 0, e.allow_anlas))
-                .collect(),
+        let tokens: Vec<TokenSpec> = match &managed {
+            Some(entries) => entries.iter().map(TokenSpec::from).collect(),
             None => env
                 .nai_tokens
                 .iter()
                 .enumerate()
-                .map(|(i, t)| {
+                .map(|(i, t)| TokenSpec {
+                    token: t.clone(),
                     // 库里没有设置行的 Token 默认 9999（放开，站长再收紧）；0 现在是「停用」
-                    (
-                        t.clone(),
-                        gate_upstream::pool::V5_DAILY_LIMIT_DEFAULT,
-                        env.nai_token_allow_anlas.get(i).copied().unwrap_or(true),
-                    )
+                    v5_daily_limit: gate_upstream::pool::V5_DAILY_LIMIT_DEFAULT,
+                    allow_anlas: env.nai_token_allow_anlas.get(i).copied().unwrap_or(true),
+                    image_host: None,
                 })
                 .collect(),
         };

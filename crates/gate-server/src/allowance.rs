@@ -95,6 +95,9 @@ impl ServerAllowance {
             .or_default()
             .clone();
         let _g = lock.lock().await;
+        if token.is_share() {
+            return Ok(false);
+        }
         let unavailable = || core::UNAVAILABLE_MSG.to_string();
         let threshold = read_alert_threshold(&self.db)
             .await

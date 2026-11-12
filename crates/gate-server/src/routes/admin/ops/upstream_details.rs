@@ -119,7 +119,7 @@ async fn details(
     let tokens = state.nai.tokens().await;
     let token = tokens
         .iter()
-        .find(|token| token.token_id == token_id)
+        .find(|token| token.token_id == token_id && !token.is_share())
         .ok_or_else(|| HttpError::new(404, "上游 Token 不存在"))?;
     let now = state.now();
     {

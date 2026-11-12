@@ -83,11 +83,9 @@ pub(super) async fn tool(
         let ctx = c;
         let mut billing_uncertain = false;
         let failed: Result<Response, (GateError, bool)> = async {
-            let mut opts = RequestOpts::post(
-                format!("{}/ai/{operation}", state.nai.image_host()),
-                &payload,
-            );
+            let mut opts = RequestOpts::post(format!("/ai/{operation}"), &payload);
             opts.requires_anlas = cost > 0;
+            opts.official_only = operation != "upscale";
             opts.image_lane = true;
             opts.lane = lane(&state, &key, &model);
             opts.prefer_token_id = key.bound_token_id.clone();
@@ -270,10 +268,7 @@ pub(super) async fn vibe(state: AppState, req: Request) -> Result<Response, ApiE
         let _held = (admission, slots, reserved.clone());
         let state = s;
         let ctx = c;
-        let mut opts = RequestOpts::post(
-            format!("{}/ai/encode-vibe", state.nai.image_host()),
-            &payload,
-        );
+        let mut opts = RequestOpts::post("/ai/encode-vibe", &payload);
         opts.accept = "application/octet-stream";
         opts.requires_anlas = true;
         opts.image_lane = true;

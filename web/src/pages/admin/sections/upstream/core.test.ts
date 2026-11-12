@@ -10,6 +10,8 @@ import {
   queueText,
   quietText,
   reading,
+  shareHostProblem,
+  shareTokenProblem,
   tokenFormatProblem,
   tokenState,
   v5Highlight,
@@ -32,6 +34,21 @@ describe("tokenFormatProblem", () => {
     expect(tokenFormatProblem("  ")).toContain("请粘贴");
     expect(tokenFormatProblem("sk-abc")).toContain("pst-");
     expect(tokenFormatProblem("pst-abc")).toBeNull();
+  });
+});
+
+describe("shareTokenProblem / shareHostProblem", () => {
+  it("拼车 Key 要 NAI- 开头", () => {
+    expect(shareTokenProblem("")).toContain("请粘贴");
+    expect(shareTokenProblem("pst-abc")).toContain("NAI-");
+    expect(shareTokenProblem("NAI-abcdefghijklmnop")).toBeNull();
+  });
+  it("地址要 https 主机名，测试允许本机 http", () => {
+    expect(shareHostProblem("")).toContain("请填写");
+    expect(shareHostProblem("https://share.example")).toBeNull();
+    expect(shareHostProblem("https://share.example/path")).toContain("路径");
+    expect(shareHostProblem("http://example.com")).toContain("https");
+    expect(shareHostProblem("http://127.0.0.1:18081")).toBeNull();
   });
 });
 

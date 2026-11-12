@@ -1,0 +1,229 @@
+//! 拼车网关：凭据入库、流式最终帧转 SSE、402 换到官方号、导演/标签不打拼车 Host。
+
+mod common;
+use common::*;
+use gate_testkit::{MockUpstream, Reply, msgpack_frame, tiny_png};
+use serde_json::{Value, json};
+
+const SHARE_KEY: &str = "NAI-synthetic-share-key01";
+
+fn v5_body() -> Value {
+    json!({
+        "input": "1girl, solo", "model": "nai-diffusion-5-full", "action": "generate",
+        "parameters": {"width": 832, "height": 1216, "steps": 28, "scale": 5, "sampler": "k_euler_ancestral",
+                       "n_samples": 1, "seed": 1234, "negative_prompt": "lowres"},
+    })
+}
+
+async fn add_share(state: &gate_server::AppState, host: &str) {
+    state
+        .nai
+        .add_token(SHARE_KEY.into(), true, None, Some(true), Some(host.into()))
+        .await
+        .unwrap();
+}
+
+#[tokio::test]
+async fn share_crud_persists_and_stays_off_the_official_page() {
+    let share = MockUpstream::start().await;
+    let e = setup(&[]).await;
+    let api = Admin::login_bare(&e.state).await;
+    let host = share.url();
+
+    api.fails(
+        "POST",
+        "/share-upstreams",
+        Some(json!({"token": SHARE_KEY})),
+        422,
+        "拼车网关地址不对：需要 https:// 开头的主机名，不要带路径",
+    )
+    .await;
+    api.fails(
+        "POST",
+        "/share-upstreams",
+        Some(json!({"token": "pst-synthetic-not-a-share", "image_host": host})),
+        422,
+        "Key 格式不对：拼车网关的 Key 应以 NAI- 开头",
+    )
+    .await;
+    api.fails(
+        "POST",
+        "/share-upstreams",
+        Some(json!({"token": SHARE_KEY, "image_host": format!("{host}/path")})),
+        422,
+        "拼车网关地址不对：需要 https:// 开头的主机名，不要带路径",
+    )
+    .await;
+
+    share.push(
+        "/user/subscription",
+        Reply::json(200, &json!({"tier": 3, "active": false})),
+    );
+    api.fails(
+        "POST",
+        "/share-upstreams",
+        Some(json!({"token": SHARE_KEY, "image_host": host, "allow_anlas": true})),
+        422,
+        "拼车网关说这份份额未生效",
+    )
+    .await;
+
+    let (status, body) = api
+        .json(
+            "POST",
+            "/share-upstreams",
+            Some(json!({"token": SHARE_KEY, "image_host": host, "allow_anlas": true})),
+        )
+        .await;
+    assert_eq!(status, 200, "{body}");
+    assert!(e.mock.requests_to("/user/subscription").is_empty());
+    assert!(!share.requests_to("/user/subscription").is_empty());
+
+    let official = api.get_ok("/upstream").await;
+    assert_eq!(official["pool_size"], json!(2));
+    assert_eq!(official["accounts"].as_array().unwrap().len(), 1);
+    assert!(
+        official["accounts"][0]["token"]
+            .as_str()
+            .unwrap()
+            .starts_with("pst-")
+    );
+
+    let listed = api.get_ok("/share-upstreams").await;
+    assert_eq!(listed["accounts"].as_array().unwrap().len(), 1);
+    let row = &listed["accounts"][0];
+    assert_eq!(row["image_host"], json!(host.trim_end_matches('/')));
+    assert_eq!(row["allow_anlas"], json!(true));
+    assert!(!row["token"].as_str().unwrap().contains(SHARE_KEY));
+    assert_eq!(row["usage_percent"], json!(80));
+
+    let id = row["token_id"].as_str().unwrap().to_string();
+    let restarted = e.restart().await;
+    assert!(
+        restarted
+            .nai
+            .tokens()
+            .await
+            .iter()
+            .any(|t| t.token_id == id && t.is_share())
+    );
+
+    let api = Admin::login_bare(&restarted).await;
+    assert_eq!(
+        api.text("DELETE", &format!("/share-upstreams/{id}"), None)
+            .await
+            .0,
+        200
+    );
+    assert_eq!(
+        api.get_ok("/share-upstreams").await["accounts"]
+            .as_array()
+            .unwrap()
+            .len(),
+        0
+    );
+}
+
+#[tokio::test]
+async fn share_octet_stream_final_becomes_member_sse() {
+    let share = MockUpstream::start().await;
+    let e = setup(&[]).await;
+    let official_id = e.state.nai.tokens().await[0].token_id.clone();
+    add_share(&e.state, &share.url()).await;
+    assert!(e.state.nai.set_admin_enabled(&official_id, false).await);
+
+    let png = tiny_png();
+    let frame = msgpack_frame(vec![
+        ("event_type", "final".into()),
+        ("samp_ix", 0.into()),
+        ("image", rmpv::Value::Binary(png)),
+    ]);
+    share.push(
+        "/ai/generate-image-stream",
+        Reply::Status {
+            status: 200,
+            headers: vec![("content-type".into(), "application/octet-stream".into())],
+            body: frame.into(),
+        },
+    );
+
+    let (status, _, body) = Call::new("POST", "/ai/generate-image-stream")
+        .bearer(TOKEN)
+        .json(image_body())
+        .send(&e.state)
+        .await;
+    let text = String::from_utf8_lossy(&body);
+    assert_eq!(status, 200, "{text}");
+    assert!(text.contains("event: final"), "{text}");
+    assert!(e.mock.requests_to("/ai/generate-image-stream").is_empty());
+    assert_eq!(share.requests_to("/ai/generate-image-stream").len(), 1);
+}
+
+#[tokio::test]
+async fn share_402_on_free_v5_switches_to_official() {
+    let share = MockUpstream::start().await;
+    let e = setup(&[]).await;
+    e.state
+        .guard
+        .with(|g| g.values.insert("interval_jitter".into(), 0));
+    policy_for(&e.state, 1, json!({"daily_v5": 10, "v5": true})).await;
+    add_share(&e.state, &share.url()).await;
+    share.push(
+        "/ai/generate-image-stream",
+        Reply::json(
+            402,
+            &json!({"statusCode": 402, "message": "Insufficient Anlas"}),
+        ),
+    );
+
+    let (status, _, body) = Call::new("POST", "/ai/generate-image-stream")
+        .bearer(TOKEN)
+        .json(v5_body())
+        .send(&e.state)
+        .await;
+    assert_eq!(status, 200, "{}", String::from_utf8_lossy(&body));
+    assert_eq!(share.requests_to("/ai/generate-image-stream").len(), 1);
+    assert_eq!(e.mock.requests_to("/ai/generate-image-stream").len(), 1);
+}
+
+#[tokio::test]
+async fn director_and_tags_do_not_hit_share_host() {
+    use base64::Engine;
+    let share = MockUpstream::start().await;
+    let e = setup(&[]).await;
+    add_share(&e.state, &share.url()).await;
+    policy_for(
+        &e.state,
+        1,
+        json!({"daily_anlas": 20, "paid_parameters": true, "augment": true, "tags": true}),
+    )
+    .await;
+    let image = base64::engine::general_purpose::STANDARD.encode(tiny_png());
+
+    let (status, _, body) = Call::new("POST", "/ai/augment-image")
+        .bearer(TOKEN)
+        .json(json!({"image": image, "width": 64, "height": 64, "req_type": "lineart"}))
+        .send(&e.state)
+        .await;
+    assert_eq!(status, 200, "{}", String::from_utf8_lossy(&body));
+    assert!(share.requests_to("/ai/augment-image").is_empty());
+    assert_eq!(e.mock.requests_to("/ai/augment-image").len(), 1);
+
+    let (status, _, body) = Call::new(
+        "GET",
+        "/ai/generate-image/suggest-tags?prompt=1g&model=nai-diffusion-4-5-full",
+    )
+    .bearer(TOKEN)
+    .send(&e.state)
+    .await;
+    assert_eq!(status, 200, "{}", String::from_utf8_lossy(&body));
+    assert!(
+        share
+            .requests_to("/ai/generate-image/suggest-tags")
+            .is_empty()
+    );
+    assert_eq!(
+        e.mock.requests_to("/ai/generate-image/suggest-tags").len(),
+        1
+    );
+}

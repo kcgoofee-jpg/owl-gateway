@@ -21,7 +21,7 @@ use wreq::header::HeaderMap;
 pub use crate::dispatch::ImageStream;
 pub use crate::error::UpstreamError;
 pub use crate::hooks::{Allowance, BoxFuture, HookResult, Hooks, NoObserver, Observer};
-pub use crate::pool::{Token, TokenFields};
+pub use crate::pool::{Token, TokenFields, TokenSpec};
 
 #[derive(Debug, Clone)]
 pub struct Config {
@@ -96,6 +96,8 @@ pub struct RequestOpts<'a> {
     pub queue_timeout: f64,
     /// 赞助席绑定的专属 Token：只派这把，冷却 / 见底时不改走站账号。
     pub prefer_token_id: Option<String>,
+    /// 标签补全、导演工具：只派官方 `pst-` 号，不打拼车网关。
+    pub official_only: bool,
 }
 
 impl<'a> RequestOpts<'a> {
@@ -123,8 +125,29 @@ impl<'a> RequestOpts<'a> {
             max_response_bytes: None,
             queue_timeout: 90.0,
             prefer_token_id: None,
+            official_only: false,
         }
     }
+}
+
+/// 选号之后拼上游 URL：`url` 可以是路径（`/ai/generate-image`）或完整地址。
+/// 拼车号用自己的 Host 替换来源；官方号路径拼到全局 `NAI_IMAGE_HOST`，完整地址原样保留（测试假上游）。
+pub fn resolve_url(default_host: &str, token: &Token, url: &str) -> String {
+    let base = token.base(default_host);
+    if url.starts_with("http://") || url.starts_with("https://") {
+        if !token.is_share() {
+            return url.to_string();
+        }
+        let rest = url.split_once("://").map(|(_, rest)| rest).unwrap_or(url);
+        let path = rest.find('/').map(|i| &rest[i..]).unwrap_or("/");
+        return format!("{}{path}", base.trim_end_matches('/'));
+    }
+    let path = if url.starts_with('/') {
+        url
+    } else {
+        return format!("{}/{url}", base.trim_end_matches('/'));
+    };
+    format!("{}{path}", base.trim_end_matches('/'))
 }
 
 /// 参数：官方免费额度是否已耗尽、Token 编号、能否改派给别的 Token 免费出；返回 `true` 表示改派。
@@ -157,14 +180,14 @@ pub struct Callbacks<'a> {
 }
 
 impl<H: Hooks> NaiClient<H> {
-    /// `tokens`：(Token, 每日免费 V5 上限, 是否允许 Anlas)。
-    pub fn new(
+    /// `tokens`：官方号或拼车号，见 [`TokenSpec`]（三元组 `(token, v5, anlas)` 仍可用）。
+    pub fn new<T: Into<TokenSpec>>(
         cfg: Config,
         hooks: H,
-        tokens: Vec<(String, i64, bool)>,
+        tokens: Vec<T>,
     ) -> Result<Self, wreq::Error> {
         let http = Http::new(cfg.proxy.as_deref())?;
-        let pool = Pool::new(tokens);
+        let pool = Pool::new(tokens.into_iter().map(Into::into).collect());
         let scheduler = Scheduler::new(cfg.pace);
         Ok(Self {
             inner: Arc::new(Inner {
@@ -218,20 +241,23 @@ impl<H: Hooks> NaiClient<H> {
         allow_anlas: bool,
         saved_v5: Option<i64>,
         saved_enabled: Option<bool>,
+        image_host: Option<String>,
     ) -> Result<Arc<Token>, String> {
         self.inner
             .pool
-            .add(token, allow_anlas, saved_v5, saved_enabled)
+            .add(token, allow_anlas, saved_v5, saved_enabled, image_host)
             .await
     }
 
     /// 替换某个槽位的 Token（在 NovelAI 重置了 Token）：设置与启停延续。
+    /// `image_host` 为 `None` 时沿用原来的（官方号仍是空，拼车号仍打同一地址）。
     pub async fn replace_token(
         &self,
         token_id: &str,
         token: String,
+        image_host: Option<String>,
     ) -> Result<(Arc<Token>, String), String> {
-        self.inner.pool.replace(token_id, token).await
+        self.inner.pool.replace(token_id, token, image_host).await
     }
 
     /// 删除（至少保留一把）。
@@ -361,11 +387,63 @@ impl<H: Hooks> NaiClient<H> {
 
     /// 后台「添加 / 替换 Token」前的有效性检查：查订阅（只读，不消耗额度，不记录 Token）。
     /// 用这把 Token 加进池后会分到的指纹：新增是池尾的位置，替换（`replacing` = 旧 token_id）是原位置。
-    pub async fn verify_token(&self, token: &str, replacing: Option<&str>) -> Result<i64, String> {
+    /// `image_host`：拼车号传对方的 API 根地址；官方号 `None` 走全局 `NAI_IMAGE_HOST`。
+    pub async fn verify_token(
+        &self,
+        token: &str,
+        replacing: Option<&str>,
+        image_host: Option<&str>,
+    ) -> Result<i64, String> {
         let tokens = self.tokens().await;
         let index = replacing
             .and_then(|id| tokens.iter().position(|t| t.token_id == id))
             .unwrap_or(tokens.len());
-        crate::account::verify(&self.inner.http, index, self.image_host(), token).await
+        let default = self.image_host();
+        let host = image_host.unwrap_or(default).trim_end_matches('/');
+        crate::account::verify(&self.inner.http, index, host, token).await
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn token(spec: TokenSpec) -> Token {
+        Token::new(spec, 0)
+    }
+
+    #[test]
+    fn resolve_url_keeps_full_official_url_and_rewrites_share() {
+        let official = TokenSpec {
+            token: "pst-abcdefghijklmnop12".into(),
+            v5_daily_limit: 0,
+            allow_anlas: true,
+            image_host: None,
+        };
+        let share = TokenSpec {
+            token: "NAI-abcdefghijklmnop12".into(),
+            v5_daily_limit: 0,
+            allow_anlas: true,
+            image_host: Some("https://share.example".into()),
+        };
+        let default = "https://image.novelai.net";
+        let o = token(official);
+        let s = token(share);
+        assert_eq!(
+            resolve_url(default, &o, "http://127.0.0.1:9/ai/generate-image"),
+            "http://127.0.0.1:9/ai/generate-image"
+        );
+        assert_eq!(
+            resolve_url(default, &o, "/ai/generate-image"),
+            "https://image.novelai.net/ai/generate-image"
+        );
+        assert_eq!(
+            resolve_url(default, &s, "http://127.0.0.1:9/ai/generate-image-stream"),
+            "https://share.example/ai/generate-image-stream"
+        );
+        assert_eq!(
+            resolve_url(default, &s, "/ai/generate-image"),
+            "https://share.example/ai/generate-image"
+        );
     }
 }
