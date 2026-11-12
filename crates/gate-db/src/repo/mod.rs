@@ -83,3 +83,8 @@ pub(crate) fn json_to_sql(v: &serde_json::Value) -> crate::Result<SqlValue> {
         }
     })
 }
+
+/// Preserve a domain or serialization error inside a rusqlite transaction callback.
+fn conversion_error(error: impl std::error::Error + Send + Sync + 'static) -> rusqlite::Error {
+    rusqlite::Error::ToSqlConversionFailure(Box::new(error))
+}

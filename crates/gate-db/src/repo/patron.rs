@@ -1,9 +1,18 @@
 //! 赞助席：指定成员的插队、自助开关和专属上游 Token。存在 `site_settings`，不进 git。
 
+use super::conversion_error;
 use crate::{Db, DbError, Result};
 use rusqlite::{Connection, OptionalExtension, params};
 use serde::{Deserialize, Serialize};
 use std::collections::{BTreeMap, HashSet};
+
+#[derive(Debug, PartialEq, thiserror::Error)]
+pub enum SeatConflict {
+    #[error("赞助席设置已变更，请刷新后再试")]
+    Changed,
+    #[error("这把上游 Token 已绑定其他赞助席")]
+    TokenTaken,
+}
 
 pub const PATRON_KEY: &str = "patron_profiles";
 
@@ -91,8 +100,7 @@ fn load_store(conn: &Connection) -> Result<PatronStore> {
 }
 
 fn save_store(conn: &Connection, store: &PatronStore) -> rusqlite::Result<()> {
-    let encoded = serde_json::to_string(store)
-        .map_err(|e| rusqlite::Error::ToSqlConversionFailure(Box::new(e)))?;
+    let encoded = serde_json::to_string(store).map_err(conversion_error)?;
     conn.execute(
         "INSERT INTO site_settings(key,value) VALUES(?,?) ON CONFLICT(key) DO UPDATE SET value=excluded.value",
         params![PATRON_KEY, encoded],
@@ -100,12 +108,15 @@ fn save_store(conn: &Connection, store: &PatronStore) -> rusqlite::Result<()> {
     Ok(())
 }
 
-pub(crate) fn patron_view(conn: &Connection, subject: &str) -> Result<Option<PatronView>> {
+pub(super) fn patron_record(conn: &Connection, subject: &str) -> Result<Option<PatronRecord>> {
     Ok(load_store(conn)?
         .profiles
         .into_iter()
-        .find(|p| p.subject == subject)
-        .map(|p| p.view()))
+        .find(|p| p.subject == subject))
+}
+
+pub(crate) fn patron_view(conn: &Connection, subject: &str) -> Result<Option<PatronView>> {
+    Ok(patron_record(conn, subject)?.map(|p| p.view()))
 }
 
 pub(crate) fn patron_views(conn: &Connection) -> Result<BTreeMap<String, PatronView>> {
@@ -120,19 +131,15 @@ impl Db {
     pub async fn patron(&self, subject: &str) -> Result<Option<PatronRecord>> {
         valid_subject(subject)?;
         let subject = subject.to_owned();
-        self.read(move |conn| {
-            load_store(conn)
-                .map_err(|e| rusqlite::Error::ToSqlConversionFailure(Box::new(e)))
-                .map(|store| store.profiles.into_iter().find(|p| p.subject == subject))
-        })
-        .await
+        self.read(move |conn| patron_record(conn, &subject).map_err(conversion_error))
+            .await
     }
 
     pub async fn patrons(&self) -> Result<Vec<PatronRecord>> {
         self.read(|conn| {
             load_store(conn)
                 .map(|store| store.profiles)
-                .map_err(|e| rusqlite::Error::ToSqlConversionFailure(Box::new(e)))
+                .map_err(conversion_error)
         })
         .await
     }
@@ -148,7 +155,11 @@ impl Db {
     }
 
     /// 写入或更新一行赞助席。专属 Token 同一时刻只能绑给一个启用的席位。
-    pub async fn upsert_patron(&self, record: PatronRecord) -> Result<()> {
+    pub async fn save_patron(
+        &self,
+        expected: Option<PatronRecord>,
+        record: PatronRecord,
+    ) -> Result<std::result::Result<(), SeatConflict>> {
         valid_subject(&record.subject)?;
         if let Some(id) = record.bound_token_id.as_deref()
             && id.trim().is_empty()
@@ -156,8 +167,11 @@ impl Db {
             return Err(invalid("专属 Token 编号无效"));
         }
         self.write(move |tx| {
-            let mut store =
-                load_store(tx).map_err(|e| rusqlite::Error::ToSqlConversionFailure(Box::new(e)))?;
+            let mut store = load_store(tx).map_err(conversion_error)?;
+            let current = store.profiles.iter().find(|p| p.subject == record.subject);
+            if current != expected.as_ref() {
+                return Ok(Err(SeatConflict::Changed));
+            }
             if record.enabled
                 && let Some(id) = nonempty(record.bound_token_id.as_deref())
             {
@@ -167,9 +181,7 @@ impl Db {
                         && nonempty(p.bound_token_id.as_deref()).as_deref() == Some(id.as_str())
                 });
                 if taken {
-                    return Err(rusqlite::Error::InvalidParameterName(
-                        "这把上游 Token 已绑定其他赞助席".into(),
-                    ));
+                    return Ok(Err(SeatConflict::TokenTaken));
                 }
             }
             if let Some(existing) = store
@@ -183,7 +195,7 @@ impl Db {
             }
             store.profiles.sort_by(|a, b| a.subject.cmp(&b.subject));
             save_store(tx, &store)?;
-            Ok(())
+            Ok(Ok(()))
         })
         .await
     }
@@ -191,8 +203,7 @@ impl Db {
     pub async fn unbind_patron_token(&self, token_id: &str) -> Result<()> {
         let token_id = token_id.to_owned();
         self.write(move |tx| {
-            let mut store =
-                load_store(tx).map_err(|e| rusqlite::Error::ToSqlConversionFailure(Box::new(e)))?;
+            let mut store = load_store(tx).map_err(conversion_error)?;
             let mut changed = false;
             for profile in &mut store.profiles {
                 if profile.bound_token_id.as_deref() == Some(token_id.as_str()) {

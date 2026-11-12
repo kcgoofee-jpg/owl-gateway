@@ -157,13 +157,6 @@ async fn set_patron(
         if !known {
             return Err(HttpError::new(422, "上游 Token 不存在").into());
         }
-        let taken =
-            state.db.patrons().await?.iter().any(|p| {
-                p.enabled && p.subject != subject && p.bound_token_id.as_deref() == Some(id)
-            });
-        if taken {
-            return Err(HttpError::new(409, "这把上游 Token 已绑定其他赞助席").into());
-        }
     }
     let existing = state.db.patron(&subject).await?;
     let mut password = None;
@@ -178,15 +171,19 @@ async fn set_patron(
     }
     state
         .db
-        .upsert_patron(gate_db::repo::patron::PatronRecord {
-            subject: subject.clone(),
-            enabled: seat.enabled,
-            queue_jump: seat.queue_jump.unwrap_or(true),
-            self_service: seat.self_service.unwrap_or(true),
-            bound_token_id: bound,
-            password_hash,
-        })
-        .await?;
+        .save_patron(
+            existing,
+            gate_db::repo::patron::PatronRecord {
+                subject: subject.clone(),
+                enabled: seat.enabled,
+                queue_jump: seat.queue_jump.unwrap_or(true),
+                self_service: seat.self_service.unwrap_or(true),
+                bound_token_id: bound,
+                password_hash,
+            },
+        )
+        .await?
+        .map_err(|e| HttpError::new(409, e.to_string()))?;
     state.refresh_exclusive_tokens().await;
     let mut body = json!(state.db.member_policy(&subject).await?);
     if let Some(obj) = body.as_object_mut() {

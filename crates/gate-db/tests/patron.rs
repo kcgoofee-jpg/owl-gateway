@@ -19,20 +19,41 @@ fn seat(subject: &str, token: Option<&str>) -> PatronRecord {
 async fn patron_profiles_bind_one_enabled_token_and_overlay_member_policy() {
     let dir = tempfile::tempdir().unwrap();
     let db = Db::open(dir.path().join("gate.db")).unwrap();
-    db.upsert_patron(seat(SUBJECT, Some("token-a")))
+    db.save_patron(None, seat(SUBJECT, Some("token-a")))
         .await
+        .unwrap()
         .unwrap();
-    let taken = db.upsert_patron(seat(OTHER, Some("token-a"))).await;
-    assert!(taken.is_err(), "{taken:?}");
-    db.upsert_patron(seat(OTHER, Some("token-b")))
+    let taken = db.save_patron(None, seat(OTHER, Some("token-a"))).await;
+    assert_eq!(
+        taken.unwrap(),
+        Err(gate_db::repo::patron::SeatConflict::TokenTaken)
+    );
+    db.save_patron(None, seat(OTHER, Some("token-b")))
         .await
+        .unwrap()
         .unwrap();
     let ids = db.exclusive_token_ids().await.unwrap();
     assert!(ids.contains("token-a") && ids.contains("token-b"));
 
+    let old_policy = db.member_policy(SUBJECT).await.unwrap();
     let mut closed = seat(SUBJECT, Some("token-a"));
     closed.enabled = false;
-    db.upsert_patron(closed).await.unwrap();
+    let open = seat(SUBJECT, Some("token-a"));
+    db.save_patron(Some(open.clone()), closed)
+        .await
+        .unwrap()
+        .unwrap();
+    assert!(
+        !db.set_patron_overrides(open.clone(), old_policy.clone(), old_policy.overrides)
+            .await
+            .unwrap()
+    );
+    let mut stale = open.clone();
+    stale.password_hash = "new".into();
+    assert_eq!(
+        db.save_patron(Some(open), stale).await.unwrap(),
+        Err(gate_db::repo::patron::SeatConflict::Changed)
+    );
     let ids = db.exclusive_token_ids().await.unwrap();
     assert!(!ids.contains("token-a"));
     assert!(ids.contains("token-b"));

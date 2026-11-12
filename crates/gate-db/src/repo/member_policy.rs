@@ -1,5 +1,6 @@
 //! 成员规则存取。一次读取同时取得默认值与例外，避免跨版本拼接。
 
+use super::conversion_error;
 use crate::repo::patron::{PatronView, patron_view, patron_views};
 use crate::{Db, DbError, Result};
 use gate_core::member_policy::{ClaimRules, MemberOverrides, MemberPolicy, SharedBudgets};
@@ -49,8 +50,7 @@ fn owner_profile(conn: &Connection) -> Result<Option<OwnerImageProfile>> {
 }
 
 fn store_owner(conn: &Connection, profile: &OwnerImageProfile) -> rusqlite::Result<()> {
-    let encoded = serde_json::to_string(profile)
-        .map_err(|e| rusqlite::Error::ToSqlConversionFailure(Box::new(e)))?;
+    let encoded = serde_json::to_string(profile).map_err(conversion_error)?;
     conn.execute("INSERT INTO site_settings(key,value) VALUES(?,?) ON CONFLICT(key) DO UPDATE SET value=excluded.value", params![OWNER_IMAGE_KEY, encoded])?;
     Ok(())
 }
@@ -185,8 +185,7 @@ impl Db {
         valid_subject(subject)?;
         let subject = subject.to_owned();
         self.write(move |tx| {
-            let old = owner_profile(tx)
-                .map_err(|e| rusqlite::Error::ToSqlConversionFailure(Box::new(e)))?;
+            let old = owner_profile(tx).map_err(conversion_error)?;
             if let Some(old) = old {
                 if old.subject != subject {
                     return Err(rusqlite::Error::InvalidParameterName(
@@ -212,15 +211,13 @@ impl Db {
         valid_subject(subject)?;
         let subject = subject.to_owned();
         self.write(move |tx| {
-            let mut owner = owner_profile(tx)
-                .map_err(|e| rusqlite::Error::ToSqlConversionFailure(Box::new(e)))?;
+            let mut owner = owner_profile(tx).map_err(conversion_error)?;
             let Some(ref mut owner) = owner.as_mut().filter(|p| p.subject == subject) else {
                 return Ok(false);
             };
             if enabled && owner.saved.is_none() {
                 // Capture personal limits before applying the full-feature overlay.
-                let policy = defaults(tx)
-                    .map_err(|e| rusqlite::Error::ToSqlConversionFailure(Box::new(e)))?;
+                let policy = defaults(tx).map_err(conversion_error)?;
                 let raw: Option<String> = tx
                     .query_row(
                         "SELECT overrides FROM member_rules WHERE discord_id=?",
@@ -231,7 +228,7 @@ impl Db {
                 let overrides: MemberOverrides = raw
                     .map(|s| serde_json::from_str(&s))
                     .transpose()
-                    .map_err(|e| rusqlite::Error::ToSqlConversionFailure(Box::new(e)))?
+                    .map_err(conversion_error)?
                     .unwrap_or_default();
                 owner.saved = Some(
                     policy
@@ -264,8 +261,7 @@ impl Db {
     pub async fn member_policy_directory(&self) -> Result<PolicyDirectory> {
         self.read(|conn| {
             let transaction = conn.unchecked_transaction()?;
-            let defaults = defaults(&transaction)
-                .map_err(|e| rusqlite::Error::ToSqlConversionFailure(Box::new(e)))?;
+            let defaults = defaults(&transaction).map_err(conversion_error)?;
             let mut statement =
                 transaction.prepare("SELECT discord_id,overrides FROM member_rules")?;
             let raw = statement
@@ -274,17 +270,15 @@ impl Db {
             drop(statement);
             let mut overrides = BTreeMap::new();
             for (subject, encoded) in raw {
-                let parsed: MemberOverrides = serde_json::from_str(&encoded)
-                    .map_err(|e| rusqlite::Error::ToSqlConversionFailure(Box::new(e)))?;
+                let parsed: MemberOverrides =
+                    serde_json::from_str(&encoded).map_err(conversion_error)?;
                 defaults
                     .resolve(&parsed)
-                    .map_err(|e| rusqlite::Error::ToSqlConversionFailure(Box::new(invalid(e))))?;
+                    .map_err(|e| conversion_error(invalid(e)))?;
                 overrides.insert(subject, parsed);
             }
-            let owner = owner_profile(&transaction)
-                .map_err(|e| rusqlite::Error::ToSqlConversionFailure(Box::new(e)))?;
-            let patrons = patron_views(&transaction)
-                .map_err(|e| rusqlite::Error::ToSqlConversionFailure(Box::new(e)))?;
+            let owner = owner_profile(&transaction).map_err(conversion_error)?;
+            let patrons = patron_views(&transaction).map_err(conversion_error)?;
             transaction.commit()?;
             Ok(PolicyDirectory {
                 owner,
@@ -330,14 +324,9 @@ impl Db {
         // The ordinary read helper supplies a Connection; a deferred transaction pins both reads.
         self.read(move |conn| {
             let transaction = conn.unchecked_transaction()?;
-            let result = snapshot(&transaction, &subject);
-            match result {
-                Ok(value) => {
-                    transaction.commit()?;
-                    Ok(value)
-                }
-                Err(error) => Err(rusqlite::Error::ToSqlConversionFailure(Box::new(error))),
-            }
+            let value = snapshot(&transaction, &subject).map_err(conversion_error)?;
+            transaction.commit()?;
+            Ok(value)
         })
         .await
     }
@@ -346,27 +335,51 @@ impl Db {
         policy.validate().map_err(invalid)?;
         let policy = policy.clone();
         self.write(move |transaction| {
-            let mut statement=transaction.prepare("SELECT discord_id,overrides FROM member_rules")?;
-            let saved=statement.query_map([],|row|Ok((row.get::<_,String>(0)?,row.get::<_,String>(1)?)))?
-                .collect::<rusqlite::Result<Vec<_>>>()?;
-            drop(statement);
-            for (subject,encoded) in saved {
-                let old:MemberOverrides=serde_json::from_str(&encoded)
-                    .map_err(|error|rusqlite::Error::ToSqlConversionFailure(Box::new(error)))?;
-                let effective=policy.resolve(&old).map_err(|error|
-                    rusqlite::Error::ToSqlConversionFailure(Box::new(invalid(error))))?;
-                let normalized=policy.differences(&effective);
-                if normalized!=old {
-                    let encoded=serde_json::to_string(&normalized).map_err(|error|
-                        rusqlite::Error::ToSqlConversionFailure(Box::new(error)))?;
-                    transaction.execute("UPDATE member_rules SET overrides=? WHERE discord_id=?",params![encoded,subject])?;
+            let saved = {
+                let mut statement = transaction.prepare("SELECT discord_id, overrides FROM member_rules")?;
+                statement.query_map([], |row| Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?)))?
+                    .collect::<rusqlite::Result<Vec<_>>>()?
+            };
+            for (subject, encoded) in saved {
+                let old: MemberOverrides = serde_json::from_str(&encoded).map_err(conversion_error)?;
+                let effective = policy.resolve(&old).map_err(|e| conversion_error(invalid(e)))?;
+                let normalized = policy.differences(&effective);
+                if normalized != old {
+                    transaction.execute(
+                        "UPDATE member_rules SET overrides=? WHERE discord_id=?",
+                        params![serde_json::to_string(&normalized).map_err(conversion_error)?, subject],
+                    )?;
                 }
             }
-            let encoded=serde_json::to_string(&policy).map_err(|error|
-                rusqlite::Error::ToSqlConversionFailure(Box::new(error)))?;
-            transaction.execute("INSERT INTO site_settings(key,value) VALUES(?,?) ON CONFLICT(key) DO UPDATE SET value=excluded.value",params![DEFAULTS_KEY,encoded])?;
+            transaction.execute(
+                "INSERT INTO site_settings(key,value) VALUES(?,?) ON CONFLICT(key) DO UPDATE SET value=excluded.value",
+                params![DEFAULTS_KEY, serde_json::to_string(&policy).map_err(conversion_error)?],
+            )?;
             Ok(())
         }).await
+    }
+
+    /// Only commit a portal edit while both its authenticated seat and the rules it edited still match.
+    pub async fn set_patron_overrides(
+        &self,
+        seat: super::patron::PatronRecord,
+        prior: PolicySnapshot,
+        overrides: MemberOverrides,
+    ) -> Result<bool> {
+        self.write(move |tx| {
+            let current =
+                super::patron::patron_record(tx, &seat.subject).map_err(conversion_error)?;
+            if !seat.enabled || !seat.self_service || current.as_ref() != Some(&seat) {
+                return Ok(false);
+            }
+            let policy = snapshot(tx, &seat.subject).map_err(conversion_error)?;
+            if policy != prior {
+                return Ok(false);
+            }
+            store_overrides(tx, &seat.subject, &overrides)?;
+            Ok(true)
+        })
+        .await
     }
 
     pub async fn set_member_overrides(
@@ -377,35 +390,39 @@ impl Db {
         valid_subject(subject)?;
         let subject = subject.to_owned();
         let overrides = overrides.clone();
-        self.write(move |transaction| {
-            let policy = defaults(transaction)
-                .map_err(|e| rusqlite::Error::ToSqlConversionFailure(Box::new(e)))?;
-            let effective = policy
-                .resolve(&overrides)
-                .map_err(|e| rusqlite::Error::ToSqlConversionFailure(Box::new(invalid(e))))?;
-            if let Some(mut owner) = owner_profile(transaction)
-                .map_err(|e| rusqlite::Error::ToSqlConversionFailure(Box::new(e)))?
-                .filter(|p| p.subject == subject)
-            {
-                if !owner.enabled {
-                    return Err(rusqlite::Error::InvalidParameterName(
-                        "普通测试状态下请修改默认规则，或先启用全部生图功能".into(),
-                    ));
-                }
-                owner.saved = Some(effective);
-                store_owner(transaction, &owner)?;
-                return Ok(());
-            }
-            let normalized = policy.differences(&effective);
-            let encoded = serde_json::to_string(&normalized)
-                .map_err(|e| rusqlite::Error::ToSqlConversionFailure(Box::new(e)))?;
-            transaction.execute(
-                "INSERT INTO member_rules(discord_id,overrides) VALUES(?,?) \
-                 ON CONFLICT(discord_id) DO UPDATE SET overrides=excluded.overrides",
-                params![subject, encoded],
-            )?;
-            Ok(())
-        })
-        .await
+        self.write(move |transaction| store_overrides(transaction, &subject, &overrides))
+            .await
     }
+}
+
+fn store_overrides(
+    transaction: &Connection,
+    subject: &str,
+    overrides: &MemberOverrides,
+) -> rusqlite::Result<()> {
+    let policy = defaults(transaction).map_err(conversion_error)?;
+    let effective = policy
+        .resolve(overrides)
+        .map_err(|e| conversion_error(invalid(e)))?;
+    if let Some(mut owner) = owner_profile(transaction)
+        .map_err(conversion_error)?
+        .filter(|p| p.subject == subject)
+    {
+        if !owner.enabled {
+            return Err(rusqlite::Error::InvalidParameterName(
+                "普通测试状态下请修改默认规则，或先启用全部生图功能".into(),
+            ));
+        }
+        owner.saved = Some(effective);
+        store_owner(transaction, &owner)?;
+        return Ok(());
+    }
+    let normalized = policy.differences(&effective);
+    let encoded = serde_json::to_string(&normalized).map_err(conversion_error)?;
+    transaction.execute(
+        "INSERT INTO member_rules(discord_id,overrides) VALUES(?,?) \
+                 ON CONFLICT(discord_id) DO UPDATE SET overrides=excluded.overrides",
+        params![subject, encoded],
+    )?;
+    Ok(())
 }

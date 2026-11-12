@@ -192,7 +192,7 @@ async fn set_features(
     if snapshot.owner_image.as_ref().is_some_and(|p| !p.enabled) {
         return Err(HttpError::new(409, "普通测试状态下请联系站长修改默认规则").into());
     }
-    let mut next = snapshot.effective;
+    let mut next = snapshot.effective.clone();
     apply_feature(&mut next.image, patch.image);
     apply_feature(&mut next.v5, patch.v5);
     apply_feature(&mut next.vibe, patch.vibe);
@@ -206,10 +206,13 @@ async fn set_features(
         .defaults
         .resolve(&overrides)
         .map_err(|message| HttpError::new(422, message))?;
-    state
+    if !state
         .db
-        .set_member_overrides(&session.subject, &overrides)
-        .await?;
+        .set_patron_overrides(session.profile.clone(), snapshot, overrides)
+        .await?
+    {
+        return Err(HttpError::new(409, "席位或成员规则已变更，请刷新后再试").into());
+    }
     me(State(state), session).await
 }
 
@@ -239,7 +242,11 @@ async fn change_password(
     }
     let mut profile = session.profile.clone();
     profile.password_hash = hash_password(&new);
-    state.db.upsert_patron(profile).await?;
+    state
+        .db
+        .save_patron(Some(session.profile), profile)
+        .await?
+        .map_err(|e| HttpError::new(409, e.to_string()))?;
     let mut resp = ok_json(&json!({"ok": true, "relogin": true}));
     resp.headers_mut().append(
         "set-cookie",

@@ -208,15 +208,19 @@ async fn patrons_skip_the_site_cap_and_keep_the_per_member_queue() {
     let admin = Admin::login(&e.state).await;
     e.state
         .db
-        .upsert_patron(PatronRecord {
-            subject: SUBJECT.into(),
-            enabled: true,
-            queue_jump: true,
-            self_service: true,
-            bound_token_id: None,
-            password_hash: hash_password(PORTAL),
-        })
+        .save_patron(
+            None,
+            PatronRecord {
+                subject: SUBJECT.into(),
+                enabled: true,
+                queue_jump: true,
+                self_service: true,
+                bound_token_id: None,
+                password_hash: hash_password(PORTAL),
+            },
+        )
         .await
+        .unwrap()
         .unwrap();
     let key: NewKey = serde_json::from_value(json!({
         "name": "第二位", "token": TOKEN2, "discord_id": SUBJECT2,
