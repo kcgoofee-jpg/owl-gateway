@@ -103,6 +103,9 @@ export type MeMember = {
 };
 export type Me = MeGuest | MeMember;
 
+/** 成功卡上的计费方式。服务端从说明文案解出；老记录可能没有。 */
+export type RequestBilling = "v5" | "anlas" | "site_paid" | "free";
+
 /** 「我的请求」的一条（/public/me/requests）。 */
 export interface MyRequest {
   id: number;
@@ -112,6 +115,9 @@ export interface MyRequest {
   kind: string;
   model: string;
   status: string;
+  /** `832 × 1216 / 28 步`；对不上尺寸文案时为空。 */
+  size?: string;
+  billing?: RequestBilling;
   /** Server-side response body delivery; absence in legacy rows means unknown. */
   delivery_state?: "transport_complete" | "transport_interrupted" | "pending" | "unknown";
   /** Durable execution outcome; uncertain rows retain an unconfirmed budget remainder. */

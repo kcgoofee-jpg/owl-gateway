@@ -39,18 +39,29 @@ async function parse(res: Response): Promise<unknown> {
   return body;
 }
 
+export function isAbortError(e: unknown): boolean {
+  return (
+    (typeof DOMException !== "undefined" && e instanceof DOMException && e.name === "AbortError") ||
+    (e instanceof Error && e.name === "AbortError")
+  );
+}
+
 export async function getJSON<T>(url: string, init?: RequestInit): Promise<T> {
   // 有界超时 + 一次重试：后台曾出现请求无限挂起、骨架屏一直转（见 docs/backend-audit-2026-11-01.md）。
-  // GET 幂等可安全重试；写操作（sendJSON）只给超时，不自动重发。
+  // GET 幂等可安全重试；写操作（sendJSON）只给超时，不自动重发。调用方 abort 不重试。
   let lastError: unknown;
   for (let attempt = 0; attempt < 2; attempt++) {
     try {
       return await request<T>("GET", url, undefined, init);
     } catch (e) {
       lastError = e;
+      if (isAbortError(e) || init?.signal?.aborted) throw e;
       // 4xx/5xx 是服务端明确回答，重试没有意义；只重试网络层失败（超时 / 断开）。
       if (e instanceof ApiError && e.status !== 0) throw e;
-      if (attempt === 0) await new Promise((r) => setTimeout(r, 600));
+      if (attempt === 0) {
+        await new Promise((r) => setTimeout(r, 600));
+        if (init?.signal?.aborted) throw e;
+      }
     }
   }
   throw lastError;
@@ -60,6 +71,11 @@ const REQUEST_TIMEOUT_MS = 20_000;
 
 async function request<T>(method: string, url: string, body?: unknown, init?: RequestInit): Promise<T> {
   const ctrl = new AbortController();
+  const onExternal = () => ctrl.abort();
+  if (init?.signal?.aborted) {
+    throw new DOMException("The operation was aborted", "AbortError");
+  }
+  init?.signal?.addEventListener("abort", onExternal, { once: true });
   const timer = setTimeout(() => ctrl.abort(), REQUEST_TIMEOUT_MS);
   try {
     const res = await fetch(url, {
@@ -77,10 +93,14 @@ async function request<T>(method: string, url: string, body?: unknown, init?: Re
     return (await parse(res)) as T;
   } catch (e) {
     if (e instanceof ApiError) throw e;
+    if (init?.signal?.aborted) {
+      throw isAbortError(e) ? e : new DOMException("The operation was aborted", "AbortError");
+    }
     // abort / 网络错误：给用户一句可读的，而不是裸的 "The operation was aborted"
     throw new ApiError(0, `请求超时或网络中断（${REQUEST_TIMEOUT_MS / 1000} 秒），稍后会自动重试。`);
   } finally {
     clearTimeout(timer);
+    init?.signal?.removeEventListener("abort", onExternal);
   }
 }
 

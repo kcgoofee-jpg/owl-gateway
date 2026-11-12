@@ -2874,9 +2874,15 @@ async fn my_requests_show_only_my_recent_rows_without_private_columns() {
     assert_eq!(items[0]["message"], "你今天的 Anlas 额度不够这次用");
     assert_eq!(items[1]["site_paid"], true);
     assert_eq!(items[1]["anlas"], 0.0);
+    assert_eq!(items[1]["size"], "832 × 1216 / 28 步");
+    assert_eq!(items[1]["billing"], "site_paid");
     assert_eq!(items[2]["anlas"], 30.0);
     assert_eq!(items[2]["wait_s"], 1.5);
     assert_eq!(items[2]["dur_s"], 9.0);
+    assert_eq!(items[2]["size"], "832 × 1216 / 28 步");
+    assert_eq!(items[2]["billing"], "anlas");
+    assert_eq!(items[0]["size"], "");
+    assert_eq!(items[0]["billing"], "free");
     assert_eq!(r.2["next"], Value::Null);
     assert_eq!(
         r.2["summary"],

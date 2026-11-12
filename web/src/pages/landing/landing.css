@@ -404,7 +404,7 @@
   margin: 0;
   overflow-wrap: anywhere;
   font-size: 14px;
-  color: var(--text-1);
+  color: var(--text);
 }
 .lp-req__code {
   margin-right: var(--sp-2);
