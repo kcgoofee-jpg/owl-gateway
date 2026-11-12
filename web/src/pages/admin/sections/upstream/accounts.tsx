@@ -56,7 +56,7 @@ function Block({
     </section>
   );
 }
-function RequestStats({ a }: { a: UpstreamAccount }) {
+export function RequestStats({ a }: { a: Pick<UpstreamAccount, "position" | "w1h" | "w24h"> }) {
   const rows: Array<[string, (w: WindowStats) => string]> = [
     ["成功", (w) => reading(w.ok)],
     ["失败", (w) => reading(w.error)],

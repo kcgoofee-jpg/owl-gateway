@@ -379,7 +379,7 @@ export default function Members() {
                 <input
                   class="input"
                   type="search"
-                  placeholder="搜索名称、Discord ID、标签或备注"
+                  placeholder="搜索名称、@用户名、Discord ID、标签或备注"
                   aria-label="搜索成员"
                   value={search}
                   onInput={(e) => setSearch(e.currentTarget.value)}

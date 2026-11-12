@@ -3,16 +3,19 @@ import { Plus } from "lucide-preact";
 import { useId, useState } from "preact/hooks";
 import { ApiError, sendJSON } from "../../../../lib/api";
 import { Badge, Button, Card, Dialog, Notice } from "../../../../ui";
-import { tick, useAdmin } from "../../data";
+import { act, tick, useAdmin } from "../../data";
 import { actOrError, ConfirmDialog, LoadError, Loading, useBusy } from "../_kit";
-import { Sect, withTone } from "../system/forms";
+import { NumField, SaveBar, Sect, useForm, withTone } from "../system/forms";
+import { RequestStats } from "./accounts";
 import {
   anlasText,
+  reading,
   type ShareAccount,
   type SharePage,
   shareHostProblem,
   shareTokenProblem,
   tokenState,
+  v5LimitSpecs,
 } from "./core";
 
 function ShareDialog(props: {
@@ -154,6 +157,77 @@ function remainingText(a: ShareAccount): string {
   return parts.length ? parts.join(" · ") : "—";
 }
 
+function ShareCard(props: {
+  a: ShareAccount;
+  limit: { min: number; max: number };
+  poolSize: number;
+  onReplace: (a: ShareAccount) => void;
+  onToggle: (a: ShareAccount) => void;
+  onDelete: (a: ShareAccount) => void;
+}) {
+  const a = props.a;
+  const st = tokenState(a);
+  const form = useForm(v5LimitSpecs(props.limit), a as unknown as Record<string, unknown>);
+  const [saving, setSaving] = useState(false);
+  const save = async () => {
+    const ch = form.changes();
+    setSaving(true);
+    let ok = true;
+    if ("v5_daily_limit" in ch)
+      ok =
+        (await act(
+          "PUT",
+          `/admin/api/upstream-tokens/${encodeURIComponent(a.token_id)}/v5-limit`,
+          { v5_daily_limit: ch.v5_daily_limit },
+          "V5 日限已保存",
+        )) !== null;
+    setSaving(false);
+    if (ok) form.commit();
+  };
+  return (
+    <Card class="up-account">
+      <header class="token__head">
+        <h2 class="up-account__title">拼车 {a.position}</h2>
+        <span class="token__name mono">{a.token}</span>
+        <Badge {...withTone(st.tone)} dot>
+          {st.text}
+        </Badge>
+        <span class="spacer" />
+        <Button onClick={() => props.onReplace(a)}>替换</Button>
+        <Button onClick={() => props.onToggle(a)}>{a.admin_enabled ? "停用" : "启用"}</Button>
+        <Button disabled={props.poolSize <= 1} onClick={() => props.onDelete(a)}>
+          删除
+        </Button>
+      </header>
+      <dl class="up-facts">
+        <div>
+          <dt>地址</dt>
+          <dd class="mono">{a.image_host ?? "—"}</dd>
+        </div>
+        <div>
+          <dt>份额余量</dt>
+          <dd>{remainingText(a)}</dd>
+        </div>
+        <div>
+          <dt>允许 Anlas</dt>
+          <dd>{a.allow_anlas ? "是" : "否"}</dd>
+        </div>
+        <div>
+          <dt>今天出图</dt>
+          <dd>
+            {reading(a.images_today)} 张 · 免费 V5 {reading(a.v5_used)} / {reading(a.v5_daily_limit)}
+          </dd>
+        </div>
+      </dl>
+      {a.w1h && a.w24h ? <RequestStats a={a} /> : null}
+      <form class="token__form" {...form.formProps} onSubmit={(e) => e.preventDefault()}>
+        <NumField form={form} name="v5_daily_limit" />
+        <SaveBar form={form} onSave={save} saving={saving} />
+      </form>
+    </Card>
+  );
+}
+
 export function ShareUpstream() {
   const { data, error, loading } = useAdmin<SharePage>("/admin/api/share-upstreams");
   const [dialog, setDialog] = useState<{ mode: "add" | "replace"; target?: ShareAccount } | null>(null);
@@ -170,7 +244,10 @@ export function ShareUpstream() {
   return (
     <Sect>
       <div class="section-head">
-        <p>把朋友的拼车网关当额外上游。份额余量来自对方钱包，不是官网电池。导演工具和标签补全仍走官方号。</p>
+        <p>
+          把朋友的拼车网关当额外上游。份额余量来自对方钱包，不是官网电池。生图、流式、Vibe
+          编码和放大走拼车。标签补全和导演工具目前仍走官方号。
+        </p>
         <span class="spacer" />
         <Button variant="primary" onClick={() => setDialog({ mode: "add" })}>
           <Plus size={16} aria-hidden="true" />
@@ -189,40 +266,17 @@ export function ShareUpstream() {
                 Number(y.admin_enabled && !y.disabled) - Number(x.admin_enabled && !x.disabled) ||
                 x.position - y.position,
             )
-            .map((a) => {
-              const st = tokenState(a);
-              return (
-                <Card key={a.token_id} class="up-account">
-                  <header class="token__head">
-                    <h2 class="up-account__title">拼车 {a.position}</h2>
-                    <span class="token__name mono">{a.token}</span>
-                    <Badge {...withTone(st.tone)} dot>
-                      {st.text}
-                    </Badge>
-                    <span class="spacer" />
-                    <Button onClick={() => setDialog({ mode: "replace", target: a })}>替换</Button>
-                    <Button onClick={() => setToggle(a)}>{a.admin_enabled ? "停用" : "启用"}</Button>
-                    <Button disabled={poolSize <= 1} onClick={() => setDel(a)}>
-                      删除
-                    </Button>
-                  </header>
-                  <dl class="up-facts">
-                    <div>
-                      <dt>地址</dt>
-                      <dd class="mono">{a.image_host ?? "—"}</dd>
-                    </div>
-                    <div>
-                      <dt>份额余量</dt>
-                      <dd>{remainingText(a)}</dd>
-                    </div>
-                    <div>
-                      <dt>允许 Anlas</dt>
-                      <dd>{a.allow_anlas ? "是" : "否"}</dd>
-                    </div>
-                  </dl>
-                </Card>
-              );
-            })}
+            .map((a) => (
+              <ShareCard
+                key={a.token_id}
+                a={a}
+                limit={data.fields.v5_daily_limit}
+                poolSize={poolSize}
+                onReplace={(t) => setDialog({ mode: "replace", target: t })}
+                onToggle={setToggle}
+                onDelete={setDel}
+              />
+            ))}
         </div>
       )}
       {dialog && <ShareDialog mode={dialog.mode} target={dialog.target} onClose={() => setDialog(null)} />}

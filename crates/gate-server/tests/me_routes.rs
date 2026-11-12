@@ -55,7 +55,12 @@ fn assert_gate_error(status: StatusCode, body: &[u8], code: u16, message: &str) 
     assert_eq!(v["message"], full);
     assert_eq!(v["error"]["message"], full);
     assert_eq!(v["error"]["status"], code);
-    assert_eq!(v["error"]["request_id"].as_str().unwrap().len(), 8);
+    let rid = v["error"]["request_id"].as_str().unwrap();
+    assert_eq!(rid.len(), 10, "{rid}");
+    assert!(
+        rid.bytes().all(|b| b.is_ascii_hexdigit()),
+        "request_id should be hex: {rid}"
+    );
 }
 
 // ------------------------------------------------------------------ /v1/me

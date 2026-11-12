@@ -179,6 +179,11 @@ export type ShareAccount = {
   disabled: boolean;
   fails: number;
   allow_anlas: boolean;
+  v5_daily_limit: number;
+  v5_used: number;
+  images_today: number;
+  w1h: WindowStats;
+  w24h: WindowStats;
   active: boolean | null;
   usage_percent: number | null;
   anlas: number | null;
@@ -188,6 +193,7 @@ export type ShareAccount = {
 export type SharePage = {
   pool_configured: boolean;
   pool_size: number;
+  fields: { v5_daily_limit: { kind: "int"; min: number; max: number } };
   accounts: ShareAccount[];
 };
 

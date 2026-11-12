@@ -96,8 +96,24 @@ async fn share_crud_persists_and_stays_off_the_official_page() {
     assert_eq!(row["allow_anlas"], json!(true));
     assert!(!row["token"].as_str().unwrap().contains(SHARE_KEY));
     assert_eq!(row["usage_percent"], json!(80));
+    assert_eq!(row["v5_used"], json!(0));
+    assert_eq!(row["images_today"], json!(0));
+    assert!(row["v5_daily_limit"].as_i64().unwrap() >= 0);
+    assert_eq!(row["w24h"]["ok"], json!(0));
+    assert_eq!(listed["fields"]["v5_daily_limit"]["min"], json!(0));
 
     let id = row["token_id"].as_str().unwrap().to_string();
+    let (status, body) = api
+        .json(
+            "PUT",
+            &format!("/upstream-tokens/{id}/v5-limit"),
+            Some(json!({"v5_daily_limit": 8})),
+        )
+        .await;
+    assert_eq!(status, 200, "{body}");
+    let listed = api.get_ok("/share-upstreams").await;
+    assert_eq!(listed["accounts"][0]["v5_daily_limit"], json!(8));
+
     let restarted = e.restart().await;
     assert!(
         restarted

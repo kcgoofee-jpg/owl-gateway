@@ -620,7 +620,9 @@ async fn set_v5_limit(
         }
     };
     let _serial = state.token_edits.lock().await;
-    require_official(&state, &id).await?;
+    if !exists(&state, &id).await {
+        return Err(HttpError::new(404, NOT_FOUND).into());
+    }
     state.db.set_upstream_token_limit(&id, limit).await?;
     if !state.nai.set_v5_daily_limit(&id, limit).await {
         return Err(HttpError::new(404, NOT_FOUND).into());

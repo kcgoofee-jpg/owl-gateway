@@ -13,6 +13,7 @@ use axum::routing::{get, put};
 use gate_core::{primitives, validation, values};
 use gate_upstream::{pool::Token, token_store};
 use serde_json::{Map, Value, json};
+use std::collections::HashMap;
 use std::time::Duration;
 
 const TOKEN_BODY_LIMIT: usize = 4096;
@@ -29,13 +30,28 @@ pub(super) fn router() -> Router<AppState> {
 
 async fn list(State(state): State<AppState>, _s: AdminSession) -> ApiResult {
     let now = state.now();
+    let day = state.day();
     let all = state.nai.tokens().await;
     let pool_size = all.len();
     let shares: Vec<_> = all.into_iter().filter(|t| t.is_share()).collect();
+    let stats_pool: Vec<Value> = shares
+        .iter()
+        .map(|token| json!({ "token_id": token.token_id }))
+        .collect();
+    let stats = super::account_stats::account_rows(&state, &stats_pool, now).await?;
+    let stats_by_id: HashMap<String, Value> = stats
+        .into_iter()
+        .filter_map(|row| {
+            let id = row["token_id"].as_str()?.to_string();
+            Some((id, row))
+        })
+        .collect();
     let mut accounts = Vec::with_capacity(shares.len());
     for token in shares {
         let sub = fetch_subscription(&state, &token).await;
         let fields = token.fields();
+        let used = state.db.get_upstream_counter(&token.token_id, &day).await?;
+        let extra = stats_by_id.get(&token.token_id);
         accounts.push(json!({
             "token_id": token.token_id,
             "position": fields.kind_index,
@@ -46,6 +62,11 @@ async fn list(State(state): State<AppState>, _s: AdminSession) -> ApiResult {
             "disabled": fields.disabled,
             "fails": fields.fails,
             "allow_anlas": fields.allow_anlas,
+            "v5_daily_limit": fields.v5_daily_limit,
+            "v5_used": used.v5,
+            "images_today": used.images,
+            "w1h": extra.map(|row| row["w1h"].clone()).unwrap_or(Value::Null),
+            "w24h": extra.map(|row| row["w24h"].clone()).unwrap_or(Value::Null),
             "active": sub.get("active").cloned().unwrap_or(Value::Null),
             "usage_percent": sub.get("usage_percent").cloned().unwrap_or(Value::Null),
             "anlas": sub.get("anlas").cloned().unwrap_or(Value::Null),
@@ -56,6 +77,13 @@ async fn list(State(state): State<AppState>, _s: AdminSession) -> ApiResult {
         "ok": true,
         "pool_configured": state.nai.configured().await,
         "pool_size": pool_size,
+        "fields": {
+            "v5_daily_limit": {
+                "kind": "int",
+                "min": 0,
+                "max": gate_core::member_policy::DAILY_MAX,
+            }
+        },
         "accounts": accounts,
     })))
 }
