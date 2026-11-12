@@ -136,3 +136,15 @@ fn size_constants_stay_consistent() {
         );
     }
 }
+
+#[test]
+fn init_image_or_mask_is_never_opus_free() {
+    let free = json!({"parameters": {"width": 1024, "height": 1024, "steps": 28}});
+    assert!(gate_core::policy::opus_free_eligible(&free).unwrap());
+    let mut img = free.clone();
+    img["parameters"]["image"] = json!("x");
+    assert!(!gate_core::policy::opus_free_eligible(&img).unwrap());
+    let mut mask = free;
+    mask["parameters"]["mask"] = json!("x");
+    assert!(!gate_core::policy::opus_free_eligible(&mask).unwrap());
+}

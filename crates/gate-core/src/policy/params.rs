@@ -321,12 +321,7 @@ pub fn clamp_image_params(
         notes.push("SMEA 已按安全钳制规则关闭".into());
     }
 
-    // ControlNet / 角色参考（额外计费）
-    if enabled_opt(p.get("controlnet_model")) || enabled_opt(p.get("controlnet_condition")) {
-        finish!(Some(
-            "本站未开放 ControlNet，未扣费。请在客户端中关闭 ControlNet。".into()
-        ));
-    }
+    // 角色参考（额外计费）。ControlNet 在 `upstream_parameter_problem` 一律拒绝，不走这条裁剪。
     if enabled_opt(p.get("characterReferences")) {
         values::pop(&mut p, "characterReferences");
         notes.push("已移除角色参考（精确参考会消耗 Anlas）".into());

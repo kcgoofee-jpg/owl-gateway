@@ -202,8 +202,10 @@ impl MemberPolicy {
             "v5" => self.image && self.v5,
             "vibe" => self.vibe,
             "tags" => self.tags,
+            "img2img" => self.img2img,
             "upscale" => self.upscale,
             "augment" => self.augment,
+            "paid_parameters" => self.paid_parameters,
             _ => false,
         }
     }

@@ -75,6 +75,10 @@ pub fn opus_free_eligible(params: &Value) -> ValidationResult<bool> {
     if has_paid_extras(params)? {
         return Ok(false);
     }
+    // 官网免费条件含「不用底图」：图生图 / 局部重绘一律走 Anlas。
+    if enabled_opt(p.get("image")) || enabled_opt(p.get("mask")) {
+        return Ok(false);
+    }
     if int_or(p.get("steps"), 28, 0)? > i128::from(FREE_MAX_STEPS) {
         return Ok(false);
     }
@@ -98,11 +102,13 @@ pub fn snap_v5_preset(width: i128, height: i128) -> (i128, i128) {
     }
 }
 
-/// `estimate_image_cost` 的返回：`anlas` 扣多少 Anlas，`v5` 占多少个 V5 额度单位。
+/// `estimate_image_cost` 的返回：`anlas` 扣多少 Anlas，`v5` / `legacy` 占多少张免费额度。
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct ImageCost {
     pub anlas: i64,
     pub v5: i64,
+    /// V4.5 及更早：符合 Opus 免费条件时记 1（批量其余张走 Anlas，首张仍占免费张数）。
+    pub legacy: i64,
 }
 
 pub(crate) fn sat_i64(i: i128) -> i64 {
@@ -193,24 +199,31 @@ pub fn estimate_image_cost(
         _ => Value::Object(base_p),
     };
     let shaped = opus_free_eligible(&base_params)?;
+    let surcharge = i128::from(reference_surcharge(params)?);
+    let reference_cost = |paid_outputs: i128| surcharge * std::cmp::max(1, paid_outputs);
 
     if is_v5 {
         let free_first = is_opus && v5_allowance_available && opus_free_eligible(params)?;
         let free = i128::from(free_first);
+        let paid_outputs = n - free;
         return Ok(ImageCost {
-            anlas: sat_i64(per.saturating_mul(n - free)),
+            anlas: sat_i64(
+                per.saturating_mul(paid_outputs)
+                    .saturating_add(reference_cost(paid_outputs)),
+            ),
             v5: free as i64,
+            legacy: 0,
         });
     }
 
     let paid_outputs = n - i128::from(is_opus && shaped);
     // 官方余额实测：符合条件的多图首张参考费减免，单张照收。
-    let reference_cost = i128::from(reference_surcharge(params)?) * std::cmp::max(1, paid_outputs);
     Ok(ImageCost {
         anlas: sat_i64(
             per.saturating_mul(paid_outputs)
-                .saturating_add(reference_cost),
+                .saturating_add(reference_cost(paid_outputs)),
         ),
         v5: 0,
+        legacy: i64::from(is_opus && shaped),
     })
 }

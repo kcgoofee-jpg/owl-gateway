@@ -11,7 +11,7 @@
 
 use crate::error::InternalError;
 use crate::state::AppState;
-use gate_core::features::FEATURES;
+use gate_core::features::{FEATURES, MEMBER_FEATURES};
 use gate_core::primitives;
 use gate_core::reasons::Reason;
 use serde_json::{Map, Value, json};
@@ -344,7 +344,7 @@ pub async fn build_status(state: &AppState) -> Result<Value, InternalError> {
             reg["role_note"] = json!(note);
         }
         let policy = state.db.member_defaults().await?;
-        let names: Vec<String> = FEATURES
+        let names: Vec<String> = MEMBER_FEATURES
             .iter()
             .filter(|(name, _)| policy.allows(name))
             .map(|(name, _)| (*name).to_owned())
@@ -373,7 +373,11 @@ pub async fn build_status(state: &AppState) -> Result<Value, InternalError> {
         "registration": reg,
         "default_features": defaults.iter().map(|n| json!({
             "id": n,
-            "label": FEATURES.iter().find(|(f, _)| f == n).map_or("", |(_, l)| *l),
+            "label": MEMBER_FEATURES
+                .iter()
+                .chain(FEATURES.iter())
+                .find(|(f, _)| f == n)
+                .map_or("", |(_, l)| *l),
         })).collect::<Vec<_>>(),
         "web_login": true,
         "algo_notice": primitives::take_chars(&algo, 300),

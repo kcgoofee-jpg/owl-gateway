@@ -13,6 +13,18 @@ pub const FEATURES: [(&str, &str); 5] = [
     ("tags", "标签补全"),
 ];
 
+/// 成员规则里的功能开关（含不记入 `usage_log.kind` 的项）。公开状态、`/v1/me`、领 Key 文案用这份。
+pub const MEMBER_FEATURES: [(&str, &str); 8] = [
+    ("image", "文生图"),
+    ("v5", "V5"),
+    ("vibe", "Vibe 编码"),
+    ("tags", "标签补全"),
+    ("img2img", "图生图与局部重绘"),
+    ("upscale", "放大"),
+    ("augment", "导演工具（线稿、上色等）"),
+    ("paid_parameters", "高规格生图"),
+];
+
 /// 需要消耗 Anlas 的功能：本站只提供免费出图，拒绝时说明原因，免得成员以为是 Key 坏了。
 pub const ANLAS_FEATURES: [(&str, &str); 3] = [
     ("vibe", "每次编码参考图约 2 Anlas"),

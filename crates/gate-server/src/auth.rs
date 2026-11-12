@@ -339,8 +339,9 @@ pub async fn site_flag(state: &AppState, spec: &Spec) -> Result<Value, gate_db::
 /// 站长号（`owner_image_full`）本来就是全功能。
 pub fn require_feature(key: &Key, name: &str) -> Result<(), ApiError> {
     if !key.owner_image_full && !key.policy.allows(name) {
-        let label = gate_core::features::FEATURES
+        let label = gate_core::features::MEMBER_FEATURES
             .iter()
+            .chain(gate_core::features::FEATURES.iter())
             .find(|(id, _)| *id == name)
             .map_or(name, |(_, label)| *label);
         return Err(GateError::with_code(

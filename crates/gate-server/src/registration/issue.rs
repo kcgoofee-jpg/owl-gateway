@@ -274,7 +274,7 @@ impl RegistrationService {
         }
         let policy = self.db.member_policy(user_id).await?.effective;
         let shared = self.db.shared_budgets().await?;
-        let opened = features::FEATURES
+        let opened = features::MEMBER_FEATURES
             .iter()
             .filter(|(name, _)| policy.allows(name))
             .map(|(_, label)| *label)

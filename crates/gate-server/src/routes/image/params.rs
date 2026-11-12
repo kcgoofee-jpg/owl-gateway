@@ -219,12 +219,13 @@ pub(super) async fn prepare(
     }
     // 2.x 这里还有「V5 续杯」：`anlas_auto` 的 Key 当天个人 V5 用完后改用 Anlas 生成同规格 V5。
     // Anlas 自动分配早已下线、没有 Key 再是 anlas_auto，3.0 删除（列保留）
-    let mut est = Est::from_cost(policy::estimate_image_cost(&body, true, true).map_err(|e| {
+    let cost = policy::estimate_image_cost(&body, true, true).map_err(|e| {
         validation_400(
             &e,
             "生图参数有误，无法计算费用，未扣费。请检查客户端中的参数设置。",
         )
-    })?);
+    })?;
+    let mut est = Est::from_cost(cost);
     // 普通成员仍限制为免费 V5；绑定站长的完整权限允许在现有预算内支付高规格费用。
     if tier == "v5" && est.anlas > 0.0 && !key.allows_paid_v5() {
         reject(&model, "V5 超出免费规格");
@@ -236,10 +237,15 @@ pub(super) async fn prepare(
     if tier == "v5" && (key.owner_image_full || key.bound_token_id.is_some()) {
         est.v5 = image_count;
     }
-    // 没花 Anlas 的 V4.5 都算免费张数。以前只在「符合 Opus 免费条件」时 +1，参考图附加费算出来是 0
-    // 的 Vibe / 大图钳制后会 0 Anlas 且 0 张，客户端看起来像没扣额度。
-    let legacy_free_images = if tier == "legacy" && est.anlas <= 0.0 {
-        image_count
+    // V4.5 免费首张占每日张数；批量其余张走 Anlas 时首张仍要记。估价 0 Anlas 的整单按张数记。
+    let legacy_free_images = if tier == "legacy" {
+        if cost.legacy > 0 {
+            cost.legacy
+        } else if est.anlas <= 0.0 {
+            image_count
+        } else {
+            0
+        }
     } else {
         0
     };

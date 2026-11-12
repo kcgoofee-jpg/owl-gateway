@@ -81,7 +81,7 @@
 
 ### 2.4 Anlas
 
-成员 Key 默认没有 Anlas 权限（`allow_anlas=false`），实际只有 Vibe（参考图编码）会花 Anlas，走全站 PVP 池。
+成员 Anlas 走个人每日/每月上限和全站 PVP 池。Vibe 编码、精确参考、图生图 / 局部重绘、以及打开 `paid_parameters`（或绑了专属 Token）后的超规格生图都会扣 Anlas。上游号是否有 Anlas 仍看 `allow_anlas`。
 
 | 项 | 代码默认 | 线上 | 说明 |
 |---|---|---|---|
@@ -92,13 +92,13 @@
 
 价格（码 `policy.rs`）：Vibe 编码 2 Anlas/张；精确参考 5 Anlas/张/图；V4 / V4.5 的 Vibe 超过 4 张，每多 1 张 +2/图。Anlas 自动分配（旧的分配池）已删除，快照里残留的 `anlas_pool_last` 等键不再被读取。
 
-### 2.5 免费规格（对没有 Anlas 权限的 Key 生效；数值写死在 `policy.rs`，没有环境变量）
+### 2.5 免费规格（未开 `paid_parameters`、也没有专属 Token 时裁剪；数值写死在 `policy.rs`）
 
 - 每次 1 张（`n_samples` 强制为 1）；步数 ≤ 28（`FREE_MAX_STEPS`）；SMEA 关闭。
 - V4.5 及更早的模型：总像素 ≤ 1024×1024 = 1048576（`FREE_MAX_PIXELS`），宽高取 64 的倍数，超出等比缩小。
 - V5：不超过三个预设之一——832×1216、1216×832、1024×1024，超出按长宽比吸附（> 1.1 → 1216×832，< 0.9 → 832×1216，其余 1024×1024）。
-- 图生图 / 局部重绘只对后台勾了「允许图生图」（`allow_img2img`）且有 Anlas 权限的 Key 开放，其余回 400；ControlNet 回 400；角色参考（`characterReferences`）被移除。
-- 功能开关在成员规则里：`image`、`upscale`、`augment`、`vibe`、`tags`、`img2img`、`paid_parameters`（文本生成 / 语音 / OpenAI 兼容聊天 2026-10-15 已整套删除）。站点级 `features_global` 已删除，库里残留的值不再读。打开 `paid_parameters`，或赞助席绑定了专属 Token 时，不再套上面的免费档裁剪。
+- 图生图 / 局部重绘只对成员规则勾了 `img2img` 的 Key 开放，其余回 400；即使尺寸步数都在免费档内也扣 Anlas。V5 图生图还需要高规格开关（或专属 Token），否则 403。ControlNet 一律 400（与高规格开关无关）。角色参考（`characterReferences`）在免费档被移除。
+- 打开 `paid_parameters` 或赞助席绑定了专属 Token 时不再套上面的免费档裁剪；一次超过 6 张直接 400。功能开关在成员规则里：`image`、`v5`、`upscale`、`augment`、`vibe`、`tags`、`img2img`、`paid_parameters`。站点级 `features_global` 已删除。
 - 上游对「模型不存在」回的是 403，网关会窥探一小段响应体把「模型级 403」和「账号级 403」分开（只有账号级才计入账号健康度和 403 冷却）。
 
 ### 2.6 重置券

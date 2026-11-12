@@ -23,6 +23,7 @@ pub fn subscription_payload(
     expires: Option<f64>,
     now: f64,
     data: &SubscriptionData,
+    skip_free_clamp: bool,
 ) -> Value {
     let allowed = policy.allows("v5");
     let open = allowed && !data.v5_paused;
@@ -38,16 +39,16 @@ pub fn subscription_payload(
     } else {
         0
     };
-    // 工作台「Anlas: N」只在开了挂费时有意义。没开挂费的 Key，官方客户端把
-    // `trainingStepsLeft` 当成余额：填剩余 V4.5 张数，生一张少一张，避免看起来像没扣额度。
-    let anlas_left = if policy.paid_parameters {
+    // 会跳过免费档裁剪时（高规格开关或专属 Token）才把 Anlas 余额给官方客户端。
+    let anlas_enabled = policy.paid_parameters || skip_free_clamp;
+    let anlas_left = if anlas_enabled {
         let personal = (f64::from(policy.daily_anlas) - data.daily_anlas_used).max(0.0);
         let site = (data.global_anlas_limit - data.global_anlas_total).max(0.0);
         personal.min(site).trunc() as i64
     } else {
         0
     };
-    let steps_left = if policy.paid_parameters {
+    let steps_left = if anlas_enabled {
         anlas_left
     } else {
         (i64::from(policy.daily_images) - data.daily_legacy_used).max(0)
@@ -63,7 +64,7 @@ pub fn subscription_payload(
             "voiceGeneration":false,"contextTokens":0},
         "naiGate":{
             "v45DailyLimit":policy.daily_images,"dailyAnlasLimit":policy.daily_anlas,
-            "anlasEnabled":policy.paid_parameters,"anlasLeft":anlas_left,
+            "anlasEnabled":anlas_enabled,"anlasLeft":anlas_left,
             "anlasMonthlyLimit":policy.monthly_anlas,
             "v5LeftToday":v5_left,"v5DailyLimit":v5_limit,
             "v5Paused":data.v5_paused,"v5Allowed":allowed,"account":null,
@@ -109,7 +110,7 @@ mod tests {
     }
     #[test]
     fn member_and_shared_limits_are_both_applied() {
-        let value = subscription_payload(&policy(), None, 1000.0, &data());
+        let value = subscription_payload(&policy(), None, 1000.0, &data(), false);
         assert_eq!(value["naiGate"]["v5LeftToday"], 3);
         assert_eq!(value["naiGate"]["v5DailyLimit"], 10);
         // 个人日上限 15 − 已用 8 = 7，全站池还剩 200，取较小值
@@ -128,7 +129,7 @@ mod tests {
                 global_v5_limit: global,
                 ..data()
             };
-            let value = subscription_payload(&policy, Some(1234.0), 1000.0, &data);
+            let value = subscription_payload(&policy, Some(1234.0), 1000.0, &data, false);
             assert_eq!(value["naiGate"]["v5DailyLimit"], 0);
             assert_eq!(value["naiGate"]["v5LeftToday"], 0);
             assert_eq!(value["expiresAt"], 1234);
@@ -142,7 +143,7 @@ mod tests {
             global_anlas_total: 300.0,
             ..data()
         };
-        let value = subscription_payload(&policy(), None, 0.0, &data);
+        let value = subscription_payload(&policy(), None, 0.0, &data, false);
         assert_eq!(value["naiGate"]["anlasLeft"], 0);
     }
 
@@ -155,7 +156,7 @@ mod tests {
             daily_anlas_used: 15.0,
             ..data()
         };
-        let value = subscription_payload(&policy, None, 0.0, &data);
+        let value = subscription_payload(&policy, None, 0.0, &data, false);
         assert_eq!(value["naiGate"]["v5LeftToday"], 0);
         assert_eq!(value["naiGate"]["anlasLeft"], 0);
     }
@@ -169,9 +170,18 @@ mod tests {
             daily_legacy_used: 3,
             ..data()
         };
-        let value = subscription_payload(&policy, None, 1000.0, &data);
+        let value = subscription_payload(&policy, None, 1000.0, &data, false);
         assert_eq!(value["trainingStepsLeft"]["fixedTrainingStepsLeft"], 97);
         assert_eq!(value["naiGate"]["anlasLeft"], 0);
         assert_eq!(value["naiGate"]["anlasEnabled"], false);
+    }
+
+    #[test]
+    fn exclusive_token_shows_anlas_without_the_paid_switch() {
+        let mut policy = policy();
+        policy.paid_parameters = false;
+        let value = subscription_payload(&policy, None, 1000.0, &data(), true);
+        assert_eq!(value["naiGate"]["anlasEnabled"], true);
+        assert_eq!(value["naiGate"]["anlasLeft"], 7);
     }
 }

@@ -121,27 +121,35 @@ async fn me_counts_usage_and_respects_feature_switches() {
         on,
         [
             ("image", true),
-            ("upscale", false),
-            ("augment", false),
+            ("v5", false),
             ("vibe", false),
             ("tags", false),
+            ("img2img", false),
+            ("upscale", false),
+            ("augment", false),
+            ("paid_parameters", false),
         ]
     );
-    // 站长全局关掉「放大」：成员看到 off；库里残留的 text / voice 开关（文本接口已删）不再有任何作用
-    e.state
-        .db
-        .set_setting(
-            "features_global",
-            r#"{"upscale": false, "text": false, "voice": false}"#,
-        )
-        .await
-        .unwrap();
     let (_, _, body) = call_get(&e, "/v1/me", TOKEN).await;
     let v = json_of(&body);
-    assert_eq!(v["features"].as_array().unwrap().len(), 5);
+    let ids: Vec<&str> = v["features"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|f| f["id"].as_str().unwrap())
+        .collect();
     assert_eq!(
-        v["features"][1],
-        json!({"id": "upscale", "label": "放大", "on": false})
+        ids,
+        [
+            "image",
+            "v5",
+            "vibe",
+            "tags",
+            "img2img",
+            "upscale",
+            "augment",
+            "paid_parameters"
+        ]
     );
 }
 

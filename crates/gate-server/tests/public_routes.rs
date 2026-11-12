@@ -520,7 +520,7 @@ async fn public_status_exposes_only_safe_fields() {
         .iter()
         .map(|f| f["id"].as_str().unwrap())
         .collect();
-    assert_eq!(ids, ["image", "upscale", "augment", "vibe", "tags"]);
+    assert_eq!(ids, ["image", "vibe", "tags", "upscale", "augment"]);
 
     // 上游状态
     for _ in 0..4 {
@@ -729,6 +729,36 @@ async fn user_data_and_subscription_report_restricted_v5_permission() {
         json_of(&data)["v5Access"],
         json!({"allowed":false, "paused":false})
     );
+}
+
+#[tokio::test]
+async fn public_status_lists_paid_img2img_and_v5_when_defaults_allow_them() {
+    let e = setup(&reg_env()).await;
+    common::defaults_for(
+        &e.state,
+        json!({"image": true, "v5": true, "img2img": true, "paid_parameters": true, "tags": true}),
+    )
+    .await;
+    e.state.live.invalidate();
+    let (_, _, v) = get_json(&e.state, "/public/status", &[]).await;
+    let ids: Vec<&str> = v["default_features"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|f| f["id"].as_str().unwrap())
+        .collect();
+    assert_eq!(ids, ["image", "v5", "tags", "img2img", "paid_parameters"]);
+}
+
+#[tokio::test]
+async fn subscription_enables_anlas_when_paid_parameters_are_on() {
+    let e = setup(&[]).await;
+    let (_, body) = get_with_auth(&e.state, "/user/subscription", TOKEN).await;
+    assert_eq!(json_of(&body)["naiGate"]["anlasEnabled"], false);
+    common::policy_for(&e.state, 1, json!({"paid_parameters": true})).await;
+    let (_, body) = get_with_auth(&e.state, "/user/subscription", TOKEN).await;
+    assert_eq!(json_of(&body)["naiGate"]["anlasEnabled"], true);
+    assert!(json_of(&body)["naiGate"]["anlasLeft"].as_i64().unwrap() > 0);
 }
 
 #[tokio::test]

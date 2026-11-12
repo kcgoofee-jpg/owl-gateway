@@ -228,6 +228,7 @@ async fn subscription(state: &AppState, key: &Key) -> Result<Value, InternalErro
         key.expires_at(),
         state.now(),
         &data,
+        key.skip_free_clamp(),
     );
     view["naiGate"]["ownerImageFull"] = json!(key.owner_image_full);
     view["naiGate"]["remaining"] = json!({

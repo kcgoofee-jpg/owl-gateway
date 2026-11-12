@@ -65,8 +65,7 @@ async fn site_paid_cost(
 }
 
 /// 普通成员 V5 保持免费规格限制；绑定站长可用现有 Anlas 预算。
-pub(super) const V5_PAID_REFUSED: &str =
-    "V5 仅支持免费规格（单张、28 步以内、不超过 832×1216 面积），未扣费。";
+pub(super) const V5_PAID_REFUSED: &str = "未开通高规格生图时，V5 只能用免费规格（一次 1 张、不超过 28 步、Normal 三档尺寸），未扣费。请改参数，或由站长打开高规格生图。";
 
 /// 这张图如果全部按 Anlas 付的估价（选号 / V5 确认时和账号余额比）；估不出来按 0（不拦）。
 pub(super) fn paid_cost(body: &Value) -> f64 {

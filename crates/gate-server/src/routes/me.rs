@@ -10,7 +10,7 @@ use crate::state::AppState;
 use axum::Router;
 use axum::extract::{Request, State};
 use axum::routing::get;
-use gate_core::features::FEATURES;
+use gate_core::features::MEMBER_FEATURES;
 use gate_core::primitives;
 
 use serde_json::{Value, json};
@@ -22,7 +22,7 @@ pub fn router() -> Router<AppState> {
 /// `_feature_view`：该 Key 当前各项功能是否可用（已计入全局开关）。
 async fn feature_view(_state: &AppState, key: &Key) -> Result<Vec<Value>, ApiError> {
     let mut view = Vec::new();
-    for (name, label) in FEATURES {
+    for (name, label) in MEMBER_FEATURES {
         // require_feature 只在被拒时返回 Gate 错误
         let on = match require_feature(key, name) {
             Ok(()) => true,

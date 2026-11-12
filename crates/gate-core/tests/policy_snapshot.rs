@@ -43,7 +43,7 @@ fn kw_i64(c: &Case, name: &str) -> Option<i64> {
 }
 
 fn cost_json(r: ImageCost) -> Value {
-    json!({"anlas": r.anlas, "v5": r.v5})
+    json!({"anlas": r.anlas, "v5": r.v5, "legacy": r.legacy})
 }
 
 fn pair(a: i128, b: i128) -> Value {
@@ -142,6 +142,7 @@ fn constants() {
         ]
     );
     assert_eq!(policy::MAX_CHARACTERS, 6);
+    assert_eq!(policy::MAX_BATCH_SAMPLES, 6);
     assert_eq!(
         policy::V5_MEDIUM_OF,
         [

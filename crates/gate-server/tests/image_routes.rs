@@ -2198,6 +2198,177 @@ async fn paid_parameters_keep_paid_v5_spec() {
     let sent = e.mock.requests_to("/ai/generate-image");
     assert_eq!(sent.len(), 1);
     assert_eq!(sent[0].json()["parameters"]["n_samples"], 2);
+    let c = e.state.db.get_counter(1, &e.state.day()).await.unwrap();
+    assert_eq!(c.v5, 1, "{c:?}");
+    assert!(c.anlas > 0.0, "第二张应付 Anlas，got {}", c.anlas);
+    assert_eq!(c.legacy_free_images, 0);
+}
+
+#[tokio::test]
+async fn paid_parameters_keep_oversized_v5_and_charge_anlas() {
+    let e = setup(&[]).await;
+    allow_v5(&e.state).await;
+    common::policy_for(
+        &e.state,
+        1,
+        json!({"paid_parameters": true, "daily_anlas": 5000}),
+    )
+    .await;
+    let mut body = image_body("nai-diffusion-5-full", 1);
+    body["parameters"]["width"] = json!(1216);
+    body["parameters"]["height"] = json!(1600);
+    let (status, resp) = v5_post(&e, body).await;
+    assert_eq!(status, 200, "{}", String::from_utf8_lossy(&resp));
+    let p = &e.mock.requests_to("/ai/generate-image")[0].json()["parameters"];
+    assert_eq!(p["width"], 1216);
+    assert_eq!(p["height"], 1600);
+    let c = e.state.db.get_counter(1, &e.state.day()).await.unwrap();
+    assert_eq!(c.v5, 0);
+    assert!(c.anlas > 0.0, "{}", c.anlas);
+}
+
+#[tokio::test]
+async fn paid_parameters_count_legacy_free_first_in_a_batch() {
+    let e = setup(&[]).await;
+    common::policy_for(
+        &e.state,
+        1,
+        json!({"paid_parameters": true, "daily_anlas": 5000, "image": true}),
+    )
+    .await;
+    let (status, _, body) = call(
+        &e.state,
+        "POST",
+        "/ai/generate-image",
+        Some(TOKEN),
+        Some(image_body("nai-diffusion-4-5-full", 2)),
+    )
+    .await;
+    assert_eq!(status, 200, "{}", String::from_utf8_lossy(&body));
+    assert_eq!(
+        e.mock.requests_to("/ai/generate-image")[0].json()["parameters"]["n_samples"],
+        2
+    );
+    let c = e.state.db.get_counter(1, &e.state.day()).await.unwrap();
+    assert_eq!(c.legacy_free_images, 1, "{c:?}");
+    assert!(c.anlas > 0.0, "{}", c.anlas);
+}
+
+#[tokio::test]
+async fn img2img_always_costs_anlas() {
+    use base64::Engine;
+    let e = setup(&[]).await;
+    common::policy_for(
+        &e.state,
+        1,
+        json!({
+            "img2img": true, "paid_parameters": true, "daily_anlas": 5000,
+            "image": true, "v5": false
+        }),
+    )
+    .await;
+    let image = base64::engine::general_purpose::STANDARD.encode(gate_testkit::tiny_png());
+    let mut body = image_body("nai-diffusion-4-5-full", 1);
+    body["parameters"]["width"] = json!(1024);
+    body["parameters"]["height"] = json!(1024);
+    body["parameters"]["image"] = json!(image);
+    body["parameters"]["strength"] = json!(0.7);
+    let (status, _, resp) = call(
+        &e.state,
+        "POST",
+        "/ai/generate-image",
+        Some(TOKEN),
+        Some(body),
+    )
+    .await;
+    assert_eq!(status, 200, "{}", String::from_utf8_lossy(&resp));
+    let sent = &e.mock.requests_to("/ai/generate-image")[0].json();
+    assert!(
+        sent["parameters"]["image"]
+            .as_str()
+            .is_some_and(|s| !s.is_empty())
+    );
+    let c = e.state.db.get_counter(1, &e.state.day()).await.unwrap();
+    assert_eq!(c.legacy_free_images, 0);
+    assert!(c.anlas > 0.0, "{}", c.anlas);
+    let rows = logs(&e.state).await;
+    let detail = rows[0]["detail"].as_str().unwrap();
+    assert!(detail.contains("est=") && detail.contains('A'), "{detail}");
+}
+
+#[tokio::test]
+async fn controlnet_is_rejected_even_with_paid_parameters() {
+    let e = setup(&[]).await;
+    common::policy_for(
+        &e.state,
+        1,
+        json!({"paid_parameters": true, "daily_anlas": 500}),
+    )
+    .await;
+    let mut body = image_body("nai-diffusion-4-5-full", 1);
+    body["parameters"]["controlnet_model"] = json!("hed");
+    body["parameters"]["controlnet_condition"] = json!("x");
+    let (status, _, resp) = call(
+        &e.state,
+        "POST",
+        "/ai/generate-image",
+        Some(TOKEN),
+        Some(body),
+    )
+    .await;
+    assert_eq!(status, 400, "{}", String::from_utf8_lossy(&resp));
+    assert!(
+        err_message(&resp).contains("ControlNet"),
+        "{}",
+        err_message(&resp)
+    );
+    assert!(e.mock.requests_to("/ai/generate-image").is_empty());
+}
+
+#[tokio::test]
+async fn paid_batch_over_six_is_rejected() {
+    let e = setup(&[]).await;
+    common::policy_for(
+        &e.state,
+        1,
+        json!({"paid_parameters": true, "daily_anlas": 5000}),
+    )
+    .await;
+    let (status, _, resp) = call(
+        &e.state,
+        "POST",
+        "/ai/generate-image",
+        Some(TOKEN),
+        Some(image_body("nai-diffusion-4-5-full", 7)),
+    )
+    .await;
+    assert_eq!(status, 400, "{}", String::from_utf8_lossy(&resp));
+    assert!(
+        err_message(&resp).contains("6 张"),
+        "{}",
+        err_message(&resp)
+    );
+    assert!(e.mock.requests_to("/ai/generate-image").is_empty());
+}
+
+#[tokio::test]
+async fn v5_img2img_without_paid_parameters_is_refused() {
+    use base64::Engine;
+    let e = setup(&[]).await;
+    allow_v5(&e.state).await;
+    common::policy_for(&e.state, 1, json!({"img2img": true, "daily_anlas": 500})).await;
+    let image = base64::engine::general_purpose::STANDARD.encode(gate_testkit::tiny_png());
+    let mut body = image_body("nai-diffusion-5-full", 1);
+    body["parameters"]["image"] = json!(image);
+    body["parameters"]["strength"] = json!(0.5);
+    let (status, resp) = v5_post(&e, body).await;
+    assert_eq!(status, 403, "{}", String::from_utf8_lossy(&resp));
+    assert!(
+        err_message(&resp).contains("高规格生图"),
+        "{}",
+        err_message(&resp)
+    );
+    assert!(e.mock.requests_to("/ai/generate-image").is_empty());
 }
 
 /// A single oversized V5 image is snapped to a free preset unless the paid switch (or exclusive token) is on.

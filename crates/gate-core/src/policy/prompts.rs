@@ -253,6 +253,16 @@ pub fn upstream_parameter_problem(body: &Value) -> Option<String> {
                 .to_string(),
         );
     }
+    if flag("controlnet_model") || flag("controlnet_condition") {
+        return Some("本站未开放 ControlNet，未扣费。请在客户端中关闭 ControlNet。".into());
+    }
+    if let Some(n) = p.get("n_samples").and_then(int_like)
+        && n > i128::from(MAX_BATCH_SAMPLES)
+    {
+        return Some(format!(
+            "一次最多生成 {MAX_BATCH_SAMPLES} 张，未扣费。请把张数改小。给客户端作者：n_samples 上限 {MAX_BATCH_SAMPLES}"
+        ));
+    }
     if generate {
         for key in ["width", "height"] {
             let Some(value) = p.get(key).and_then(int_like) else {

@@ -77,6 +77,9 @@ pub const DIMENSION_STEP: i64 = 64;
 /// 免费档的单张面积上限（= 1024×1024）。免费 Key 的生成请求按它等比缩小。
 pub const FREE_MAX_PIXELS: i64 = 1024 * 1024;
 
+/// 官网一次生成张数上限（Small 最多 6 张）。高规格不静默裁剪，超出直接拒绝。
+pub const MAX_BATCH_SAMPLES: i64 = 6;
+
 /// 图片工具（放大 / 导演工具）允许的输入面积上限，是生成档的 3 倍（= 1536×2048）。
 pub const TOOL_MAX_PIXELS: u64 = 3_145_728;
 
