@@ -39,7 +39,7 @@ scan() {
           next if $o[0] == 127 || $o[0] == 0;
           print STDERR "$f:$.: 疑似公网 IP $ip（测试请用 RFC 5737 文档网段 203.0.113.0/24 等）\n"; $fail = 1;
         }
-        if ($line =~ /pst-[A-Za-z0-9_-]{40,}/) { print STDERR "$f:$.: 疑似真实上游 Token\n"; $fail = 1 }
+        if ($line =~ /(?:pst|NAI)-[A-Za-z0-9_-]{40,}/) { print STDERR "$f:$.: 疑似真实上游 Token\n"; $fail = 1 }
       }
       close($fh) or do { print STDERR "$f: 读取出错\n"; $fail = 1 };
     }

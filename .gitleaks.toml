@@ -11,3 +11,6 @@ paths = [
   # 误报指纹清单本身（只有提交号、文件名、规则名）
   '''^\.gitleaksignore$''',
 ]
+regexes = [
+  '''(?:pst|NAI)-synthetic-[A-Za-z0-9_-]+''',
+]

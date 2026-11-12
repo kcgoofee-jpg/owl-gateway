@@ -41,7 +41,7 @@ describe("shareTokenProblem / shareHostProblem", () => {
   it("拼车 Key 要 NAI- 开头", () => {
     expect(shareTokenProblem("")).toContain("请粘贴");
     expect(shareTokenProblem("pst-abc")).toContain("NAI-");
-    expect(shareTokenProblem("NAI-abcdefghijklmnop")).toBeNull();
+    expect(shareTokenProblem("NAI-synthetic-share-0001")).toBeNull();
   });
   it("地址要 https 主机名，测试允许本机 http", () => {
     expect(shareHostProblem("")).toContain("请填写");

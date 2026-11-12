@@ -246,19 +246,19 @@ mod tests {
     fn share_entries_roundtrip_and_drop_invalid() {
         let dir = tempfile::tempdir().unwrap();
         let p = dir.path().join("upstream_tokens.json");
-        let official = Entry::official("pst-abcdefghijklmnop_-12", false);
-        let share = Entry::share("NAI-abcdefghijklmnop_-12", "https://share.example", true);
+        let official = Entry::official("pst-synthetic-official-0001", false);
+        let share = Entry::share("NAI-synthetic-share-0001", "https://share.example", true);
         save(&p, &[official.clone(), share.clone()]).unwrap();
         assert_eq!(load(&p, None).unwrap().unwrap(), vec![official, share]);
 
         std::fs::write(
             &p,
             r#"{"tokens":[
-                {"token":"pst-abcdefghijklmnop_-12"},
-                {"token":"NAI-abcdefghijklmnop_-12"},
-                {"token":"NAI-abcdefghijklmnop_-12","image_host":"https://share.example/path"},
-                {"token":"pst-abcdefghijklmnop_-12","image_host":"https://share.example"},
-                {"token":"NAI-abcdefghijklmnop_-12","image_host":"https://share.example"}
+                {"token":"pst-synthetic-official-0001"},
+                {"token":"NAI-synthetic-share-0001"},
+                {"token":"NAI-synthetic-share-0001","image_host":"https://share.example/path"},
+                {"token":"pst-synthetic-official-0001","image_host":"https://share.example"},
+                {"token":"NAI-synthetic-share-0001","image_host":"https://share.example"}
             ]}"#,
         )
         .unwrap();

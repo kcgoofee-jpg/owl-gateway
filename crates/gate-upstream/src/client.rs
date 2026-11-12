@@ -415,13 +415,13 @@ mod tests {
     #[test]
     fn resolve_url_keeps_full_official_url_and_rewrites_share() {
         let official = TokenSpec {
-            token: "pst-abcdefghijklmnop12".into(),
+            token: "pst-synthetic-official-0001".into(),
             v5_daily_limit: 0,
             allow_anlas: true,
             image_host: None,
         };
         let share = TokenSpec {
-            token: "NAI-abcdefghijklmnop12".into(),
+            token: "NAI-synthetic-share-0001".into(),
             v5_daily_limit: 0,
             allow_anlas: true,
             image_host: Some("https://share.example".into()),
