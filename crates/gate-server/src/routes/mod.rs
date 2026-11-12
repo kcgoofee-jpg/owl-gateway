@@ -1,13 +1,16 @@
 //! 路由表。按接口分组：公开页面与状态、成员接口（出图 / 工具 / 补全 / 查询自己的额度）、成员页、机器人桥接、后台。
 
 pub mod admin;
+mod device;
 pub(crate) mod explore;
 mod image;
+mod landing;
 mod me;
 mod member;
 mod pages;
 mod patron;
 pub(crate) mod public;
+mod realtime;
 mod registration;
 
 use crate::AppState;
@@ -28,6 +31,8 @@ pub fn router(state: AppState) -> Router {
         .merge(explore::router())
         .merge(crate::backup::router())
         .merge(public::router())
+        .merge(realtime::router())
+        .route("/public/device-fp", axum::routing::post(device::device_fp))
         .merge(me::router())
         .merge(registration::router())
         .merge(member::router())

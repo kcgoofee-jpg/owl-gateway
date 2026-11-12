@@ -186,8 +186,7 @@ async fn login_callback(
             tracing::warn!(target: "web-login", "记设备登录失败：{e}");
         }
         // 浏览器标记（/public/device-fp 种下的 owl_bid Cookie）：同一个浏览器登过多个账号 = 疑似小号
-        let bid = cookie(&parts.headers, super::public::BROWSER_COOKIE)
-            .filter(|b| super::public::valid_browser_id(b));
+        let bid = super::device::browser_id(&parts.headers);
         if let Some(bid) = &bid
             && let Err(e) = state.db.record_browser_login(&who.id, bid, &ip, now).await
         {
@@ -288,12 +287,12 @@ async fn logout() -> Response {
 // ------------------------------------------------------------------ 个人状态 / 重置券
 
 /// 登录后的个人状态：不用粘贴 Key 就能看额度、排队、到期；并提供自己的 Key 供一键复制。
-/// 内容由首页首屏用的同一份 [`super::public::me_payload`] 生成，不另写一份。
+/// 内容由首页首屏用的同一份 [`super::landing::me_payload`] 生成，不另写一份。
 async fn public_me(State(state): State<AppState>, headers: HeaderMap) -> ApiResult {
     let Some((discord_id, key)) = member_state(&state, &headers).await? else {
         return Ok(no_store(ok_json(&json!({"logged_in": false}))));
     };
-    let me = super::public::me_payload(&state, &discord_id, key.as_ref()).await?;
+    let me = super::landing::me_payload(&state, &discord_id, key.as_ref()).await?;
     Ok(no_store(ok_json(&me)))
 }
 

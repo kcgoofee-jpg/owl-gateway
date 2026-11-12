@@ -299,7 +299,7 @@ async fn bot_context(State(state): State<AppState>, req: Request) -> ApiResult {
     let svc = authorize(&state, &parts, false)?;
     let discord_id = checked(svc, &who)?;
     let key = svc.key_row_for(discord_id).await?;
-    let me = super::public::me_payload(&state, discord_id, key.as_ref()).await?;
+    let me = super::landing::me_payload(&state, discord_id, key.as_ref()).await?;
     let member = member_bot_projection(&me);
     let status = state.live.status(&state).await?;
     Ok(no_store(ok_json(&json!({

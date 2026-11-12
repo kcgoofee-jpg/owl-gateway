@@ -78,9 +78,9 @@ async fn healthz(State(st): State<AppState>) -> Response {
 /// 容器内 `nai-gate healthcheck` 的 4 秒、Docker HEALTHCHECK 的 5 秒。正常时 `SELECT 1` 不到 1 毫秒。
 const HEALTH_DB_LIMIT: std::time::Duration = std::time::Duration::from_secs(1);
 
-/// 首页：HTML 里注入首屏数据（我 / 实时看板 / 站点状态，见 `public::landing_boot`），取不到就照常返回页面。
+/// 首页：HTML 里注入首屏数据（我 / 实时看板 / 站点状态，见 `landing::landing_boot`），取不到就照常返回页面。
 async fn landing(State(st): State<AppState>, headers: HeaderMap) -> Response {
-    let boot = super::public::landing_boot(&st, &headers).await;
+    let boot = super::landing::landing_boot(&st, &headers).await;
     st.assets.page(Page::Landing, boot.as_ref())
 }
 
@@ -126,7 +126,7 @@ async fn asset(State(st): State<AppState>, Path(path): Path<String>) -> Response
 /// 官网生图页：官方构建产物 + 桥接层配置（成员 Key 由首屏数据带入）。
 /// 没有成员会话（或还没领到 Key）时回首页走登录/领 Key，别让游客落在半残的官网壳上。
 async fn image(State(st): State<AppState>, headers: HeaderMap) -> Response {
-    let boot = super::public::landing_boot(&st, &headers).await;
+    let boot = super::landing::landing_boot(&st, &headers).await;
     if !workbench_ready(boot.as_ref()) {
         return axum::response::Redirect::temporary("/").into_response();
     }
