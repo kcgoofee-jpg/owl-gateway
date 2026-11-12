@@ -20,8 +20,14 @@ services:
       ZCODE_UPDATE_CHECK: "off"
       ZCODE_CLAIM_ENABLED: "false"
       ZCODE_PROVIDER: "${ZCODE_PROVIDER:-zai}"
-    mem_limit: 192m
+    mem_limit: 384m
+    networks: [owl_internal]
     logging:
       driver: journald
       options:
         tag: "{{.Name}}"
+
+networks:
+  owl_internal:
+    external: true
+    name: owl_internal

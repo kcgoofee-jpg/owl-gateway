@@ -20,7 +20,7 @@ use serde_json::{Value, json};
 /// 对话功能的配置；三项都来自环境变量，缺一即整段功能关闭。
 #[derive(Debug, Clone)]
 pub struct ChatCfg {
-    /// OpenAI 兼容接口根地址（已去尾 `/`），如 `http://host.docker.internal:8090`。
+    /// OpenAI 兼容接口根地址（已去尾 `/`），如 `http://zcode-proxy:8080`。
     pub base_url: String,
     pub api_key: String,
     pub model: String,

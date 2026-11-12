@@ -6,7 +6,7 @@ auth:
   proxyApiKey: null
 
 provider: zai
-plan: coding-plan
+plan: start-plan
 defaultModel: glm-5.3-flash
 models:
   - glm-5.3
