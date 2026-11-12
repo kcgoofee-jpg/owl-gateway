@@ -233,13 +233,8 @@ pub async fn build(state: &AppState, now: f64) -> Result<Map<String, Value>, Int
     }
     let mut body = Map::new();
     body.insert("t".into(), json!(now));
-    // "fifo" = 车道关掉、全部按先来后到；"v5-priority" = V5 走短作业车道（guard_v5_priority 打开时）。
-    // 前端目前只读 queue.full / queue.waiting，多这一个字段不影响旧页面。
-    let v5_priority = state.guard.with(|g| g.v5_priority());
-    body.insert(
-        "mode".into(),
-        json!(if v5_priority { "v5-priority" } else { "fifo" }),
-    );
+    // 11-12 起 V5 不再插队；赞助 / 站长仍走 Jump，对外仍报 fifo（前端只读 queue.full / queue.waiting）。
+    body.insert("mode".into(), json!("fifo"));
     body.insert(
         "auth".into(),
         json!({"requests": requests, "rejected": rejected}),

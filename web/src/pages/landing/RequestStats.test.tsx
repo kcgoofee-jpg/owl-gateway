@@ -98,7 +98,6 @@ function requestsPayload() {
     remaining_anlas: 0,
     remaining_v5: 0,
     remaining_legacy: 0,
-    correlation_id: "",
     app: "client",
   });
   return {

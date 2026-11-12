@@ -119,8 +119,6 @@ export interface MyRequest {
   remaining_anlas?: number;
   remaining_v5?: number;
   remaining_legacy?: number;
-  /** Public correlation token for diagnostics. */
-  correlation_id?: string;
   /** 请求来源：本站生图工作台（workbench）或第三方客户端（client） */
   app?: "workbench" | "client";
   images: number;

@@ -9,7 +9,7 @@
 //! [`TIE_SECS`]）时按轮询。排队期间别的账号空出来了（或者等了一半排队超时、别的账号明显更快），
 //! 就把这张挪过去（[`Pool::try_move`]），资格规则与选号完全一样（启停、冷却、Anlas、V5 日限、账号保护）。
 //!
-//! 同一个账号上谁先轮到按 [`crate::pace::fair_cmp`]：[`crate::pace::Lane`] 插队 → V5 → 普通；同车道按先来后到，等满半个超时的跳过排队；
+//! 同一个账号上谁先轮到按 [`crate::pace::fair_cmp`]：[`crate::pace::Lane`] 插队 → 普通；同车道按先来后到，等满半个超时的跳过排队；
 //! 估算开始时间按这个顺序算（[`Token::ahead_of`] / [`Token::ahead_for`]）。首页位次有估计时跟它走，还没分到账号时由 GuardCore 按车道再按入队先后排。
 
 use crate::error::UpstreamError;
@@ -28,6 +28,8 @@ pub const V5_DAILY_LIMIT_DEFAULT: i64 = 9999;
 #[derive(Debug, Clone)]
 pub struct TokenFields {
     pub position: usize,
+    /// 同类账号里的 1-based 序号（官方一队、拼车一队），编进请求编号前两位。
+    pub kind_index: usize,
     pub v5_daily_limit: i64,
     pub allow_anlas: bool,
     pub pending_v5: i64,
@@ -197,6 +199,7 @@ impl Token {
             dispatch_lock: tokio::sync::Mutex::new(()),
             fields: Mutex::new(TokenFields {
                 position: index + 1,
+                kind_index: 1,
                 v5_daily_limit: spec.v5_daily_limit.max(0),
                 allow_anlas: spec.allow_anlas,
                 pending_v5: 0,
@@ -223,6 +226,12 @@ impl Token {
 
     pub fn is_share(&self) -> bool {
         self.image_host.is_some()
+    }
+
+    /// 请求编号前两位：`1N` 官方第 N 号，`2N` 拼车第 N 号（N 为 1–9）。
+    pub fn account_code(&self) -> u8 {
+        let n = self.fields().kind_index.clamp(1, 9) as u8;
+        if self.is_share() { 20 + n } else { 10 + n }
     }
 
     /// 这把号实际要打的上游根地址：拼车号用自己的 Host，官方号用全局 `NAI_IMAGE_HOST`。
@@ -1129,7 +1138,51 @@ async fn v5_room(hooks: &dyn Hooks, t: &Token, now: f64) -> Result<bool, Upstrea
 }
 
 fn renumber(tokens: &[Arc<Token>]) {
+    let mut official = 0usize;
+    let mut share = 0usize;
     for (i, t) in tokens.iter().enumerate() {
-        t.with(|f| f.position = i + 1);
+        t.with(|f| {
+            f.position = i + 1;
+            if t.is_share() {
+                share += 1;
+                f.kind_index = share;
+            } else {
+                official += 1;
+                f.kind_index = official;
+            }
+        });
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn account_code_splits_official_and_share() {
+        let official = Arc::new(Token::new(
+            TokenSpec {
+                token: "pst-synthetic-official-0001".into(),
+                v5_daily_limit: 0,
+                allow_anlas: true,
+                image_host: None,
+            },
+            0,
+        ));
+        let share = Arc::new(Token::new(
+            TokenSpec {
+                token: "NAI-synthetic-share-0001".into(),
+                v5_daily_limit: 0,
+                allow_anlas: false,
+                image_host: Some("https://share.example".into()),
+            },
+            1,
+        ));
+        let tokens = vec![official, share];
+        renumber(&tokens);
+        assert_eq!(tokens[0].account_code(), 11);
+        assert_eq!(tokens[1].account_code(), 21);
+        assert_eq!(tokens[0].fields().kind_index, 1);
+        assert_eq!(tokens[1].fields().kind_index, 1);
     }
 }

@@ -1,5 +1,7 @@
 # V5 要不要插队：日志证据 + 排队机制 roadmap
 
+> 11-12 起这段机制已删除。归档 tag：`archive/v5-priority-lane`。下文是当时的依据，不再描述现行排队。
+
 生成：2026-11-07 17:00 (+08:00)
 数据：`owl-new:/opt/service-tools/data/nai_gate.db`（`sqlite3 -readonly`，库内可用窗口 **2026-11-06 08:00 → 11-07 16:51，约 33 小时**）
 脚本：`owl-monitor/r/v5-vs-45.R`（分析工作区在 `/Users/davidzhao/purge/purgedsh/owl-monitor/`）（base R，无第三方包）；原始输出 `owl-monitor/stats/v5-vs-45.txt`；数据 `owl-monitor/data/usage-14d.csv`

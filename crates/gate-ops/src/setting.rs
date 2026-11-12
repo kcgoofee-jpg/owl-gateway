@@ -265,12 +265,6 @@ pub const SPECS: &[Spec] = &[
         Kind::Int,
         "排队超时（秒）",
     ),
-    s(
-        "v5_priority",
-        Ep::Guard,
-        Kind::Int,
-        "V5 出图优先（1=开，0=关；只影响同一个账号上谁先开始，不抢占正在生成的那张）",
-    ),
 ];
 
 pub fn find(name: &str) -> Option<&'static Spec> {

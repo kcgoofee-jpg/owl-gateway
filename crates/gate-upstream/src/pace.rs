@@ -7,8 +7,8 @@
 //! - **周期**：一个账号两次开始出图的平均间距 = (实测出图耗时 + 平均歇的秒数) ÷ 并发。
 //!   选号（谁能最早开始）和排队上限（排队超时内真能出完几张）都按它估算。
 //! - **排队顺序**（[`Arrival`] / [`fair_cmp`]）：一个账号空出来时，等它的图里先轮到**插队**（站长号 / 赞助席），
-//!   再轮到**短作业车道**（V5），再普通。同车道按先来后到。防饿死：等了一半排队超时还没开始的，在本车道内直接排到最前；
-//!   等满整个超时的才压过 V5 车道（不能压过插队）。11-07 删掉了「这个成员今天出得最少」那一层 —— 它让所有人都要多等，而防饿死靠的是老化。
+//!   再普通（V5 和 V4.5 一样先来后到）。同车道按先来后到。防饿死：等了一半排队超时还没开始的，在本车道内直接排到最前。
+//!   11-12 删掉了 V5 短作业车道（归档 tag `archive/v5-priority-lane`）。11-07 删掉了「这个成员今天出得最少」。
 //! - **上游并发锁**（NovelAI 429 / 409 + `Concurrent generation is locked`）：这个账号上一张还没释放，
 //!   不是限流——不冷却、不算 429；在同一个账号上等 [`lock_wait`] 秒再试，最多 [`LOCK_RETRIES`] 次
 //!   （不超过排队超时）。锁在响应返回后稍晚才释放，所以出完后歇的秒数下限是 1。
@@ -30,14 +30,9 @@ pub fn lock_wait(retry: u32) -> Option<f64> {
 pub struct Arrival {
     /// 开始排队的时刻（上游客户端的单调秒）。
     pub since: f64,
-    /// 到这个时刻（单调秒）还没开始就不再看用量，按先来后到排在最前（防饿死：开始排队 + 排队超时的一半）。
-    /// 只在同一条车道内生效——跨车道的抢先看 [`Self::hard_at`]。
+    /// 到这个时刻（单调秒）还没开始就不再排队、直接排到本车道最前（防饿死：开始排队 + 排队超时的一半）。
     pub patient_at: f64,
-    /// 到这个时刻（单调秒）还没开始就压过 V5 短作业车道（防饿死：开始排队 + 整个排队超时）。
-    /// 半个超时只在车道内抢先，是因为拥塞时几乎每张普通请求都过 45 秒，用两条不同的阈值才能既让 V5 真的先出、
-    /// 又不把普通请求饿死。硬老化不能压过插队：赞助 / 站长号始终排在等待中的生图前面。
-    pub hard_at: f64,
-    /// 插队 / V5 / 普通。客户端指定无效；见 [`Lane`]。
+    /// 插队 / 普通。客户端指定无效；见 [`Lane`]。
     pub lane: Lane,
 }
 
@@ -46,7 +41,6 @@ impl Arrival {
         Self {
             since: now,
             patient_at: now + queue_timeout.max(0.0) / 2.0,
-            hard_at: now + queue_timeout.max(0.0),
             lane: Lane::Normal,
         }
     }
@@ -59,23 +53,14 @@ impl Arrival {
 }
 
 /// 排队的先后（`Less` = `a` 先轮到）：
-/// 1. **车道**：插队（站长 / 赞助）先于短作业（V5）先于普通；等满整个排队超时的普通 / V5（`hard_at`）只压过 V5 车道，压不过插队；
+/// 1. **车道**：插队（站长 / 赞助）先于普通；老化不能压过插队；
 /// 2. **老化**：等满半个超时的（`patient_at`）在车道内不再排队、直接排到本车道最前；
 /// 3. **先来后到**：其余按开始排队的时刻；
 /// 4. 同一时刻的按票号。
-///
-/// 11-07 删掉了「今天出得少的人先」：那个比较让所有人都要多等（重度用户沉底、轻度用户被后来的轻度用户插队），
-/// 而真正防饿死的是老化；删掉之后排队就是「车道 + 老化 + 先来后到」，谁都能算出自己还要等几张。
-///
-/// 为什么老化分两档：11-07 上线实测发现，拥塞时几乎每张普通请求都过了 45 秒，若「等半个超时」就能越过车道，
-/// V5 一次也插不进去（18:05 那批 V5 等了 52 秒、79 秒）。半个超时留在车道内防饿死，整个超时才允许跨过 V5。
-/// 11-12 起插队单独一条车道：V5 仍是模型车道，赞助 / 站长排在所有等待中的生图前面，90 秒老化也不能越过他们。
 pub fn fair_cmp(a: (&Arrival, u64), b: (&Arrival, u64), now: f64) -> std::cmp::Ordering {
     let key = |(x, id): (&Arrival, u64)| {
         let aged = now >= x.patient_at;
-        let hard = now >= x.hard_at;
-        let lane = x.lane.effective(hard) as u8;
-        (lane, !aged, x.since, id)
+        (x.lane as u8, !aged, x.since, id)
     };
     let (ka, kb) = (key(a), key(b));
     ka.0.cmp(&kb.0)
@@ -156,41 +141,23 @@ mod tests {
     }
 
     #[test]
-    fn fast_lane_wins_until_the_other_side_has_waited_the_whole_timeout() {
+    fn v5_no_longer_cuts_ahead_of_an_earlier_plain_request() {
         use std::cmp::Ordering::*;
-        // 普通先到、V5 后到：V5 先上
         let plain = Arrival::new(0.0, 90.0);
-        let v5 = Arrival::new(5.0, 90.0).lane(Lane::Fast);
-        assert_eq!(fair_cmp((&v5, 2), (&plain, 1), 10.0), Less);
-        // 普通等过 45 秒（半个超时）：只在普通车道内抢先，压不过车道
-        assert_eq!(fair_cmp((&plain, 1), (&v5, 2), 45.0), Greater);
-        // 等满整个超时（90 秒）：硬老化压过车道，最后一定能跑到
-        assert_eq!(fair_cmp((&plain, 1), (&v5, 2), 91.0), Less);
-        // V5 自己等满整个超时后，两条都按先来后到
-        assert_eq!(fair_cmp((&v5, 2), (&plain, 1), 96.0), Greater);
+        let v5 = Arrival::new(5.0, 90.0);
+        assert_eq!(fair_cmp((&plain, 1), (&v5, 2), 10.0), Less);
+        assert_eq!(fair_cmp((&v5, 2), (&plain, 1), 10.0), Greater);
     }
 
     #[test]
-    fn fast_lane_keeps_the_arrival_order_inside_the_lane() {
-        use std::cmp::Ordering::*;
-        let a = Arrival::new(0.0, 90.0).lane(Lane::Fast);
-        let b = Arrival::new(1.0, 90.0).lane(Lane::Fast);
-        // 同车道：先来后到，车道不改变这一点
-        assert_eq!(fair_cmp((&a, 1), (&b, 2), 10.0), Less);
-        assert_eq!(fair_cmp((&b, 2), (&a, 1), 10.0), Greater);
-    }
-
-    #[test]
-    fn jump_lane_beats_v5_and_plain_even_after_hard_aging() {
+    fn jump_lane_beats_plain_even_after_aging() {
         use std::cmp::Ordering::*;
         let plain = Arrival::new(0.0, 90.0);
-        let v5 = Arrival::new(1.0, 90.0).lane(Lane::Fast);
         let jump = Arrival::new(5.0, 90.0).lane(Lane::Jump);
-        assert_eq!(fair_cmp((&jump, 3), (&v5, 2), 10.0), Less);
-        assert_eq!(fair_cmp((&jump, 3), (&plain, 1), 10.0), Less);
-        // 等满 90 秒的 V4.5 / V5 仍压不过刚来的插队
-        assert_eq!(fair_cmp((&plain, 1), (&jump, 3), 91.0), Greater);
-        assert_eq!(fair_cmp((&v5, 2), (&jump, 3), 92.0), Greater);
+        assert_eq!(fair_cmp((&jump, 2), (&plain, 1), 10.0), Less);
+        // 等满半个超时的普通仍压不过刚来的插队
+        assert_eq!(fair_cmp((&plain, 1), (&jump, 2), 50.0), Greater);
+        assert_eq!(fair_cmp((&plain, 1), (&jump, 2), 91.0), Greater);
         // 两名插队：先来后到
         let first = Arrival::new(0.0, 90.0).lane(Lane::Jump);
         let second = Arrival::new(1.0, 90.0).lane(Lane::Jump);

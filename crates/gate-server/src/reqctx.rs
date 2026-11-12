@@ -32,7 +32,6 @@ impl std::fmt::Debug for ReqCtx {
 
 struct Inner {
     internal_id: String,
-    correlation_id: String,
     settlement_reserved: bool,
     settlement_day: Option<String>,
     execution_unknown: bool,
@@ -80,14 +79,14 @@ impl Default for ReqCtx {
 
 impl ReqCtx {
     pub fn new() -> Self {
+        let rid = new_rid();
         Self(
             Arc::new(Mutex::new(Inner {
                 internal_id: hex::encode(rand::random::<[u8; 16]>()),
-                correlation_id: new_correlation_id(),
                 settlement_reserved: false,
                 settlement_day: None,
                 execution_unknown: false,
-                rid: new_rid(),
+                rid,
                 t0: Instant::now(),
                 sent: None,
                 up_status: 0,
@@ -197,9 +196,16 @@ impl ReqCtx {
         self.with(|i| i.internal_id.clone())
     }
 
-    /// Short NovelAI support correlation code. This is separate from both the internal ID and rid.
+    /// Same as [`rid`][Self::rid]; sent to NovelAI as `x-correlation-id`.
     pub fn correlation_id(&self) -> String {
-        self.with(|i| i.correlation_id.clone())
+        self.rid()
+    }
+
+    fn stamp_account(&self, code: u8) {
+        self.with(|i| {
+            let unique = unique_of(&i.rid);
+            i.rid = format!("{code:02}{unique}");
+        });
     }
 
     pub fn mark_settlement_reserved(&self) {
@@ -342,28 +348,34 @@ pub fn current_rid() -> String {
     current().map(|c| c.rid()).unwrap_or_default()
 }
 
-fn new_correlation_id() -> String {
-    const ALPHANUM: &[u8; 62] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789";
-    rand::random::<[u8; 6]>()
-        .into_iter()
-        .map(|b| ALPHANUM[(b as usize) % ALPHANUM.len()] as char)
-        .collect()
-}
-
 pub fn current_execution_unknown() -> bool {
     current().is_some_and(|c| c.execution_unknown())
 }
 
-/// 8 位十六进制（`secrets.token_hex(4)`）。
+/// 编号：`AARRRRRRRR`。AA 是账号（`00` 还没派到号，`1N` 官方第 N 号，`2N` 拼车第 N 号），后 8 位随机。
 fn new_rid() -> String {
-    let n: u32 = rand::random();
-    format!("{n:08x}")
+    format!("00{:08x}", rand::random::<u32>())
+}
+
+fn unique_of(rid: &str) -> String {
+    if rid.len() >= 8 {
+        rid[rid.len() - 8..].to_string()
+    } else {
+        format!("{rid:0<8}")
+    }
 }
 
 /// 上游观察者：把 gate-upstream 的「已发送 / 状态码」写回请求上下文。
 impl gate_upstream::client::Observer for ReqCtx {
     fn picked(&self, token_id: &str) {
         self.with(|i| i.token_id = Some(token_id.to_string()));
+    }
+    fn picked_token(&self, token: &gate_upstream::client::Token) {
+        self.picked(&token.token_id);
+        self.stamp_account(token.account_code());
+    }
+    fn public_id(&self) -> String {
+        self.rid()
     }
     fn queued(&self, _token_id: &str, wait: f64) {
         let hook = self.with(|i| i.on_queued.clone());
@@ -420,14 +432,17 @@ mod tests {
     }
 
     #[test]
-    fn correlation_id_is_six_alphanumeric_and_separate_from_request_ids() {
+    fn public_id_starts_unassigned_and_stamps_the_account() {
         let ctx = ReqCtx::new();
-        let correlation = ctx.correlation_id();
-        assert_eq!(correlation.len(), 6);
-        assert!(correlation.bytes().all(|b| b.is_ascii_alphanumeric()));
-        assert_eq!(ctx.correlation_id(), correlation);
+        assert_eq!(ctx.rid().len(), 10);
+        assert!(ctx.rid().starts_with("00"));
+        assert!(ctx.rid().bytes().all(|b| b.is_ascii_hexdigit()));
+        assert_eq!(ctx.correlation_id(), ctx.rid());
+        let unique = ctx.rid()[2..].to_string();
+        ctx.stamp_account(21);
+        assert_eq!(ctx.rid(), format!("21{unique}"));
+        assert_eq!(ctx.correlation_id(), ctx.rid());
         assert_eq!(ctx.internal_id().len(), 32);
-        assert_eq!(ctx.rid().len(), 8);
-        assert_ne!(correlation, ctx.rid());
+        assert_ne!(ctx.internal_id(), ctx.rid());
     }
 }

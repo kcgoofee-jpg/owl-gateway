@@ -87,7 +87,7 @@ impl<H: Hooks> NaiClient<H> {
                     .unavailable(requires_anlas, v5_free, prefer_token_id)
                     .await);
             };
-            obs.picked(&token.token_id);
+            obs.picked_token(&token);
             let mut fl = InFlight::new(inner.clone(), token.clone(), v5_free, 0);
             fl.ticket = ticket;
             // V5 计费确认：排队前一次（换号后对新账号再一次），排完队仍是免费再一次（见 request_once）
@@ -200,8 +200,9 @@ impl<H: Hooks> NaiClient<H> {
                     )
                     // 流式生图同样是非幂等 POST：3xx 不跟随（避免把请求体重发到新地址）。
                     .redirect(wreq::redirect::Policy::none());
-                if let Some(correlation_id) = cb.correlation_id.as_deref() {
-                    req = req.header("x-correlation-id", correlation_id);
+                let public_id = obs.public_id();
+                if !public_id.is_empty() {
+                    req = req.header("x-correlation-id", public_id);
                 }
                 // 与 set_admin_enabled 串行（只在检查启停时持锁，请求本身不持锁）
                 drop(token.dispatch_lock.lock().await);

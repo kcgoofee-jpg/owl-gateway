@@ -383,7 +383,6 @@ struct MyRequestItem {
     remaining_anlas: i64,
     remaining_v5: i64,
     remaining_legacy: i64,
-    correlation_id: String,
     app: &'static str,
     size: String,
     billing: &'static str,
@@ -442,7 +441,6 @@ impl MyRequestItem {
             remaining_anlas: r["remaining_anlas"].as_i64().unwrap_or(0),
             remaining_v5: r["remaining_v5"].as_i64().unwrap_or(0),
             remaining_legacy: r["remaining_legacy"].as_i64().unwrap_or(0),
-            correlation_id: text_field(r, "correlation_id"),
             app,
         }
     }

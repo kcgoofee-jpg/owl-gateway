@@ -76,7 +76,7 @@ impl<H: Hooks> NaiClient<H> {
                     .unavailable(o.requires_anlas, o.v5_free, o.prefer_token_id.as_deref())
                     .await);
             };
-            obs.picked(&token.token_id);
+            obs.picked_token(&token);
             let mut fl = InFlight::new(inner.clone(), token.clone(), o.v5_free, o.image_count);
             fl.ticket = ticket;
             let outcome = self
@@ -90,7 +90,7 @@ impl<H: Hooks> NaiClient<H> {
                     // 在同一账号上不占排队位重发一次（acquire 无票 = 只等出图间隔）。
                     // 只试一次，重试的结果（无论成败）直接返回；重试路径要求换号 / V5 异常时保守返回原始 5xx。
                     if o.image_lane && r.as_ref().is_ok_and(|resp| resp.status >= 500) {
-                        obs.picked(&last_token.token_id);
+                        obs.picked_token(&last_token);
                         tracing::warn!(
                             target: "upstream",
                             token_id = %last_token.token_id,
@@ -240,8 +240,9 @@ impl<H: Hooks> NaiClient<H> {
                 o.json,
                 o.accept,
             );
-            if let Some(correlation_id) = cb.correlation_id.as_deref() {
-                req = req.header("x-correlation-id", correlation_id);
+            let public_id = obs.public_id();
+            if !public_id.is_empty() {
+                req = req.header("x-correlation-id", public_id);
             }
             if o.image_lane {
                 // 生图 / 图片工具是非幂等 POST：上游 3xx 一律不跟随。307/308 会把请求体重发到新地址
@@ -473,6 +474,6 @@ impl<H: Hooks> NaiClient<H> {
         new.ticket = Some(ticket);
         let old = std::mem::replace(fl, new);
         old.finish().await;
-        obs.picked(&to.token_id);
+        obs.picked_token(to);
     }
 }

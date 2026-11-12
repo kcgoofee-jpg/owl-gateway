@@ -68,6 +68,14 @@ pub trait Observer: Send + Sync {
     /// 选中了上游账号（`token_id`）：在排队等出图槽位之前调用，所以选号之后才失败的请求也知道是哪个账号。
     /// 重试换号会再调用一次，以最后一次为准。
     fn picked(&self, _token_id: &str) {}
+    /// 选中账号时带上 Token，好把账号序号编进请求编号。默认转给 [`picked`][Self::picked]。
+    fn picked_token(&self, token: &Token) {
+        self.picked(&token.token_id);
+    }
+    /// 发给上游的 `x-correlation-id`，与成员看到的编号相同。选号之后会带上账号位。
+    fn public_id(&self) -> String {
+        String::new()
+    }
     /// 正在等 `token_id` 这个账号：估计还要 `wait` 秒才能开始（排队期间会更新；换号后报新账号）。
     fn queued(&self, _token_id: &str, _wait: f64) {}
     fn sent(&self) {}

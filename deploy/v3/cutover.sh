@@ -8,6 +8,7 @@
 #                                                  最多再收尾 120 秒）。同一时刻只有一个网关在用账号
 #   deploy/v3/cutover.sh previous                  回到上一版镜像（owl-gate:previous），同样走 restart
 # 改 Caddy 配置用 deploy/v3/caddy-reload.sh（不要 docker exec caddy caddy reload，原因见那个脚本）。
+#   deploy/v3/cutover.sh extract-web               从当前镜像抽出前端到 nai-mirror（不含 nai-app）
 #   deploy/v3/cutover.sh status
 #
 # 换版成功后会自动清掉本机不再需要的产物，避免磁盘被部署次数慢慢吃满：
@@ -133,6 +134,26 @@ prune_image_tags() {
   log "· 镜像标签：保留 $kept 个（current / previous / failed），清掉 $removed 个旧构建"
 }
 
+# 把镜像里的 /opt/web-dist 抽到宿主机 nai-mirror（STATIC_DIR）。不含 nai-app（官网镜像仍走 sync-mirror）。
+# 旧镜像没有这份目录时跳过，保留磁盘上现有前端，不让回滚失败。
+cmd_extract_web() {
+  local tag=${1:-$IMAGE:current} cid tmp
+  docker image inspect "$tag" >/dev/null 2>&1 || die "先 load 镜像"
+  cid=$(docker create "$tag") || die "docker create $tag 失败"
+  tmp=$(mktemp -d)
+  if ! docker cp "$cid:/opt/web-dist/." "$tmp/" 2>/dev/null || [[ ! -f $tmp/landing.html ]]; then
+    docker rm -f "$cid" >/dev/null 2>&1 || true
+    rm -rf "$tmp"
+    log "! $tag 没有 /opt/web-dist，前端仍用磁盘上现有文件"
+    return 0
+  fi
+  docker rm -f "$cid" >/dev/null 2>&1 || true
+  mkdir -p "$OWL_DIR/nai-mirror"
+  rsync -a --checksum --delete --exclude 'nai-app' "$tmp/" "$OWL_DIR/nai-mirror/"
+  rm -rf "$tmp"
+  log "✓ 前端从 $tag 抽到 $OWL_DIR/nai-mirror"
+}
+
 # 先停后起换版本：任何时刻只有一个网关进程在给 NovelAI 发图。
 # 每个账号「有没有图在出、下一张什么时候能发」只记在网关进程的内存里，两个网关同时在线时互相看不到，
 # 会让同一账号同时出两张而被上游回 429，所以部署不再让新旧网关重叠。
@@ -150,6 +171,7 @@ restart_container() {
   else
     log "没有 $OWL_DIR/ops/migrate-schema.sh：跳过库结构升级"
   fi
+  cmd_extract_web "$IMAGE:current"
   log "起新的 $GATE"
   if ! "${COMPOSE[@]}" up -d --remove-orphans || ! wait_healthy 90 || ! smoke; then
     "${COMPOSE[@]}" logs --tail 80 gate || true
@@ -215,12 +237,16 @@ cmd_previous() {
 
 cmd_status() {
   docker ps -a --filter name=owl- --format '{{.Names}}\t{{.Status}}\t{{.Image}}'
+  if [[ -f $OWL_DIR/live.sha ]]; then
+    log "live.sha $(tr -d '\n' <"$OWL_DIR/live.sha" | cut -c1-12)"
+  fi
   curl -fsS -m 3 "$GATE_URL/healthz" && echo
 }
 
 case ${1:-status} in
   load) shift; cmd_load "$@" ;;
   install-ops) shift; cmd_install_ops "$@" ;;
+  extract-web) shift; cmd_extract_web "$@" ;;
   restart) cmd_restart ;;
   previous) cmd_previous ;;
   status) cmd_status ;;

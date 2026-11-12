@@ -236,6 +236,10 @@ jobs:
           [ "$ok" = 1 ] || { docker logs smoke; exit 1; }
           curl -fsS -m 5 http://127.0.0.1:18080/ | grep -q '/_owl/' || { echo "landing page does not embed the web bundle"; docker logs smoke; exit 1; }
           docker exec smoke /usr/local/bin/nai-gate healthcheck
+          cid=$(docker create owl-gate:${{ github.sha }})
+          docker cp "$cid:/opt/web-dist/landing.html" /tmp/web-dist-landing.html
+          docker rm "$cid"
+          [ -s /tmp/web-dist-landing.html ] || { echo "image is missing /opt/web-dist/landing.html"; exit 1; }
           docker rm -f smoke
       - run: gzip -1 /tmp/owl-gate.tar
       - uses: actions/upload-artifact@v7
@@ -243,6 +247,18 @@ jobs:
           name: owl-gate-image
           path: /tmp/owl-gate.tar.gz
           # 每版镜像约 250MB，一天能推十来次。原先是 7 天，光 CI 产物就压着十几 GB 配额；
-          # tools/deploy.sh 永远只拉最近一次成功的 run，2 天足够回退到前一天的构建。
+          # tools/deploy.sh 默认等本次提交的 CI，2 天足够回退到前一天的构建。
           retention-days: 2
           compression-level: 0
+
+  ready:
+    name: ready to deploy
+    needs: [web, lint, test, e2e, deploy-safety, secrets, ops-binary, image]
+    runs-on: ubuntu-24.04
+    timeout-minutes: 2
+    steps:
+      - name: Print the deploy command
+        run: |
+          echo "sha=${GITHUB_SHA}"
+          echo "laptop: tools/deploy.sh"
+          echo "github: gh workflow run Deploy --ref main"

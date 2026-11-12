@@ -71,7 +71,6 @@ export function RequestRow({ r }: { r: MyRequest }) {
     r.wait_s != null && r.wait_s >= 1 ? `排队 ${Math.round(r.wait_s)} 秒` : "",
     r.dur_s != null ? `出图 ${Math.round(r.dur_s)} 秒` : "",
     r.rid ? `编号 ${r.rid}` : "",
-    r.correlation_id ? `上游关联号 ${r.correlation_id}` : "",
   ]
     .filter(Boolean)
     .join(" · ");

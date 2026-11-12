@@ -63,8 +63,8 @@ impl Db {
             day.to_owned(),
             month.to_owned(),
         );
-        self.write(move |tx| Ok(tx.execute("UPDATE request_settlements SET status='dispatched',correlation_id=?,day=?,month=?,anlas=?,v5=?,legacy=?,is_vibe=?,dispatched_at=CASE WHEN dispatched_at IS NULL THEN ? ELSE dispatched_at END,updated_at=? WHERE request_id=? AND status IN ('reserved','dispatched')",
-            params![correlation_id, day, month, anlas, v5, legacy, is_vibe, now, now, request_id])? == 1)).await
+        self.write(move |tx| Ok(tx.execute("UPDATE request_settlements SET status='dispatched',correlation_id=?,rid=?,day=?,month=?,anlas=?,v5=?,legacy=?,is_vibe=?,dispatched_at=CASE WHEN dispatched_at IS NULL THEN ? ELSE dispatched_at END,updated_at=? WHERE request_id=? AND status IN ('reserved','dispatched')",
+            params![correlation_id, correlation_id, day, month, anlas, v5, legacy, is_vibe, now, now, request_id])? == 1)).await
     }
 
     #[allow(clippy::too_many_arguments)]
@@ -415,7 +415,15 @@ impl Db {
         self.write(move |tx| {
             insert_usage_log(tx, &l, now)?;
             tx.execute("INSERT INTO usage_request_links(request_id,usage_log_id) VALUES(?,last_insert_rowid())", [&id])?;
-            tx.execute("UPDATE request_settlements SET status=?,updated_at=? WHERE request_id=? AND status IN ('reserved','dispatched')", params![target, now, id])?;
+            // 派到号之后 public rid 会改前缀。取消路径会先把预留标成 released，落账时仍要把编号写回去。
+            tx.execute(
+                "UPDATE request_settlements SET rid=?,updated_at=? WHERE request_id=?",
+                params![primitives::take_chars(&l.rid, 16), now, id],
+            )?;
+            tx.execute(
+                "UPDATE request_settlements SET status=?,updated_at=? WHERE request_id=? AND status IN ('reserved','dispatched')",
+                params![target, now, id],
+            )?;
             Ok(())
         }).await
     }

@@ -1,0 +1,52 @@
+name: Deploy
+
+# Same path as tools/deploy.sh, from GitHub. Needs repository secrets:
+#   OWL_DEPLOY_HOST     SSH host (never commit)
+#   OWL_DEPLOY_SSH_KEY  private key that can log in as root (same as ~/.ssh/naigate_ed25519)
+#
+#   gh workflow run Deploy --ref main
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  actions: read
+
+concurrency:
+  group: deploy-production
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    name: production
+    runs-on: ubuntu-24.04
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v7
+      - name: Require deploy secrets
+        env:
+          HOST: ${{ secrets.OWL_DEPLOY_HOST }}
+          KEY: ${{ secrets.OWL_DEPLOY_SSH_KEY }}
+        run: |
+          if [ -z "$HOST" ] || [ -z "$KEY" ]; then
+            echo "::error::Set OWL_DEPLOY_HOST and OWL_DEPLOY_SSH_KEY, then re-run. Laptop path remains tools/deploy.sh"
+            exit 1
+          fi
+      - name: Install rsync
+        run: sudo apt-get update -o Acquire::Retries=3 && sudo apt-get install -y --no-install-recommends rsync
+        timeout-minutes: 5
+      - name: Write local deploy config
+        env:
+          HOST: ${{ secrets.OWL_DEPLOY_HOST }}
+          KEY: ${{ secrets.OWL_DEPLOY_SSH_KEY }}
+        run: |
+          umask 077
+          mkdir -p "$HOME/.config/owl" "$HOME/.ssh"
+          printf 'OWL_IP=%s\n' "$HOST" > "$HOME/.config/owl/owl.env"
+          printf '%s\n' "$KEY" > "$HOME/.ssh/naigate_ed25519"
+          chmod 600 "$HOME/.ssh/naigate_ed25519"
+      - name: Wait for this commit's CI and cut over
+        env:
+          GH_TOKEN: ${{ github.token }}
+          OWL_REPO: ${{ github.repository }}
+        run: bash tools/deploy.sh

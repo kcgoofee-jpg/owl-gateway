@@ -56,6 +56,13 @@ case "$1" in
     repo=${@: -1}
     awk -F '\t' -v p="$repo:" 'index($1,p)==1 {print $1}' "$state"
     ;;
+  create) echo cutover-web ;;
+  cp)
+    dest=${*: -1}
+    mkdir -p "$dest"
+    printf 'landing\n' >"$dest/landing.html"
+    ;;
+  rm) ;;
   compose) ;;
   exec) ;;
   inspect) printf '%s\n' "$(get_image owl-gate:current)" ;;

@@ -2,9 +2,10 @@
 # shellcheck disable=SC2016,SC2029  # remote snippets intentionally interpolate on the server
 # Deploy a green CI build of main to production, end to end.
 #
-#   tools/deploy.sh              latest successful push run of CI on main
-#   tools/deploy.sh --wait       wait for the CI run of origin main HEAD, then deploy it
+#   tools/deploy.sh              wait for CI on origin/main HEAD, then deploy that run
+#   tools/deploy.sh --latest     latest successful push run of CI on main (may not be HEAD)
 #   tools/deploy.sh <run-id>     a specific run (must have succeeded)
+#   tools/deploy.sh --mirror-only  sync /image static resources only
 #
 # Steps: pick run -> refuse unless every job passed -> skip if already live -> download
 # artifacts (the image tarball is skipped when the server already loaded that exact image,
@@ -33,12 +34,17 @@ mask() { sed -E 's/[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}/x.x.x.x/g'; }
 remote() { ssh "${KEY[@]}" "root@$OWL_IP" "$@" 2>&1 | mask; return "${PIPESTATUS[0]}"; }
 say() { printf '\033[1m==> %s\033[0m\n' "$*"; }
 die() { printf '\033[31mxx %s\033[0m\n' "$*" >&2; exit 1; }
-run_id="" wait=0 mirror_only=0
+run_id="" wait=1 mirror_only=0
 for a in "$@"; do
   case $a in
     --wait) wait=1 ;;
+    --latest) wait=0 ;;
     --mirror-only) mirror_only=1 ;;
-    [0-9]*) run_id=$a ;;
+    --help|-h)
+      sed -n '2,16p' "$0"
+      exit 0
+      ;;
+    [0-9]*) run_id=$a; wait=0 ;;
     *) die "unknown argument: $a" ;;
   esac
 done
@@ -53,10 +59,14 @@ if [[ $mirror_only == 1 ]]; then
 fi
 
 if [[ -z $run_id && $wait == 1 ]]; then
-  sha=$(gh api "repos/$REPO/commits/main" -q .sha)
-  say "waiting for CI on main ${sha:0:7}"
+  if [[ -n ${GITHUB_SHA:-} ]]; then
+    sha=$GITHUB_SHA
+  else
+    sha=$(gh api "repos/$REPO/commits/main" -q .sha)
+  fi
+  say "waiting for CI on ${sha:0:7}"
   for _ in $(seq 1 30); do
-    run_id=$(gh run list -R "$REPO" --workflow CI --commit "$sha" --event push --limit 1 --json databaseId -q '.[0].databaseId')
+    run_id=$(gh run list -R "$REPO" --workflow CI --commit "$sha" --limit 1 --json databaseId -q '.[0].databaseId')
     [[ -n $run_id ]] && break
     sleep 10
   done
@@ -129,11 +139,8 @@ remote "chmod 755 ${remote_ops[*]}" >/dev/null
 # 官网生图页镜像：59MB 静态资源不进仓库也不进镜像，cutover 之前同步到宿主机只读挂载点。
 tools/sync-mirror.sh
 
-# 前端产物（landing / admin）：网关 STATIC_DIR 优先读磁盘，镜像里那份是构建时的旧快照。
-# 不在这里同步的话，改了前端样式/文案部署完看不到变化（10-30 踩过两次），所以每次部署都顺手刷一遍。
-# 一定要现场构建：web/dist 是 gitignore 的，谁的机器上只要有一份旧产物，`--no-build` 就会把旧 CSS
-# 推上去（10-31 05:18 就是这么把后台的框线「改回去了」——线上 CSS 的时间戳还停在一天前）。
-tools/hot-web.sh
+# 前端（landing / admin）由 cutover 从镜像 /opt/web-dist 抽到 nai-mirror，不再用笔记本热更新覆盖。
+# 紧急只改前端、不换镜像时仍可单独跑 tools/hot-web.sh。
 
 # cutover 自己的 smoke 也要求公共接口 200；维护模式开着时先临时切 off，部署完由 verify 脚本切回。
 # 这里把当前档位写到服务器上的一个小文件，verify 脚本读它恢复。
@@ -158,5 +165,7 @@ ssh "${KEY[@]}" "root@$OWL_IP" "bash -s -- $(printf %q "$DOMAIN")" < tools/deplo
   || die "post-deploy checks failed; consider: /opt/owl/cutover.sh previous"
 
 curl -fsS -m 10 "https://$DOMAIN/healthz" | grep -q '"ok":true' || die "public /healthz not ok"
+remote "printf '%s\n' $(printf %q "$sha") > /opt/owl/live.sha" >/dev/null
 say "live: owl-gate:${sha:0:7} ($((SECONDS - start))s total)"
+say "https://github.com/$REPO/commit/$sha"
 

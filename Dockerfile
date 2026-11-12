@@ -38,6 +38,8 @@ USER 10001:10001
 WORKDIR /app
 ENV DATA_DIR=/app/data TZ=Asia/Shanghai RUST_LOG=info
 COPY --from=build /src/target/release/nai-gate /src/target/release/nai-bots /src/target/release/nai-ops /usr/local/bin/
+# 前端也放进镜像：cutover 抽到宿主机 STATIC_DIR，避免笔记本热更新盖掉 CI 产物。
+COPY --from=web /src/web/dist /opt/web-dist
 EXPOSE 8000
 HEALTHCHECK --interval=30s --timeout=5s --retries=3 CMD ["/usr/local/bin/nai-gate", "healthcheck"]
 ENTRYPOINT ["/usr/local/bin/nai-gate"]

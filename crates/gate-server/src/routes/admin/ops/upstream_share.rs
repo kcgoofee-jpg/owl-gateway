@@ -38,7 +38,7 @@ async fn list(State(state): State<AppState>, _s: AdminSession) -> ApiResult {
         let fields = token.fields();
         accounts.push(json!({
             "token_id": token.token_id,
-            "position": fields.position,
+            "position": fields.kind_index,
             "token": gate_core::policy::mask_token(&token.token, 6),
             "image_host": token.image_host,
             "usable": token.usable(now),

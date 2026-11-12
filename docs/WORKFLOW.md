@@ -50,15 +50,15 @@ Artifact builds run alongside checks. `tools/deploy.sh` accepts only a successfu
 ## 5. Deploy
 
 ```bash
-tools/deploy.sh --wait     # wait for CI on main HEAD, then deploy it
-tools/deploy.sh --wait --no-notify  # same deployment without a completion webhook
-tools/deploy.sh            # deploy the latest green run
-tools/deploy.sh <run-id>   # deploy a specific green run
+tools/deploy.sh            # wait for CI on origin/main HEAD, then deploy it
+tools/deploy.sh --latest   # latest green run on main (may not be HEAD)
+tools/deploy.sh <run-id>   # a specific green run
+gh workflow run Deploy --ref main   # same script, from GitHub (needs OWL_DEPLOY_HOST / OWL_DEPLOY_SSH_KEY)
 ```
 
-The script refuses runs that did not fully succeed and skips if that build is already live. It downloads and stages the candidate image without changing `current` or `previous`, then promotes the candidate and restarts immediately — no queue wait (owner 10-27); the 1-2 minute downtime window is covered by the Caddy maintenance page, and the old gateway finishes accepted work while shutting down. After restart it checks `healthcheck`, `nai-ops smoke` and the public `/healthz`.
+The script refuses runs that did not fully succeed and skips if that build is already live. It downloads and stages the candidate image without changing `current` or `previous`, then promotes the candidate and restarts immediately — no queue wait (owner 10-27); the 1-2 minute downtime window is covered by the Caddy maintenance page, and the old gateway finishes accepted work while shutting down. Frontend files come out of the image (`/opt/web-dist` → `/opt/owl/nai-mirror`); do not use `tools/hot-web.sh` on a normal release. After restart it checks `healthcheck`, `nai-ops smoke` and the public `/healthz`.
 
-`tools/deploy.sh --wait` reports CI state and its GitHub run URL every minute, and stops waiting after one hour by default (`OWL_CI_WAIT_TIMEOUT_SECONDS` changes that limit). The cutover stops the old gateway and waits for its accepted requests to finish before starting the new process.
+`tools/deploy.sh` reports CI state and its GitHub run URL every minute, and stops waiting after one hour by default (`OWL_CI_WAIT_TIMEOUT_SECONDS` changes that limit). The cutover stops the old gateway and waits for its accepted requests to finish before starting the new process.
 
 After cutover, check job timestamps and error logs for five minutes. Verify the scheduled jobs start advancing and investigate missing tables, missing columns or new 5xx responses.
 

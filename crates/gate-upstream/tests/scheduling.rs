@@ -613,11 +613,11 @@ async fn arrivals_start_in_the_order_they_queued() {
     assert!(at < bt, "先登记的应先发出：earlier={at:?} later={bt:?}");
 }
 
-/// V5 走短作业车道：账号先被一个普通请求占着，之后一张 V5 进来，账号空出来时 V5 先发。
+/// V5 不再插队：账号先被一个普通请求占着，之后一张更晚的 V5 进来，账号空出来时仍先发普通请求。
 /// （11-07 之前这里还比「今天出得少」，那个比较已经删掉，现在只比车道和到达顺序。）
 /// V5 后到也能先发（实测 V5 只占上游 4 秒，见 `docs/report-20261107-v5-queue.md`）。
 #[tokio::test]
-async fn a_v5_request_takes_the_fast_lane_over_an_earlier_plain_one() {
+async fn a_later_v5_request_does_not_cut_ahead_of_an_earlier_plain_one() {
     let up = MockUpstream::start().await;
     up.push(
         "/ai/generate-image",
@@ -654,9 +654,9 @@ async fn a_v5_request_takes_the_fast_lane_over_an_earlier_plain_one() {
     let plain = std::sync::Arc::new(Watch::default());
     let p = send(plain.clone(), 30.0, Lane::Normal);
     tokio::time::sleep(Duration::from_millis(100)).await;
-    // V5：来得更晚，但走快车道
+    // V5 来得更晚：11-12 起不再插队，按先来后到
     let v5 = std::sync::Arc::new(Watch::default());
-    let v = send(v5.clone(), 30.0, Lane::Fast);
+    let v = send(v5.clone(), 30.0, Lane::Normal);
     for r in [first, p, v] {
         r.await.unwrap().unwrap();
     }
@@ -664,7 +664,7 @@ async fn a_v5_request_takes_the_fast_lane_over_an_earlier_plain_one() {
         plain.sent_at.lock().unwrap().unwrap(),
         v5.sent_at.lock().unwrap().unwrap(),
     );
-    assert!(vt < pt, "V5 应先发出：v5={vt:?} plain={pt:?}");
+    assert!(pt < vt, "先到的普通请求应先发出：plain={pt:?} v5={vt:?}");
 }
 
 /// 插队排在所有等待中的生图前面：账号先被占着，之后一张 V5 和一张更晚的插队进来，账号空出来时插队先发。
@@ -703,7 +703,7 @@ async fn a_jump_request_starts_before_earlier_v5() {
     let first = send(std::sync::Arc::new(Watch::default()), 30.0, Lane::Normal);
     tokio::time::sleep(Duration::from_millis(100)).await;
     let v5 = std::sync::Arc::new(Watch::default());
-    let v = send(v5.clone(), 30.0, Lane::Fast);
+    let v = send(v5.clone(), 30.0, Lane::Normal);
     tokio::time::sleep(Duration::from_millis(100)).await;
     let jump = std::sync::Arc::new(Watch::default());
     let j = send(jump.clone(), 30.0, Lane::Jump);

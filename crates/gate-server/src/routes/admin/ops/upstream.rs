@@ -276,7 +276,7 @@ pub(super) async fn pool_status(state: &AppState) -> Result<Vec<Value>, ApiError
             .with(|g| g.at_daily_cap(&t.token_id, c.images, now));
         out.push(json!({
             "token_id": t.token_id,
-            "position": f.position,
+            "position": f.kind_index,
             "token": gate_core::policy::mask_token(&t.token, 6),
             "usable": t.usable(now),
             "full": full,

@@ -129,24 +129,13 @@ function What(props: { l: UsageLog; features: Feature[]; kinds: Record<string, s
   );
 }
 
-/** 展开后的详情：编号、上游账号、完整 UA、来源 IP、说明 */
+/** 展开后的详情：编号、完整 UA、来源 IP、说明 */
 function More(props: { l: UsageLog }) {
   const { l } = props;
   return (
     <dl class="lg-kv">
       <dt>编号</dt>
       <dd>{l.rid ? <CopyField value={l.rid} label="编号" /> : <span class="muted">—</span>}</dd>
-      {l.correlation_id && (
-        <>
-          <dt>上游关联号</dt>
-          <dd>
-            <CopyField value={l.correlation_id} label="上游关联号" />
-            <span class="small muted">本站生成并随请求发送给上游，不是上游返回的错误编号。</span>
-          </dd>
-        </>
-      )}
-      <dt>上游账号</dt>
-      <dd class="mono">{l.token_id || <span class="muted">—</span>}</dd>
       <dt>来源 IP</dt>
       <dd class="mono">{l.src || <span class="muted">—</span>}</dd>
       <dt>UA 原文</dt>

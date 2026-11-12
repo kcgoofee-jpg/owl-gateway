@@ -13,7 +13,7 @@
 
 ## Release
 
-See [WORKFLOW.md](WORKFLOW.md). In short: push to `main`, then `tools/deploy.sh --wait`.
+See [WORKFLOW.md](WORKFLOW.md). In short: push to `main`, then `tools/deploy.sh` (waits for this commit's CI). GitHub can run the same script via `gh workflow run Deploy`.
 The server never compiles (2 cores) and holds no GitHub credentials: the script downloads the CI artifacts
 locally, copies them over with `scp`, syncs `cutover.sh` / `compose.yml`, and runs `cutover.sh load`
 (new image becomes `owl-gate:staged`; `current` and rollback tag `previous` stay untouched), promotes the candidate while retaining the old `current` as `previous`, restarts, then runs
