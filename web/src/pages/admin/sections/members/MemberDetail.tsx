@@ -3,7 +3,7 @@ import { ExternalLink, Plus } from "lucide-preact";
 import { useEffect, useState } from "preact/hooks";
 import { dayOf, fullTime, rel, usedOf } from "../../../../lib/format";
 import { Badge, Button, copyText, Menu, toast } from "../../../../ui";
-import { useAdmin } from "../../Admin";
+import { useAdmin } from "../../data";
 import { exceptionCount, FEATURE_FIELDS, type PatronView, policyLabel } from "../member-policy";
 import type { UpstreamPage } from "../upstream/core";
 import { call } from "./actions";

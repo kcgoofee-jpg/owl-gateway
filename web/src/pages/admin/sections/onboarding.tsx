@@ -1,6 +1,6 @@
 import { useMemo, useState } from "preact/hooks";
 import { Button, Card } from "../../../ui";
-import { act, useAdmin } from "../Admin";
+import { act, useAdmin } from "../data";
 import { CardPending, SectionHead, useBusy } from "./_kit";
 import {
   type MemberPolicy,

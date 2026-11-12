@@ -1,7 +1,7 @@
 /** 全站维护模式：正常 / 全关 / 只有站长可用。 */
 import { useState } from "preact/hooks";
 import { Card } from "../../../../ui";
-import { act, useAdmin } from "../../Admin";
+import { act, useAdmin } from "../../data";
 import { SwitchRow } from "./forms";
 
 type MaintenanceMode = "off" | "all" | "owner";

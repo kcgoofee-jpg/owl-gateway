@@ -2,13 +2,13 @@
  * 首页的数据层：一个页面一份，模块级 signal。
  * - me：/public/me（首屏用网关注入的 owl-boot，没有就取一次；之后每分钟、切回标签页时刷新）
  * - live：/public/live（SSE 优先，旧网关没有 SSE 就轮询；登录成员的响应里带 me = 我的排队）
- * - status：/public/status（站点信息，30 秒一次）
+ * - status：/public/status（站点信息，每分钟及切回页面时）
  * 组件只读自己要的那一小块（读 .value 的组件才会重绘），所以每秒一次的 live 不会带着整页重绘。
  */
 import { computed, signal } from "@preact/signals";
 import { getJSON } from "../../lib/api";
 import { bootData } from "../../lib/boot";
-import { subscribe } from "../../lib/live";
+import { liveSubscription } from "../../lib/live";
 import { isMe } from "./helpers";
 import type { Live, Me, Meta } from "./types";
 
@@ -16,7 +16,7 @@ type Boot = { me?: unknown; live?: unknown; status?: unknown };
 
 const isObj = (v: unknown): v is Record<string, unknown> => typeof v === "object" && v !== null;
 
-/** live 里带的站点信息比 /public/status 更新（≤30 秒 vs 每 30 秒拉一次）；live 里没有的字段（旧/新网关差异）用 status 的。 */
+/** live 里带的站点信息比 /public/status 更新（≤30 秒 vs 每分钟刷新）；live 里没有的字段（旧/新网关差异）用 status 的。 */
 const META_KEYS = ["discord_invite", "registration", "limits"] as const satisfies ReadonlyArray<keyof Meta>;
 
 export function mergeMeta(status: Meta | null, live: Live | null): Meta {
@@ -47,7 +47,7 @@ export function createStore() {
   /** undefined = 还在读（显示骨架屏，不要先闪一下游客内容） */
   const me = signal<Me | undefined>(isMe(boot?.me) ? boot.me : undefined);
   const status = signal<Meta | null>(isObj(boot?.status) ? (boot.status as Meta) : null);
-  const liveSub = subscribe<Live>(
+  const liveSub = liveSubscription<Live>(
     "/public/live/stream",
     "/public/live",
     isObj(boot?.live) ? (boot.live as Live) : null,
@@ -55,12 +55,15 @@ export function createStore() {
   const live = liveSub.data;
   const meta = stable<Meta>(() => mergeMeta(status.value, live.value));
 
+  let meRequest = 0;
   const loadMe = async () => {
+    const id = ++meRequest;
     try {
-      me.value = await getJSON<Me>("/public/me", { cache: "no-store" });
+      const next = await getJSON<Me>("/public/me", { cache: "no-store" });
+      if (id === meRequest) me.value = next;
     } catch {
       // 偶发网络错误不把已登录的人踢成游客；首屏读不到才当游客处理
-      if (me.value === undefined) me.value = { logged_in: false };
+      if (id === meRequest && me.value === undefined) me.value = { logged_in: false };
     }
   };
   const loadStatus = async () => {
@@ -73,23 +76,21 @@ export function createStore() {
 
   /** 在页面挂载时调用，返回清理函数。 */
   const start = () => {
+    const stopLive = liveSub.start();
     if (me.value === undefined) void loadMe();
-    void loadStatus();
-    const timer = setInterval(() => {
+    if (!status.value) void loadStatus();
+    const refresh = () => {
       if (document.hidden) return;
       void loadMe();
       void loadStatus();
-    }, 60_000);
-    const onVisible = () => {
-      if (!document.hidden) {
-        void loadMe();
-        void loadStatus();
-      }
     };
-    document.addEventListener("visibilitychange", onVisible);
+    const timer = setInterval(refresh, 60_000);
+    document.addEventListener("visibilitychange", refresh);
     return () => {
+      meRequest++;
+      stopLive();
       clearInterval(timer);
-      document.removeEventListener("visibilitychange", onVisible);
+      document.removeEventListener("visibilitychange", refresh);
     };
   };
 

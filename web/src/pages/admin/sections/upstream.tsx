@@ -7,7 +7,7 @@ import { Plus } from "lucide-preact";
 import { useEffect, useState } from "preact/hooks";
 import { sendJSON } from "../../../lib/api";
 import { Button, Notice, toast } from "../../../ui";
-import { tick, useAdmin } from "../Admin";
+import { tick, useAdmin } from "../data";
 import { actOrError, ConfirmDialog, LoadError, Loading, SectionHead } from "./_kit";
 import { Sect } from "./system/forms";
 import { AccountCard } from "./upstream/accounts";

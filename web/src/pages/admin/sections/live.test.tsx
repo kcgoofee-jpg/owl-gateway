@@ -1,7 +1,8 @@
 import { render } from "preact";
 import { act } from "preact/test-utils";
 import { afterEach, describe, expect, it } from "vitest";
-import { edits, useFrozenList } from "./live";
+import { edits } from "../data";
+import { useFrozenList } from "./live";
 
 type Row = { id: number; v: string };
 type Out = ReturnType<typeof useFrozenList<Row>>;

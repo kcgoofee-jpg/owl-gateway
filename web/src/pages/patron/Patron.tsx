@@ -1,13 +1,14 @@
 /**
  * 赞助席 `/patron`：独立密码进独立页面。欢迎 + 自己的功能开关，没有后台侧栏。
  */
-import { useEffect, useId, useRef, useState } from "preact/hooks";
+import { useEffect, useRef, useState } from "preact/hooks";
 import { ApiError, getJSON, sendJSON } from "../../lib/api";
 import { FEATURE_COPY, FEATURE_FIELDS } from "../../lib/member-policy";
 import { reduceMotion } from "../../lib/motion";
 import { Badge, Button, Field, Notice, toast } from "../../ui";
 import "../../ui/chrome.css";
 import "../landing/landing.css";
+import { SwitchRow } from "../../ui/Switch";
 import "./patron.css";
 
 type Features = Record<(typeof FEATURE_FIELDS)[number], boolean>;
@@ -55,40 +56,6 @@ function Grain() {
   return (
     <div class="grain" aria-hidden="true">
       <canvas ref={ref} />
-    </div>
-  );
-}
-
-function SwitchRow(props: {
-  title: string;
-  desc: string;
-  checked: boolean;
-  disabled?: boolean;
-  onChange: (next: boolean) => void;
-}) {
-  const id = useId();
-  return (
-    <div class="switch-row">
-      <div class="switch-row__body">
-        <div class="switch-row__title" id={`${id}-t`}>
-          {props.title}
-        </div>
-        <div class="switch-row__desc" id={`${id}-d`}>
-          {props.desc}
-        </div>
-      </div>
-      <button
-        type="button"
-        role="switch"
-        class="switch"
-        aria-checked={props.checked}
-        aria-labelledby={`${id}-t`}
-        aria-describedby={`${id}-d`}
-        disabled={props.disabled}
-        onClick={() => props.onChange(!props.checked)}
-      >
-        <span class="switch__thumb" aria-hidden="true" />
-      </button>
     </div>
   );
 }
@@ -149,19 +116,20 @@ function Login(props: { onOk: () => void }) {
 
 function Seat(props: { me: Me; onLogout: () => void; onReload: (me: Me) => void }) {
   const { me } = props;
-  const [pending, setPending] = useState<string | null>(null);
+  const [pending, setPending] = useState(false);
   const [current, setCurrent] = useState("");
   const [nextPw, setNextPw] = useState("");
   const save = async (name: (typeof FEATURE_FIELDS)[number], value: boolean) => {
-    setPending(name);
+    setPending(true);
     try {
       const body = await sendJSON<Me>("PUT", "/patron/api/me/features", { [name]: value });
       props.onReload(body);
       toast("已保存");
     } catch (e) {
-      toast(e instanceof ApiError ? e.message : "保存失败", { error: true });
+      if (e instanceof ApiError && e.status === 401) props.onLogout();
+      else toast(e instanceof Error ? e.message : "保存失败", { error: true });
     } finally {
-      setPending(null);
+      setPending(false);
     }
   };
   return (
@@ -190,7 +158,7 @@ function Seat(props: { me: Me; onLogout: () => void; onReload: (me: Me) => void 
                 title={FEATURE_COPY[name].label}
                 desc={FEATURE_COPY[name].help}
                 checked={me.features[name]}
-                disabled={!me.self_service || pending === name}
+                disabled={!me.self_service || pending}
                 onChange={(next) => void save(name, next)}
               />
             ))}
@@ -200,7 +168,7 @@ function Seat(props: { me: Me; onLogout: () => void; onReload: (me: Me) => void 
             class="pt-pw"
             onSubmit={async (e) => {
               e.preventDefault();
-              setPending("password");
+              setPending(true);
               try {
                 await sendJSON("POST", "/patron/api/me/password", { current, new: nextPw });
                 toast("密码已改，请重新登录");
@@ -208,7 +176,7 @@ function Seat(props: { me: Me; onLogout: () => void; onReload: (me: Me) => void 
               } catch (err) {
                 toast(err instanceof ApiError ? err.message : "改密失败", { error: true });
               } finally {
-                setPending(null);
+                setPending(false);
               }
             }}
           >
@@ -231,18 +199,24 @@ function Seat(props: { me: Me; onLogout: () => void; onReload: (me: Me) => void 
               />
             </Field>
             <div class="pt-foot">
-              <Button
-                type="submit"
-                disabled={pending === "password" || current.length === 0 || nextPw.length < 12}
-              >
+              <Button type="submit" disabled={pending || current.length === 0 || nextPw.length < 12}>
                 修改门户密码
               </Button>
               <span class="spacer" />
               <Button
                 variant="ghost"
+                disabled={pending}
                 onClick={async () => {
-                  await sendJSON("POST", "/patron/api/logout").catch(() => null);
-                  props.onLogout();
+                  setPending(true);
+                  try {
+                    await sendJSON("POST", "/patron/api/logout");
+                    props.onLogout();
+                  } catch (e) {
+                    if (e instanceof ApiError && e.status === 401) props.onLogout();
+                    else toast(e instanceof Error ? e.message : "退出失败", { error: true });
+                  } finally {
+                    setPending(false);
+                  }
                 }}
               >
                 退出
@@ -257,6 +231,8 @@ function Seat(props: { me: Me; onLogout: () => void; onReload: (me: Me) => void 
 
 export function Patron() {
   const [me, setMe] = useState<Me | null | false>(null);
+  const [loadError, setLoadError] = useState("");
+  const [attempt, setAttempt] = useState(0);
   useEffect(() => {
     let alive = true;
     getJSON<Me>("/patron/api/me")
@@ -266,17 +242,30 @@ export function Patron() {
       .catch((e: unknown) => {
         if (!alive) return;
         if (e instanceof ApiError && e.status === 401) setMe(false);
-        else toast(e instanceof Error ? e.message : String(e), { error: true });
+        else setLoadError(e instanceof Error ? e.message : String(e));
       });
     return () => {
       alive = false;
     };
-  }, []);
+  }, [attempt]);
   if (me === false) return <Login onOk={() => location.reload()} />;
   if (!me) {
     return (
       <main class="pt-page">
         <Grain />
+        {loadError && (
+          <section class="card pt-card">
+            <Notice tone="danger">{loadError}</Notice>
+            <Button
+              onClick={() => {
+                setLoadError("");
+                setAttempt(attempt + 1);
+              }}
+            >
+              重试
+            </Button>
+          </section>
+        )}
       </main>
     );
   }

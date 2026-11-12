@@ -1,6 +1,6 @@
 import { useMemo, useState } from "preact/hooks";
 import { Card } from "../../../ui";
-import { act, useAdmin } from "../Admin";
+import { act, useAdmin } from "../data";
 import { CardPending, SectionHead } from "./_kit";
 import {
   type Guard,

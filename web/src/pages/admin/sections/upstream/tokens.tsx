@@ -2,7 +2,7 @@
 import { useId, useState } from "preact/hooks";
 import { ApiError, sendJSON } from "../../../../lib/api";
 import { Button, Dialog, toast } from "../../../../ui";
-import { tick } from "../../Admin";
+import { tick } from "../../data";
 import { useBusy } from "../_kit";
 import { tokenFormatProblem, type UpstreamAccount } from "./core";
 

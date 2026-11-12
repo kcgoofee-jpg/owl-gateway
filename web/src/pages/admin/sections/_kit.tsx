@@ -6,7 +6,7 @@
 import type { ComponentChildren } from "preact";
 import { useEffect, useState } from "preact/hooks";
 import { Badge, Button, Card, cx, Dialog, Field, Notice, Skeleton, toast } from "../../../ui";
-import { busy } from "../Admin";
+import { busy } from "../data";
 import { call } from "./members/actions";
 import "./members/shared.css";
 

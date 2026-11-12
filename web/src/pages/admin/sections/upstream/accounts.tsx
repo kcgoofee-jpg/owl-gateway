@@ -4,7 +4,7 @@ import type { ComponentChildren } from "preact";
 import { useState } from "preact/hooks";
 import { dayOf, fullTime, shortTime } from "../../../../lib/format";
 import { Badge, Button, Card, Menu, Meter, Notice } from "../../../../ui";
-import { act } from "../../Admin";
+import { act } from "../../data";
 import { NumField, SaveBar, useForm, withTone } from "../system/forms";
 import {
   ageText,

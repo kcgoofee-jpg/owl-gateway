@@ -4,7 +4,7 @@ import { ChevronDown } from "lucide-preact";
 import { useEffect, useMemo, useRef, useState } from "preact/hooks";
 import { fullTime, num, withUnit } from "../../../../lib/format";
 import { Badge, Button, CopyField, cx, SearchSelect, Skeleton } from "../../../../ui";
-import { useAdmin } from "../../Admin";
+import { useAdmin } from "../../data";
 import { LoadError, TableWrap } from "../_kit";
 import { asFeatures, type Feature, logFeatures } from "../features";
 import { FreshBar, useFrozenList, useScrolledPast } from "../live";

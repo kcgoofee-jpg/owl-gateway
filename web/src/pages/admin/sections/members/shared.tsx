@@ -7,7 +7,7 @@ import type { ComponentChildren } from "preact";
 import { useEffect, useId, useRef, useState } from "preact/hooks";
 import { num, usedOf } from "../../../../lib/format";
 import { Button, cx } from "../../../../ui";
-import { useAdmin } from "../../Admin";
+import { useAdmin } from "../../data";
 import { Avatar } from "../_kit";
 import "./shared.css";
 

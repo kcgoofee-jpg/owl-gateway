@@ -21,7 +21,7 @@ async function parse(res: Response): Promise<unknown> {
   try {
     body = text ? JSON.parse(text) : null;
   } catch {
-    body = text;
+    if (res.ok) throw new ApiError(res.status, "服务器返回了无效的 JSON 响应");
   }
   if (!res.ok) {
     const b = body as {
@@ -29,7 +29,9 @@ async function parse(res: Response): Promise<unknown> {
       detail?: string;
       error?: { message?: string; request_id?: string };
     } | null;
-    let msg = b?.error?.message ?? b?.message ?? b?.detail ?? `请求失败（HTTP ${res.status}）`;
+    let msg =
+      [b?.error?.message, b?.message, b?.detail].find((v) => typeof v === "string") ??
+      `请求失败（HTTP ${res.status}）`;
     if (msg.startsWith(NOTICE_PREFIX)) msg = msg.slice(NOTICE_PREFIX.length);
     const error = new ApiError(res.status, msg, b?.error?.request_id);
     const retry = Number(res.headers.get("Retry-After"));
@@ -47,6 +49,7 @@ export async function getJSON<T>(url: string, init?: RequestInit): Promise<T> {
     try {
       return await request<T>("GET", url, undefined, init);
     } catch (e) {
+      init?.signal?.throwIfAborted();
       lastError = e;
       // 4xx/5xx 是服务端明确回答，重试没有意义；只重试网络层失败（超时 / 断开）。
       if (e instanceof ApiError && e.status !== 0) throw e;
@@ -59,26 +62,27 @@ export async function getJSON<T>(url: string, init?: RequestInit): Promise<T> {
 const REQUEST_TIMEOUT_MS = 20_000;
 
 async function request<T>(method: string, url: string, body?: unknown, init?: RequestInit): Promise<T> {
+  init?.signal?.throwIfAborted();
   const ctrl = new AbortController();
+  const signal = init?.signal ? AbortSignal.any([init.signal, ctrl.signal]) : ctrl.signal;
+  const headers = new Headers(init?.headers);
+  if (!headers.has("Accept")) headers.set("Accept", "application/json");
+  if (body !== undefined && !headers.has("Content-Type")) headers.set("Content-Type", "application/json");
   const timer = setTimeout(() => ctrl.abort(), REQUEST_TIMEOUT_MS);
   try {
     const res = await fetch(url, {
       credentials: "same-origin",
       ...init,
       method,
-      headers: {
-        Accept: "application/json",
-        ...(body === undefined ? {} : { "Content-Type": "application/json" }),
-        ...((init?.headers as Record<string, string> | undefined) ?? {}),
-      },
+      headers,
       body: body === undefined ? null : JSON.stringify(body),
-      signal: ctrl.signal,
+      signal,
     });
     return (await parse(res)) as T;
   } catch (e) {
     if (e instanceof ApiError) throw e;
     // abort / 网络错误：给用户一句可读的，而不是裸的 "The operation was aborted"
-    throw new ApiError(0, `请求超时或网络中断（${REQUEST_TIMEOUT_MS / 1000} 秒），稍后会自动重试。`);
+    throw new ApiError(0, `请求超时或网络中断（${REQUEST_TIMEOUT_MS / 1000} 秒），请稍后再试。`);
   } finally {
     clearTimeout(timer);
   }

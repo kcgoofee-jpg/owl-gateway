@@ -36,8 +36,8 @@ const write = vi.hoisted(() =>
     return true;
   }),
 );
-vi.mock("../Admin", async (original) => ({
-  ...(await original<typeof import("../Admin")>()),
+vi.mock("../data", async (original) => ({
+  ...(await original<typeof import("../data")>()),
   useAdmin: (url: string) => ({
     data:
       url === "/admin/api/member-rules"

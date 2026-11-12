@@ -3,7 +3,7 @@
  * 原生 <dialog> 盖在 toast 上面，所以出错要把原因交给对话框自己显示，成功再由调用方 toast。
  * 成功后触发一次全局刷新（tick）。
  */
-import { adminWrite, type WriteResult } from "../../Admin";
+import { adminWrite, type WriteResult } from "../../data";
 import type { Coupon } from "./types";
 
 export type Res<T = unknown> = WriteResult<T>;

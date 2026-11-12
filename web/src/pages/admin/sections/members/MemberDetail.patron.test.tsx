@@ -5,7 +5,7 @@ import { call } from "./actions";
 import { PatronSeatButtons } from "./MemberDetail";
 
 vi.mock("./actions", () => ({ call: vi.fn() }));
-vi.mock("../../Admin", () => ({
+vi.mock("../../data", () => ({
   useAdmin: () => ({
     data: {
       accounts: [{ token_id: "token-donated", position: 1, token: "pst-te…0001", exclusive: false }],

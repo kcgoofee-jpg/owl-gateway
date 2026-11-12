@@ -6,8 +6,7 @@ vi.mock("../../lib/api", async (original) => ({
 }));
 
 import { getJSON } from "../../lib/api";
-import { busy, getShared, startTicker, tick } from "./Admin";
-import { edits } from "./sections/live";
+import { busy, edits, getShared, startTicker, tick } from "./data";
 
 class Events {
   static OPEN = 1;

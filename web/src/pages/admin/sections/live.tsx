@@ -6,13 +6,11 @@
  * - 自己在后台做了操作（act / call）：下一份数据直接放进来，不然刚删掉的行还挂着；
  * - 换筛选 / 换页（key 变了）：直接用新数据。
  */
-import { signal } from "@preact/signals";
+
 import type { RefObject } from "preact";
 import { useEffect, useRef, useState } from "preact/hooks";
 import { Button } from "../../../ui";
-
-/** 后台自己的写操作次数（act / call 成功后 +1）：冻结中的列表见到它变了就放行下一份数据。 */
-export const edits = signal(0);
+import { edits } from "../data";
 
 type Snap<T> = {
   key: string;

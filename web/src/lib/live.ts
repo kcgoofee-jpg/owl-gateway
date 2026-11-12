@@ -1,55 +1,74 @@
 import { signal } from "@preact/signals";
+import { getJSON } from "./api";
 
-/**
- * 实时数据订阅：优先 SSE（服务端有变化才推），连不上时退回轮询（可见 1 秒 / 失败 5 秒 / 后台 10 秒，与旧版节奏一致）。
- * 返回的 signal 在任意组件里读取都会自动刷新。
- */
-export function subscribe<T>(streamUrl: string, pollUrl: string, initial: T | null = null) {
+/** Use polling during startup and reconnects. Opening the stream stops the active fallback. */
+export function connectEvents(
+  url: string,
+  message: (event: MessageEvent) => void,
+  startPolling: () => () => void,
+) {
+  let source: EventSource;
+  let stopPolling: (() => void) | undefined;
+  const fallback = () => {
+    stopPolling ??= startPolling();
+  };
+  try {
+    source = new EventSource(url, { withCredentials: true });
+  } catch {
+    return startPolling();
+  }
+  const startup = setTimeout(fallback, 3000);
+  source.onmessage = message;
+  source.onerror = fallback;
+  source.onopen = () => {
+    clearTimeout(startup);
+    stopPolling?.();
+    stopPolling = undefined;
+  };
+  return () => {
+    clearTimeout(startup);
+    source.onmessage = source.onerror = source.onopen = null;
+    source.close();
+    stopPolling?.();
+  };
+}
+
+export function liveSubscription<T>(streamUrl: string, pollUrl: string, initial: T | null = null) {
   const data = signal<T | null>(initial);
   const connected = signal<"sse" | "poll" | "down">("down");
-  let es: EventSource | null = null;
-  let timer: ReturnType<typeof setTimeout> | undefined;
-  let failures = 0;
-
-  const poll = async () => {
-    clearTimeout(timer);
-    try {
-      const res = await fetch(pollUrl, {
-        credentials: "same-origin",
-        headers: { Accept: "application/json" },
-      });
-      if (!res.ok) throw new Error(String(res.status));
-      data.value = (await res.json()) as T;
-      connected.value = "poll";
-      failures = 0;
-    } catch {
-      failures++;
-      connected.value = "down";
-    }
-    const delay = document.hidden ? 10_000 : failures ? 5_000 : 1_000;
-    timer = setTimeout(poll, delay);
-  };
-
-  const startSse = () => {
-    if (typeof EventSource === "undefined") return poll();
-    es = new EventSource(streamUrl, { withCredentials: true });
-    es.onmessage = (e) => {
+  const startPolling = () => {
+    const controller = new AbortController();
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const poll = async () => {
       try {
-        data.value = JSON.parse(e.data) as T;
-        connected.value = "sse";
+        const next = await getJSON<T>(pollUrl, { signal: controller.signal });
+        if (controller.signal.aborted) return;
+        data.value = next;
+        connected.value = "poll";
       } catch {
-        /* 忽略坏帧 */
+        if (controller.signal.aborted) return;
+        connected.value = "down";
       }
+      timer = setTimeout(poll, document.hidden ? 10_000 : connected.value === "down" ? 5_000 : 1_000);
     };
-    es.onerror = () => {
-      // 浏览器会自动重连；连续失败（例如代理不支持 SSE）就退回轮询
-      if (es && es.readyState === EventSource.CLOSED) {
-        es = null;
-        void poll();
-      }
+    void poll();
+    return () => {
+      controller.abort();
+      clearTimeout(timer);
     };
   };
-
-  startSse();
-  return { data, connected };
+  const start = () =>
+    connectEvents(
+      streamUrl,
+      (event) => {
+        try {
+          data.value = JSON.parse(event.data) as T;
+          connected.value = "sse";
+        } catch {
+          /* Ignore malformed frames. */
+        }
+      },
+      startPolling,
+    );
+  return { data, connected, start };
 }

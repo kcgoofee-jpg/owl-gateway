@@ -7,7 +7,7 @@ import { useMemo, useRef, useState } from "preact/hooks";
 import { useLocation } from "preact-iso";
 import { usedOf, withUnit } from "../../../lib/format";
 import { Button, Menu, toast } from "../../../ui";
-import { useAdmin } from "../Admin";
+import { useAdmin } from "../data";
 import { ConfirmDialog, LoadError, Loading, SectionHead } from "./_kit";
 import { FreshBar, useFrozenList, useScrolledPast } from "./live";
 import {
