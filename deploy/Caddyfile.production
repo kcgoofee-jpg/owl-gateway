@@ -78,6 +78,16 @@ gate.davidzhao.top {
 		}
 	}
 
+	# Next 静态块是内容哈希：覆盖网关按 Vite 规则判出来的 max-age=0。
+	handle /_next/static/* {
+		reverse_proxy 172.30.0.10:8000 {
+			import gate_lb
+			header_down Cache-Control "public, max-age=31536000, immutable"
+			lb_try_duration 150s
+			lb_try_interval 500ms
+		}
+	}
+
 	# 直连容器固定 IP（不走 127.0.0.1:3003 的 docker-proxy）
 	reverse_proxy 172.30.0.10:8000 {
 		import gate_lb

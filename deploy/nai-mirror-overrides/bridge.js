@@ -1188,24 +1188,6 @@
     if (saved === "zh" || saved === "en") wbLang = saved;
   } catch (e) {}
 
-  function wbLog(message, data) {
-    // #region agent log
-    fetch("http://127.0.0.1:7919/ingest/c6bd5a92-1e26-4042-987b-ecfb5a55bff3", {
-      method: "POST",
-      headers: { "Content-Type": "application/json", "X-Debug-Session-Id": "fd2bf8" },
-      body: JSON.stringify({
-        sessionId: "fd2bf8",
-        location: "bridge.js:i18n",
-        message: message,
-        data: data || {},
-        timestamp: Date.now(),
-        hypothesisId: "chrome-translate",
-        runId: "wb-i18n",
-      }),
-    }).catch(function () {});
-    // #endregion
-  }
-
   function wbSkip(el) {
     if (!el || el.nodeType !== 1) return true;
     if (el.id === "owl-lang-toggle" || (el.closest && el.closest("#owl-lang-toggle"))) return true;
@@ -1282,7 +1264,6 @@
       btn.title = wbLang === "zh" ? "中文 · 点按切英文" : "English · click for 中文";
     }
     wbApply();
-    wbLog("lang-set", { lang: wbLang, translate: document.documentElement.getAttribute("translate") });
   }
 
   function wbHideMark() {
@@ -1339,13 +1320,6 @@
       if (wbLang === "zh") wbApply();
     });
     wbObs.observe(document.documentElement, { childList: true, subtree: true });
-    wbLog("i18n-ready", {
-      lang: wbLang,
-      keep: keep.length,
-      map: Object.keys(map).length,
-      htmlLang: document.documentElement.lang,
-      translate: document.documentElement.getAttribute("translate"),
-    });
   }
 
   function wbStartI18n() {
@@ -1359,25 +1333,6 @@
       .catch(function () { return load("/_next/workbench-i18n.json"); })
       .then(wbBootI18n)
       .catch(function () { wbBootI18n({ keep: [], map: {} }); });
-    setTimeout(function () {
-      var nav = performance.getEntriesByType("navigation")[0];
-      var res = performance.getEntriesByType("resource").slice().sort(function (a, b) {
-        return b.transferSize - a.transferSize;
-      }).slice(0, 8).map(function (e) {
-        return {
-          name: String(e.name).replace(/^https?:\/\/[^/]+/, "").slice(0, 80),
-          dur: Math.round(e.duration),
-          xfer: e.transferSize || 0,
-          enc: e.encodedBodySize || 0,
-          dec: e.decodedBodySize || 0,
-        };
-      });
-      wbLog("workbench-perf", {
-        ttfb: nav ? Math.round(nav.responseStart) : null,
-        load: nav ? Math.round(nav.loadEventEnd) : null,
-        top: res,
-      });
-    }, 5000);
   }
   if (document.readyState === "loading") {
     document.addEventListener("DOMContentLoaded", wbStartI18n);

@@ -128,30 +128,13 @@ async fn asset(State(st): State<AppState>, Path(path): Path<String>) -> Response
 /// 没有成员会话（或还没领到 Key）时回首页走登录/领 Key，别让游客落在半残的官网壳上。
 /// 只读会话和 Key，不跑首页那套 live/status/配额首屏（那些和生图页无关，会拖 TTFB）。
 async fn image(State(st): State<AppState>, headers: HeaderMap) -> Response {
-    let started = std::time::Instant::now();
     let session = crate::session::member_state(&st, &headers).await;
     let key = match session {
         Ok(Some((_, Some(key)))) if key.enabled() && !key.token().is_empty() => key,
         _ => {
-            // #region agent log
-            tracing::info!(
-                target: "web",
-                session_ms = started.elapsed().as_millis() as u64,
-                ready = false,
-                "workbench html gate"
-            );
-            // #endregion
             return axum::response::Redirect::temporary("/").into_response();
         }
     };
-    // #region agent log
-    tracing::info!(
-        target: "web",
-        session_ms = started.elapsed().as_millis() as u64,
-        ready = true,
-        "workbench html gate"
-    );
-    // #endregion
     st.assets.page(
         Page::Image,
         Some(&json!({"me": {"logged_in": true, "key": key.token()}})),
