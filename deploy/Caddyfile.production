@@ -34,9 +34,10 @@ gate.davidzhao.top {
 	request_header -X-Admin-Test
 	request_header -X-Test-Channel
 
-	# 只压缩网页、后台、前端资源和公开 JSON；出图接口与两条实时推送（SSE）不压缩，避免缓冲
+	# 只压缩网页、后台、前端资源和公开 JSON；出图接口与两条实时推送（SSE）不压缩，避免缓冲。
+	# 官网镜像页的 /_next 脚本按文件名往往对不上 Vite 的长缓存规则，体积也大，必须压缩。
 	@compress {
-		path / /admin /admin/* /patron /patron/* /public/* /_owl/*
+		path / /admin /admin/* /patron /patron/* /public/* /_owl/* /static/* /image /_next/* /icons/* /cf-fonts/* /js/* /tokenizer/* /bridge.js /workbench-i18n.json /manifest.json
 		not path /public/live/stream /admin/api/events
 	}
 	encode @compress zstd gzip

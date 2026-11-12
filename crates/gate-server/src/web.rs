@@ -109,9 +109,7 @@ impl Assets {
             return (StatusCode::NOT_FOUND, "not found").into_response();
         };
         let mime = mime_for(path);
-        let hashed = path
-            .rsplit_once('-')
-            .is_some_and(|(_, tail)| tail.len() >= 8 && tail.contains('.'));
+        let hashed = long_cache(path);
         let cache = if hashed {
             "public, max-age=31536000, immutable"
         } else {
@@ -240,6 +238,17 @@ fn json_for_html(v: &Value) -> String {
     out
 }
 
+/// Vite: `name-8charhash.ext`. Next/Turbopack chunks often end in `-ak.js`, so
+/// those would miss the Vite rule; `/_next/static/` is already content-addressed.
+fn long_cache(path: &str) -> bool {
+    let p = path.trim_start_matches('/');
+    if p.contains("_next/static/") {
+        return true;
+    }
+    path.rsplit_once('-')
+        .is_some_and(|(_, tail)| tail.len() >= 8 && tail.contains('.'))
+}
+
 fn mime_for(path: &str) -> &'static str {
     match path.rsplit('.').next().unwrap_or("") {
         "js" | "mjs" => "text/javascript; charset=utf-8",
@@ -268,6 +277,15 @@ mod tests {
         assert!(!s.contains('<') && !s.contains('>') && !s.contains('&'));
         let back: Value = serde_json::from_str(&s).unwrap();
         assert_eq!(back["x"], "</script><script>alert(1)</script>");
+    }
+
+    #[test]
+    fn next_static_chunks_are_immutable() {
+        assert!(long_cache("nai-app/_next/static/chunks/1tae-3ze2k-ak.js"));
+        assert!(long_cache("_next/static/chunks/35np5iwst-km7.js"));
+        assert!(long_cache("landing-Ch4zIOVd.js"));
+        assert!(!long_cache("bridge.js"));
+        assert!(!long_cache("theme-init.js"));
     }
 
     #[test]

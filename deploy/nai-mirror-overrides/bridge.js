@@ -1359,6 +1359,25 @@
       .catch(function () { return load("/_next/workbench-i18n.json"); })
       .then(wbBootI18n)
       .catch(function () { wbBootI18n({ keep: [], map: {} }); });
+    setTimeout(function () {
+      var nav = performance.getEntriesByType("navigation")[0];
+      var res = performance.getEntriesByType("resource").slice().sort(function (a, b) {
+        return b.transferSize - a.transferSize;
+      }).slice(0, 8).map(function (e) {
+        return {
+          name: String(e.name).replace(/^https?:\/\/[^/]+/, "").slice(0, 80),
+          dur: Math.round(e.duration),
+          xfer: e.transferSize || 0,
+          enc: e.encodedBodySize || 0,
+          dec: e.decodedBodySize || 0,
+        };
+      });
+      wbLog("workbench-perf", {
+        ttfb: nav ? Math.round(nav.responseStart) : null,
+        load: nav ? Math.round(nav.loadEventEnd) : null,
+        top: res,
+      });
+    }, 5000);
   }
   if (document.readyState === "loading") {
     document.addEventListener("DOMContentLoaded", wbStartI18n);
