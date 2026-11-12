@@ -58,17 +58,69 @@
 .lg-ridin {
   width: 8rem;
 }
-.lg-sum {
+.lg-chips {
   display: flex;
   flex-wrap: wrap;
-  gap: 0 var(--sp-2);
-  margin: 0;
+  align-items: center;
+  gap: var(--sp-2);
 }
-.lg-sum > span {
+.lg-chip {
+  all: unset;
+  box-sizing: border-box;
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-height: var(--control-h);
+  padding: 0 10px;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  background: var(--surface-2);
+  color: var(--text-2);
+  font: 600 var(--fs-sm) / 1.2 var(--font);
   white-space: nowrap;
+  cursor: pointer;
 }
-.lg-sum > span + span::before {
-  content: "· ";
+.lg-chip:hover {
+  color: var(--text);
+}
+.lg-chip[aria-pressed="true"] {
+  background: var(--accent-soft);
+  border-color: var(--accent);
+  color: var(--accent-text);
+}
+.lg-chip:focus-visible {
+  outline: 2px solid var(--focus);
+  outline-offset: 2px;
+}
+.lg-n {
+  display: inline-block;
+  min-width: 18px;
+  padding: 0 5px;
+  border-radius: 999px;
+  background: var(--surface-3);
+  color: var(--text-2);
+  font-size: var(--fs-xs);
+  line-height: 18px;
+  text-align: center;
+  font-variant-numeric: tabular-nums;
+}
+.lg-chip[aria-pressed="true"] .lg-n {
+  background: var(--accent-soft);
+  color: var(--accent-text);
+}
+.lg-chip.is-danger .lg-n {
+  background: var(--danger-soft);
+  color: var(--danger);
+}
+.lg-chip.is-warn .lg-n {
+  background: var(--warn-soft);
+  color: var(--warn);
+}
+.lg-chip[aria-pressed="true"].is-danger .lg-n,
+.lg-chip[aria-pressed="true"].is-warn .lg-n {
+  background: var(--accent-soft);
+  color: var(--accent-text);
 }
 .lg-link {
   all: unset;
@@ -83,12 +135,49 @@
   outline: 2px solid var(--focus);
   outline-offset: 2px;
 }
+.lg-explain {
+  display: grid;
+  gap: var(--sp-1);
+  margin: 0 0 var(--sp-3);
+}
+.lg-explain__t {
+  margin: 0;
+  font-size: var(--fs-md);
+  font-weight: 650;
+}
+.lg-explain p {
+  margin: 0;
+}
+.lg-more-nav {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--sp-3);
+  margin-top: var(--sp-3);
+}
+.lg-issue-hint {
+  max-width: 28em;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
 .lg-ua {
   white-space: nowrap;
 }
 /* 成员格子是两行身份（头像 + 名字 / @handle），不能 nowrap；纯文字兜底才收着 */
-.lg-who {
+a.lg-who {
+  display: inline-flex;
+  align-items: center;
   text-align: left;
+  color: inherit;
+  text-decoration: none;
+}
+a.lg-who:hover {
+  color: inherit;
+  text-decoration: none;
+}
+a.lg-who:hover .mb-name__t {
+  text-decoration: underline;
+  text-underline-offset: 2px;
 }
 .lg-who-plain {
   white-space: nowrap;
@@ -170,6 +259,10 @@
   flex-direction: column;
   align-items: flex-start;
   gap: 2px;
+}
+.lg-status .lg-chip {
+  min-height: var(--control-h-sm);
+  padding: 0 8px;
 }
 .lg-timing,
 .lg-cost {

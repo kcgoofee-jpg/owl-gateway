@@ -513,6 +513,7 @@ async fn call(db: &Db, c: &Case) -> Out {
                     .unwrap_or_default(),
                 status: s(a(7, "status"), ""),
                 reason: s(a(9, "reason"), ""),
+                error: s(c.kwarg("error"), ""),
             };
             json!(
                 db.list_logs(int(a(0, "limit"), 20), int(a(1, "offset"), 0), &fl)
@@ -537,6 +538,7 @@ async fn call(db: &Db, c: &Case) -> Out {
                     .unwrap_or_default(),
                 status: s(a(5, "status"), ""),
                 reason: s(a(7, "reason"), ""),
+                error: s(c.kwarg("error"), ""),
             };
             json!(db.log_summary(&fl).await?)
         }

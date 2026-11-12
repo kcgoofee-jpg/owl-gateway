@@ -7,7 +7,15 @@ import { useAdmin } from "../../data";
 import { exceptionCount, FEATURE_FIELDS, type PatronView, policyLabel } from "../member-policy";
 import type { UpstreamPage } from "../upstream/core";
 import { call } from "./actions";
-import { type Issue, type IssueAction, memberIssues, memberLabel, memberVerdict, userTags } from "./logic";
+import {
+  type Issue,
+  type IssueAction,
+  memberIssues,
+  memberLabel,
+  memberLogsHref,
+  memberVerdict,
+  userTags,
+} from "./logic";
 import type { KeyRow, MemberRow } from "./types";
 
 export type DetailActions = {
@@ -248,8 +256,12 @@ export function MemberDetail(props: { m: MemberRow; now: number; act: DetailActi
         <Button size="sm" onClick={() => act.resetQuota(m)}>
           重置今日额度{m.reset_today?.count ? `（${m.reset_today.count}）` : ""}
         </Button>
-        {/* 生成记录 / 请求只是跳转，降成文字链接（站内链接样式），按钮留给要点的操作 */}
-        <a href={`/admin/logs/usage?key=${m.all_key_ids.join(",")}`}>请求</a>
+        <a class="btn btn--sm" href={memberLogsHref(m)}>
+          请求记录
+        </a>
+        <a class="btn btn--sm btn--ghost" href={memberLogsHref(m, { status: "error" })}>
+          出错
+        </a>
         <Button size="sm" onClick={() => act.coupon(m)}>
           发重置券
         </Button>

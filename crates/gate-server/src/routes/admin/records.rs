@@ -62,8 +62,8 @@ fn key_id_list(raw: &str) -> Result<Vec<i64>, ApiError> {
     Ok(parts.iter().filter_map(|x| x.parse().ok()).collect())
 }
 
-/// 请求日志（每次请求一行）：按成员 / 功能 / 文生图版本 / 状态 / 原因码 / 错误编号筛选，服务端分页。
-/// `summary` 是同一组筛选条件下各状态的条数（不受 `status` 自己影响，这样筛了状态也看得到其他状态有多少）。
+/// 请求日志（每次请求一行）：按成员 / 功能 / 文生图版本 / 状态 / 原因码 / 上游错误分类 / 错误编号筛选，服务端分页。
+/// `summary` / `reason_counts` / `error_counts` 不受当前点的状态、原因、错误分类影响，芯片才能一直显示各档有多少。
 async fn logs(State(state): State<AppState>, _s: AdminSession, q: AdminQuery) -> R {
     let key_raw = q.text("key_id").to_string();
     let key_id = if key_raw.contains(',') {
@@ -77,6 +77,7 @@ async fn logs(State(state): State<AppState>, _s: AdminSession, q: AdminQuery) ->
     let rid = q.text("rid").to_string();
     let status = primitives::strip(q.text("status")).to_string();
     let reason = primitives::strip(q.text("reason")).to_string();
+    let error = primitives::strip(q.text("error")).to_string();
     let per_page = q.int("per_page", 20)?;
     let per_page: i64 = if matches!(per_page, 20 | 50 | 100) {
         per_page
@@ -115,6 +116,9 @@ async fn logs(State(state): State<AppState>, _s: AdminSession, q: AdminQuery) ->
     {
         return Err(http(422, "未知原因码"));
     }
+    if !error.is_empty() && !gate_core::upstream_errors::is_issue_code(&error) {
+        return Err(http(422, "未知错误分类"));
+    }
     let kinds = feature.as_deref().map(|f| {
         features::kinds_for(f)
             .into_iter()
@@ -134,34 +138,82 @@ async fn logs(State(state): State<AppState>, _s: AdminSession, q: AdminQuery) ->
         model_version,
         key_ids,
         status: String::new(),
-        reason,
+        reason: String::new(),
+        error: String::new(),
     };
+    // 状态芯片要一直能看到各状态有多少，不受当前点的状态 / 原因 / 错误分类影响。
     let summary = st.db.log_summary(&filter).await?;
-    let total = match status.as_str() {
-        "ok" => summary.ok,
-        "rejected" => summary.rejected,
-        "error" => summary.error,
-        "cancelled" => summary.cancelled,
-        _ => summary.total,
-    };
+    let reason_rows = st.db.log_reason_counts(&filter).await?;
+    let error_rows = st.db.log_error_counts(&filter).await?;
+    filter.reason = reason;
+    filter.error = error;
     filter.status = status;
+    let counted = st.db.log_summary(&filter).await?;
+    let total = counted.total;
     let pages = page_count(total, per_page);
     let page = page.min(pages);
     let mut rows = st
         .db
         .list_logs(per_page, (page - 1) * per_page, &filter)
         .await?;
-    // 原因短说明由服务端算（前端不再留一份副本）
+    // 原因短说明、上游错误分类由服务端算（前端不再留一份副本）
     for r in &mut rows {
         if let Value::Object(m) = r {
             let text = |k: &str| m.get(k).and_then(Value::as_str).unwrap_or("").to_string();
-            let label = gate_core::reasons::reason_label(&text("reason"), &text("detail"));
+            let reason = text("reason");
+            let detail = text("detail");
+            let status = text("status");
+            let label = gate_core::reasons::reason_label(&reason, &detail);
             m.insert("reason_label".into(), json!(label));
+            if status == "error" {
+                let up = m.get("up_status").and_then(Value::as_i64).unwrap_or(0);
+                let issue = gate_core::upstream_errors::issue_code(up, &detail);
+                m.insert("issue".into(), json!(issue));
+                m.insert(
+                    "issue_label".into(),
+                    json!(gate_core::upstream_errors::issue_label(issue)),
+                );
+                m.insert(
+                    "issue_hint".into(),
+                    json!(gate_core::upstream_errors::issue_hint(up, &detail)),
+                );
+            }
         }
     }
     let reasons: Vec<Value> = gate_core::reasons::LABELS
         .iter()
         .map(|(code, label)| json!({"code": code, "label": label}))
+        .collect();
+    let reason_counts: Vec<Value> = reason_rows
+        .into_iter()
+        .filter(|(code, n)| !code.is_empty() && *n > 0)
+        .map(|(code, n)| {
+            json!({
+                "code": code,
+                "label": gate_core::reasons::reason_label(&code, ""),
+                "count": n,
+            })
+        })
+        .collect();
+    let mut merged: Vec<(&str, i64)> = Vec::new();
+    for (up, n) in error_rows {
+        let code = gate_core::upstream_errors::issue_code(up, "");
+        if let Some(slot) = merged.iter_mut().find(|(c, _)| *c == code) {
+            slot.1 += n;
+        } else {
+            merged.push((code, n));
+        }
+    }
+    merged.sort_by(|a, b| b.1.cmp(&a.1).then(a.0.cmp(b.0)));
+    let error_counts: Vec<Value> = merged
+        .into_iter()
+        .map(|(code, n)| {
+            json!({
+                "code": code,
+                "label": gate_core::upstream_errors::issue_label(code),
+                "count": n,
+            })
+        })
         .collect();
     Ok(ok_json(&json!({
         "logs": json!(rows),
@@ -171,6 +223,8 @@ async fn logs(State(state): State<AppState>, _s: AdminSession, q: AdminQuery) ->
         "pages": pages,
         "summary": summary,
         "reasons": reasons,
+        "reason_counts": reason_counts,
+        "error_counts": error_counts,
     })))
 }
 

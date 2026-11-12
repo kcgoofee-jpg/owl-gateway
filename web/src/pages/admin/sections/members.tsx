@@ -3,7 +3,7 @@
  * 支持 ?filter=<筛选 id>（总览的「成员要处理」）。
  */
 import { ChevronDown, Search } from "lucide-preact";
-import { useMemo, useRef, useState } from "preact/hooks";
+import { useEffect, useMemo, useRef, useState } from "preact/hooks";
 import { useLocation } from "preact-iso";
 import { usedOf, withUnit } from "../../../lib/format";
 import { Button, Menu, toast } from "../../../ui";
@@ -37,6 +37,7 @@ import {
   buildFilters,
   countFilter,
   matchesQuery,
+  memberFromOpen,
   memberIssues,
   memberLabel,
   normalizeFilter,
@@ -72,7 +73,7 @@ export default function Members() {
   // 默认「全部成员」：不再默认落到「需要处理」把 368 人藏起来；要处理的人数在 chip 上提示。
   // 老链接的 ?filter= 照旧生效（normalizeFilter 只做旧 id 的改名）。
   const [filter, setFilter] = useState<string | null>(normalizeFilter(query.filter) ?? ALL_FILTER);
-  const [search, setSearch] = useState("");
+  const [search, setSearch] = useState(query.search ?? "");
   const [sort, setSort] = useState<SortKey>("today");
   const [dir, setDir] = useState<"asc" | "desc">("desc");
   const [open, setOpen] = useState<Set<number>>(new Set());
@@ -96,23 +97,45 @@ export default function Members() {
     ...(f.id === "attention" ? { hot: true } : {}),
   }));
 
+  const opened = useMemo(() => memberFromOpen(rows, query.open), [rows, query.open]);
   const list = useMemo(() => {
     if (!active) return [];
-    return sortMembers(
+    const matched = sortMembers(
       rows.filter(active.test).filter((m) => matchesQuery(m, search)),
       sort,
       dir,
     );
-  }, [rows, active, search, sort, dir]);
+    if (opened && !matched.some((m) => m.id === opened.id)) return [opened, ...matched];
+    return matched;
+  }, [rows, active, search, sort, dir, opened]);
+  useEffect(() => {
+    if (!opened) return;
+    setOpen((s) => {
+      if (s.has(opened.id)) return s;
+      const n = new Set(s);
+      n.add(opened.id);
+      return n;
+    });
+  }, [opened?.id]);
+  useEffect(() => {
+    if (!opened) return;
+    document.getElementById(`mb-m-${opened.id}`)?.scrollIntoView({ block: "nearest" });
+  }, [opened?.id]);
   // 展开了某位、开着对话框、或往下看了：顺序和名单冻住（默认按今日用量排，会在眼前跳位置），数值照常更新
   const top = useRef<HTMLDivElement>(null);
   const scrolled = useScrolledPast(top);
   const live = useFrozenList(list, (m) => m.id, {
     frozen: scrolled || open.size > 0 || dlg !== null,
-    key: `${activeId}|${search}|${sort}|${dir}`,
+    key: `${activeId}|${search}|${sort}|${dir}|${opened?.id ?? ""}`,
   });
   const frozenList = live.rows ?? list;
-  const shown = frozenList.slice(0, limit);
+  const shown = (() => {
+    const slice = frozenList.slice(0, limit);
+    if (opened && !slice.some((m) => m.id === opened.id) && frozenList.some((m) => m.id === opened.id)) {
+      return [opened, ...slice];
+    }
+    return slice;
+  })();
 
   const toggleOpen = (id: number) =>
     setOpen((s) => {

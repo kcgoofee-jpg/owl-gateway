@@ -341,6 +341,7 @@
 .mb-sub {
   display: flex;
   align-items: center;
+  flex-wrap: wrap;
   gap: var(--sp-2);
   min-height: 20px;
 }

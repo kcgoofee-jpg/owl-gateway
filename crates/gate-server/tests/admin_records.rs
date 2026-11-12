@@ -189,6 +189,8 @@ async fn usage_logs_filter_and_paginate() {
         ("model_version=v3", "未知文生图版本"),
         ("feature=upscale&model_version=v5", "未知文生图版本"),
         ("reason=Queue-Full", "未知原因码"),
+        ("error=nope", "未知错误分类"),
+        ("error=Queue", "未知错误分类"),
         ("key_id=1,x", "Key 编号无效"),
         ("key_id=1,", "Key 编号无效"),
     ] {
@@ -208,6 +210,69 @@ async fn usage_logs_filter_and_paginate() {
         assert_eq!(a.get(&format!("{A}/logs?{q}")).await.status, 422, "{q}");
     }
     drop(e);
+}
+
+#[tokio::test]
+async fn usage_logs_aggregate_reasons_and_errors() {
+    let (_e, a) = ready().await;
+    a.sql(
+        "INSERT INTO usage_log(ts, key_id, key_name, kind, model, status, reason, up_status, detail) VALUES \
+         (1.0, 1, 'k1', 'image', 'm', 'rejected', 'queue_full', 0, ''), \
+         (2.0, 1, 'k1', 'image', 'm', 'rejected', 'queue_full', 0, ''), \
+         (3.0, 1, 'k1', 'image', 'm', 'rejected', 'key_rate', 0, ''), \
+         (4.0, 1, 'k1', 'image', 'm', 'error', '', 503, 'upstream 503（nai-diffusion-4-5-curated · 1024x1024）'), \
+         (5.0, 1, 'k1', 'image', 'm', 'error', '', 503, 'upstream 503'), \
+         (6.0, 1, 'k1', 'image', 'm', 'error', '', 422, 'upstream 422：未知字段：foo。'), \
+         (7.0, 1, 'k1', 'image', 'm', 'ok', '', 200, '');",
+    )
+    .await;
+    let v = a.get(&format!("{A}/logs")).await.json();
+    assert_eq!(
+        v["summary"],
+        json!({"total": 7, "ok": 1, "rejected": 3, "error": 3, "cancelled": 0})
+    );
+    assert_eq!(
+        v["reason_counts"],
+        json!([
+            {"code": "queue_full", "label": "排队满", "count": 2},
+            {"code": "key_rate", "label": "Key 请求过快", "count": 1}
+        ])
+    );
+    assert_eq!(
+        v["error_counts"],
+        json!([
+            {"code": "up_503", "label": "出图通道接不了", "count": 2},
+            {"code": "up_422", "label": "参数不被接受", "count": 1}
+        ])
+    );
+    let filtered = a
+        .get(&format!("{A}/logs?status=error&error=up_503"))
+        .await
+        .json();
+    assert_eq!(filtered["total"], 2);
+    assert_eq!(
+        filtered["summary"]["error"], 3,
+        "芯片计数不受当前错误分类影响"
+    );
+    assert_eq!(filtered["logs"][0]["issue"], "up_503");
+    assert_eq!(filtered["logs"][0]["issue_label"], "出图通道接不了");
+    assert_eq!(filtered["logs"][0]["issue_hint"], "上游 503");
+    let hint = a
+        .get(&format!("{A}/logs?status=error&error=up_422"))
+        .await
+        .json();
+    assert_eq!(hint["total"], 1);
+    assert_eq!(hint["logs"][0]["issue_hint"], "未知字段：foo。");
+    assert_eq!(
+        a.get(&format!("{A}/logs?reason=queue_full")).await.json()["summary"]["rejected"],
+        3,
+        "原因筛选也不改 summary"
+    );
+    assert_eq!(
+        a.get(&format!("{A}/logs?error=up_other")).await.json()["total"],
+        0,
+        "成功行的 200 不算进未归类错误"
+    );
 }
 
 #[tokio::test]

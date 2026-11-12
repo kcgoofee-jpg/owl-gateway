@@ -30,6 +30,11 @@ export type UsageLog = {
   client: string;
   /** 处理这条请求的上游账号；没选号就被拒为 null */
   token_id: string | null;
+  /** 上游失败分类（只在 status=error 时有） */
+  issue?: string;
+  issue_label?: string;
+  /** 上游点名的字段，或「上游 503」 */
+  issue_hint?: string;
 };
 /** 同一组筛选条件下各状态的条数（不受 status 筛选影响） */
 export type LogSummary = {
@@ -39,11 +44,16 @@ export type LogSummary = {
   error: number;
   cancelled: number;
 };
+export type CountChip = { code: string; label: string; count: number };
 export type LogsResp = Paged & {
   logs: UsageLog[];
   summary: LogSummary;
   /** 筛选下拉框的原因码和短说明（服务端给） */
   reasons?: Array<{ code: string; label: string }>;
+  /** 当前筛选下实际出现过的拒绝原因（带条数） */
+  reason_counts?: CountChip[];
+  /** 当前筛选下实际出现过的上游错误分类（带条数） */
+  error_counts?: CountChip[];
 };
 
 export type ActionRow = {

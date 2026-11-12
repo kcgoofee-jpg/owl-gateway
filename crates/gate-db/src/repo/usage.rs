@@ -97,6 +97,8 @@ pub struct LogFilter {
     pub status: String,
     /// 拒绝原因码（精确匹配）；空串 = 不筛。
     pub reason: String,
+    /// 上游错误分类（`up_503` 等，见 `gate_core::upstream_errors`）；空串 = 不筛。
+    pub error: String,
 }
 
 /// 按状态分的条数（`log_summary`）：`total` 含状态不是这四种的行。
@@ -196,6 +198,25 @@ pub(super) fn insert_usage_log(
     Ok(())
 }
 
+/// 上游错误分类对应的 SQL 片段（不含 `status='error'`，由调用方自己加）。
+fn error_sql(code: &str) -> Option<&'static str> {
+    Some(match code {
+        "up_503" => "up_status=503",
+        "up_5xx" => "(up_status BETWEEN 500 AND 599 AND up_status!=503)",
+        "up_422" => "up_status IN (400,422)",
+        "up_429" => "up_status=429",
+        "up_401" => "up_status=401",
+        "up_402" => "up_status=402",
+        "up_403" => "up_status=403",
+        "up_404" => "up_status=404",
+        "up_413" => "up_status=413",
+        "up_other" => {
+            "(up_status NOT IN (400,401,402,403,404,413,422,429) AND (up_status < 500 OR up_status > 599))"
+        }
+        _ => return None,
+    })
+}
+
 /// 组装日志筛选的 WHERE 子句：返回 (` WHERE ...` 或空串, 绑定参数)。
 fn log_filter(f: &LogFilter) -> (String, Vec<SqlValue>) {
     let mut clauses: Vec<String> = Vec::new();
@@ -224,6 +245,11 @@ fn log_filter(f: &LogFilter) -> (String, Vec<SqlValue>) {
     if !f.reason.is_empty() {
         clauses.push("reason=?".into());
         args.push(SqlValue::Text(f.reason.clone()));
+    }
+    if !f.error.is_empty() {
+        // 分类只对失败行有意义；成功行的 up_status=200 会误入 up_other。
+        clauses.push("status='error'".into());
+        clauses.push(error_sql(&f.error).unwrap_or("0").into());
     }
     if let Some(kinds) = &f.kinds {
         if kinds.is_empty() {
@@ -326,6 +352,44 @@ impl Db {
                 out.add(&status, n);
             }
             Ok(out)
+        })
+        .await
+    }
+
+    /// 当前筛选下各拒绝原因的条数（忽略 status / reason / error，只按被拒行分组）。
+    pub async fn log_reason_counts(&self, filter: &LogFilter) -> Result<Vec<(String, i64)>> {
+        let mut f = filter.clone();
+        f.status = "rejected".into();
+        f.reason.clear();
+        f.error.clear();
+        let (where_, args) = log_filter(&f);
+        self.read(move |c| {
+            let mut stmt = c.prepare(&format!(
+                "SELECT reason, COUNT(*) FROM usage_log{where_} GROUP BY reason ORDER BY COUNT(*) DESC, reason"
+            ))?;
+            stmt.query_map(rusqlite::params_from_iter(args.iter()), |r| {
+                Ok((value::text_or(r, 0, "")?, value::i64_or(r, 1, 0)?))
+            })?
+            .collect()
+        })
+        .await
+    }
+
+    /// 当前筛选下各上游状态码的失败条数（忽略 status / reason / error）。
+    pub async fn log_error_counts(&self, filter: &LogFilter) -> Result<Vec<(i64, i64)>> {
+        let mut f = filter.clone();
+        f.status = "error".into();
+        f.reason.clear();
+        f.error.clear();
+        let (where_, args) = log_filter(&f);
+        self.read(move |c| {
+            let mut stmt = c.prepare(&format!(
+                "SELECT up_status, COUNT(*) FROM usage_log{where_} GROUP BY up_status ORDER BY COUNT(*) DESC, up_status"
+            ))?;
+            stmt.query_map(rusqlite::params_from_iter(args.iter()), |r| {
+                Ok((value::i64_or(r, 0, 0)?, value::i64_or(r, 1, 0)?))
+            })?
+            .collect()
         })
         .await
     }

@@ -21,6 +21,27 @@ export const memberLabel = (m: Pick<Member, "discord" | "name">): string =>
 export const memberKeyValue = (m: Pick<Member, "id" | "all_key_ids">): string =>
   (m.all_key_ids ?? [m.id]).join(",");
 
+/** 从请求日志跳到这位成员（`open` 可以是成员 id 或名下任一 Key id）。 */
+export const memberHref = (id: number): string => `/admin/members?open=${id}`;
+
+/** 从成员跳到他的请求日志。 */
+export function memberLogsHref(
+  m: Pick<Member, "id" | "all_key_ids">,
+  extra: Record<string, string> = {},
+): string {
+  const qs = new URLSearchParams();
+  qs.set("key", (m.all_key_ids ?? [m.id]).join(","));
+  for (const [k, v] of Object.entries(extra)) if (v) qs.set(k, v);
+  return `/admin/logs/usage?${qs}`;
+}
+
+export function memberFromOpen(rows: Member[], open: string | null | undefined): Member | undefined {
+  if (!open) return undefined;
+  const n = Number(open);
+  if (!Number.isInteger(n) || n <= 0) return undefined;
+  return rows.find((m) => m.id === n || (m.all_key_ids ?? []).includes(n));
+}
+
 /** 「成员」下拉的选项：多把 Key 时名字后面带「（N 把 Key）」，提示是账号名。 */
 export const memberKeyOptions = (
   members: Pick<Member, "id" | "all_key_ids" | "discord" | "name" | "key_count">[],

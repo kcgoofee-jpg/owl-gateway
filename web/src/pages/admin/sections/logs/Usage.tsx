@@ -1,4 +1,4 @@
-/** 请求日志：每次请求一行；按成员 / 功能 / 文生图版本 / 状态 / 编号筛选，服务端分页。完整 IP 放在展开详情中。 */
+/** 请求日志：每次请求一行；按成员 / 功能 / 状态 / 原因 / 上游错误分类 / 编号筛选，服务端分页。 */
 import { ChevronDown } from "lucide-preact";
 
 import { useEffect, useMemo, useRef, useState } from "preact/hooks";
@@ -8,40 +8,86 @@ import { useAdmin } from "../../data";
 import { LoadError, TableWrap } from "../_kit";
 import { asFeatures, type Feature, logFeatures } from "../features";
 import { FreshBar, useFrozenList, useScrolledPast } from "../live";
-import { memberKeyOptions, memberLabel } from "../members/logic";
+import { memberHref, memberKeyOptions, memberLabel } from "../members/logic";
 import { Empty, MemberIdent, NARROW, Pager, useDebounced, useMedia, usePageData } from "../members/shared";
 import type { Member } from "../members/types";
-import { deliveryLabel, kindLabel, STATUS_TEXT, shortModel, statusText, statusTone, timing } from "./format";
+import {
+  deliveryLabel,
+  issueExplain,
+  kindLabel,
+  STATUS_TEXT,
+  shortModel,
+  statusHeadline,
+  statusTone,
+  timing,
+} from "./format";
 import { intParam, useQueryState } from "./query";
-import type { LogSummary, LogsResp, UsageLog } from "./types";
+import type { CountChip, LogSummary, LogsResp, UsageLog } from "./types";
 import { uaLabel } from "./ua";
 
 const SIZES = [20, 50, 100];
-const STATUSES = Object.entries(STATUS_TEXT).map(([id, label]) => ({ id, label }));
 const COLS = 8;
 type Filter = (patch: Record<string, string | null>) => void;
 
-function Status(props: { l: UsageLog; onFilter: (patch: Record<string, string | null>) => void }) {
+function ChipBar(props: {
+  label: string;
+  items: Array<{ id: string; label: string; count: number; tone?: "warn" | "danger" }>;
+  active: string;
+  onToggle: (id: string) => void;
+}) {
+  if (!props.items.length) return null;
+  return (
+    // biome-ignore lint/a11y/useSemanticElements: 一排并列的切换按钮，role=group + aria-label 即标准写法
+    <div class="lg-chips" role="group" aria-label={props.label}>
+      {props.items.map((c) => (
+        <button
+          key={c.id}
+          type="button"
+          class={cx("lg-chip", c.tone && `is-${c.tone}`)}
+          aria-pressed={c.id === props.active}
+          onClick={() => props.onToggle(c.id)}
+        >
+          {c.label}
+          <span class="lg-n">{num(c.count)}</span>
+        </button>
+      ))}
+    </div>
+  );
+}
+
+function Status(props: { l: UsageLog; onFilter: Filter }) {
   const { l } = props;
-  const label = l.status === "rejected" ? l.reason_label : "";
   const delivery = l.status === "ok" ? deliveryLabel(l.delivery_state) : null;
+  const headline = statusHeadline(l);
+  const hint =
+    l.status === "error" && l.issue_hint && l.issue_hint !== `上游 ${l.up_status}` ? l.issue_hint : "";
+  const onClick = () => {
+    if (l.status === "rejected" && l.reason) {
+      props.onFilter({ status: "rejected", reason: l.reason, error: null, page: null });
+    } else if (l.status === "error" && l.issue) {
+      props.onFilter({ status: "error", error: l.issue, reason: null, page: null });
+    }
+  };
+  const clickable = (l.status === "rejected" && !!l.reason) || (l.status === "error" && !!l.issue);
   return (
     <span class="lg-status">
-      <Badge tone={statusTone(l.status)}>{statusText(l.status)}</Badge>
-      {l.status === "rejected" &&
-        (l.reason ? (
-          <button
-            type="button"
-            class="lg-link small"
-            title="只看这个原因"
-            onClick={() => props.onFilter({ status: "rejected", reason: l.reason, page: null })}
-          >
-            {label}
-          </button>
-        ) : (
-          <span class="small muted">{label}</span>
-        ))}
-      {l.status === "error" && l.up_status > 0 && <span class="small muted">上游 {l.up_status}</span>}
+      {clickable ? (
+        <button
+          type="button"
+          class={cx("lg-chip", `is-${statusTone(l.status)}`)}
+          title="只看这类"
+          onClick={onClick}
+        >
+          {headline}
+        </button>
+      ) : (
+        <Badge tone={statusTone(l.status)}>{headline}</Badge>
+      )}
+      {hint && (
+        <span class="small muted lg-issue-hint" title={hint}>
+          {hint}
+        </span>
+      )}
       {delivery && (
         <Badge
           tone={delivery.tone}
@@ -81,7 +127,6 @@ function Cost(props: { l: UsageLog }) {
   return <span class="lg-cost">{parts}</span>;
 }
 
-/** 用量日志的来源 IP 只在展开详情中显示。 */
 function Client(props: { l: UsageLog }) {
   const ua = props.l.client;
   return (
@@ -91,31 +136,21 @@ function Client(props: { l: UsageLog }) {
   );
 }
 
-function Who(props: {
-  l: UsageLog;
-  memberOf: (id: number) => string;
-  memberByKey: Map<number, Member>;
-  onFilter: Filter;
-}) {
+function Who(props: { l: UsageLog; memberByKey: Map<number, Member> }) {
   const { l } = props;
   if (l.key_id == null) return <span class="muted">{l.key_name || "—"}</span>;
   const m = props.memberByKey.get(l.key_id as number);
   const title = m ? memberLabel(m) : l.key_name || `#${l.key_id}`;
-  // 成员页同款身份格子；成员已删（不在列表里）时退回纯文字
   const ident = m ? (
     <MemberIdent title={title} username={m.discord?.username} avatarUrl={m.discord?.avatar_url} />
   ) : (
     <span class="lg-who-plain">{title}</span>
   );
+  if (!m) return ident;
   return (
-    <button
-      type="button"
-      class="lg-link lg-who"
-      title="只看这位成员"
-      onClick={() => props.onFilter({ key: props.memberOf(l.key_id as number), page: null })}
-    >
+    <a class="lg-who" href={memberHref(m.id)} title={`打开 ${title}`}>
       {ident}
-    </button>
+    </a>
   );
 }
 
@@ -129,33 +164,69 @@ function What(props: { l: UsageLog; features: Feature[]; kinds: Record<string, s
   );
 }
 
-/** 展开后的详情：编号、完整 UA、来源 IP、说明 */
-function More(props: { l: UsageLog }) {
+function More(props: {
+  l: UsageLog;
+  memberByKey: Map<number, Member>;
+  memberOf: (id: number) => string;
+  onFilter: Filter;
+}) {
   const { l } = props;
+  const m = l.key_id != null ? props.memberByKey.get(l.key_id as number) : undefined;
+  const err = l.status === "error";
+  const rej = l.status === "rejected";
   return (
-    <dl class="lg-kv">
-      <dt>编号</dt>
-      <dd>{l.rid ? <CopyField value={l.rid} label="编号" /> : <span class="muted">—</span>}</dd>
-      <dt>来源 IP</dt>
-      <dd class="mono">{l.src || <span class="muted">—</span>}</dd>
-      <dt>UA 原文</dt>
-      <dd class="lg-wrap">{l.client || <span class="muted">—</span>}</dd>
-      <dt>说明</dt>
-      <dd class="lg-wrap">{l.detail || <span class="muted">—</span>}</dd>
-    </dl>
-  );
-}
-
-function Summary(props: { s: LogSummary }) {
-  const { s } = props;
-  return (
-    <p class="lg-sum small muted">
-      <span>共 {num(s.total)}</span>
-      <span>成功 {num(s.ok)}</span>
-      <span>拒绝 {num(s.rejected)}</span>
-      <span>错误 {num(s.error)}</span>
-      <span>已取消 {num(s.cancelled)}</span>
-    </p>
+    <div class="lg-morebox">
+      {(err || rej) && (
+        <div class="lg-explain">
+          <p class="lg-explain__t">{statusHeadline(l)}</p>
+          <p class="small">{err ? issueExplain(l.issue) : l.detail || ""}</p>
+          {err && l.issue_hint && l.issue_hint !== `上游 ${l.up_status}` && (
+            <p class="small">上游说：{l.issue_hint}</p>
+          )}
+        </div>
+      )}
+      <dl class="lg-kv">
+        <dt>编号</dt>
+        <dd>{l.rid ? <CopyField value={l.rid} label="编号" /> : <span class="muted">—</span>}</dd>
+        {l.token_id ? (
+          <>
+            <dt>上游账号</dt>
+            <dd class="mono">{l.token_id}</dd>
+          </>
+        ) : null}
+        <dt>来源 IP</dt>
+        <dd class="mono">{l.src || <span class="muted">—</span>}</dd>
+        <dt>UA 原文</dt>
+        <dd class="lg-wrap">{l.client || <span class="muted">—</span>}</dd>
+        {err ? (
+          <>
+            <dt>原始说明</dt>
+            <dd class="lg-wrap">{l.detail || <span class="muted">—</span>}</dd>
+          </>
+        ) : rej ? null : (
+          <>
+            <dt>说明</dt>
+            <dd class="lg-wrap">{l.detail || <span class="muted">—</span>}</dd>
+          </>
+        )}
+      </dl>
+      <div class="lg-more-nav">
+        {m && (
+          <a class="lg-link" href={memberHref(m.id)}>
+            打开成员
+          </a>
+        )}
+        {l.key_id != null && (
+          <button
+            type="button"
+            class="lg-link"
+            onClick={() => props.onFilter({ key: props.memberOf(l.key_id as number), page: null })}
+          >
+            只看此成员的请求
+          </button>
+        )}
+      </div>
+    </div>
   );
 }
 
@@ -175,6 +246,14 @@ function Toggle(props: { open: boolean; onClick: () => void; id: string }) {
     </Button>
   );
 }
+
+const STATUS_CHIPS: Array<{ id: keyof LogSummary | ""; label: string; tone?: "warn" | "danger" }> = [
+  { id: "", label: "全部" },
+  { id: "ok", label: "成功" },
+  { id: "rejected", label: "拒绝", tone: "warn" },
+  { id: "error", label: "错误", tone: "danger" },
+  { id: "cancelled", label: "已取消", tone: "warn" },
+];
 
 export function Usage() {
   const { query, set } = useQueryState();
@@ -201,10 +280,14 @@ export function Usage() {
     : "";
   const feature = selectedFeature.startsWith("image_") ? "image" : selectedFeature;
   const modelVersion = selectedFeature === "image_v45" ? "v45" : selectedFeature === "image_v5" ? "v5" : "";
-  const status = STATUSES.some((s) => s.id === query.status) ? (query.status as string) : "";
+  const error = /^up_[a-z0-9_]{1,16}$/.test(query.error ?? "") ? (query.error as string) : "";
+  const status = Object.keys(STATUS_TEXT).includes(query.status ?? "")
+    ? (query.status as string)
+    : error
+      ? "error"
+      : "";
   const reason =
     status === "rejected" && /^[a-z0-9_]{1,24}$/.test(query.reason ?? "") ? (query.reason as string) : "";
-  // 后端按请求编号前 16 位匹配；前端保持同一口径，避免输入和结果条件不一致。
   const rid = (query.rid ?? "")
     .toLowerCase()
     .replace(/[^0-9a-f]/g, "")
@@ -238,14 +321,10 @@ export function Usage() {
   if (modelVersion) qs.set("model_version", modelVersion);
   if (status) qs.set("status", status);
   if (reason) qs.set("reason", reason);
+  if (error) qs.set("error", error);
   qs.set("per_page", String(per));
   qs.set("page", String(page));
-  const { data, error, pending } = usePageData<LogsResp>(`/admin/api/logs?${qs}`);
-
-  // 地址栏里带的原因码不在短说明表里（如 param）：照原码列出来，下拉框才能显示选中
-  const known = data?.reasons ?? [];
-  const reasons =
-    !reason || known.some((r) => r.code === reason) ? known : [...known, { code: reason, label: reason }];
+  const { data, error: loadError, pending } = usePageData<LogsResp>(`/admin/api/logs?${qs}`);
 
   const filters = (
     <div class="xa-toolbar lg-filters-in">
@@ -279,38 +358,6 @@ export function Usage() {
         </select>
       </label>
       <label class="field-inline">
-        <span class="field-inline__k">状态</span>
-        <select
-          class="select"
-          value={status}
-          onChange={(e) => set({ status: e.currentTarget.value, reason: null, page: null })}
-        >
-          <option value="">全部</option>
-          {STATUSES.map((s) => (
-            <option key={s.id} value={s.id}>
-              {s.label}
-            </option>
-          ))}
-        </select>
-      </label>
-      {status === "rejected" && (
-        <label class="field-inline">
-          <span class="field-inline__k">原因</span>
-          <select
-            class="select"
-            value={reason}
-            onChange={(e) => set({ reason: e.currentTarget.value, page: null })}
-          >
-            <option value="">全部</option>
-            {reasons.map((r) => (
-              <option key={r.code} value={r.code}>
-                {r.label}
-              </option>
-            ))}
-          </select>
-        </label>
-      )}
-      <label class="field-inline">
         <span class="field-inline__k">编号</span>
         <input
           class="input mono lg-ridin"
@@ -334,7 +381,6 @@ export function Usage() {
     });
   const toggle = (id: number) => setRowOpen(id, !open.has(id));
 
-  // 往下看了、展开了某行、或不在第 1 页：冻住（请求最频繁，新行会把正在看的行一路挤下去）
   const top = useRef<HTMLDivElement>(null);
   const scrolled = useScrolledPast(top);
   const live = useFrozenList(data?.logs, (l) => l.id, {
@@ -343,6 +389,12 @@ export function Usage() {
     pending,
   });
   const rows = live.rows ?? [];
+  const summary = data?.summary;
+  const reasonChips = data?.reason_counts ?? [];
+  const errorChips = data?.error_counts ?? [];
+  const showReasons = reasonChips.length > 0 && (status === "" || status === "rejected");
+  const showErrors = errorChips.length > 0 && (status === "" || status === "error");
+
   return (
     <div class="stack">
       <div class="lg-bar">
@@ -356,13 +408,72 @@ export function Usage() {
         )}
       </div>
 
-      {error && !data ? (
-        <LoadError error={error} />
+      {loadError && !data ? (
+        <LoadError error={loadError} />
       ) : !data ? (
         <Skeleton h="240px" />
       ) : (
         <>
-          {data.summary && <Summary s={data.summary} />}
+          {summary && (
+            <ChipBar
+              label="按结果"
+              active={status}
+              onToggle={(id) =>
+                set({
+                  status: id && id !== status ? id : null,
+                  reason: null,
+                  error: null,
+                  page: null,
+                })
+              }
+              items={STATUS_CHIPS.map((c) => ({
+                id: c.id,
+                label: c.label,
+                count: c.id ? summary[c.id] : summary.total,
+                ...(c.tone && (c.id ? summary[c.id] : 0) > 0 ? { tone: c.tone } : {}),
+              }))}
+            />
+          )}
+          {showReasons && (
+            <ChipBar
+              label="拒绝原因"
+              active={reason}
+              onToggle={(id) =>
+                set({
+                  status: "rejected",
+                  reason: id && id !== reason ? id : null,
+                  error: null,
+                  page: null,
+                })
+              }
+              items={reasonChips.map((c: CountChip) => ({
+                id: c.code,
+                label: c.label,
+                count: c.count,
+                tone: "warn" as const,
+              }))}
+            />
+          )}
+          {showErrors && (
+            <ChipBar
+              label="上游错误"
+              active={error}
+              onToggle={(id) =>
+                set({
+                  status: "error",
+                  error: id && id !== error ? id : null,
+                  reason: null,
+                  page: null,
+                })
+              }
+              items={errorChips.map((c: CountChip) => ({
+                id: c.code,
+                label: c.label,
+                count: c.count,
+                tone: "danger" as const,
+              }))}
+            />
+          )}
           <div ref={top} class={cx("card lg-listcard", pending && "xa-busy")} aria-busy={pending}>
             <FreshBar fresh={live.fresh} changed={live.changed} onApply={live.apply} anchor={top} />
             {rows.length === 0 ? (
@@ -376,7 +487,7 @@ export function Usage() {
                       <Status l={l} onFilter={set} />
                     </div>
                     <div class="lg-card__meta">
-                      <Who l={l} memberOf={memberOf} memberByKey={memberByKey} onFilter={set} />
+                      <Who l={l} memberByKey={memberByKey} />
                       <What l={l} features={features} kinds={kinds} />
                     </div>
                     <div class="lg-card__meta small">
@@ -392,7 +503,7 @@ export function Usage() {
                       onToggle={(e) => setRowOpen(l.id, e.currentTarget.open)}
                     >
                       <summary class="small">详情</summary>
-                      <More l={l} />
+                      <More l={l} memberByKey={memberByKey} memberOf={memberOf} onFilter={set} />
                     </details>
                   </li>
                 ))}
@@ -426,7 +537,7 @@ export function Usage() {
                           </td>
                           <td class="nowrap">{fullTime(l.ts)}</td>
                           <td>
-                            <Who l={l} memberOf={memberOf} memberByKey={memberByKey} onFilter={set} />
+                            <Who l={l} memberByKey={memberByKey} />
                           </td>
                           <td>
                             <What l={l} features={features} kinds={kinds} />
@@ -450,7 +561,7 @@ export function Usage() {
                             row,
                             <tr key={`${l.id}-d`} id={id} class="lg-detail-row">
                               <td colSpan={COLS}>
-                                <More l={l} />
+                                <More l={l} memberByKey={memberByKey} memberOf={memberOf} onFilter={set} />
                               </td>
                             </tr>,
                           ]

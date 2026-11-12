@@ -196,6 +196,13 @@
   flex-wrap: wrap;
   gap: var(--sp-1);
 }
+.mb-jump {
+  color: var(--accent-text);
+  font-size: var(--fs-sm);
+}
+.mb-jump:hover {
+  text-decoration: underline;
+}
 .mb-bars {
   display: grid;
   gap: var(--sp-2);

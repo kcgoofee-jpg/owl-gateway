@@ -5,10 +5,13 @@ import {
   countFilter,
   DAY,
   matchesQuery,
+  memberFromOpen,
+  memberHref,
   memberIssues,
   memberKeyOptions,
   memberKeyValue,
   memberLabel,
+  memberLogsHref,
   memberStatus,
   memberVerdict,
   needsAttention,
@@ -219,6 +222,18 @@ describe("排序 / 身份 / 查找", () => {
         mk({ discord: { id: "1", username: "u", display_name: "昵称", avatar_url: "", profile_url: "" } }),
       ),
     ).toBe("昵称");
+  });
+});
+
+describe("成员与请求互跳", () => {
+  it("用成员 id 或名下 Key id 都能打开，请求链接带上全部 Key", () => {
+    const a = mk({ all_key_ids: [11, 12], id: 12, key_count: 2 });
+    expect(memberHref(12)).toBe("/admin/members?open=12");
+    expect(memberLogsHref(a)).toBe("/admin/logs/usage?key=11%2C12");
+    expect(memberLogsHref(a, { status: "error" })).toBe("/admin/logs/usage?key=11%2C12&status=error");
+    expect(memberFromOpen([a], "12")?.id).toBe(12);
+    expect(memberFromOpen([a], "11")?.id).toBe(12);
+    expect(memberFromOpen([a], "99")).toBeUndefined();
   });
 });
 

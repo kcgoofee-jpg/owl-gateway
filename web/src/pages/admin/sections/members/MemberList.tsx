@@ -4,7 +4,7 @@ import { type ComponentChildren, Fragment } from "preact";
 import { rel, withUnit } from "../../../../lib/format";
 import { Badge, Button, cx } from "../../../../ui";
 import { TableWrap } from "../_kit";
-import { memberLabel, memberStatus, type SortKey, userTags } from "./logic";
+import { memberLabel, memberLogsHref, memberStatus, type SortKey, userTags } from "./logic";
 import { type DetailActions, MemberDetail } from "./MemberDetail";
 import { MemberIdent, MiniBar } from "./shared";
 import type { MemberRow } from "./types";
@@ -39,6 +39,9 @@ function Identity(props: { m: MemberRow }) {
               {tag.tag}
             </span>
           )}
+          <a class="mb-jump" href={memberLogsHref(m)} title={`查看 ${title} 的请求`}>
+            请求
+          </a>
         </>
       }
     />
