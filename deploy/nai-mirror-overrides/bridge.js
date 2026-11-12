@@ -1,7 +1,7 @@
 /* owl ⇄ NovelAI 生图页桥：把官网前端的 API 调用改到本站网关。
-   改 base、带 Key、隐藏账号横幅；工作台默认英文，左上角可切中文（自管词表，不走浏览器翻译）。 */
+   改 base、带 Key、隐藏账号横幅；工作台默认英文，工具栏可切中文（自管词表，不走浏览器翻译）。 */
 (function () {
-  window.__BRIDGE_VERSION__ = "2026-11-13-wb-i18n";
+  window.__BRIDGE_VERSION__ = "2026-11-13-wb-toolbar";
   var CFG = window.__NAI_BRIDGE__ || {};
   var GATE = CFG.gate || "";
   var KEY = CFG.key || "";
@@ -297,6 +297,57 @@
     "We’ve updated our Terms of Service",
     "We've updated our Terms of Service",
   ];
+  var SPLASH_LOAD = ["Load", "载入"];
+  var SPLASH_DISMISS = ["Close", "Dismiss", "Skip", "Continue", "Got it", "OK", "关闭", "跳过", "知道了"];
+
+  function splashKind(text) {
+    if (!text) return "";
+    if (/Load a previous session|Restore previous session|上次会话/.test(text)) return "session";
+    if (/What.?s New in NovelAI|Here.?s what.?s new|Start generating now|Generate Images For Free|Start for Free!?/.test(text)) return "promo";
+    return "";
+  }
+
+  function splashClick(root, labels) {
+    var buttons = root.querySelectorAll("button");
+    for (var i = 0; i < buttons.length; i++) {
+      var t = (buttons[i].textContent || "").replace(/\s+/g, " ").trim();
+      for (var j = 0; j < labels.length; j++) {
+        if (t === labels[j]) {
+          buttons[i].click();
+          return true;
+        }
+      }
+    }
+    return false;
+  }
+
+  function dismissSplash() {
+    if (!document.body) return;
+    var nodes = document.querySelectorAll('[role="dialog"][aria-modal="true"], dialog[open]');
+    for (var i = 0; i < nodes.length; i++) {
+      var el = nodes[i];
+      if (el.getAttribute("data-owl-splash")) continue;
+      var kind = splashKind(el.innerText || "");
+      if (!kind) continue;
+      var ok = false;
+      if (kind === "session") {
+        ok = splashClick(el, SPLASH_LOAD);
+        if (!ok) continue;
+      } else {
+        var close = el.querySelector(".modal-close");
+        if (close) { close.click(); ok = true; }
+        else ok = splashClick(el, SPLASH_DISMISS);
+        if (!ok) {
+          // Use the native backdrop close handler so React releases the modal too.
+          var backdrop = el.parentElement;
+          if (backdrop) backdrop.click();
+          else continue;
+        }
+      }
+      el.setAttribute("data-owl-splash", kind);
+    }
+  }
+
   function hideBanners() {
     var walker = document.createTreeWalker(document.body, NodeFilter.SHOW_TEXT);
     var hits = [];
@@ -353,10 +404,13 @@
 
   function watchBanners() {
     hideBanners();
+    dismissSplash();
     renameDiscord();
     var mo = new MutationObserver(function () {
       hideBanners();
+      dismissSplash();
       renameDiscord();
+      wbPlaceToggle();
     });
     mo.observe(document.documentElement, { childList: true, subtree: true, characterData: true });
   }
@@ -1266,19 +1320,32 @@
     wbApply();
   }
 
-  function wbHideMark() {
-    var nodes = document.querySelectorAll("button, a");
+  function wbHasModal() {
+    var nodes = document.querySelectorAll('[role="dialog"][aria-modal="true"], dialog[open]');
     for (var i = 0; i < nodes.length; i++) {
       var el = nodes[i];
-      if (el.id === "owl-lang-toggle") continue;
-      var r = el.getBoundingClientRect();
-      if (r.left < 0 || r.top < 0 || r.left > 24 || r.top > 24) continue;
-      if (r.width < 28 || r.width > 80 || r.height < 28 || r.height > 80) continue;
-      el.setAttribute("data-owl-hidden-mark", "1");
-      el.style.visibility = "hidden";
-      return true;
+      var st = window.getComputedStyle(el);
+      if (st.display === "none" || st.visibility === "hidden" || Number(st.opacity) === 0) continue;
+      if (el.getClientRects().length) return true;
     }
     return false;
+  }
+
+  function wbPlaceToggle() {
+    var btn = document.getElementById("owl-lang-toggle");
+    if (!btn) { wbMountToggle(); return; }
+    // Join the native toolbar in both responsive layouts; never cover or hide a control.
+    var menus = document.querySelectorAll('button[aria-label="menu"]');
+    var menu = null;
+    for (var i = 0; i < menus.length; i++) {
+      var rect = menus[i].getBoundingClientRect();
+      if (rect.width && rect.height) { menu = menus[i]; break; }
+    }
+    if (menu && (btn.parentElement !== menu.parentElement || btn.nextElementSibling !== menu)) {
+      menu.parentElement.insertBefore(btn, menu);
+    }
+    var visibility = menu && !wbHasModal() ? "visible" : "hidden";
+    if (btn.style.visibility !== visibility) btn.style.visibility = visibility;
   }
 
   function wbMountToggle() {
@@ -1290,12 +1357,12 @@
     btn.setAttribute("aria-label", wbLang === "zh" ? "Switch to English" : "切换到中文");
     btn.title = wbLang === "zh" ? "中文 · 点按切英文" : "English · click for 中文";
     btn.style.cssText = [
-      "position:fixed", "top:8px", "left:8px", "z-index:2147483000",
-      "width:48px", "height:48px", "padding:0", "margin:0",
-      "border:1px solid #3a3560", "border-radius:12px",
+      "position:relative", "flex:0 0 36px", "align-self:center",
+      "width:36px", "height:28px", "padding:0", "margin:0 4px 0 0",
+      "border:1px solid #3a3560", "border-radius:6px",
       "background:#1b1836", "color:#f4f0ff",
-      "font:700 14px/48px system-ui,-apple-system,'Segoe UI',sans-serif",
-      "letter-spacing:.02em", "cursor:pointer", "box-shadow:0 4px 16px rgba(0,0,0,.35)",
+      "font:700 12px/1 system-ui,-apple-system,'Segoe UI',sans-serif",
+      "letter-spacing:.02em", "cursor:pointer", "visibility:hidden",
     ].join(";");
     btn.addEventListener("click", function (ev) {
       ev.preventDefault();
@@ -1303,8 +1370,9 @@
       wbSetLang(wbLang === "zh" ? "en" : "zh");
     });
     (document.body || document.documentElement).appendChild(btn);
-    wbHideMark();
+    wbPlaceToggle();
   }
+  window.addEventListener("resize", wbPlaceToggle);
 
   function wbBootI18n(dict) {
     var keep = (dict && dict.keep) || [];
@@ -1316,7 +1384,7 @@
     if (wbLang === "zh") wbApply();
     if (wbObs) wbObs.disconnect();
     wbObs = new MutationObserver(function () {
-      wbHideMark();
+      wbPlaceToggle();
       if (wbLang === "zh") wbApply();
     });
     wbObs.observe(document.documentElement, { childList: true, subtree: true });
