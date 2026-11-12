@@ -111,12 +111,7 @@ export function MemberDetail(props: { m: MemberRow; now: number; act: DetailActi
           <OwnerImageButtons subject={dcId || ""} enabled={k.policy.owner_image.enabled} />
         </section>
       )}
-      {dcId && (
-        <section class="mb-sec" aria-label="赞助席">
-          <h4 class="mb-h4">赞助席</h4>
-          <PatronSeatButtons subject={dcId} patron={k.policy.patron} />
-        </section>
-      )}
+      {dcId && <PatronSeatButtons subject={dcId} patron={k.policy.patron} />}
       {issues.length > 0 && <IssueList m={m} issues={issues} act={act} />}
 
       <div class="mb-cols">
@@ -333,36 +328,31 @@ export function PatronSeatButtons({ subject, patron }: { subject: string; patron
   };
   const accounts = upstream.data?.accounts ?? [];
   return (
-    <>
-      <p>
-        {enabled
-          ? `插队${jump ? "已开" : "未开"}。对方走独立入口 /patron，看不到后台。打开席位后插队立即生效。`
-          : "指定后对方可以插队，并在 /patron 打开自己 Key 的功能开关。绑定捐赠 Token 后只走那把账号。"}
-      </p>
+    <section class="mb-patron" aria-label="赞助席">
+      <h4 class="mb-h4">赞助席</h4>
       {enabled && (
-        <p class="small muted">
-          {patron?.has_password ? "门户密码已有，需要时再重置。" : "还没有门户密码。"}
-          {patron?.bound_token_id ? " 已绑定专属上游账号。" : " 未绑定专属账号，出图仍走全站池。"}
-        </p>
+        <Badge tone="ok" title={patron?.has_password ? "门户密码已有，需要时再重置" : "还没有门户密码"}>
+          已开
+        </Badge>
       )}
-      <label class="mb-key">
-        <span class="small muted">插队</span>
+      <label class="mb-patron__jump" title="打开后插队立即生效；对方走 /patron，看不到后台">
         <input
           type="checkbox"
           checked={jump}
           disabled={pending}
           onChange={(e) => setJump((e.target as HTMLInputElement).checked)}
         />
+        插队
       </label>
-      <label class="mb-key">
-        <span class="small muted">专属 Token</span>
+      <label class="field-inline" title="绑定捐赠 Token 后只走那把账号；不绑则走全站池">
+        <span class="field-inline__k">专属号</span>
         <select
           class="select"
           value={tokenId}
           disabled={pending}
           onChange={(e) => setTokenId((e.target as HTMLSelectElement).value)}
         >
-          <option value="">不绑定（金钱赞助，走全站池）</option>
+          <option value="">不绑定（全站池）</option>
           {accounts.map((a) => (
             <option key={a.token_id} value={a.token_id}>
               账号 {a.position} · {a.token}
@@ -371,34 +361,52 @@ export function PatronSeatButtons({ subject, patron }: { subject: string; patron
           ))}
         </select>
       </label>
-      <Button
-        size="sm"
-        disabled={pending || enabled}
-        onClick={() => void save({ enabled: true, queue_jump: jump, bound_token_id: tokenId })}
-      >
-        开启席位
-      </Button>
-      <Button
-        size="sm"
-        disabled={pending || !enabled}
-        onClick={() =>
-          void save({ enabled: true, queue_jump: jump, bound_token_id: tokenId, reset_password: true })
-        }
-      >
-        重置门户密码
-      </Button>
-      <Button
-        size="sm"
-        disabled={pending || !enabled}
-        onClick={() => void save({ enabled: true, queue_jump: jump, bound_token_id: tokenId })}
-      >
-        保存绑定
-      </Button>
-      <Button size="sm" disabled={pending || !enabled} onClick={() => void save({ enabled: false })}>
-        关闭席位
-      </Button>
+      <span class="mb-inline">
+        {enabled ? (
+          <>
+            <Button
+              size="sm"
+              disabled={pending}
+              onClick={() => void save({ enabled: true, queue_jump: jump, bound_token_id: tokenId })}
+            >
+              保存
+            </Button>
+            <Button
+              size="sm"
+              variant="ghost"
+              disabled={pending}
+              onClick={() =>
+                void save({
+                  enabled: true,
+                  queue_jump: jump,
+                  bound_token_id: tokenId,
+                  reset_password: true,
+                })
+              }
+            >
+              重置密码
+            </Button>
+            <Button
+              size="sm"
+              variant="ghost"
+              disabled={pending}
+              onClick={() => void save({ enabled: false })}
+            >
+              关闭
+            </Button>
+          </>
+        ) : (
+          <Button
+            size="sm"
+            disabled={pending}
+            onClick={() => void save({ enabled: true, queue_jump: jump, bound_token_id: tokenId })}
+          >
+            开启
+          </Button>
+        )}
+      </span>
       {password && (
-        <p class="mb-key">
+        <p class="mb-patron__pw">
           <code class="mb-key__v">{password}</code>
           <Button
             size="sm"
@@ -417,7 +425,7 @@ export function PatronSeatButtons({ subject, patron }: { subject: string; patron
           {error}
         </p>
       )}
-    </>
+    </section>
   );
 }
 
@@ -435,7 +443,7 @@ export function OwnerImageButtons({ subject, enabled }: { subject: string; enabl
     else toast(next ? "全部生图功能已启用" : "已恢复普通默认");
   };
   return (
-    <>
+    <span class="mb-inline">
       <Button size="sm" disabled={pending || enabled} onClick={() => void change(true)}>
         启用全部生图功能
       </Button>
@@ -447,6 +455,6 @@ export function OwnerImageButtons({ subject, enabled }: { subject: string; enabl
           {error}
         </p>
       )}
-    </>
+    </span>
   );
 }

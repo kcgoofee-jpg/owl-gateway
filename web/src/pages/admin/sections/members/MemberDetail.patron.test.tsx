@@ -29,7 +29,8 @@ it("opens a patron seat with queue jump and optional bound token", async () => {
   document.body.append(root);
   vi.mocked(call).mockResolvedValue({ ok: true, data: { portal_password: "once-only-password" } });
   await act(() => render(<PatronSeatButtons subject="900000000000000001" />, root));
-  const enable = [...root.querySelectorAll("button")].find((b) => b.textContent === "开启席位");
+  const enable = [...root.querySelectorAll("button")].find((b) => b.textContent === "开启");
+  expect([...root.querySelectorAll("button")].map((b) => b.textContent)).toEqual(["开启"]);
   await act(async () => {
     enable?.click();
   });
@@ -60,7 +61,12 @@ it("shows save errors", async () => {
       root,
     ),
   );
-  const save = [...root.querySelectorAll("button")].find((b) => b.textContent === "保存绑定");
+  expect([...root.querySelectorAll("button")].map((b) => b.textContent)).toEqual([
+    "保存",
+    "重置密码",
+    "关闭",
+  ]);
+  const save = [...root.querySelectorAll("button")].find((b) => b.textContent === "保存");
   await act(async () => {
     save?.click();
   });

@@ -331,6 +331,51 @@
   padding-top: var(--sp-3);
 }
 
+/* 赞助席：一行控件，不要被 .mb-sec 网格拉成整页宽的按钮 */
+.mb-patron {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--sp-2) var(--sp-3);
+  min-width: 0;
+}
+.mb-patron__jump {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--sp-2);
+  height: var(--control-h-sm);
+  font-size: var(--fs-sm);
+  cursor: pointer;
+  white-space: nowrap;
+}
+.mb-patron__jump input {
+  margin: 0;
+  accent-color: var(--accent);
+}
+.mb-patron .field-inline {
+  height: var(--control-h-sm);
+}
+.mb-patron .field-inline .select {
+  height: calc(var(--control-h-sm) - 2px);
+}
+.mb-inline {
+  display: inline-flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--sp-2);
+}
+.mb-patron__pw,
+.mb-patron .xa-formerr {
+  flex: 1 1 100%;
+  margin: 0;
+}
+.mb-patron__pw {
+  display: inline-flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: var(--sp-2);
+}
+
 /* 待处理列表 */
 .mb-issues {
   list-style: none;
