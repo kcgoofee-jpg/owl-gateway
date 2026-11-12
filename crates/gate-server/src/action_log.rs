@@ -60,6 +60,7 @@ pub const ADMIN_ACTIONS: &[(&str, &str, &str)] = &[
     ("PUT", "/members/{discord_id}/patron", "设置赞助席"),
     ("PUT", "/settings", "修改预算"),
     ("POST", "/ops/manual", "手动改设置"),
+    ("PUT", "/ops/debug-record", "临时调试记录"),
     ("PUT", "/ops/registration", "修改开放注册设置"),
     ("PUT", "/guard", "修改账号保护与排队设置"),
     ("POST", "/ops/reset-all-keys", "全站杀头重置"),

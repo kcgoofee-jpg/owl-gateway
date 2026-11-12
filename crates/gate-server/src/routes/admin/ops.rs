@@ -60,6 +60,7 @@ pub fn router() -> Router<AppState> {
         .merge(manual::router())
         .merge(onboarding::router())
         .merge(system::router())
+        .merge(crate::debug_record::router())
 }
 
 /// 上游健康：最近 10 分钟上游调用成败 + 全站图片冷却剩余秒数。

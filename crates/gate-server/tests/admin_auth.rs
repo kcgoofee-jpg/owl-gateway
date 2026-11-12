@@ -49,6 +49,12 @@ const ENDPOINTS: &[(&str, &str)] = &[
     ("GET", "/quota-records"),
     ("PUT", "/upstream-tokens/token-x/enabled"),
     ("GET", "/ops"),
+    ("GET", "/ops/debug-record"),
+    ("PUT", "/ops/debug-record"),
+    (
+        "GET",
+        "/ops/debug-record/900000000000000001/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa/out-0.png",
+    ),
     ("PUT", "/ops/registration"),
     ("GET", "/guard"),
     ("PUT", "/guard"),

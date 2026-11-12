@@ -9,6 +9,7 @@ pub mod auth;
 pub mod backup;
 pub mod body;
 pub mod bugs;
+pub mod debug_record;
 pub mod defaults;
 pub mod discord_share;
 pub mod env;

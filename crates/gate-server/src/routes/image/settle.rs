@@ -340,6 +340,7 @@ pub(super) async fn perform_generation(
     // 工作台自动备份：响应体已完整收到（MAX_RESPONSE_BYTES 内），先按 ZIP/单图提取，
     // 再交 on_generation_ok 异步确认开关与 workbench 资格后入队；不阻塞这里的响应返回。
     let images = crate::backup::extract_images(&resp.body);
+    crate::debug_record::capture_outputs(&state, ctx, key.subject(), &images, &resp.body).await;
     let media = resp
         .headers
         .get("content-type")

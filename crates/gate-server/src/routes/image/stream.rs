@@ -11,6 +11,7 @@ use crate::accounting::Entry;
 use crate::admission::{Est, acquire_slots, image_admission, reserve_image_budget};
 use crate::auth::check_image_cooldown;
 use crate::error::{ApiError, GateError, InternalError, json_response};
+use crate::key::Key;
 use crate::reqctx::ReqCtx;
 use crate::state::AppState;
 use axum::body::Body;
@@ -28,6 +29,40 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 use tokio_util::sync::CancellationToken;
+
+async fn attach_output_sinks(
+    tracker: &mut ImageEventTracker,
+    state: &AppState,
+    ctx: &ReqCtx,
+    key: &Key,
+) {
+    let backup = crate::backup::applies_to(&ctx.origin().2, key.subject())
+        && crate::backup::enabled(state, key.subject()).await;
+    let debug = crate::debug_record::watching(state, key.subject()).await;
+    if !backup && !debug {
+        return;
+    }
+    let backup_state = state.clone();
+    let debug_state = state.clone();
+    let member = key.subject().to_string();
+    let request_id = ctx.internal_id();
+    tracker.set_image_sink(move |index, bytes| {
+        if backup {
+            backup_state
+                .backup
+                .enqueue(&member, &request_id, index, bytes.to_vec());
+        }
+        if debug {
+            crate::debug_record::write_output_image(
+                &debug_state,
+                &member,
+                &request_id,
+                index,
+                bytes,
+            );
+        }
+    });
+}
 
 /// 排队超过这么久还没派发，就先发响应头让客户端知道自己已在队列里，避免它按空闲超时断开。
 /// 20 秒：比常见的出图节流等待（15 秒）长，短错误仍能以普通 JSON 返回；又明显短于客户端 60 秒超时。
@@ -341,18 +376,7 @@ async fn perform_stream(
         ImageEventTracker::new(image_count, wire).map_err(|e| InternalError(e.to_string()))?;
     // 工作台自动备份：成员开启后，从 final 事件收下服务端已验证的完整图片（request_id + 序号去重
     // 在 BackupCenter 里做）。只挂到符合条件的请求上：workbench 标记 + 成员 Key + 开关已开。
-    if crate::backup::applies_to(&ctx.origin().2, key.subject()) {
-        let backup_state = state.clone();
-        let member = key.subject().to_string();
-        let request_id = ctx.internal_id();
-        if crate::backup::enabled(state, &member).await {
-            tracker.set_image_sink(move |index, bytes| {
-                backup_state
-                    .backup
-                    .enqueue(&member, &request_id, index, bytes.to_vec());
-            });
-        }
-    }
+    attach_output_sinks(&mut tracker, state, ctx, &key).await;
     let mut failure: Option<String> = None;
     let mut billing_uncertain = false;
     let mut local_reject = false;
@@ -465,21 +489,7 @@ async fn perform_stream(
                 tracker = ImageEventTracker::new(image_count, wire)
                     .map_err(|e| GateError::new(500, e.to_string()))?
                     .parse_as(WireFormat::Msgpack);
-                if crate::backup::applies_to(&ctx.origin().2, key.subject()) {
-                    let backup_state = state.clone();
-                    let member = key.subject().to_string();
-                    let request_id = ctx.internal_id();
-                    if crate::backup::enabled(state, &member).await {
-                        tracker.set_image_sink(move |index, bytes| {
-                            backup_state.backup.enqueue(
-                                &member,
-                                &request_id,
-                                index,
-                                bytes.to_vec(),
-                            );
-                        });
-                    }
-                }
+                attach_output_sinks(&mut tracker, state, ctx, &key).await;
             }
             sink.start().await;
             let mut chunks = handle.take_body().expect("stream body");

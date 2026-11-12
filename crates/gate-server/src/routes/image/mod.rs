@@ -423,6 +423,16 @@ async fn generate(state: AppState, req: Request, streaming: bool) -> ApiResult {
     require_feature(&key, "image")?;
     let body = read_image_payload(&parts.headers, body, IMAGE_BODY_LIMIT).await?;
     let prep = params::prepare(&state, &ctx, key, body).await?;
+    crate::debug_record::capture_request(
+        &state,
+        &ctx,
+        &prep.key,
+        if streaming { "image_stream" } else { "image" },
+        &prep.body,
+        &prep.notes,
+        &prep.detail,
+    )
+    .await;
     if streaming {
         return stream::stream(state, ctx, prep).await;
     }
