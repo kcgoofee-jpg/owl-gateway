@@ -17,7 +17,7 @@ use twilight_model::gateway::Intents;
 
 /// 奶妹的网关 Intents：GUILDS（服务器名）+ GUILD_MESSAGES + MESSAGE_CONTENT（@奶妹 / 回复奶妹触发对话）。
 /// MESSAGE_CONTENT 是特权 Intent，须在开发者后台勾选，否则网关以 4014 拒连（启动即失败退避重试）。
-/// 它只用来读「@奶妹 / 回复奶妹」的消息文本；不私信、不点赞、不进论坛，其余纪律见 `lib.rs`。
+/// 用于对话触发和分享图片检测；论坛只读并记录分享元数据，不私信、不点赞，其余纪律见 `lib.rs`。
 pub const NAIMEI_INTENTS: Intents = Intents::GUILDS
     .union(Intents::GUILD_MESSAGES)
     .union(Intents::MESSAGE_CONTENT);

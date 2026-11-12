@@ -17,6 +17,13 @@ use crate::handlers::{Backend, HandlerError, interpret_backend};
 pub const COMMAND_TIMEOUT: Duration = Duration::from_secs(8);
 pub const REGISTER_TIMEOUT: Duration = Duration::from_secs(12);
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum ShareDelivery {
+    Committed,
+    Retry,
+    Rejected(u16),
+}
+
 #[derive(Clone)]
 pub struct Bridge {
     http: reqwest::Client,
@@ -27,6 +34,38 @@ pub struct Bridge {
 }
 
 impl Bridge {
+    /// Only an explicit successful acknowledgement confirms a committed share.
+    pub async fn report_share(&self, payload: &Value) -> ShareDelivery {
+        let response = self
+            .http
+            .post(format!("{}/self-register/bot/share", self.backend))
+            .timeout(self.command_timeout)
+            .header("Authorization", self.bearer())
+            .json(payload)
+            .send()
+            .await;
+        let Ok(response) = response else {
+            return ShareDelivery::Retry;
+        };
+        let status = response.status().as_u16();
+        if status == 200 {
+            return if response
+                .json::<Value>()
+                .await
+                .ok()
+                .is_some_and(|v| v["ok"] == true)
+            {
+                ShareDelivery::Committed
+            } else {
+                ShareDelivery::Retry
+            };
+        }
+        if matches!(status, 400 | 401 | 403 | 404 | 422) {
+            ShareDelivery::Rejected(status)
+        } else {
+            ShareDelivery::Retry
+        }
+    }
     /// `backend` 已去掉末尾的 `/`。
     pub fn new(backend: impl Into<String>, secret: impl Into<String>) -> Self {
         let http = reqwest::Client::builder()

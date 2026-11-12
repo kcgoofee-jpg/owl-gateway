@@ -28,6 +28,19 @@ impl Db {
         .await
     }
 
+    /// Batch view for the administrator's member list.
+    pub async fn sharing_members_since(
+        &self,
+        since: f64,
+    ) -> Result<std::collections::HashSet<String>> {
+        self.read(move |c| {
+            let mut stmt =
+                c.prepare("SELECT DISTINCT discord_id FROM share_posts WHERE created_at>=?")?;
+            stmt.query_map([since], |r| r.get(0))?.collect()
+        })
+        .await
+    }
+
     /// `since`（含）之后这个成员有没有分享记录。
     pub async fn has_share_since(&self, discord_id: &str, since: f64) -> Result<bool> {
         let discord_id = discord_id.to_string();

@@ -376,9 +376,12 @@ async fn bot_share(State(state): State<AppState>, req: Request) -> ApiResult {
     if !at.is_finite() || at < 1_000_000_000.0 || at > now + 120.0 {
         return Err(HttpError::new(422, "at: Field required").into());
     }
+    let snowflake_at = gate_core::snowflake::snowflake_created_at(&message_id)
+        .filter(|t| (*t - at).abs() < 0.002)
+        .ok_or_else(|| HttpError::new(422, "消息时间与 message_id 不一致"))?;
     state
         .db
-        .record_share(discord_id, &message_id, &channel_id, at)
+        .record_share(discord_id, &message_id, &channel_id, snowflake_at)
         .await?;
     Ok(ok_json(&json!({"ok": true})))
 }
@@ -390,6 +393,13 @@ async fn bot_report(State(state): State<AppState>, req: Request) -> ApiResult {
     m.finish()?;
     authorize(&state, &parts, true)?;
     if let Some(status) = &status {
+        if let Some(report) = status.get("share_detection") {
+            let report: gate_core::share_detection::Report = serde_json::from_value(report.clone())
+                .map_err(|_| HttpError::new(422, "分享检测状态格式不正确"))?;
+            if !report.valid(state.now()) {
+                return Err(HttpError::new(422, "分享检测时间或错误信息不正确").into());
+            }
+        }
         state
             .db
             .set_setting(

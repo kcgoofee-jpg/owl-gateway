@@ -34,6 +34,9 @@ use crate::handlers::{self, Backend, HandlerError};
 use crate::kb;
 use crate::share;
 
+#[path = "share_sync.rs"]
+mod share_sync;
+
 /// 心跳间隔。
 pub const SYNC_INTERVAL: Duration = Duration::from_secs(60);
 
@@ -115,6 +118,12 @@ pub struct Naimei {
     /// 最近一次心跳延迟（毫秒）；`u64::MAX` = 还没有数据。
     latency_ms: AtomicU64,
     inner: Mutex<Inner>,
+    share_sync: Mutex<share_sync::State>,
+    forum_scan: tokio::sync::Mutex<()>,
+    forum_wake: tokio::sync::Notify,
+    gateway_connected: AtomicBool,
+    gateway_seen_at: AtomicU64,
+    ready_at: AtomicU64,
 }
 
 fn unix_now() -> f64 {
@@ -144,6 +153,12 @@ impl Naimei {
             clock,
             latency_ms: AtomicU64::new(u64::MAX),
             inner: Mutex::new(Inner::default()),
+            share_sync: Mutex::new(share_sync::State::default()),
+            forum_scan: tokio::sync::Mutex::new(()),
+            forum_wake: tokio::sync::Notify::new(),
+            gateway_connected: AtomicBool::new(false),
+            gateway_seen_at: AtomicU64::new(0),
+            ready_at: AtomicU64::new(0),
         })
     }
 
@@ -798,79 +813,6 @@ impl Naimei {
 
     // ---------- 存图频道 ----------
 
-    /// 启动后把还开着的存图帖子加一遍，这样已有帖子里的新图也能收到。
-    async fn catch_up_forum(self: Arc<Self>) {
-        let threads = match self.api.active_threads(self.cfg.guild_id).await {
-            Ok(v) => v,
-            Err(e) => {
-                warn!("[bot] 读取活跃帖子失败：{e}");
-                return;
-            }
-        };
-        let mut n = 0u32;
-        for thread in threads {
-            let parent = thread
-                .get("parent_id")
-                .and_then(|v| v.as_str())
-                .unwrap_or("");
-            if parent != share::FORUM_CHANNEL_ID {
-                continue;
-            }
-            let Some(id) = thread.get("id").and_then(|v| v.as_str()) else {
-                continue;
-            };
-            self.remember_parent(id, parent);
-            self.join_thread(id).await;
-            self.scan_forum_thread(id).await;
-            n += 1;
-        }
-        if n > 0 {
-            info!("[bot] 已加入 {n} 个存图帖子");
-        }
-    }
-
-    async fn on_thread(&self, t: ThreadInfo, created: bool) {
-        let forum = t.parent_id.as_deref() == Some(share::FORUM_CHANNEL_ID);
-        if created || forum {
-            self.join_thread(&t.id).await;
-        }
-        if !forum {
-            return;
-        }
-        self.remember_parent(&t.id, share::FORUM_CHANNEL_ID);
-        if let Some(raw) = t.message.clone()
-            && let Ok(message) = serde_json::from_value::<MessageInfo>(raw)
-        {
-            self.record_forum_share(&message).await;
-        }
-        if created || !t.archived {
-            self.scan_forum_thread(&t.id).await;
-        }
-    }
-
-    async fn join_thread(&self, thread_id: &str) {
-        let Ok(tid) = thread_id.parse::<u64>() else {
-            return;
-        };
-        if let Err(e) = self.api.join_thread(tid).await {
-            debug!("[bot] 加入帖子失败：{e}");
-        }
-    }
-
-    async fn scan_forum_thread(&self, thread_id: &str) {
-        let Ok(tid) = thread_id.parse::<u64>() else {
-            return;
-        };
-        let Ok(rows) = self.api.recent_messages(tid).await else {
-            return;
-        };
-        for raw in rows {
-            if let Ok(message) = serde_json::from_value::<MessageInfo>(raw) {
-                self.record_forum_share(&message).await;
-            }
-        }
-    }
-
     fn remember_parent(&self, thread_id: &str, parent_id: &str) {
         let mut inner = self.lock();
         if inner.thread_parents.len() > 4000 {
@@ -883,55 +825,6 @@ impl Naimei {
 
     fn cached_parent(&self, channel_id: &str) -> Option<String> {
         self.lock().thread_parents.get(channel_id).cloned()
-    }
-
-    /// 这条消息若是成员自己发在存图频道（或它下面的帖子）里的图，就告诉网关。
-    async fn record_forum_share(&self, m: &MessageInfo) {
-        let Some(author) = m.author.as_ref() else {
-            return;
-        };
-        if author.bot || m.webhook_id.is_some() || author.id.is_empty() || m.id.is_empty() {
-            return;
-        }
-        if self.lock().bot_id.as_deref() == Some(author.id.as_str()) {
-            return;
-        }
-        if m.guild_id
-            .as_deref()
-            .is_some_and(|g| g.parse::<u64>().ok() != Some(self.cfg.guild_id))
-        {
-            return;
-        }
-        if !share::has_image(m) {
-            return;
-        }
-        let Some(parent) = self.share_parent(&m.channel_id).await else {
-            return;
-        };
-        if parent != share::FORUM_CHANNEL_ID && m.channel_id != share::FORUM_CHANNEL_ID {
-            return;
-        }
-        let Some(at) = share::snowflake_unix(&m.id) else {
-            return;
-        };
-        if self
-            .bridge
-            .bot(
-                "/share",
-                &json!({
-                    "discord_id": author.id,
-                    "guild_id": self.cfg.guild_id.to_string(),
-                    "message_id": m.id,
-                    "channel_id": m.channel_id,
-                    "parent_id": parent,
-                    "at": at,
-                }),
-            )
-            .await
-            .is_none()
-        {
-            warn!("[bot] 存图记录没有写上");
-        }
     }
 
     async fn share_parent(&self, channel_id: &str) -> Option<String> {
@@ -958,13 +851,25 @@ impl Naimei {
 
     /// READY：把斜杠命令同步到指定服务器，然后（只启动一次）开始每分钟的心跳。
     pub async fn on_ready(self: Arc<Self>, ready: ReadyInfo) {
+        self.set_gateway_connected(true);
+        let start = {
+            let mut inner = self.lock();
+            !std::mem::replace(&mut inner.sync_started, true) // 断线重连也会再触发 READY，只启动一次
+        };
+        if start {
+            self.ready_at.store(self.now() as u64, Ordering::Relaxed);
+            tokio::spawn(self.clone().sync_loop());
+            tokio::spawn(self.clone().forum_loop());
+            tokio::spawn(self.clone().share_retry_loop());
+        }
+        self.forum_wake.notify_one();
         let defs = commands::definitions();
         if let Err(e) = self
             .api
             .sync_guild_commands(&ready.application_id, self.cfg.guild_id, &defs)
             .await
         {
-            // 命令没同步成功就不开始心跳（后台显示离线，站长能发现）
+            // 命令同步失败不会阻止独立的分享检测与心跳。
             error!("[bug] on_ready failed: {e}");
             return;
         }
@@ -972,14 +877,6 @@ impl Naimei {
             "[bot] ready as {}, commands synced",
             ready.user.display_tag()
         );
-        let start = {
-            let mut inner = self.lock();
-            !std::mem::replace(&mut inner.sync_started, true) // 断线重连也会再触发 READY，只启动一次
-        };
-        if start {
-            tokio::spawn(self.clone().sync_loop());
-            tokio::spawn(self.clone().catch_up_forum());
-        }
     }
 
     /// 每分钟报一次心跳（后台据此显示在线状态）。
@@ -995,6 +892,11 @@ impl Naimei {
 
     /// 报一次心跳；网关收到（200）返回 true。
     pub async fn sync_once(&self, ready_at: f64) -> bool {
+        let ready_at = if ready_at > 0.0 {
+            ready_at
+        } else {
+            self.ready_at.load(Ordering::Relaxed) as f64
+        };
         let status = self.status_report(ready_at);
         self.bridge
             .bot("/report", &json!({"status": status}))
@@ -1004,6 +906,7 @@ impl Naimei {
 
     /// 心跳里的 `status`。
     pub fn status_report(&self, ready_at: f64) -> Value {
+        let detection = self.share_detection_report();
         let inner = self.lock();
         let user = inner
             .bot
@@ -1019,6 +922,7 @@ impl Naimei {
             "guild": inner.guild_name.clone().unwrap_or_default(),
             "latency_ms": latency,
             "ready_at": ready_at,
+            "share_detection": detection,
         })
     }
 }
@@ -1137,6 +1041,8 @@ pub async fn wait_for_shutdown() {
 
 /// 分发一条网关文本消息。
 pub fn dispatch(app: &Arc<Naimei>, raw: &str) {
+    app.gateway_seen_at
+        .store(app.now() as u64, Ordering::Relaxed);
     match events::parse(raw) {
         Ok(Gateway::Ready(ready)) => {
             app.set_bot_user(ready.user.clone());
@@ -1159,6 +1065,34 @@ pub fn dispatch(app: &Arc<Naimei>, raw: &str) {
         Ok(Gateway::ThreadUpdate(t)) => {
             let app = app.clone();
             tokio::spawn(async move { app.on_thread(*t, false).await });
+        }
+        Ok(Gateway::Resumed) => {
+            app.set_gateway_connected(true);
+            app.forum_wake.notify_one();
+        }
+        Ok(Gateway::MessageUpdate(m)) => {
+            let app = app.clone();
+            tokio::spawn(async move {
+                if m.guild_id
+                    .as_deref()
+                    .is_some_and(|g| g.parse::<u64>().ok() != Some(app.cfg.guild_id))
+                {
+                    return;
+                }
+                if app.share_parent(&m.channel_id).await.as_deref() != Some(share::FORUM_CHANNEL_ID)
+                {
+                    return;
+                }
+                if let (Ok(channel), Ok(id)) = (m.channel_id.parse(), m.id.parse()) {
+                    if let Ok(raw) = app.api.message_by_id(channel, id).await {
+                        if let Ok(message) = serde_json::from_value(raw) {
+                            app.record_forum_share(&message).await;
+                        }
+                    } else {
+                        app.forum_wake.notify_one();
+                    }
+                }
+            });
         }
         Ok(Gateway::Other) => {}
         Err(e) => warn!("无法解析的网关消息：{e}"),
@@ -1189,9 +1123,13 @@ pub async fn run(cfg: NaimeiConfig) -> anyhow::Result<()> {
                 dispatch(&app, &raw);
             }
             Some(Ok(Message::Close(frame))) => {
+                app.set_gateway_connected(false);
                 info!("[bot] 网关连接关闭：{frame:?}");
             }
-            Some(Err(e)) => warn!("[bot] 网关消息出错：{e}"),
+            Some(Err(e)) => {
+                app.set_gateway_connected(false);
+                warn!("[bot] 网关消息出错：{e}");
+            }
             None if closing => return Ok(()),
             None => anyhow::bail!(
                 "网关连接被致命关闭（常见原因：DISCORD_BOT_TOKEN 无效或 Intent 未开通），详见上面的关闭码"

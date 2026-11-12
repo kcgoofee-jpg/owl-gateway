@@ -144,6 +144,7 @@ export function memberStatus(m: Member, now: number): StatusBadge | null {
   const ids = m.issues ?? [];
   if (ids.includes("paused")) return { tone: "danger", text: "已限流" };
   if (ids.includes("expired")) return { tone: "danger", text: "已过期" };
+  if (m.share_locked) return { tone: "warn", text: "待分享", title: "在指定频道发图后自动恢复生图" };
   if (needsAttention(m, now)) {
     return {
       tone: "warn",

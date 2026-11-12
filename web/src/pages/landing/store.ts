@@ -85,11 +85,17 @@ export function createStore() {
       void loadStatus();
     };
     const timer = setInterval(refresh, 60_000);
+    const shareTimer = setInterval(() => {
+      if (!document.hidden && me.value?.logged_in && me.value.share_lock) void loadMe();
+    }, 5_000);
+    window.addEventListener("focus", refresh);
     document.addEventListener("visibilitychange", refresh);
     return () => {
       meRequest++;
       stopLive();
       clearInterval(timer);
+      clearInterval(shareTimer);
+      window.removeEventListener("focus", refresh);
       document.removeEventListener("visibilitychange", refresh);
     };
   };

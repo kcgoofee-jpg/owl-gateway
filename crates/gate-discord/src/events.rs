@@ -225,6 +225,8 @@ pub enum Gateway {
     GuildDelete(String),
     Interaction(Box<Interaction>),
     MessageCreate(Box<MessageInfo>),
+    MessageUpdate(Box<MessageInfo>),
+    Resumed,
     ThreadCreate(Box<ThreadInfo>),
     ThreadUpdate(Box<ThreadInfo>),
     /// 其他事件（含 HELLO / HEARTBEAT_ACK 等控制帧）：机器人不关心。
@@ -299,6 +301,10 @@ pub fn parse(raw: &str) -> Result<Gateway, serde_json::Error> {
         }
         Some("THREAD_UPDATE") => {
             Gateway::ThreadUpdate(Box::new(serde_json::from_str::<Frame<ThreadInfo>>(raw)?.d))
+        }
+        Some("RESUMED") => Gateway::Resumed,
+        Some("MESSAGE_UPDATE") => {
+            Gateway::MessageUpdate(Box::new(serde_json::from_str::<Frame<MessageInfo>>(raw)?.d))
         }
         Some("MESSAGE_CREATE") => {
             Gateway::MessageCreate(Box::new(serde_json::from_str::<Frame<MessageInfo>>(raw)?.d))

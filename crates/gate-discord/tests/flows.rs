@@ -294,9 +294,11 @@ async fn heartbeat_reports_account_server_latency_and_start_time() {
     assert_eq!(bridge[0]["authorization"], format!("Bearer {SECRET}"));
     assert_eq!(
         bridge[0]["json"].to_string(),
-        json!({"status": {"user": "naimei", "guild": "测试服", "latency_ms": 42, "ready_at": 1_759_999_000.5}})
+        json!({"status": {"user": "naimei", "guild": "测试服", "latency_ms": 42, "ready_at": 1_759_999_000.5,
+            "share_detection": {"connected":false,"last_complete_at":0.0,"complete_day_start":0.0,
+            "pending":0,"oldest_failure_at":null,"error":null}}})
             .to_string(),
-        "只有在线状态，没有旧版的 AI 评论计数"
+        "心跳包含分享检测健康度，不含消息正文或旧版 AI 评论计数"
     );
     assert!(server.discord_log().is_empty(), "心跳不调用 Discord");
     // 服务器不在缓存里：guild 报空串；延迟还没有数据按 0 报
@@ -331,7 +333,7 @@ async fn heartbeat_failures_do_not_break_anything() {
 }
 
 #[tokio::test]
-async fn ready_syncs_the_commands_then_starts_the_heartbeat_once() {
+async fn ready_syncs_commands_and_starts_heartbeat_and_reconciliation_once() {
     let server = MockServer::start().await;
     let app = naimei(&server);
     server.reset(
@@ -370,5 +372,8 @@ async fn ready_syncs_the_commands_then_starts_the_heartbeat_once() {
         }
         tokio::time::sleep(Duration::from_millis(20)).await;
     }
-    assert_eq!(bridge_paths(&server), ["/self-register/bot/report"]);
+    let paths = bridge_paths(&server);
+    // Reconciliation publishes its result immediately; two READY frames may wake it twice.
+    assert!(!paths.is_empty() && paths.len() <= 3, "{paths:?}");
+    assert!(paths.iter().all(|p| p == "/self-register/bot/report"));
 }

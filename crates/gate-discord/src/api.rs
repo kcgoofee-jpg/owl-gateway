@@ -169,6 +169,46 @@ impl DiscordApi {
         Ok(v.as_array().cloned().unwrap_or_default())
     }
 
+    /// Ascending cursor for reliable incremental scans (100 messages per page).
+    pub async fn messages_after(
+        &self,
+        channel_id: u64,
+        after: u64,
+    ) -> Result<Vec<Value>, ApiError> {
+        let route = Route::GetMessages {
+            after: Some(after),
+            around: None,
+            before: None,
+            channel_id,
+            limit: Some(100),
+        };
+        let response = self
+            .client
+            .request::<Value>(Request::builder(&route).build()?)
+            .await?;
+        let v = response.model().await.map_err(ApiError::Body)?;
+        v.as_array()
+            .cloned()
+            .ok_or_else(|| ApiError::BadId("消息分页格式不正确".into()))
+    }
+
+    pub async fn archived_threads(
+        &self,
+        channel_id: u64,
+        before: Option<&str>,
+    ) -> Result<Value, ApiError> {
+        let route = Route::GetPublicArchivedThreads {
+            before,
+            channel_id,
+            limit: Some(100),
+        };
+        let response = self
+            .client
+            .request::<Value>(Request::builder(&route).build()?)
+            .await?;
+        response.model().await.map_err(ApiError::Body)
+    }
+
     /// `PUT /channels/{tid}/thread-members/@me` —— bot 加入帖子（不加入收不到帖子内消息）。
     pub async fn join_thread(&self, thread_id: u64) -> Result<(), ApiError> {
         let route = Route::JoinThread {
@@ -195,10 +235,10 @@ impl DiscordApi {
             .request::<Value>(Request::builder(&route).build()?)
             .await?;
         let v = response.model().await.map_err(ApiError::Body)?;
-        Ok(v.get("threads")
+        v.get("threads")
             .and_then(Value::as_array)
             .cloned()
-            .unwrap_or_default())
+            .ok_or_else(|| ApiError::BadId("活跃帖子格式不正确".into()))
     }
 
     /// `GET /channels/{cid}/messages/{mid}` —— 单条消息（帖子首楼：帖子的频道 id 即首楼 id）。

@@ -41,6 +41,13 @@ async fn a_share_is_recorded_once_and_only_counts_from_its_time() {
             .unwrap()
     );
     assert!(!db.has_share_since("900000000000000009", 0.0).await.unwrap());
+    assert!(
+        db.sharing_members_since(200.0)
+            .await
+            .unwrap()
+            .contains("900000000000000005")
+    );
+    assert!(db.sharing_members_since(201.0).await.unwrap().is_empty());
     let at: f64 = db
         .read(|c| {
             c.query_row(

@@ -10,6 +10,7 @@ import {
   policySpecs,
 } from "./member-policy";
 import { claimBody, type Ops, type RoleRule, validRole } from "./onboarding/core";
+import { ShareLockCard } from "./share-lock";
 import { NumField, SaveBar, Sect, SwitchRow, useForm } from "./system/forms";
 
 function DefaultRules() {
@@ -163,6 +164,7 @@ export default function Onboarding() {
     <Sect>
       <SectionHead title="成员规则" />
       <DefaultRules />
+      <ShareLockCard />
       {ops.data ? (
         <ClaimForm ops={ops.data} />
       ) : (

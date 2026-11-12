@@ -8,6 +8,39 @@ use crate::key::Key;
 use crate::state::AppState;
 use gate_core::clock::Clock;
 use gate_core::reasons;
+use gate_core::share_detection::Report;
+use serde_json::{Value, json};
+
+pub const ENABLED_KEY: &str = "share_lock_enabled";
+
+pub async fn detection(state: &AppState) -> Result<Value, crate::error::InternalError> {
+    let enabled = state.db.get_setting(ENABLED_KEY).await?.as_deref() != Some("0");
+    let raw = state
+        .db
+        .get_setting(gate_core::bot_config::STATUS_KEY)
+        .await?;
+    let status: Value = raw
+        .as_deref()
+        .and_then(|s| serde_json::from_str(s).ok())
+        .unwrap_or(Value::Null);
+    let report = status
+        .get("share_detection")
+        .cloned()
+        .and_then(|v| serde_json::from_value::<Report>(v).ok())
+        .unwrap_or_default();
+    let now = state.now();
+    let day_start = state.clock.day_start(now);
+    let seen_at = status["seen_at"].as_f64().unwrap_or(0.0);
+    let enforcing = enabled && report.enforceable(seen_at, now, day_start);
+    Ok(json!({
+        "enabled": enabled,
+        "enforcing": enforcing,
+        "healthy": report.healthy(seen_at, now, day_start),
+        "bot_online": now - seen_at < gate_core::bot_config::ONLINE_WINDOW,
+        "channel_url": channel_url(),
+        "detection": report,
+    }))
+}
 
 /// 存图备份专用（论坛频道）。新帖和帖子里的新内容都算。
 pub const FORUM_CHANNEL_ID: &str = "1558068804934705222";
@@ -70,6 +103,12 @@ pub async fn enforce(state: &AppState, key: &Key) -> Result<(), ApiError> {
 async fn lookup(state: &AppState, key: &Key) -> Result<bool, crate::error::InternalError> {
     let now = state.now();
     if now < starts_at() || key.owner_image_full || key.patron {
+        return Ok(false);
+    }
+    if !detection(state).await?["enforcing"]
+        .as_bool()
+        .unwrap_or(false)
+    {
         return Ok(false);
     }
     let discord_id = key.subject();

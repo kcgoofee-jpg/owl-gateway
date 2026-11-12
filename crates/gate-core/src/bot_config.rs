@@ -1,7 +1,6 @@
 //! Discord 机器人（奶妹）的运行状态（心跳）的纯逻辑部分。
 //!
-//! 机器人只管成员命令；跑图分享、最近动作之类的扩展功能不存在，站点设置里残留的
-//! `bot_gallery_*` / `bot_events` 行不再读写（只增不减，留在库里无害）。
+//! 心跳包含成员命令进程状态与独立的分享检测报告；旧的 AI 画廊评论与动作设置不再使用。
 //!
 //! 不在这里的（服务层负责，都是 `site_settings` 表的键值读写）：
 //! - 机器人每分钟上报一次心跳：服务层把 `status` 交给 [`status_to_store`]，结果写进 `bot_status`；
@@ -30,7 +29,14 @@ pub enum BotConfigError {
 }
 
 /// 心跳里留下的字段（白名单）；其余的键一律丢弃。
-const STATUS_FIELDS: [&str; 5] = ["user", "guild", "latency_ms", "ready_at", "version"];
+const STATUS_FIELDS: [&str; 6] = [
+    "user",
+    "guild",
+    "latency_ms",
+    "ready_at",
+    "version",
+    "share_detection",
+];
 
 /// `report` 的心跳部分：只留白名单字段，整体覆盖 `bot_status`。`status` 必须是对象。
 pub fn status_to_store(status: &Map<String, Value>, now: f64) -> String {

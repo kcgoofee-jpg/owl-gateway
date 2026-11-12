@@ -23,6 +23,7 @@ pub mod policy;
 pub mod primitives;
 pub mod quota;
 pub mod reasons;
+pub mod share_detection;
 pub mod site_flags;
 pub mod snowflake;
 pub mod upstream_errors;

@@ -16,6 +16,7 @@ name = "nai-bots"
 path = "src/main.rs"
 
 [dependencies]
+gate-core = { path = "../gate-core" }
 anyhow.workspace = true
 thiserror.workspace = true
 serde.workspace = true

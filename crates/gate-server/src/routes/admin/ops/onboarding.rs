@@ -16,6 +16,43 @@ pub(super) fn router() -> Router<AppState> {
     Router::new()
         .route("/admin/api/ops", get(ops_get))
         .route("/admin/api/ops/registration", put(set_registration))
+        .route(
+            "/admin/api/ops/share-lock",
+            get(share_lock_get).put(share_lock_put),
+        )
+}
+
+async fn share_lock_get(State(state): State<AppState>, _s: AdminSession) -> ApiResult {
+    Ok(ok_json(&crate::share_lock::detection(&state).await?))
+}
+
+async fn share_lock_put(
+    State(state): State<AppState>,
+    _s: AdminSession,
+    req: Request,
+) -> ApiResult {
+    let (parts, body) = req.into_parts();
+    let body = read_json_body(&parts.headers, body, BODY_LIMIT).await?;
+    let enabled = body
+        .get("enabled")
+        .and_then(Value::as_bool)
+        .filter(|_| body.len() == 1)
+        .ok_or_else(|| crate::error::HttpError::new(422, "只接受 {enabled: true/false}"))?;
+    state
+        .db
+        .set_setting_logged(
+            crate::share_lock::ENABLED_KEY,
+            Some(if enabled { "1" } else { "0" }),
+            &super::super::actor(&state, &parts),
+            "分享限制",
+            "成员规则",
+            if enabled { "开启" } else { "关闭" },
+            state.now(),
+        )
+        .await?;
+    Ok(super::super::mark_logged(ok_json(
+        &crate::share_lock::detection(&state).await?,
+    )))
 }
 
 /// 运行中开关的当前状态（`GET /ops` 与 `PUT /ops/registration` 共用）。

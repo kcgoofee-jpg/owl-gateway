@@ -177,6 +177,21 @@ pub(super) async fn members_view(state: &AppState, filter_raw: &str) -> Result<V
         }
     }
     let today_counters = st.db.counter_map(&today).await?;
+    // Batch the same policy inputs used by the request gate; no per-member database reads.
+    let share_inputs = async {
+        if !crate::share_lock::detection(&st).await?["enforcing"]
+            .as_bool()
+            .unwrap_or(false)
+        {
+            return Ok::<_, crate::error::InternalError>(None);
+        }
+        Ok(Some((
+            st.db.counter_map(&st.clock.day(day_start - 1.0)).await?,
+            st.db.sharing_members_since(day_start).await?,
+        )))
+    }
+    .await
+    .unwrap_or(None);
     let mut out: Vec<Obj> = Vec::new();
     for row in st.db.list_keys().await? {
         let id = row.get("id").and_then(Value::as_i64).unwrap_or(0);
@@ -190,6 +205,29 @@ pub(super) async fn members_view(state: &AppState, filter_raw: &str) -> Result<V
         let invited = my_tags.is_some_and(|t| t.iter().any(|x| x.tag == INVITE_TAG));
         let reg_row = reg.get(&id);
         let _ms = milestones.get(&id);
+        let policy = policies.for_subject(row.get("discord_id").and_then(Value::as_str))?;
+        let share_locked = share_inputs.as_ref().is_some_and(|(counters, shared)| {
+            let Some(subject) = row
+                .get("discord_id")
+                .and_then(Value::as_str)
+                .filter(|s| !s.is_empty())
+            else {
+                return false;
+            };
+            let used = counters.get(&id).cloned().unwrap_or_default();
+            crate::share_lock::locked(
+                now,
+                crate::share_lock::DayUsage {
+                    legacy: used.legacy_free_images,
+                    v5: used.v5,
+                    daily_images: i64::from(policy.effective.daily_images),
+                    daily_v5: i64::from(policy.effective.daily_v5),
+                },
+                shared.contains(subject),
+                policy.owner_image.as_ref().is_some_and(|p| p.enabled)
+                    || policy.patron.as_ref().is_some_and(|p| p.enabled),
+            )
+        });
         let mut m = Obj::new();
         let mut put = |k: &str, v: Value| {
             m.insert(k.to_string(), v);
@@ -197,6 +235,9 @@ pub(super) async fn members_view(state: &AppState, filter_raw: &str) -> Result<V
         put("id", jget(&row, "id"));
         put("name", jget(&row, "name"));
         put("enabled", json!(jflag(&row, "enabled")));
+        if share_locked {
+            put("share_locked", json!(true));
+        }
         put("invited", json!(invited));
         put("discord_id", json!(reg_row.map(|r| r.discord_id.clone())));
         put("discord", json!(reg_row.map(discord_profile)));
@@ -205,10 +246,8 @@ pub(super) async fn members_view(state: &AppState, filter_raw: &str) -> Result<V
         put("expires_at", jget(&row, "expires_at"));
         put(
             "policy",
-            serde_json::to_value(
-                policies.for_subject(row.get("discord_id").and_then(Value::as_str))?,
-            )
-            .map_err(|_| crate::error::InternalError("成员规则编码失败".into()))?,
+            serde_json::to_value(policy)
+                .map_err(|_| crate::error::InternalError("成员规则编码失败".into()))?,
         );
         put(
             "today",
@@ -323,6 +362,11 @@ pub(super) async fn members_view(state: &AppState, filter_raw: &str) -> Result<V
             Value::Array(entries.iter().map(|e| e["id"].clone()).collect()),
         );
         for other in &entries[1..] {
+            let share_locked = head.get("share_locked") == Some(&Value::Bool(true))
+                || other.get("share_locked") == Some(&Value::Bool(true));
+            if share_locked {
+                head.insert("share_locked".into(), json!(true));
+            }
             let enabled = head["enabled"].as_bool().unwrap_or(false)
                 || other["enabled"].as_bool().unwrap_or(false);
             head.insert("enabled".into(), json!(enabled));

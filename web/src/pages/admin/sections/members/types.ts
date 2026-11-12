@@ -13,6 +13,7 @@ export type Member = {
   id: number;
   name: string;
   enabled: boolean;
+  share_locked?: boolean;
   discord_id: string | null;
   discord: Discord | null;
   created_at: number;

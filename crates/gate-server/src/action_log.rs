@@ -62,6 +62,7 @@ pub const ADMIN_ACTIONS: &[(&str, &str, &str)] = &[
     ("POST", "/ops/manual", "手动改设置"),
     ("PUT", "/ops/debug-record", "临时调试记录"),
     ("PUT", "/ops/registration", "修改开放注册设置"),
+    ("PUT", "/ops/share-lock", "分享限制"),
     ("PUT", "/guard", "修改账号保护与排队设置"),
     ("POST", "/ops/reset-all-keys", "全站杀头重置"),
     ("POST", "/keys/{key_id}/share-clear", "解除限流暂停"),

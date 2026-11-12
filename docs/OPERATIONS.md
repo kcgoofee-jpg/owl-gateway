@@ -104,6 +104,14 @@ cd /opt/owl && docker compose -p owl --env-file /opt/service-tools/.env -f compo
 
 线上 `.env` 里残留的 `DEFAULT_*`、`REGISTER_*`、`AUDIT_*`、`DISCORD_ROLE_ID`、`SEED_DEMO_KEY`、`TZ`、`DAY_RESET_HOUR`、`GLOBAL_CONCURRENCY`、`GLOBAL_MONTHLY_ANLAS`、`GLOBAL_DAILY_ANLAS`、`QUEUE_TIMEOUT`、`IMAGE_MIN_INTERVAL`、`IMAGE_429_COOLDOWN_SECONDS`、`AUTH_FAIL_*`、`LOGIN_*`、`ALLOW_IMG2IMG`、`SAFE_CLAMP`、`MAX_PIXELS`、`MAX_STEPS`、`ALERT_CHANNEL_ID`、`ALERT_WEBHOOK_URL` 3.0 不再读，可以删掉。删之前先确认后台设置里已经有你要的值——比如名额 `register_max_users`、新领 Key 的有效天数 `register_expires_days`：库里没有这一行时，3.0 用代码默认（10 / 不过期），不再回落到 `.env`。
 
+## 分享限制
+
+后台「成员规则 → 用满额度后需分享」开关对应 `GET/PUT /admin/api/ops/share-lock`，写入只接受 `{ "enabled": true/false }`，立即生效并记操作日志，默认开启。关闭只跳过分享限制，检测继续运行，其他权限与额度仍正常检查。
+
+昨日用满 V4.5 或 V5 个人额度、今日尚未分享图片的普通成员，只暂停图片相关请求，不停用 Key、不移除频道身份组；站长完整生图号与已开通赞助席豁免。发图提交成功后下一次请求解除此限制，等待分享的首页每 5 秒刷新，并在切回页面时核对。
+
+检测状态独立于 Bot 在线心跳：最近完整补扫时间、核对的服务日起点、待重试记录和错误均可在卡片查看。超过 5 分钟没有可靠同步或当前服务日尚未核对时暂时放行；心跳成功不能续期，须完整补扫并清空重试队列才恢复检测。重启和重连从本服务日起点重新分页核对；只存分享元数据，不保存消息正文或图片。故障时先关该开关，检查 Discord 连接、频道可见性、读取历史权限、Message Content Intent 和桥接配置，无需改成员 Key。
+
 ## 常用命令
 
 ```bash
