@@ -128,6 +128,15 @@ mod tests {
         );
         let miss = retrieve("今天天气怎么样", 2);
         assert!(miss.is_empty(), "无关问题不硬塞知识库：{miss}");
+        let recycle = retrieve("连续几天没出图会不会自动回收 Key", 2);
+        assert!(
+            recycle.contains("不会因为几天没出图") || recycle.contains("闲置回收"),
+            "应说明闲置回收已关：{recycle}"
+        );
+        assert!(
+            !recycle.contains("会被自动回收，名额释放"),
+            "不得再承诺闲置自动删 Key：{recycle}"
+        );
     }
 
     #[test]

@@ -1,0 +1,27 @@
+# Host-only GLM proxy for 奶妹. Lives at /opt/zcode-proxy on the server.
+# Bind loopback 8090; the image listens on 8080 inside the container.
+# Credentials and .env stay on the host (mode 600), never in git.
+
+name: zcode
+
+services:
+  zcode-proxy:
+    image: ghcr.io/tridefender/zcode-proxy:latest
+    container_name: zcode-proxy
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:8090:8080"
+    volumes:
+      - ./config.yaml:/data/config.yaml
+      - ./credentials.json:/home/bun/.zcode-proxy/credentials.json
+    env_file: .env
+    environment:
+      TZ: Asia/Shanghai
+      ZCODE_UPDATE_CHECK: "off"
+      ZCODE_CLAIM_ENABLED: "false"
+      ZCODE_PROVIDER: "${ZCODE_PROVIDER:-zai}"
+    mem_limit: 192m
+    logging:
+      driver: journald
+      options:
+        tag: "{{.Name}}"

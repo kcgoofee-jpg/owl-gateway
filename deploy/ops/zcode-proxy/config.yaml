@@ -1,0 +1,39 @@
+server:
+  port: 8080
+  host: "0.0.0.0"
+
+auth:
+  proxyApiKey: null
+
+provider: zai
+plan: coding-plan
+defaultModel: glm-5.3-flash
+models:
+  - glm-5.3
+  - glm-5.3-flash
+
+identity:
+  sourceTitle: "cli"
+  refererOrigin: "https://zcode.z.ai"
+  deviceMid: ""
+
+claim:
+  enabled: false
+  auto: false
+
+async:
+  enabled: false
+
+mcp:
+  gateway:
+    enabled: false
+
+highspeed:
+  enabled: true
+  models: ["glm-5.3", "glm-5.3-flash"]
+
+clientSigning:
+  enabled: true
+
+logging:
+  level: info
