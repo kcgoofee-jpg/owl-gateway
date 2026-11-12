@@ -266,7 +266,7 @@ pub(crate) fn sanitize(value: &Value) -> Value {
 }
 
 fn strip(value: &Value, key: &str) -> Value {
-    if BINARY_KEYS.iter().any(|k| *k == key) {
+    if BINARY_KEYS.contains(&key) {
         return omit(value);
     }
     match value {

@@ -46,7 +46,12 @@ export function DebugRecordCard() {
   const save = async () => {
     if (saving) return;
     setSaving(true);
-    const ok = await act("PUT", "/admin/api/ops/debug-record", { subjects: ids }, "已更新调试记录名单");
+    const ok = await act(
+      "PUT",
+      "/admin/api/ops/debug-record",
+      { subjects: ids },
+      "已更新调试记录名单",
+    );
     setSaving(false);
     if (ok) setDraft(null);
   };
@@ -84,7 +89,13 @@ export function DebugRecordCard() {
                 <button
                   type="button"
                   class="derive__title"
-                  style={{ background: "none", border: 0, padding: 0, cursor: "pointer", textAlign: "left" }}
+                  style={{
+                    background: "none",
+                    border: 0,
+                    padding: 0,
+                    cursor: "pointer",
+                    textAlign: "left",
+                  }}
                   onClick={() => setOpen(shown ? null : key)}
                 >
                   {when(item.ts)} · {item.rid} · {item.model || item.kind || "请求"}

@@ -41,14 +41,10 @@ pub(super) async fn tool(
     let body = read_image_payload(&parts.headers, body, IMAGE_BODY_LIMIT).await?;
     let body = Value::Object(body);
     let op = operation.to_string();
-    let (payload, cost) = tokio::task::spawn_blocking({
-        let body = body.clone();
-        let op = op.clone();
-        move || prepare_tool(&body, &op)
-    })
-    .await
-    .map_err(|e| InternalError(e.to_string()))?
-    .map_err(|m| GateError::with_code(400, m, reasons::PARAM))?;
+    let (payload, cost) = tokio::task::spawn_blocking(move || prepare_tool(&body, &op))
+        .await
+        .map_err(|e| InternalError(e.to_string()))?
+        .map_err(|m| GateError::with_code(400, m, reasons::PARAM))?;
     crate::debug_record::capture_request(&state, &ctx, &key, operation, &payload, &[], "").await;
     let model = payload
         .get("model")
