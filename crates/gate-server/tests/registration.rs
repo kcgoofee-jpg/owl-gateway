@@ -2804,6 +2804,7 @@ async fn my_requests_show_only_my_recent_rows_without_private_columns() {
     let rows: Vec<(i64, f64, &str, f64, &str, &str)> = vec![
         (mine, ds - 3600.0, "ok", 0.0, "", "old"),
         (mine, at(0.2), "ok", 30.0, "", "832x1216/28step est=30A"),
+        (mine, at(0.3), "ok", 0.0, "", "832x1216/28step V5额度+1"),
         (
             mine,
             at(0.4),
@@ -2857,7 +2858,7 @@ async fn my_requests_show_only_my_recent_rows_without_private_columns() {
     let items = r.2["items"].as_array().unwrap();
     assert_eq!(
         items.len(),
-        3,
+        4,
         "rows before the last reset and other members' rows are hidden"
     );
     for it in items {
@@ -2872,21 +2873,27 @@ async fn my_requests_show_only_my_recent_rows_without_private_columns() {
     assert_eq!(items[0]["status"], "rejected");
     assert_eq!(items[0]["code"], 402);
     assert_eq!(items[0]["message"], "你今天的 Anlas 额度不够这次用");
+    assert_eq!(items[0]["size"], "");
     assert_eq!(items[1]["site_paid"], true);
     assert_eq!(items[1]["anlas"], 0.0);
-    assert_eq!(items[2]["anlas"], 30.0);
-    assert_eq!(items[2]["wait_s"], 1.5);
-    assert_eq!(items[2]["dur_s"], 9.0);
+    assert_eq!(items[1]["billing"], "site_paid");
+    assert_eq!(items[1]["size"], "832 × 1216 / 28 步");
+    assert_eq!(items[2]["billing"], "v5");
+    assert_eq!(items[2]["size"], "832 × 1216 / 28 步");
+    assert_eq!(items[3]["anlas"], 30.0);
+    assert_eq!(items[3]["billing"], "anlas");
+    assert_eq!(items[3]["wait_s"], 1.5);
+    assert_eq!(items[3]["dur_s"], 9.0);
     assert_eq!(r.2["next"], Value::Null);
     assert_eq!(
         r.2["summary"],
-        json!({"total": 3, "ok": 2, "rejected": 1, "error": 0, "cancelled": 0})
+        json!({"total": 4, "ok": 3, "rejected": 1, "error": 0, "cancelled": 0})
     );
     let only = get("?status=rejected").await;
     assert_eq!(only.2["items"].as_array().unwrap().len(), 1);
     let before = items[0]["id"].as_i64().unwrap();
     let older = get(&format!("?before={before}")).await;
-    assert_eq!(older.2["items"].as_array().unwrap().len(), 2);
+    assert_eq!(older.2["items"].as_array().unwrap().len(), 3);
 }
 
 /// Statistics use the complete service day and the authenticated key, not a page of history.

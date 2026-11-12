@@ -134,6 +134,10 @@ export interface MyRequest {
   code: number | null;
   /** 本站的说明原文（成功时是尺寸与计费说明） */
   message: string;
+  /** 成功行尺寸：`832 × 1216 / 28 步`。没有则空串。老记录可能缺这个字段。 */
+  size?: string;
+  /** 成功行计费：站付 / Anlas / V5 / 免费。老记录可能缺这个字段。 */
+  billing?: "v5" | "anlas" | "site_paid" | "free";
 }
 
 export interface MyRequests {

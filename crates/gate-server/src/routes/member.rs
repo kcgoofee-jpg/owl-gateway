@@ -18,7 +18,8 @@ use axum::http::{HeaderMap, HeaderValue, StatusCode};
 use axum::response::Response;
 use axum::routing::{get, post};
 use gate_core::values;
-use serde_json::json;
+use serde::Serialize;
+use serde_json::{Value, json};
 use std::collections::HashMap;
 
 pub fn router() -> Router<AppState> {
@@ -330,14 +331,12 @@ async fn my_requests(
         .member_logs(key.id(), since, before, status, MY_REQUESTS_PAGE + 1)
         .await?;
     let more = rows.len() as i64 > MY_REQUESTS_PAGE;
-    let items: Vec<serde_json::Value> = rows
+    let items: Vec<MyRequestItem> = rows
         .iter()
         .take(MY_REQUESTS_PAGE as usize)
-        .map(my_request_item)
+        .map(MyRequestItem::from_log)
         .collect();
-    let next = more
-        .then(|| items.last().and_then(|r| r["id"].as_i64()))
-        .flatten();
+    let next = more.then(|| items.last().map(|r| r.id)).flatten();
     let summary = state.db.member_log_summary(key.id(), since).await?;
     Ok(no_store(ok_json(&json!({
         "items": items,
@@ -362,56 +361,180 @@ async fn my_request_stats(State(state): State<AppState>, headers: HeaderMap) -> 
     Ok(no_store(ok_json(&data)))
 }
 
-/// 一行请求日志 → 成员看到的一条（`rid` = 请求编号，与错误响应的 request_id / x-request-id、后台请求日志的「编号」同一个）：拒绝 / 失败的说明去掉开头的状态码另放；站付的图成员花的 Anlas 记 0。
-fn my_request_item(r: &serde_json::Value) -> serde_json::Value {
-    let detail = r["detail"].as_str().unwrap_or("");
-    let (code, message) = match detail.split_once(' ') {
-        Some((c, rest)) if c.len() == 3 && c.bytes().all(|b| b.is_ascii_digit()) => {
-            (c.parse::<i64>().ok(), rest)
+/// 成员看到的一条请求。旧键保留；`size` / `billing` 是首页成功行直接用的字段，不再让前端抠 `detail`。
+#[derive(Debug, Serialize)]
+struct MyRequestItem {
+    id: i64,
+    rid: Option<String>,
+    ts: f64,
+    kind: String,
+    model: String,
+    status: String,
+    images: i64,
+    anlas: f64,
+    site_paid: bool,
+    wait_s: Option<f64>,
+    dur_s: Option<f64>,
+    reason: String,
+    code: Option<i64>,
+    message: String,
+    delivery_state: String,
+    settlement_status: Option<String>,
+    remaining_anlas: i64,
+    remaining_v5: i64,
+    remaining_legacy: i64,
+    correlation_id: String,
+    app: &'static str,
+    size: String,
+    billing: &'static str,
+}
+
+impl MyRequestItem {
+    /// 拒绝 / 失败的说明去掉开头的状态码另放；站付的图成员花的 Anlas 记 0。
+    fn from_log(r: &Value) -> Self {
+        let detail = r["detail"].as_str().unwrap_or("");
+        let (code, message) = match detail.split_once(' ') {
+            Some((c, rest)) if c.len() == 3 && c.bytes().all(|b| b.is_ascii_digit()) => {
+                (c.parse::<i64>().ok(), rest.to_string())
+            }
+            _ => (None, detail.to_string()),
+        };
+        let site_paid = detail.contains(gate_core::paid_v5::MARKER);
+        let anlas = if site_paid {
+            0.0
+        } else {
+            r["anlas"].as_f64().unwrap_or(0.0)
+        };
+        let client = r["client"].as_str().unwrap_or("");
+        let app = if client.starts_with("workbench") {
+            "workbench"
+        } else {
+            "client"
+        };
+        let secs = |k: &str| {
+            r[k].as_i64()
+                .filter(|ms| *ms > 0)
+                .map(|ms| ms as f64 / 1000.0)
+        };
+        Self {
+            id: r["id"].as_i64().unwrap_or(0),
+            rid: r["rid"].as_str().map(str::to_string),
+            ts: r["ts"].as_f64().unwrap_or(0.0),
+            kind: text_field(r, "kind"),
+            model: text_field(r, "model"),
+            status: text_field(r, "status"),
+            images: r["images"].as_i64().unwrap_or(0),
+            anlas,
+            site_paid,
+            wait_s: secs("wait_ms"),
+            dur_s: secs("dur_ms"),
+            reason: text_field(r, "reason"),
+            code,
+            size: request_size(detail),
+            billing: request_billing(site_paid, anlas, detail),
+            message,
+            delivery_state: r["delivery_state"]
+                .as_str()
+                .filter(|s| !s.is_empty())
+                .unwrap_or("unknown")
+                .to_string(),
+            settlement_status: r["settlement_status"].as_str().map(str::to_string),
+            remaining_anlas: r["remaining_anlas"].as_i64().unwrap_or(0),
+            remaining_v5: r["remaining_v5"].as_i64().unwrap_or(0),
+            remaining_legacy: r["remaining_legacy"].as_i64().unwrap_or(0),
+            correlation_id: text_field(r, "correlation_id"),
+            app,
         }
-        _ => (None, detail),
-    };
-    let site_paid = detail.contains(gate_core::paid_v5::MARKER);
-    let anlas = if site_paid {
-        0.0
+    }
+}
+
+fn text_field(r: &Value, k: &str) -> String {
+    r[k].as_str().unwrap_or("").to_string()
+}
+
+/// `832x1216/28step` → `832 × 1216 / 28 步`。对不上就空串（工具类、拒绝说明）。
+/// 只按 ASCII 数字取宽高，避免说明文案里中文紧挨尺寸时切到 UTF-8 中间。
+fn request_size(detail: &str) -> String {
+    for (i, _) in detail.match_indices('x') {
+        let left = &detail[..i];
+        let w_len = left.bytes().rev().take_while(u8::is_ascii_digit).count();
+        if w_len == 0 {
+            continue;
+        }
+        let w = &left[left.len() - w_len..];
+        let rest = &detail[i + 1..];
+        let h_len = rest.bytes().take_while(u8::is_ascii_digit).count();
+        if h_len == 0 {
+            continue;
+        }
+        let h = &rest[..h_len];
+        let rest = &rest[h_len..];
+        if !rest.starts_with('/') {
+            continue;
+        }
+        let rest = &rest[1..];
+        let s_len = rest.bytes().take_while(u8::is_ascii_digit).count();
+        if s_len == 0 {
+            continue;
+        }
+        let steps = &rest[..s_len];
+        if rest[s_len..].starts_with("step") {
+            return format!("{w} × {h} / {steps} 步");
+        }
+    }
+    String::new()
+}
+
+/// 与首页成功行同一套优先级：站付 → 自己的 Anlas → V5 额度 → 免费。
+fn request_billing(site_paid: bool, anlas: f64, detail: &str) -> &'static str {
+    if site_paid {
+        "site_paid"
+    } else if anlas > 0.0 {
+        "anlas"
+    } else if detail.contains("V5额度") {
+        "v5"
     } else {
-        r["anlas"].as_f64().unwrap_or(0.0)
-    };
-    // 来源：桥接层标过的 workbench 优先，其余按第三方客户端显示
-    let client = r["client"].as_str().unwrap_or("");
-    let app = if client.starts_with("workbench") {
-        "workbench"
-    } else {
-        "client"
-    };
-    let secs = |k: &str| {
-        r[k].as_i64()
-            .filter(|ms| *ms > 0)
-            .map(|ms| ms as f64 / 1000.0)
-    };
-    json!({
-        "id": r["id"],
-        "rid": r["rid"],
-        "ts": r["ts"],
-        "kind": r["kind"],
-        "model": r["model"],
-        "status": r["status"],
-        "images": r["images"],
-        "anlas": anlas,
-        "site_paid": site_paid,
-        "wait_s": secs("wait_ms"),
-        "dur_s": secs("dur_ms"),
-        "reason": r["reason"],
-        "code": code,
-        "message": message,
-        "delivery_state": r["delivery_state"].as_str().unwrap_or("unknown"),
-        "settlement_status": r["settlement_status"],
-        "remaining_anlas": r["remaining_anlas"],
-        "remaining_v5": r["remaining_v5"],
-        "remaining_legacy": r["remaining_legacy"],
-        "correlation_id": r["correlation_id"],
-        "app": app,
-    })
+        "free"
+    }
+}
+
+#[cfg(test)]
+mod request_item_tests {
+    use super::{request_billing, request_size};
+    use gate_core::paid_v5::MARKER;
+
+    #[test]
+    fn size_comes_from_the_leading_token() {
+        assert_eq!(
+            request_size("832x1216/28step est=30A"),
+            "832 × 1216 / 28 步"
+        );
+        assert_eq!(
+            request_size(&format!("1216x832/23step; {MARKER} 30A")),
+            "1216 × 832 / 23 步"
+        );
+        assert_eq!(request_size("402 你今天的 Anlas 额度不够这次用"), "");
+        assert_eq!(request_size("Vibe 编码 2 Anlas"), "");
+        assert_eq!(
+            request_size("400 尺寸832x1216/28step无效"),
+            "832 × 1216 / 28 步"
+        );
+        assert_eq!(request_size("寸x1216/28step"), "");
+    }
+
+    #[test]
+    fn billing_prefers_site_paid_then_anlas_then_v5() {
+        assert_eq!(request_billing(true, 30.0, "站付V5"), "site_paid");
+        assert_eq!(
+            request_billing(false, 30.0, "832x1216/28step est=30A"),
+            "anlas"
+        );
+        assert_eq!(
+            request_billing(false, 0.0, "832x1216/28step V5额度+1"),
+            "v5"
+        );
+        assert_eq!(request_billing(false, 0.0, "832x1216/28step 免费"), "free");
+    }
 }
 
 fn int_path_error(_raw: &str) -> HttpError {

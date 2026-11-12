@@ -1,7 +1,7 @@
 import { fullTime, num } from "../../lib/format";
+import { modelLabel } from "../../lib/request-label";
 import { Button, Skeleton } from "../../ui";
-import { modelLabel } from "./request-model";
-import type { MyRequestStats, MyRequests } from "./types";
+import type { MyRequestStats } from "./types";
 import "./request-stats.css";
 
 export function requestCategories(rows: MyRequestStats["breakdown"]) {
