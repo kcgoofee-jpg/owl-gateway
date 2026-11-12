@@ -221,6 +221,7 @@ async fn subscription(state: &AppState, key: &Key) -> Result<Value, InternalErro
         global_v5_limit: shared.daily_v5,
         global_v5_total: state.db.day_v5_total(&day).await?,
         v5_paused: crate::ops::v5_paused(&state.db).await?,
+        daily_legacy_used: day_counter.legacy_free_images,
     };
     let mut view = gate_core::client_views::subscription_payload(
         &key.policy,

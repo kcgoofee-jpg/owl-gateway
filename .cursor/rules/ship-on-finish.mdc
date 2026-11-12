@@ -1,0 +1,14 @@
+---
+description: Finish a change by committing main, waiting for that commit's CI, and deploying. Never ask.
+alwaysApply: true
+---
+
+# Ship on finish
+
+After a code change is done, ship it. Do not ask whether to commit, push, or deploy.
+
+1. Commit on `main`. English conventional commits (`type(scope): imperative`). CHANGELOG in simple Chinese. No PRs.
+2. Wait for CI on **this commit**, then `tools/deploy.sh`.
+3. Do not put member names, Discord IDs, IPs, or live Keys/tokens in git.
+
+Do not commit untracked research dirs or secrets. Do not skip hooks. Do not force-push main.

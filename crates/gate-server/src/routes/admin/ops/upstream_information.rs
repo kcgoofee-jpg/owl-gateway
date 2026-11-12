@@ -10,7 +10,7 @@ use axum::extract::{Request, State};
 use axum::http::{HeaderMap, header};
 use axum::response::IntoResponse;
 use axum::routing::post;
-use gate_upstream::client::Token;
+use gate_upstream::client::{Allowance, Token};
 use serde_json::{Map, Value, json};
 use std::time::Duration;
 
@@ -314,6 +314,10 @@ async fn refresh(State(state): State<AppState>, _session: AdminSession, req: Req
                 row["last_error_at"] = json!(now);
             }
         }
+    }
+    // 电量 / 官方 Anlas 在内存订阅缓存里。只查 /user/information 的话卡片上的电量仍是「—」。
+    for token in &tokens {
+        let _ = state.allowance.with(&state.nai).resolve(token).await;
     }
     cache["accounts"] = Value::Object(account_map);
     write_cache(&state, &cache).await?;

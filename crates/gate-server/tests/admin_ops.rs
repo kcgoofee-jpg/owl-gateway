@@ -1350,6 +1350,50 @@ async fn allowance_snapshot_is_read_only() {
 }
 
 #[tokio::test]
+async fn upstream_page_fills_v5_from_snapshots_until_live_query() {
+    let e = setup(&[]).await;
+    let token_id = e.state.nai.tokens().await[0].token_id.clone();
+    let now = e.state.now();
+    e.state
+        .db
+        .insert_upstream_snapshot(now - 60.0, &token_id, Some(7.0), None, Some(2710), 1)
+        .await
+        .unwrap();
+    let api = Admin::login_bare(&e.state).await;
+    let page = api.get_ok("/upstream").await;
+    let v5 = &page["accounts"][0]["v5"];
+    assert_eq!(v5["percent"], 7);
+    assert_eq!(v5["fixed_anlas"], 2710);
+    assert_eq!(v5["stale"], true);
+    assert!(e.mock.requests_to(SUBSCRIPTION_OK).is_empty());
+}
+
+#[tokio::test]
+async fn manual_info_refresh_also_loads_subscription_battery() {
+    let e = setup(&[]).await;
+    e.mock.set_v5_percent(42);
+    let api = Admin::login(&e.state).await;
+    let csrf = api.get_ok("/upstream").await["csrf_info"]
+        .as_str()
+        .unwrap()
+        .to_string();
+    let refreshed = api
+        .raw(
+            "POST",
+            "/upstream/refresh-info",
+            Some(json!({})),
+            &[("x-nai-admin-csrf", csrf.as_str())],
+        )
+        .await;
+    assert_eq!(refreshed.status, 200, "{}", refreshed.text());
+    assert_eq!(e.mock.requests_to(SUBSCRIPTION_OK).len(), 1);
+    let v5 = api.get_ok("/upstream").await["accounts"][0]["v5"].clone();
+    assert_eq!(v5["percent"], 42);
+    assert_eq!(v5["fixed_anlas"], 10000);
+    assert_eq!(v5["stale"], false);
+}
+
+#[tokio::test]
 async fn v5_medium_mode_is_validated_stored_and_audited() {
     let e = setup(&[]).await;
     let api = Admin::login_bare(&e.state).await;

@@ -21,6 +21,8 @@ use crate::pace::{self, Arrival};
 use crate::pool::{self, MoveWatch, Ticket, Token};
 use crate::scheduler::Turn;
 use bytes::Bytes;
+use gate_core::policy::{adapt_share_image_request, apply_share_unknown_retry};
+use gate_core::upstream_errors::json_error_message;
 use serde_json::Value;
 use std::sync::Arc;
 use std::time::Duration;
@@ -201,6 +203,11 @@ impl<H: Hooks> NaiClient<H> {
         let token = &token;
         // 上游回「并发锁」时在同一账号上再发（见 retry_after_lock），其余响应往下处理
         let mut locks: u32 = 0;
+        let mut share_body = o
+            .json
+            .filter(|_| token.is_share())
+            .map(adapt_share_image_request);
+        let mut share_unknown_retried = false;
         let resp = loop {
             response_status = None;
             // 与 set_admin_enabled 串行：之后发出的请求一定能看到新的启停状态（请求本身不持锁）
@@ -232,12 +239,17 @@ impl<H: Hooks> NaiClient<H> {
             fl.mark_sent();
             obs.sent();
             let url = crate::client::resolve_url(&inner.cfg.image_host, token, &o.url);
+            let json = if token.is_share() {
+                share_body.as_ref().or(o.json)
+            } else {
+                o.json
+            };
             let mut req = inner.http.build(
                 token.profile_index(),
                 &token.token,
                 o.method.clone(),
                 &url,
-                o.json,
+                json,
                 o.accept,
             );
             let public_id = obs.public_id();
@@ -326,6 +338,22 @@ impl<H: Hooks> NaiClient<H> {
                     continue;
                 }
                 return Attempt::Done(Err(locked_out()));
+            }
+            if token.is_share()
+                && o.image_lane
+                && matches!(resp.status, 400 | 422)
+                && !share_unknown_retried
+            {
+                let hint = json_error_message(&resp.body);
+                if apply_share_unknown_retry(&mut share_body, o.json, &hint) {
+                    tracing::info!(
+                        status = resp.status,
+                        hint = %hint,
+                        "share 422 unknown fields; retrying stripped body"
+                    );
+                    share_unknown_retried = true;
+                    continue;
+                }
             }
             break resp;
         };

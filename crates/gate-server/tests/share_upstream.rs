@@ -203,6 +203,70 @@ async fn share_402_on_free_v5_switches_to_official() {
 }
 
 #[tokio::test]
+async fn share_generate_image_drops_website_extras() {
+    let share = MockUpstream::start().await;
+    let e = setup(&[]).await;
+    let official_id = e.state.nai.tokens().await[0].token_id.clone();
+    add_share(&e.state, &share.url()).await;
+    assert!(e.state.nai.set_admin_enabled(&official_id, false).await);
+
+    let mut body = image_body();
+    body["website_extra"] = json!(true);
+    body["parameters"]["characterReferences"] = json!([]);
+    body["parameters"]["autoSmea"] = json!(true);
+    body["parameters"]["sm"] = json!(true);
+    body["parameters"]["qualityToggle"] = json!(1);
+
+    let (status, _, resp) = Call::new("POST", "/ai/generate-image")
+        .bearer(TOKEN)
+        .json(body)
+        .send(&e.state)
+        .await;
+    assert_eq!(status, 200, "{}", String::from_utf8_lossy(&resp));
+    let sent = share.requests_to("/ai/generate-image");
+    assert_eq!(sent.len(), 1);
+    let got = sent[0].json();
+    assert!(got.get("website_extra").is_none(), "{got}");
+    let p = got["parameters"].as_object().unwrap();
+    assert!(p.get("characterReferences").is_none(), "{p:?}");
+    assert_eq!(p.get("autoSmea"), Some(&json!(false)));
+    assert_eq!(p.get("sm"), Some(&json!(false)));
+    assert_eq!(p.get("qualityToggle"), Some(&json!(true)));
+}
+
+#[tokio::test]
+async fn share_422_unknown_fields_are_stripped_and_retried() {
+    let share = MockUpstream::start().await;
+    let e = setup(&[]).await;
+    let official_id = e.state.nai.tokens().await[0].token_id.clone();
+    add_share(&e.state, &share.url()).await;
+    assert!(e.state.nai.set_admin_enabled(&official_id, false).await);
+    share.push(
+        "/ai/generate-image",
+        Reply::json(
+            422,
+            &json!({
+                "statusCode": 422,
+                "message": "包含尚未支持的生成参数；请关闭 ControlNet、自动放大或其他未支持的扩展。 未知字段：foo。"
+            }),
+        ),
+    );
+
+    let mut body = image_body();
+    body["parameters"]["foo"] = json!(1);
+    let (status, _, resp) = Call::new("POST", "/ai/generate-image")
+        .bearer(TOKEN)
+        .json(body)
+        .send(&e.state)
+        .await;
+    assert_eq!(status, 200, "{}", String::from_utf8_lossy(&resp));
+    let sent = share.requests_to("/ai/generate-image");
+    assert_eq!(sent.len(), 2);
+    assert_eq!(sent[0].json()["parameters"]["foo"], json!(1));
+    assert!(sent[1].json()["parameters"].get("foo").is_none());
+}
+
+#[tokio::test]
 async fn director_and_tags_do_not_hit_share_host() {
     use base64::Engine;
     let share = MockUpstream::start().await;

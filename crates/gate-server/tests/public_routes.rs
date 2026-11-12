@@ -626,7 +626,7 @@ async fn user_compat_routes_require_key_and_keep_panel_schema() {
         );
         assert_eq!(
             v["trainingStepsLeft"],
-            json!({"fixedTrainingStepsLeft": 0, "purchasedTrainingSteps": 0})
+            json!({"fixedTrainingStepsLeft": 100, "purchasedTrainingSteps": 0})
         );
         assert_eq!(
             v["perks"],
@@ -676,7 +676,7 @@ async fn user_compat_routes_require_key_and_keep_panel_schema() {
             v["trainingStepsLeft"],
             v["subscription"]["trainingStepsLeft"]
         );
-        assert_eq!(v["anlas"], 0);
+        assert_eq!(v["anlas"], 100);
     }
 
     for path in ["/user/priority", "/ai/user/priority"] {

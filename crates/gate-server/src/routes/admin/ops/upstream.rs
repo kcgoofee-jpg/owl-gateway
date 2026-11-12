@@ -113,8 +113,11 @@ async fn page(State(state): State<AppState>, _s: AdminSession, req: Request) -> 
                     row[key] = st[key].clone();
                 }
             }
-            // V5 官方余量（/user/subscription 的缓存），行序与 pool 一致
+            // V5 官方余量（/user/subscription 的内存缓存），行序与 pool 一致。
+            // 刚重启时缓存是空的：用最近一条 upstream_snapshots 先填上，避免卡片全是「—」。
             row["v5"] = allowance_rows.get(i).cloned().unwrap_or(Value::Null);
+            let balance = row.get("balance").cloned().unwrap_or(Value::Null);
+            overlay_v5_from_snapshot(&mut row["v5"], &balance);
             // 账号状态（/user/information 的缓存）
             row["info"] = info_by_id.get(id).cloned().unwrap_or(Value::Null);
             attach_runtime(
@@ -162,6 +165,35 @@ async fn page(State(state): State<AppState>, _s: AdminSession, req: Request) -> 
             "v5_daily_limit": {"kind": "int", "min": 0, "max": gate_core::member_policy::DAILY_MAX},
         },
     })))
+}
+
+/// 内存里还没有订阅读数时，用最近一次定时快照填电量和 Anlas。快照不是当场查询，标陈旧。
+fn overlay_v5_from_snapshot(v5: &mut Value, balance: &Value) {
+    if !v5.is_object() {
+        return;
+    }
+    if v5.get("checked_at").and_then(Value::as_f64).is_some() {
+        return;
+    }
+    let percent = balance.get("v5_percent").and_then(Value::as_f64);
+    let anlas = balance.get("balance").and_then(Value::as_f64);
+    if percent.is_none() && anlas.is_none() {
+        return;
+    }
+    if let Some(p) = percent {
+        v5["percent"] = json!(p.round() as i64);
+    }
+    if let Some(a) = anlas {
+        v5["fixed_anlas"] = json!(a.round() as i64);
+        if v5.get("purchased_anlas").is_none_or(Value::is_null) {
+            v5["purchased_anlas"] = json!(0);
+        }
+    }
+    if let Some(at) = balance.get("at").cloned() {
+        v5["checked_at"] = at;
+    }
+    v5["stale"] = json!(true);
+    v5["uncertain"] = json!(true);
 }
 
 struct RuntimeInput<'a> {

@@ -74,7 +74,7 @@ export function OfficialUpstream() {
   return (
     <Sect>
       <div class="section-head">
-        <p>账号状态显示最近一次官方查询结果。手动查询间隔 5 分钟；页面自动刷新只更新网关读数。</p>
+        <p>手动查询同时刷新账号状态和电量，间隔 5 分钟。页面自动刷新只更新网关读数。</p>
         <span class="spacer" />
         {data && <InfoRefresh data={data} />}
         <Button variant="primary" onClick={() => setDialog({ mode: "add" })}>

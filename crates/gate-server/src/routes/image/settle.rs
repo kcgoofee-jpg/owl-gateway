@@ -287,7 +287,10 @@ pub(super) async fn perform_generation(
                 resp.status
             );
         }
-        let detail = if shape.is_empty() {
+        let hint = gate_core::upstream_errors::json_error_message(&resp.body);
+        let detail = if !hint.is_empty() {
+            format!("upstream {}：{}", resp.status, take_chars(&hint, 140))
+        } else if shape.is_empty() {
             format!("upstream {}", resp.status)
         } else {
             format!("upstream {}（{}）", resp.status, take_chars(&shape, 110))

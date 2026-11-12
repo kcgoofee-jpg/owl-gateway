@@ -236,10 +236,10 @@ pub(super) async fn prepare(
     if tier == "v5" && (key.owner_image_full || key.bound_token_id.is_some()) {
         est.v5 = image_count;
     }
-    let legacy_free_images = if tier == "legacy"
-        && policy::opus_free_eligible(&body).map_err(|e| InternalError(e.to_string()))?
-    {
-        1
+    // 没花 Anlas 的 V4.5 都算免费张数。以前只在「符合 Opus 免费条件」时 +1，参考图附加费算出来是 0
+    // 的 Vibe / 大图钳制后会 0 Anlas 且 0 张，客户端看起来像没扣额度。
+    let legacy_free_images = if tier == "legacy" && est.anlas <= 0.0 {
+        image_count
     } else {
         0
     };

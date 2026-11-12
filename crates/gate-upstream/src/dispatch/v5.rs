@@ -186,7 +186,12 @@ impl<H: Hooks> NaiClient<H> {
             };
             // 上游回「并发锁」时在同一账号上再发（见 retry_after_lock）；其余 429 / 409 在这里就结束
             let mut locks: u32 = 0;
+            let mut share_body = token
+                .is_share()
+                .then(|| gate_core::policy::adapt_share_image_request(body));
+            let mut share_unknown_retried = false;
             let (resp, status) = loop {
+                let payload = share_body.as_ref().unwrap_or(body);
                 let request_url = crate::client::resolve_url(&inner.cfg.image_host, &token, url);
                 let mut req = inner
                     .http
@@ -195,7 +200,7 @@ impl<H: Hooks> NaiClient<H> {
                         &token.token,
                         wreq::Method::POST,
                         &request_url,
-                        Some(body),
+                        Some(payload),
                         accept,
                     )
                     // 流式生图同样是非幂等 POST：3xx 不跟随（避免把请求体重发到新地址）。
@@ -251,6 +256,29 @@ impl<H: Hooks> NaiClient<H> {
                     }
                 };
                 let status = resp.status().as_u16();
+                if token.is_share() && matches!(status, 400 | 422) && !share_unknown_retried {
+                    let peek = http::peek_body(resp).await;
+                    if gate_core::policy::apply_share_unknown_retry(
+                        &mut share_body,
+                        Some(body),
+                        &gate_core::upstream_errors::json_error_message(peek.as_bytes()),
+                    ) {
+                        tracing::info!(
+                            status,
+                            peek,
+                            "share 422 unknown fields; retrying stripped body"
+                        );
+                        share_unknown_retried = true;
+                        continue;
+                    }
+                    obs.status(status);
+                    fl.finish().await;
+                    return Err(UpstreamError::uncertain(
+                        status,
+                        format!("NovelAI 未完成出图，未扣费。请稍后重试。状态码 {status}。"),
+                        false,
+                    ));
+                }
                 if status == 429 || status == 409 {
                     let headers = resp.headers().clone();
                     let peek = http::peek_body(resp).await;

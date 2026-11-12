@@ -129,9 +129,13 @@ mod pricing;
 mod probe;
 mod prompts;
 mod references;
+mod share;
 
 pub use params::*;
 pub use pricing::*;
 pub use probe::*;
 pub use prompts::*;
 pub use references::*;
+pub use share::{
+    adapt_share_image_request, apply_share_unknown_retry, share_unknown_fields, strip_named_fields,
+};

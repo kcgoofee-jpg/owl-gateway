@@ -14,6 +14,8 @@ pub struct SubscriptionData {
     pub global_v5_limit: u32,
     pub global_v5_total: i64,
     pub v5_paused: bool,
+    /// 今天已用的 V4.5 免费张数。没开挂费时官方客户端只看得懂 `trainingStepsLeft`，用它来显示剩余张数。
+    pub daily_legacy_used: i64,
 }
 
 pub fn subscription_payload(
@@ -36,7 +38,8 @@ pub fn subscription_payload(
     } else {
         0
     };
-    // 工作台里那个「Anlas: N」就是成员今天还能用的量：个人日上限剩多少、全站池剩多少，取较小值。
+    // 工作台「Anlas: N」只在开了挂费时有意义。没开挂费的 Key，官方客户端把
+    // `trainingStepsLeft` 当成余额：填剩余 V4.5 张数，生一张少一张，避免看起来像没扣额度。
     let anlas_left = if policy.paid_parameters {
         let personal = (f64::from(policy.daily_anlas) - data.daily_anlas_used).max(0.0);
         let site = (data.global_anlas_limit - data.global_anlas_total).max(0.0);
@@ -44,13 +47,18 @@ pub fn subscription_payload(
     } else {
         0
     };
+    let steps_left = if policy.paid_parameters {
+        anlas_left
+    } else {
+        (i64::from(policy.daily_images) - data.daily_legacy_used).max(0)
+    };
     let expires = expires
         .filter(|e| *e != 0.0)
         .unwrap_or(now + 3650.0 * 86400.0)
         .trunc() as i64;
     json!({
         "tier":3,"active":true,"expiresAt":expires,
-        "trainingStepsLeft":{"fixedTrainingStepsLeft":anlas_left,"purchasedTrainingSteps":0},
+        "trainingStepsLeft":{"fixedTrainingStepsLeft":steps_left,"purchasedTrainingSteps":0},
         "perks":{"imageGeneration":policy.image,"unlimitedImageGeneration":false,
             "voiceGeneration":false,"contextTokens":0},
         "naiGate":{
@@ -96,6 +104,7 @@ mod tests {
             global_v5_limit: 150,
             global_v5_total: 147,
             v5_paused: false,
+            daily_legacy_used: 0,
         }
     }
     #[test]
@@ -149,5 +158,20 @@ mod tests {
         let value = subscription_payload(&policy, None, 0.0, &data);
         assert_eq!(value["naiGate"]["v5LeftToday"], 0);
         assert_eq!(value["naiGate"]["anlasLeft"], 0);
+    }
+
+    #[test]
+    fn free_members_see_remaining_v45_images_as_training_steps() {
+        let mut policy = policy();
+        policy.paid_parameters = false;
+        policy.daily_images = 100;
+        let data = SubscriptionData {
+            daily_legacy_used: 3,
+            ..data()
+        };
+        let value = subscription_payload(&policy, None, 1000.0, &data);
+        assert_eq!(value["trainingStepsLeft"]["fixedTrainingStepsLeft"], 97);
+        assert_eq!(value["naiGate"]["anlasLeft"], 0);
+        assert_eq!(value["naiGate"]["anlasEnabled"], false);
     }
 }
