@@ -154,11 +154,6 @@ cmd_extract_web() {
   # mktemp -d is 0700 under a hardened umask; rsync -a copies that onto STATIC_DIR.
   # The gateway runs as uid 10001 and then cannot read nai-app/image.html (not in the binary).
   chmod 755 "$OWL_DIR/nai-mirror"
-  # #region agent log
-  {
-    printf '%s\n' "{\"sessionId\":\"fd2bf8\",\"hypothesisId\":\"A\",\"location\":\"cutover.sh:extract-web\",\"message\":\"STATIC_DIR mode after extract\",\"data\":{\"mode\":\"$(stat -c %a "$OWL_DIR/nai-mirror" 2>/dev/null || stat -f %Lp "$OWL_DIR/nai-mirror")\",\"has_landing\":$( [[ -f $OWL_DIR/nai-mirror/landing.html ]] && echo true || echo false )},\"timestamp\":$(date +%s000)}"
-  } >> "${OWL_DEBUG_LOG:-/dev/null}" 2>/dev/null || true
-  # #endregion
   log "✓ 前端从 $tag 抽到 $OWL_DIR/nai-mirror"
 }
 
