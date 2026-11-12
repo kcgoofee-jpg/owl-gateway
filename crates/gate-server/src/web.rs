@@ -89,10 +89,22 @@ impl Assets {
         }
         if let Some(dir) = &self.disk {
             // canonicalize 后再校验前缀：防符号链接、以及 canonicalize 才能看出的逃逸。
-            if let (Ok(base), Ok(full)) = (
-                std::fs::canonicalize(dir),
-                std::fs::canonicalize(dir.join(rel)),
-            ) && full.starts_with(&base)
+            let base = std::fs::canonicalize(dir);
+            let full = std::fs::canonicalize(dir.join(rel));
+            // #region agent log
+            if base.is_err() || full.is_err() {
+                tracing::warn!(
+                    target: "web",
+                    path,
+                    disk = %dir.display(),
+                    base_err = ?base.as_ref().err().map(|e| e.to_string()),
+                    full_err = ?full.as_ref().err().map(|e| e.to_string()),
+                    "STATIC_DIR overlay missed; falling back to embed"
+                );
+            }
+            // #endregion
+            if let (Ok(base), Ok(full)) = (base, full)
+                && full.starts_with(&base)
                 && full.is_file()
                 && let Ok(bytes) = std::fs::read(&full)
             {

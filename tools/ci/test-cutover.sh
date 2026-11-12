@@ -140,4 +140,18 @@ bash "$repo/deploy/v3/cutover.sh" previous >"$tmp/compatible.log" 2>&1
 grep -Fq 'tag owl-gate:previous owl-gate:current' "$DOCKER_CALLS"
 grep -Fq 'compose ' "$DOCKER_CALLS"
 
+# extract-web must not copy mktemp's 0700 onto STATIC_DIR (gateway is uid 10001).
+umask 077
+OWL_DEBUG_LOG="$tmp/extract-web.ndjson"
+export OWL_DEBUG_LOG
+bash "$repo/deploy/v3/cutover.sh" extract-web >/dev/null
+mode=$(stat -c %a "$OWL_DIR/nai-mirror" 2>/dev/null || stat -f %Lp "$OWL_DIR/nai-mirror")
+[[ $mode == 755 ]] || { echo "STATIC_DIR mode is $mode, want 755" >&2; exit 1; }
+[[ -f $OWL_DIR/nai-mirror/landing.html ]] || { echo 'extract-web did not write landing.html' >&2; exit 1; }
+# #region agent log
+if [[ -n ${CURSOR_DEBUG_LOG:-} ]]; then
+  cat "$OWL_DEBUG_LOG" >>"$CURSOR_DEBUG_LOG" 2>/dev/null || true
+fi
+# #endregion
+
 echo 'cutover safety tests passed'
