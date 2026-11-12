@@ -91,21 +91,26 @@ impl Db {
         Ok(out)
     }
 
-    /// 每把 Key 的成功出图首末时间与累计张数，一次扫描同时取回。
-    /// `members_view` 原来为这两组数各扫一遍同一批 `usage_log` 行（见 docs/backend-audit-2026-11-01.md）。
-    pub async fn member_image_stats(&self) -> Result<OrderedPairs<i64, ImageMilestones>> {
+    /// 每把 Key 的成功出图首末时间、累计张数、近 7 天张数，一次扫描同时取回。
+    /// `week_since` 是近 7 个服务日起点的 Unix 秒；近 7 天和累计用同一批 `usage_log` 行，口径一致。
+    pub async fn member_image_stats(
+        &self,
+        week_since: f64,
+    ) -> Result<OrderedPairs<i64, ImageMilestones>> {
         self.read(move |c| {
             c.prepare(
-                "SELECT key_id, MIN(ts), MAX(ts), COALESCE(SUM(images), 0) FROM usage_log \
+                "SELECT key_id, MIN(ts), MAX(ts), COALESCE(SUM(images), 0), \
+                        COALESCE(SUM(CASE WHEN ts>=? THEN images ELSE 0 END), 0) FROM usage_log \
                  WHERE status='ok' AND kind IN ('image','image_stream') AND key_id IS NOT NULL GROUP BY key_id",
             )?
-            .query_map([], |r| {
+            .query_map([week_since], |r| {
                 Ok((
                     value::i64_or(r, 0, 0)?,
                     ImageMilestones {
                         first_image_at: value::f64_opt(r, 1)?,
                         last_image_at: value::f64_opt(r, 2)?,
                         total_images: value::i64_or(r, 3, 0)?,
+                        week_images: value::i64_or(r, 4, 0)?,
                     },
                 ))
             })?

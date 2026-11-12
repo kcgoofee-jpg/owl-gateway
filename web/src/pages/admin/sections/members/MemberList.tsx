@@ -52,6 +52,8 @@ function TodayBars(props: { m: MemberRow }) {
   const { m } = props;
   const v5 = m.today.v5 || 0;
   const v45 = m.today.legacy_free_images;
+  const anlas = Math.round(m.today.anlas || 0);
+  const anlasCap = m.policy.effective.daily_anlas;
   return (
     <div class="mb-bars">
       <MiniBar label="V4.5" used={v45} max={m.policy.effective.image ? m.policy.effective.daily_images : 0} />
@@ -63,6 +65,7 @@ function TodayBars(props: { m: MemberRow }) {
           tone="v5"
         />
       )}
+      {(anlasCap > 0 || anlas > 0) && <MiniBar label="Anlas" used={anlas} max={anlasCap} />}
     </div>
   );
 }

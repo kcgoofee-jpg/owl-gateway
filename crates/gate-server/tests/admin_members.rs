@@ -565,10 +565,17 @@ async fn members_view_shape_and_dropped_fields() {
     )
     .await;
     a.sql(&format!(
-        "INSERT INTO usage_log(ts, key_id, key_name, kind, model, status, images, detail, client) VALUES ({0}, {k2}, '乙', 'image', 'm', 'rejected', 0, '请求过于频繁（每把 Key 每分钟最多 10 次）', ''), ({0}, {k2}, '乙', 'image', 'm', 'ok', 1, '', '柏宝绘');\
+        "INSERT INTO usage_log(ts, key_id, key_name, kind, model, status, images, detail, client) VALUES \
+           ({0}, {k2}, '乙', 'image', 'm', 'rejected', 0, '请求过于频繁（每把 Key 每分钟最多 10 次）', ''), \
+           ({0}, {k2}, '乙', 'image', 'm', 'ok', 1, '', '柏宝绘'), \
+           ({2}, {k2}, '乙', 'image', 'm', 'ok', 4, '', '');\
+         INSERT INTO counters(key_id, day, images, anlas, text_tokens, requests, v5, legacy_free_images) \
+           VALUES ({k2}, '{3}', 9, 0, 0, 3, 2, 3);\
          INSERT INTO share_state(key_id, paused_until, pause_reason) VALUES ({k2}, {1}, '');",
         e.state.now() - 600.0,
-        e.state.now() + 3600.0
+        e.state.now() + 3600.0,
+        e.state.now() - 10.0 * 86400.0,
+        e.state.day()
     ))
     .await;
     let r = a.get(&format!("{A}/members")).await;
@@ -607,6 +614,15 @@ async fn members_view_shape_and_dropped_fields() {
     assert_eq!(
         (m[1]["key_count"].clone(), m[1]["all_key_ids"].clone()),
         (json!(1), json!([k2]))
+    );
+    assert_eq!(
+        (
+            m[1]["today"]["images"].clone(),
+            m[1]["week"]["images"].clone(),
+            m[1]["total_images"].clone()
+        ),
+        (json!(9), json!(1), json!(5)),
+        "今日张数来自计数器；近 7 天 / 累计都来自成功出图日志，近 7 天不会大于累计"
     );
     assert!(
         m[0].get("hours24").is_none(),

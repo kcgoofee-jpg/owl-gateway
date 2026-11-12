@@ -1,4 +1,4 @@
-/** 成员展开后的详情：一句话结论 → 待处理 → 额度与权限 / 资料 → 日常操作。今天的用量只在列表行里显示一次。 */
+/** 成员展开后的详情：一句话结论 → 待处理 → 额度与权限 / 资料 → 日常操作。出图张数在列表行，这里只写额度。 */
 import { ExternalLink, Plus } from "lucide-preact";
 import { useEffect, useState } from "preact/hooks";
 import { dayOf, fullTime, rel, usedOf } from "../../../../lib/format";
@@ -118,12 +118,20 @@ export function MemberDetail(props: { m: MemberRow; now: number; act: DetailActi
         <section class="mb-sec" aria-label="有效规则">
           <h4 class="mb-h4">有效规则</h4>
           <dl class="mb-kv">
-            <dt>V4.5 免费图</dt>
-            <dd>{policy.image && policy.daily_images > 0 ? `${policy.daily_images} 张` : "停用"}</dd>
-            <dt>V5 每天</dt>
-            <dd>{policy.image && policy.v5 && policy.daily_v5 > 0 ? `${policy.daily_v5} 张` : "停用"}</dd>
-            <dt>Anlas 每天</dt>
-            <dd>{policy.daily_anlas > 0 ? usedOf(Math.round(k.used.anlas), policy.daily_anlas) : "停用"}</dd>
+            <dt>V4.5 免费额度</dt>
+            <dd>
+              {policy.image && policy.daily_images > 0
+                ? usedOf(m.today.legacy_free_images, policy.daily_images)
+                : "停用"}
+            </dd>
+            <dt>V5 额度</dt>
+            <dd>
+              {policy.image && policy.v5 && policy.daily_v5 > 0
+                ? usedOf(m.today.v5, policy.daily_v5)
+                : "停用"}
+            </dd>
+            <dt>Anlas 额度</dt>
+            <dd>{policy.daily_anlas > 0 ? usedOf(Math.round(m.today.anlas), policy.daily_anlas) : "停用"}</dd>
             <dt>Anlas 每月</dt>
             <dd>{policy.monthly_anlas}</dd>
             <dt>每分钟请求</dt>
@@ -147,12 +155,6 @@ export function MemberDetail(props: { m: MemberRow; now: number; act: DetailActi
                 </Button>
               )}
             </dd>
-            {m.reset_today && m.reset_today.count > 0 && (
-              <>
-                <dt>今日重置</dt>
-                <dd>{m.reset_today.count} 次</dd>
-              </>
-            )}
           </dl>
         </section>
 
@@ -298,11 +300,11 @@ export function PatronSeatButtons({ subject, patron }: { subject: string; patron
   const [error, setError] = useState("");
   const [password, setPassword] = useState("");
   const [tokenId, setTokenId] = useState(patron?.bound_token_id ?? "");
-  const [jump, setJump] = useState(patron?.queue_jump ?? true);
+  const [jump, setJump] = useState(patron?.queue_jump === true);
   const enabled = patron?.enabled === true;
   useEffect(() => {
     setTokenId(patron?.bound_token_id ?? "");
-    setJump(patron?.queue_jump ?? true);
+    setJump(patron?.queue_jump === true);
   }, [patron?.bound_token_id, patron?.queue_jump]);
   const save = async (body: {
     enabled: boolean;
@@ -330,37 +332,43 @@ export function PatronSeatButtons({ subject, patron }: { subject: string; patron
   return (
     <section class="mb-patron" aria-label="赞助席">
       <h4 class="mb-h4">赞助席</h4>
-      {enabled && (
+      {enabled ? (
         <Badge tone="ok" title={patron?.has_password ? "门户密码已有，需要时再重置" : "还没有门户密码"}>
           已开
         </Badge>
+      ) : (
+        <span class="muted small">未开</span>
       )}
-      <label class="mb-patron__jump" title="打开后插队立即生效；对方走 /patron，看不到后台">
-        <input
-          type="checkbox"
-          checked={jump}
-          disabled={pending}
-          onChange={(e) => setJump((e.target as HTMLInputElement).checked)}
-        />
-        插队
-      </label>
-      <label class="field-inline" title="绑定捐赠 Token 后只走那把账号；不绑则走全站池">
-        <span class="field-inline__k">专属号</span>
-        <select
-          class="select"
-          value={tokenId}
-          disabled={pending}
-          onChange={(e) => setTokenId((e.target as HTMLSelectElement).value)}
-        >
-          <option value="">不绑定（全站池）</option>
-          {accounts.map((a) => (
-            <option key={a.token_id} value={a.token_id}>
-              账号 {a.position} · {a.token}
-              {a.exclusive ? " · 专属" : ""}
-            </option>
-          ))}
-        </select>
-      </label>
+      {enabled && (
+        <>
+          <label class="mb-patron__jump" title="勾上后插队立即生效；对方走 /patron，看不到后台">
+            <input
+              type="checkbox"
+              checked={jump}
+              disabled={pending}
+              onChange={(e) => setJump((e.target as HTMLInputElement).checked)}
+            />
+            插队
+          </label>
+          <label class="field-inline" title="绑定捐赠 Token 后只走那把账号；不绑则走全站池">
+            <span class="field-inline__k">专属号</span>
+            <select
+              class="select"
+              value={tokenId}
+              disabled={pending}
+              onChange={(e) => setTokenId((e.target as HTMLSelectElement).value)}
+            >
+              <option value="">不绑定（全站池）</option>
+              {accounts.map((a) => (
+                <option key={a.token_id} value={a.token_id}>
+                  账号 {a.position} · {a.token}
+                  {a.exclusive ? " · 专属" : ""}
+                </option>
+              ))}
+            </select>
+          </label>
+        </>
+      )}
       <span class="mb-inline">
         {enabled ? (
           <>
@@ -399,7 +407,8 @@ export function PatronSeatButtons({ subject, patron }: { subject: string; patron
           <Button
             size="sm"
             disabled={pending}
-            onClick={() => void save({ enabled: true, queue_jump: jump, bound_token_id: tokenId })}
+            title="开启后默认插队，可再改专属号"
+            onClick={() => void save({ enabled: true, queue_jump: true, bound_token_id: tokenId })}
           >
             开启
           </Button>

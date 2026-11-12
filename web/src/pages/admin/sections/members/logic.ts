@@ -2,7 +2,7 @@
  * 成员判断逻辑（纯函数，无界面依赖，方便单测；总览的「成员要处理」提醒也用这里的 needsAttention）。
  * 时间单位都是 Unix 秒。
  */
-import { fullTime, rel, scopeText, withUnit } from "../../../../lib/format";
+import { fullTime, rel, scopeText } from "../../../../lib/format";
 import type { Member, Tag } from "./types";
 
 export const HOUR = 3600;
@@ -138,9 +138,8 @@ export function memberVerdict(m: Member, now: number): { title: string; sub: str
     title = `有 ${issues.filter((x) => x.need).length} 件事要看一眼`;
   } else if (!m.first_image_at) {
     title = `领了 Key ${m.registered_at ? `${ago(now - m.registered_at)}了` : ""}，还没出过图`;
-  } else if (cap > 0 && m.today.legacy_free_images >= cap)
-    title = `今天的额度用完了（${withUnit(used, "张")}）`;
-  else if (used > 0) title = `正常使用，今天出了 ${withUnit(used, "张")}`;
+  } else if (cap > 0 && m.today.legacy_free_images >= cap) title = "今天的额度用完了";
+  else if (used > 0) title = "正常使用";
   else title = `今天还没用${m.last_used_at ? `，上次是 ${rel(m.last_used_at, now)}` : ""}`;
   const ack = m.tags.find((t) => t.tag === ACK_TAG);
   const sub = [

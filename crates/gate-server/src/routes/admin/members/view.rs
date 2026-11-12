@@ -111,9 +111,17 @@ pub(super) async fn members_view(state: &AppState, filter_raw: &str) -> Result<V
     let now = st.now();
     let today = st.day();
     let week_start = st.clock.last_days(now, 7).remove(0);
+    let week_since = st
+        .clock
+        .service_day_start(&week_start)
+        .unwrap_or(now - 7.0 * 86400.0);
     let week: HashMap<i64, Value> = st.db.member_usage(&week_start).await?.into_iter().collect();
-    let image_stats: HashMap<i64, gate_db::repo::usage::ImageMilestones> =
-        st.db.member_image_stats().await?.into_iter().collect();
+    let image_stats: HashMap<i64, gate_db::repo::usage::ImageMilestones> = st
+        .db
+        .member_image_stats(week_since)
+        .await?
+        .into_iter()
+        .collect();
     let reg: HashMap<i64, RegistrationRow> = st
         .db
         .registration_rows()
@@ -209,7 +217,7 @@ pub(super) async fn members_view(state: &AppState, filter_raw: &str) -> Result<V
         );
         put(
             "week",
-            json!({"images": wi("images"), "v5": wi("v5"),
+            json!({"images": image_stats.get(&id).map_or(0, |m| m.week_images), "v5": wi("v5"),
                    "anlas": values::float(primitives::round(wf("anlas"), 2)), "requests": wi("requests")}),
         );
         put(

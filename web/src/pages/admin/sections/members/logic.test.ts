@@ -145,7 +145,7 @@ describe("memberVerdict / memberStatus", () => {
     expect(
       memberVerdict(mk({ today: { images: 7, v5: 0, anlas: 0, requests: 3, legacy_free_images: 7 } }), NOW)
         .title,
-    ).toContain("今天出了 7 张");
+    ).toBe("正常使用");
   });
   it("V5 图片不消耗 V4.5 免费图额度", () => {
     const member = mk({ today: { images: 125, legacy_free_images: 25, v5: 100, anlas: 0, requests: 125 } });
