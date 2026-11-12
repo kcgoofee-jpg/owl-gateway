@@ -46,12 +46,7 @@ export function DebugRecordCard() {
   const save = async () => {
     if (saving) return;
     setSaving(true);
-    const ok = await act(
-      "PUT",
-      "/admin/api/ops/debug-record",
-      { subjects: ids },
-      "已更新调试记录名单",
-    );
+    const ok = await act("PUT", "/admin/api/ops/debug-record", { subjects: ids }, "已更新调试记录名单");
     setSaving(false);
     if (ok) setDraft(null);
   };
