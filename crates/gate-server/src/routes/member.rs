@@ -498,45 +498,6 @@ fn request_billing(site_paid: bool, anlas: f64, detail: &str) -> &'static str {
     }
 }
 
-#[cfg(test)]
-mod request_item_tests {
-    use super::{request_billing, request_size};
-    use gate_core::paid_v5::MARKER;
-
-    #[test]
-    fn size_comes_from_the_leading_token() {
-        assert_eq!(
-            request_size("832x1216/28step est=30A"),
-            "832 × 1216 / 28 步"
-        );
-        assert_eq!(
-            request_size(&format!("1216x832/23step; {MARKER} 30A")),
-            "1216 × 832 / 23 步"
-        );
-        assert_eq!(request_size("402 你今天的 Anlas 额度不够这次用"), "");
-        assert_eq!(request_size("Vibe 编码 2 Anlas"), "");
-        assert_eq!(
-            request_size("400 尺寸832x1216/28step无效"),
-            "832 × 1216 / 28 步"
-        );
-        assert_eq!(request_size("寸x1216/28step"), "");
-    }
-
-    #[test]
-    fn billing_prefers_site_paid_then_anlas_then_v5() {
-        assert_eq!(request_billing(true, 30.0, "站付V5"), "site_paid");
-        assert_eq!(
-            request_billing(false, 30.0, "832x1216/28step est=30A"),
-            "anlas"
-        );
-        assert_eq!(
-            request_billing(false, 0.0, "832x1216/28step V5额度+1"),
-            "v5"
-        );
-        assert_eq!(request_billing(false, 0.0, "832x1216/28step 免费"), "free");
-    }
-}
-
 fn int_path_error(_raw: &str) -> HttpError {
     HttpError::new(422, "coupon_id 必须是整数")
 }
@@ -584,4 +545,43 @@ async fn use_my_coupon(
     )
     .await;
     Ok(no_store(ok_json(&json!({"ok": true}))))
+}
+
+#[cfg(test)]
+mod request_item_tests {
+    use super::{request_billing, request_size};
+    use gate_core::paid_v5::MARKER;
+
+    #[test]
+    fn size_comes_from_the_leading_token() {
+        assert_eq!(
+            request_size("832x1216/28step est=30A"),
+            "832 × 1216 / 28 步"
+        );
+        assert_eq!(
+            request_size(&format!("1216x832/23step; {MARKER} 30A")),
+            "1216 × 832 / 23 步"
+        );
+        assert_eq!(request_size("402 你今天的 Anlas 额度不够这次用"), "");
+        assert_eq!(request_size("Vibe 编码 2 Anlas"), "");
+        assert_eq!(
+            request_size("400 尺寸832x1216/28step无效"),
+            "832 × 1216 / 28 步"
+        );
+        assert_eq!(request_size("寸x1216/28step"), "");
+    }
+
+    #[test]
+    fn billing_prefers_site_paid_then_anlas_then_v5() {
+        assert_eq!(request_billing(true, 30.0, "站付V5"), "site_paid");
+        assert_eq!(
+            request_billing(false, 30.0, "832x1216/28step est=30A"),
+            "anlas"
+        );
+        assert_eq!(
+            request_billing(false, 0.0, "832x1216/28step V5额度+1"),
+            "v5"
+        );
+        assert_eq!(request_billing(false, 0.0, "832x1216/28step 免费"), "free");
+    }
 }
