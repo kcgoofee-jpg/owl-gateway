@@ -33,6 +33,8 @@ pub type Turn = (String, String);
 
 #[derive(Debug, thiserror::Error)]
 pub enum ChatError {
+    #[error("读图失败：{0}")]
+    ImageInput(&'static str),
     /// 上游额度或并发不足（免费池先到先得的常态）；对成员只说「额度用完了」。
     #[error("上游额度/并发受限")]
     Quota,
@@ -47,6 +49,7 @@ pub enum ChatError {
 pub struct Chat {
     cfg: ChatCfg,
     http: reqwest::Client,
+    image_slots: std::sync::Arc<tokio::sync::Semaphore>,
 }
 
 impl Chat {
@@ -56,7 +59,27 @@ impl Chat {
             .user_agent("naimei/3.0 (owl-gateway)")
             .build()
             .expect("构建 reqwest 客户端失败");
-        Chat { cfg, http }
+        Chat {
+            cfg,
+            http,
+            image_slots: std::sync::Arc::new(tokio::sync::Semaphore::new(2)),
+        }
+    }
+
+    async fn prepare_user(
+        &self,
+        user: Value,
+    ) -> Result<(Value, Option<tokio::sync::OwnedSemaphorePermit>), ChatError> {
+        if !crate::chat_images::has_images(&user) {
+            return Ok((user, None));
+        }
+        let slot = self
+            .image_slots
+            .clone()
+            .acquire_owned()
+            .await
+            .expect("读图池不会关闭");
+        Ok((crate::chat_images::inline(user).await?, Some(slot)))
     }
 
     /// 模型名（留档用）。
@@ -76,7 +99,8 @@ impl Chat {
         history: &[Turn],
         user: impl Into<Value>,
     ) -> Result<String, ChatError> {
-        let body = self.request_body(system, history, user.into(), false);
+        let (user, _images) = self.prepare_user(user.into()).await?;
+        let body = self.request_body(system, history, user, false);
         let url = format!("{}/v1/chat/completions", self.cfg.base_url);
         let resp = self
             .http
@@ -141,6 +165,7 @@ impl Chat {
         F: FnMut(String) + Send,
     {
         use futures::StreamExt as _;
+        let (user_content, _images) = self.prepare_user(user_content).await?;
         let body = self.request_body(system, history, user_content, true);
         let url = format!("{}/v1/chat/completions", self.cfg.base_url);
         let resp = self
@@ -221,6 +246,9 @@ fn classify(status: u16, v: &Value) -> ChatError {
         .as_i64()
         .or_else(|| v["code"].as_i64())
         .unwrap_or(0);
+    if code == 1210 || msg.contains("[1210]") || msg.contains("图片输入格式") {
+        return ChatError::ImageInput("上游无法解析图片，请重新上传 PNG、JPG 或 WebP");
+    }
     if status == 429
         || code == 1005
         || code == 3009
@@ -665,6 +693,21 @@ mod tests {
         assert!(matches!(
             classify(429, &json!({"error": "rate"})),
             ChatError::Quota
+        ));
+    }
+
+    #[test]
+    fn upstream_image_parse_errors_have_an_actionable_class() {
+        assert!(matches!(
+            classify(
+                400,
+                &json!({"error":{"message":"[1210][图片输入格式/解析错误]"}})
+            ),
+            ChatError::ImageInput(_)
+        ));
+        assert!(matches!(
+            classify(400, &json!({"code":1210,"msg":"bad image"})),
+            ChatError::ImageInput(_)
         ));
     }
 
