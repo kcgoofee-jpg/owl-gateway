@@ -12,7 +12,13 @@ export type ShareLockStatus = {
   healthy: boolean;
   bot_online: boolean;
   channel_url: string;
-  chat?: { running: number; waiting: number; circuit_open: boolean; worker_connected?: boolean };
+  chat?: {
+    running: number;
+    waiting: number;
+    circuit_open: boolean;
+    worker_connected?: boolean;
+    last_model_result?: { state: string; category: string; at: number } | null;
+  };
   reactions?: { enabled: boolean; pending: number; error: string | null };
   detection: {
     connected: boolean;
@@ -100,6 +106,12 @@ export function ShareLockCard() {
             [
               "聊天上游",
               data.chat ? (data.chat.circuit_open ? "熔断冷却" : "未熔断（不代表上游必定可用）") : "未知",
+            ],
+            [
+              "最近模型结果",
+              data.chat?.last_model_result
+                ? `${data.chat.last_model_result.state === "success" ? "成功" : "失败"} · ${fullTime(data.chat.last_model_result.at)}`
+                : "尚无请求记录",
             ],
             ["反应待发送", data.reactions?.pending ?? "未知"],
             ["最早异常", data.detection.oldest_failure_at ? fullTime(data.detection.oldest_failure_at) : "—"],

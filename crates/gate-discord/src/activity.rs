@@ -227,22 +227,19 @@ impl Naimei {
                     }
                     info = channels[parent].clone();
                 }
-                if !public_visible(&roles, &info, &self.cfg.guild_id.to_string())
-                    || !visible(
-                        &roles,
-                        &member,
-                        &info,
-                        actor,
-                        &self.cfg.guild_id.to_string(),
-                    )
-                    || !visible(
-                        &roles,
-                        &bot_member,
-                        &info,
-                        &bot,
-                        &self.cfg.guild_id.to_string(),
-                    )
-                {
+                if !visible(
+                    &roles,
+                    &member,
+                    &info,
+                    actor,
+                    &self.cfg.guild_id.to_string(),
+                ) || !visible(
+                    &roles,
+                    &bot_member,
+                    &info,
+                    &bot,
+                    &self.cfg.guild_id.to_string(),
+                ) {
                     continue;
                 }
                 let Some(at) = share::snowflake_unix(mid) else {
@@ -282,7 +279,7 @@ impl Naimei {
             }
             tokio::time::sleep(Duration::from_millis(500)).await;
         }
-        json!({"status":"finished","target":target,"cutoff":cutoff,"timezone":"Asia/Shanghai","scope":"Bot 与查询者均可见的公开频道及公开帖子","messages":count,"active_days":days.len(),"image_shares":images,"first_at":first,"last_at":last,"links":links,"complete":complete&&issue.is_none(),"issue":issue,"sampled_at":self.now(),"note":"只统计可读取且仍存在的内容，不评定是否合格；不完整结果是下限，不能视为零活跃证明"})
+        json!({"status":"finished","target":target,"cutoff":cutoff,"timezone":"Asia/Shanghai","scope":"Bot 与查询者均可见的可读频道及公开帖子（包含身份组可见频道，排除私有帖子）","messages":count,"active_days":days.len(),"image_shares":images,"first_at":first,"last_at":last,"links":links,"complete":complete&&issue.is_none(),"issue":issue,"sampled_at":self.now(),"note":"只统计可读取且仍存在的内容，不评定是否合格；不完整结果是下限，不能视为零活跃证明"})
     }
 }
 fn base(roles: &Value, ids: &[Value], guild: &str) -> u64 {
@@ -315,9 +312,6 @@ fn overwrite(mut p: u64, ch: &Value, ids: &[Value], uid: &str, guild: &str) -> u
     }
     p
 }
-pub(super) fn public_visible(roles: &Value, ch: &Value, guild: &str) -> bool {
-    !ch.is_null() && overwrite(base(roles, &[], guild), ch, &[], "", guild) & (1 << 10) != 0
-}
 pub(super) fn visible(roles: &Value, m: &Value, ch: &Value, uid: &str, guild: &str) -> bool {
     let ids = m["roles"].as_array().cloned().unwrap_or_default();
     let p = base(roles, &ids, guild);
@@ -331,7 +325,18 @@ mod tests {
     fn private_channels_and_role_denials_are_excluded() {
         let roles = json!([{"id":"1","permissions":((1u64<<10)|(1<<16)).to_string()}]);
         let ch = json!({"permission_overwrites":[{"id":"1","type":0,"deny":(1u64<<10).to_string(),"allow":"0"}]});
-        assert!(!public_visible(&roles, &ch, "1"));
         assert!(!visible(&roles, &json!({"roles":[]}), &ch, "2", "1"));
+    }
+}
+
+#[cfg(test)]
+mod member_visible_tests {
+    use super::*;
+    #[test]
+    fn member_only_forum_is_included_for_qualified_reader() {
+        let roles = json!([{"id":"1","permissions":"0"},{"id":"3","permissions":((1u64<<10)|(1<<16)).to_string()}]);
+        let forum = json!({"permission_overwrites":[{"id":"1","type":0,"deny":(1u64<<10).to_string(),"allow":"0"},{"id":"3","type":0,"deny":"0","allow":(1u64<<10).to_string()}]});
+        assert!(visible(&roles, &json!({"roles":["3"]}), &forum, "2", "1"));
+        assert!(!visible(&roles, &json!({"roles":[]}), &forum, "2", "1"));
     }
 }

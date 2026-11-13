@@ -75,7 +75,7 @@ pub fn definitions() -> Vec<Value> {
     for c in crate::naimei::capabilities::CAPABILITIES {
         let options = if matches!(c.name, "activity" | "creator_audit") {
             vec![
-                json!({"name":"成员","description":"待查询成员；省略查本人","type":6,"required":false}),
+                json!({"name":"成员","description":if c.name=="creator_audit"{"待查作者；帖子内省略为楼主，其他位置省略查本人"}else{"待查询成员；省略查本人"},"type":6,"required":false}),
             ]
         } else {
             vec![]

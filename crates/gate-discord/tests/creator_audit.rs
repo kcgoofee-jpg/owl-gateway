@@ -99,13 +99,13 @@ async fn audit_verifies_origins_and_never_invents_download_records() {
     .unwrap();
     assert_eq!(result["data"]["target"], C);
     assert_eq!(result["data"]["complete"], true);
-    for k in ["原生转发", "回复作者", "提及作者", "该帖链接"] {
+    for k in ["原生转发", "回复作者", "提及作者", "原帖链接"] {
         assert_eq!(result["data"]["counts"][k]["messages"], 1, "{result}");
     }
     assert!(result["data"]["unavailable"]["downloaders"].is_null());
     assert_eq!(result["data"]["evidence"].as_array().unwrap().len(), 4);
     let text = render("creator_audit", &result);
-    assert!(text.contains("已核实次数"));
+    assert!(text.contains("已核实行为"));
     assert!(text.contains("Discord 不提供"));
     assert!(text.contains("默认全部可见历史"));
     task.abort();

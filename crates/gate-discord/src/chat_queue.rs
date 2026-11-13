@@ -186,12 +186,16 @@ impl Queue {
     }
 }
 fn has_images(m: &MessageInfo) -> bool {
-    !m.attachments.is_empty()
-        || m.referenced_message
-            .as_ref()
-            .is_some_and(|r| !r.attachments.is_empty())
-        || m.message_reference.is_some()
+    share::has_image(m)
+        || m.referenced_message.as_ref().is_some_and(|r| {
+            r.attachments.iter().any(|a| {
+                a.content_type
+                    .as_deref()
+                    .is_some_and(|t| t.starts_with("image/"))
+            })
+        })
 }
+
 impl Naimei {
     fn queue(&self) -> std::sync::MutexGuard<'_, Queue> {
         self.chat_queue
@@ -328,7 +332,7 @@ impl Naimei {
 mod tests {
     use super::*;
     fn m(id: u64, ch: u64, user: u64, image: bool) -> MessageInfo {
-        serde_json::from_value(json!({"id":id.to_string(),"channel_id":ch.to_string(),"author":{"id":user.to_string()},"attachments":if image{json!([{"url":"image"}])}else{json!([])}})).unwrap()
+        serde_json::from_value(json!({"id":id.to_string(),"channel_id":ch.to_string(),"author":{"id":user.to_string()},"attachments":if image{json!([{"url":"image","filename":"synthetic.png","content_type":"image/png"}])}else{json!([])}})).unwrap()
     }
     #[test]
     fn fair_limits_and_no_same_channel_overlap() {
@@ -394,5 +398,21 @@ mod tests {
         }
         assert!(q.admit(m(33, 33, 33, false), 10.0).is_err());
         assert!(q.next(191.0).is_none());
+    }
+    #[test]
+    fn text_replies_do_not_consume_image_slots() {
+        let mut q = Queue::default();
+        for i in 0..4 {
+            let mut message = m(i, i, i, false);
+            message.message_reference = Some(json!({"message_id":"synthetic"}));
+            message.referenced_message = Some(events::ReferencedMessage {
+                content: "plain reply".into(),
+                ..Default::default()
+            });
+            q.admit(message, 1.0).unwrap();
+        }
+        for _ in 0..4 {
+            assert!(q.next(2.0).is_some());
+        }
     }
 }

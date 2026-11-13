@@ -55,6 +55,10 @@ pub struct Chat {
 }
 
 impl ChatError {
+    pub fn http_status(&self) -> Option<u16> {
+        let Self::Upstream(s) = self else { return None };
+        s.strip_prefix("HTTP ")?.get(..3)?.parse().ok()
+    }
     pub fn transient(&self) -> bool {
         matches!(self, Self::Timeout)
             || matches!(self,Self::Upstream(s) if s.starts_with("HTTP 5") || s.starts_with("请求没发出去"))
@@ -162,8 +166,16 @@ impl Chat {
                     Some("timeout") => ChatError::Timeout,
                     Some("quota") => ChatError::Quota,
                     Some("image") => ChatError::ImageInput("图片处理失败"),
-                    Some("transient") => ChatError::Upstream("HTTP 503：模型暂不可用".into()),
-                    _ => ChatError::Upstream("模型上游拒绝请求".into()),
+                    Some("transient") | Some("upstream") => match v["http_status"].as_u64() {
+                        Some(status) => {
+                            ChatError::Upstream(format!("HTTP {status}：模型上游请求失败"))
+                        }
+                        None if v["kind"] == "transient" => {
+                            ChatError::Upstream("请求没发出去：模型上游网络不可用".into())
+                        }
+                        _ => ChatError::Upstream("模型上游拒绝请求".into()),
+                    },
+                    _ => ChatError::Upstream("模型工作进程拒绝请求".into()),
                 }),
             };
         }

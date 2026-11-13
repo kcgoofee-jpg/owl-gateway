@@ -205,8 +205,11 @@ pub fn render(name: &str, result: &Value) -> String {
     }
     if name == "creator_audit" && data.get("counts").is_some() {
         let mut out = format!(
-            "**作者相关行为核对**\n对象：`{}`\n范围：本服务器中双方均可读的公开频道和公开帖子；默认全部可见历史。\n结果：{}\n\n| 行为 | 已核实次数 | 涉及成员数 |\n|---|---:|---:|\n",
-            data["target"].as_str().unwrap_or("未知"),
+            "**作者相关行为核对**\n对象：`{}`\n范围：本服务器中双方均可读的服务器频道与公开帖子（含身份组可见频道）；默认全部可见历史。\n结果：{}\n\n**已核实行为**\n",
+            data["target_name"]
+                .as_str()
+                .or_else(|| data["target"].as_str())
+                .unwrap_or("未知"),
             if data["complete"] == true {
                 "本次搜索已完成（不包含已删除或不可见内容）"
             } else {
@@ -216,7 +219,7 @@ pub fn render(name: &str, result: &Value) -> String {
         if let Some(rows) = data["counts"].as_object() {
             for (kind, v) in rows {
                 out.push_str(&format!(
-                    "| {kind} | {} | {} |\n",
+                    "- {kind}：{} 次，涉及 {} 位成员。\n",
                     v["messages"], v["members"]
                 ));
             }
@@ -248,18 +251,35 @@ pub fn render(name: &str, result: &Value) -> String {
                     .replace('`', "'")
                     .replace(['\n', '\r'], " ");
                 out.push_str(&format!(
-                    "- `{who}`（`{}`）：{kinds}，{}。[消息证据]({})\n",
-                    row["member_id"].as_str().unwrap_or("未知"),
-                    row["at"].as_str().unwrap_or("时间未知"),
-                    row["message_url"].as_str().unwrap_or("")
-                ));
+                        "- `{who}`（`{}`）：{kinds}，{}。[消息证据]({})\n",
+                        row["member_id"].as_str().unwrap_or("未知"),
+                        row["at_unix"]
+                            .as_f64()
+                            .map(|at| gate_core::clock::Clock::service()
+                                .format(at, "%Y-%m-%d %H:%M:%S"))
+                            .as_deref()
+                            .unwrap_or("时间未知"),
+                        row["message_url"].as_str().unwrap_or("")
+                    ));
             }
         }
         out.push_str("\n**无法查询：谁下载、保存或截图了附件；私信、其他服务器及站外二传。** Discord 不提供这些记录，不能报成 0。回复、提及和转发可能重叠，人数不能相加；转发事实不等于违规结论，由作者自行判断。\n");
         if data["complete"] != true {
+            let issues = data["issues"]
+                .as_array()
+                .map(|a| {
+                    a.iter()
+                        .filter_map(|v| v.as_str())
+                        .collect::<Vec<_>>()
+                        .join("；")
+                })
+                .unwrap_or_default();
+            if !issues.is_empty() {
+                out.push_str(&format!("\n未完整核实：{issues}。"));
+            }
             out.push_str(&format!(
-                "\n未完整核实：{}；原消息无法核实 {} 条。",
-                data["issues"], data["unverified_origins"]
+                "\n有 {} 条原消息因删除、权限或来源不可读而未能核实；这些不能当作零记录。",
+                data["unverified_origins"]
             ));
         }
         return out;

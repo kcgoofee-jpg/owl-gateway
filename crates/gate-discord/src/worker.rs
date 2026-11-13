@@ -55,7 +55,10 @@ async fn reply(
         Err(_) | Ok(Err(ChatError::Timeout)) => json!({"kind":"timeout"}),
         Ok(Err(ChatError::Quota)) => json!({"kind":"quota"}),
         Ok(Err(ChatError::ImageInput(_))) => json!({"kind":"image"}),
-        Ok(Err(e)) => json!({"kind":if e.transient(){"transient"}else{"upstream"}}),
+        Ok(Err(e)) => {
+            tracing::warn!(http_status=?e.http_status(),transient=e.transient(),"[chat-worker] upstream request failed");
+            json!({"kind":if e.transient(){"transient"}else{"upstream"},"http_status":e.http_status()})
+        }
     };
     (StatusCode::OK, Json(body))
 }

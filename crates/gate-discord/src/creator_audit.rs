@@ -1,5 +1,5 @@
 //! Evidence of visible interactions, never a download tracker or an infringement verdict.
-use super::activity::{public_visible, visible};
+use super::activity::visible;
 use super::*;
 struct Scope {
     roles: Value,
@@ -32,8 +32,7 @@ impl Naimei {
         }
         let gid = self.cfg.guild_id.to_string();
         Some(
-            public_visible(&s.roles, &ch, &gid)
-                && visible(&s.roles, &s.member, &ch, &s.actor, &gid)
+            visible(&s.roles, &s.member, &ch, &s.actor, &gid)
                 && visible(&s.roles, &s.bot_member, &ch, &s.bot, &gid),
         )
     }
@@ -41,7 +40,7 @@ impl Naimei {
         &self,
         actor: &str,
         target: &str,
-        source: &str,
+        _source: &str,
         cutoff: f64,
         jobkey: &str,
     ) -> Value {
@@ -64,6 +63,19 @@ impl Naimei {
         else {
             return json!({"complete":false,"error":"无法核实查询权限"});
         };
+        let target_member = self
+            .api
+            .read(format!("guilds/{}/members/{target}", self.cfg.guild_id))
+            .await
+            .ok()
+            .map(|(_, v)| v)
+            .unwrap_or(Value::Null);
+        let target_name = target_member["nick"]
+            .as_str()
+            .or_else(|| target_member["user"]["global_name"].as_str())
+            .or_else(|| target_member["user"]["username"].as_str())
+            .unwrap_or(target)
+            .to_owned();
         let mut scope = Scope {
             roles,
             member,
@@ -78,12 +90,10 @@ impl Naimei {
             ("回复作者", format!("replied_to_user_id={target}")),
             ("提及作者", format!("mentions={target}")),
         ];
-        if !source.is_empty() {
-            queries.push((
-                "该帖链接",
-                format!("content={source}&link_hostname=discord.com"),
-            ));
-        }
+        queries.push((
+            "原帖链接",
+            "link_hostname=discord.com&link_hostname=discordapp.com".to_owned(),
+        ));
         let mut counts = serde_json::Map::new();
         let mut evidence = std::collections::BTreeMap::<String, Value>::new();
         let mut origins = HashMap::<String, Value>::new();
@@ -151,63 +161,61 @@ impl Naimei {
                             .as_array()
                             .is_some_and(|a| a.iter().any(|u| u["id"] == target))
                     } else {
-                        let reference = if kind == "该帖链接" {
-                            link_reference(&m, self.cfg.guild_id, source)
+                        let references = if kind == "原帖链接" {
+                            link_references(&m, self.cfg.guild_id)
                         } else {
                             let expected = if kind == "原生转发" { 1 } else { 0 };
                             let r = &m["message_reference"];
                             if r["type"].as_u64().unwrap_or(0) == expected {
-                                Some(r.clone())
+                                vec![r.clone()]
                             } else {
-                                None
+                                vec![]
                             }
                         };
-                        if let Some(r) = reference {
-                            if let (Some(oc), Some(om)) =
+                        let mut matched = false;
+                        for r in references {
+                            let (Some(oc), Some(om)) =
                                 (r["channel_id"].as_str(), r["message_id"].as_str())
-                            {
-                                if self.audit_visible(oc, &mut scope).await != Some(true) {
-                                    unverified += 1;
-                                    false
-                                } else {
-                                    let key = format!("{oc}/{om}");
-                                    if !origins.contains_key(&key) {
-                                        let value = match (oc.parse(), om.parse()) {
-                                            (Ok(c), Ok(m)) => self
-                                                .api
-                                                .message_by_id(c, m)
-                                                .await
-                                                .unwrap_or(Value::Null),
-                                            _ => Value::Null,
-                                        };
-                                        origins.insert(key.clone(), value);
-                                    }
-                                    let original = &origins[&key];
-                                    if original.is_null() {
-                                        unverified += 1;
-                                        false
-                                    } else {
-                                        source_link = Some(format!(
-                                            "https://discord.com/channels/{}/{oc}/{om}",
-                                            self.cfg.guild_id
-                                        ));
-                                        original["author"]["id"] == target
-                                    }
-                                }
-                            } else {
+                            else {
                                 unverified += 1;
-                                false
+                                continue;
+                            };
+                            if self.audit_visible(oc, &mut scope).await != Some(true) {
+                                unverified += 1;
+                                continue;
                             }
-                        } else {
-                            false
+                            let key = format!("{oc}/{om}");
+                            if !origins.contains_key(&key) {
+                                let original = match (oc.parse(), om.parse()) {
+                                    (Ok(c), Ok(m)) => {
+                                        self.api.message_by_id(c, m).await.unwrap_or(Value::Null)
+                                    }
+                                    _ => Value::Null,
+                                };
+                                origins.insert(key.clone(), original);
+                            }
+                            let original = &origins[&key];
+                            if original.is_null() {
+                                unverified += 1;
+                                continue;
+                            }
+                            if original["author"]["id"] == target {
+                                source_link = Some(format!(
+                                    "https://discord.com/channels/{}/{oc}/{om}",
+                                    self.cfg.guild_id
+                                ));
+                                matched = true;
+                                break;
+                            }
                         }
+                        matched
                     };
                     if !relevant || !ids.insert(id.to_owned()) {
                         continue;
                     }
                     people.insert(who.to_owned());
                     if evidence.len() < 50 || evidence.contains_key(id) {
-                        let entry=evidence.entry(id.into()).or_insert_with(||json!({"member_id":who,"member_name":m["author"]["global_name"].as_str().or_else(||m["author"]["username"].as_str()).unwrap_or("未知"),"at":m["timestamp"],"message_url":format!("https://discord.com/channels/{}/{cid}/{id}",self.cfg.guild_id),"source_url":source_link,"kinds":[]}));
+                        let entry=evidence.entry(id.into()).or_insert_with(||json!({"member_id":who,"member_name":m["author"]["global_name"].as_str().or_else(||m["author"]["username"].as_str()).unwrap_or("未知"),"at":m["timestamp"],"at_unix":share::snowflake_unix(id),"message_url":format!("https://discord.com/channels/{}/{cid}/{id}",self.cfg.guild_id),"source_url":source_link,"kinds":[]}));
                         entry["kinds"]
                             .as_array_mut()
                             .expect("kinds")
@@ -218,7 +226,7 @@ impl Naimei {
                     kind.into(),
                     json!({"messages":ids.len(),"members":people.len(),"complete":false}),
                 );
-                let partial = json!({"status":"pending","target":target,"until":cutoff,"sampled_at":self.now(),"counts":counts,"evidence":evidence.values().cloned().collect::<Vec<_>>(),"searched_rows":scanned,"unverified_origins":unverified,"complete":false,"issues":["历史查询仍在进行"],"unavailable":{"downloaders":null,"savers":null,"screenshots":null,"private_or_external_forwards":null}});
+                let partial = json!({"status":"pending","target":target,"target_name":target_name,"until":cutoff,"sampled_at":self.now(),"counts":counts,"evidence":evidence.values().cloned().collect::<Vec<_>>(),"searched_rows":scanned,"unverified_origins":unverified,"complete":false,"issues":["历史查询仍在进行"],"unavailable":{"downloaders":null,"savers":null,"screenshots":null,"private_or_external_forwards":null}});
                 self.activity
                     .lock()
                     .unwrap_or_else(std::sync::PoisonError::into_inner)
@@ -241,17 +249,15 @@ impl Naimei {
         }
         issues.sort();
         issues.dedup();
-        json!({"status":"finished","target":target,"scope":"本服务器中 Bot 与查询者均可读的公开频道和公开帖子；默认全部可见历史","until":cutoff,"sampled_at":self.now(),"counts":counts,"evidence":evidence.into_values().collect::<Vec<_>>(),"evidence_limit":50,"searched_rows":scanned,"unverified_origins":unverified,"complete":issues.is_empty()&&unverified==0,"issues":issues,"unavailable":{"downloaders":null,"savers":null,"screenshots":null,"private_or_external_forwards":null},"notes":["Discord 不提供谁下载、保存或截图了附件的数据；null 表示无法查询，不是零","原生转发须核实原消息发送人；快照本身没有原作者字段","各类行为可能重叠，不能相加作为总人数；可见转发不等于侵权","删帖、无权限、私信、其他服务器和站外行为未覆盖；无法靠现有接口证明没有二传"]})
+        json!({"status":"finished","target":target,"target_name":target_name,"scope":"本服务器中 Bot 与查询者均可读的公开频道和公开帖子；默认全部可见历史","until":cutoff,"sampled_at":self.now(),"counts":counts,"evidence":evidence.into_values().collect::<Vec<_>>(),"evidence_limit":50,"searched_rows":scanned,"unverified_origins":unverified,"complete":issues.is_empty()&&unverified==0,"issues":issues,"unavailable":{"downloaders":null,"savers":null,"screenshots":null,"private_or_external_forwards":null},"notes":["Discord 不提供谁下载、保存或截图了附件的数据；null 表示无法查询，不是零","原生转发须核实原消息发送人；快照本身没有原作者字段","各类行为可能重叠，不能相加作为总人数；可见转发不等于侵权","删帖、无权限、私信、其他服务器和站外行为未覆盖；无法靠现有接口证明没有二传"]})
     }
 }
-fn link_reference(m: &Value, guild: u64, source: &str) -> Option<Value> {
+fn link_references(m: &Value, guild: u64) -> Vec<Value> {
     let re =
         regex::Regex::new(r"https?://(?:www\.)?discord(?:app)?\.com/channels/(\d+)/(\d+)/(\d+)")
             .expect("regex");
-    for c in re.captures_iter(m["content"].as_str().unwrap_or("")) {
-        if c[1] == guild.to_string() && c[2] == *source {
-            return Some(json!({"channel_id":&c[2],"message_id":&c[3]}));
-        }
-    }
-    None
+    re.captures_iter(m["content"].as_str().unwrap_or(""))
+        .filter(|c| c[1] == guild.to_string())
+        .map(|c| json!({"channel_id":&c[2],"message_id":&c[3]}))
+        .collect()
 }
