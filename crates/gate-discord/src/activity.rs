@@ -315,8 +315,14 @@ fn overwrite(mut p: u64, ch: &Value, ids: &[Value], uid: &str, guild: &str) -> u
 pub(super) fn visible(roles: &Value, m: &Value, ch: &Value, uid: &str, guild: &str) -> bool {
     let ids = m["roles"].as_array().cloned().unwrap_or_default();
     let p = base(roles, &ids, guild);
-    p & 8 != 0
-        || overwrite(p, ch, &ids, uid, guild) & ((1 << 10) | (1 << 16)) == ((1 << 10) | (1 << 16))
+    let required = (1 << 10)
+        | (1 << 16)
+        | if matches!(ch["type"].as_u64(), Some(2 | 13)) {
+            1 << 20
+        } else {
+            0
+        };
+    p & 8 != 0 || overwrite(p, ch, &ids, uid, guild) & required == required
 }
 #[cfg(test)]
 mod tests {

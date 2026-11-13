@@ -499,7 +499,7 @@ impl Naimei {
         if !is_chat_trigger(&m, &bot_id) {
             return false;
         }
-        let (source, mut images) = self.reference_context(&m).await;
+        let (source, mut images, history_allowed) = self.reference_context(&m).await;
         let mut text = format!("{}\n{}", source, strip_mention(&m.content, &bot_id).trim());
         if text.is_empty() && images.is_empty() {
             return false; // 只 @ 不说话（纯表情）不触发
@@ -543,6 +543,7 @@ impl Naimei {
             text: &text,
             images,
             text_files,
+            history_allowed,
             is_owner,
             author_id: &author.id,
             author_name: &author.display_tag(),
@@ -630,26 +631,33 @@ impl Naimei {
         chat: &Chat,
         req: ChatRequest<'_>,
     ) -> Result<(), ChatError> {
-        let history: Vec<Turn> = self
-            .lock()
-            .histories
-            .get(&req.channel_id)
-            .map(|h| {
-                h.iter()
-                    .rev()
-                    .take(CHAT_HISTORY_TURNS)
-                    .rev()
-                    .cloned()
-                    .collect()
-            })
-            .unwrap_or_default();
+        let history: Vec<Turn> = if req.history_allowed {
+            self.lock()
+                .histories
+                .get(&req.channel_id)
+                .map(|h| {
+                    h.iter()
+                        .rev()
+                        .take(CHAT_HISTORY_TURNS)
+                        .rev()
+                        .cloned()
+                        .collect()
+                })
+                .unwrap_or_default()
+        } else {
+            Vec::new()
+        };
         let stickers = chat::wants_stickers(req.text).then(kb::nailong);
-        let mut channel_ctx = tokio::time::timeout(
-            Duration::from_secs(8),
-            self.channel_context(req.channel_id, req.message_id),
-        )
-        .await
-        .unwrap_or_else(|_| "频道背景暂时不可用，不猜测来源或规则".into());
+        let mut channel_ctx = if req.history_allowed {
+            tokio::time::timeout(
+                Duration::from_secs(8),
+                self.channel_context(req.channel_id, req.message_id),
+            )
+            .await
+            .unwrap_or_else(|_| "频道背景暂时不可用，不猜测来源或规则".into())
+        } else {
+            "未获授权读取历史，只使用当前成员本条消息，不猜测其他成员的内容。".into()
+        };
         for (name, content) in &req.text_files {
             channel_ctx.push_str(&format!("\n成员附带的文本文件 [{name}]:\n{content}\n"));
         }
@@ -1100,6 +1108,7 @@ struct ChatRequest<'a> {
     images: Vec<String>,
     /// 文本类附件（filename, 内容已抓取截断）
     text_files: Vec<(String, String)>,
+    history_allowed: bool,
     is_owner: bool,
     author_id: &'a str,
     author_name: &'a str,
