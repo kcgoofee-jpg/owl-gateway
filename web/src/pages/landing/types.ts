@@ -34,7 +34,7 @@ export type Live = {
 /** 变化很慢的站点信息：/public/status 与 /public/live 都带（live 里是 30 秒子缓存） */
 export type Meta = {
   discord_invite?: string;
-  /** 加入按钮跟着它走：注册关了就置灰成「关闭注册」；role_note = 限定身份组的名称（只有设了门槛才有） */
+  /** 加入按钮跟着它走：注册关了就置灰成「关闭注册」；role_note 只表示设有身份组门槛，不包含具体名称 */
   registration?: { open?: boolean; role_note?: string };
   limits?: {
     queue_per_member?: number;

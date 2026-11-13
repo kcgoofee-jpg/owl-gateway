@@ -30,15 +30,12 @@ impl RegistrationService {
     pub async fn check_capacity(&self) -> Result<Registration, RegErr> {
         let cfg = self.settings().await?;
         if !cfg.open {
-            return denied("领 Key 当前已关闭，开放时间看站长公告。");
+            return denied("Key 领取暂未开放。");
         }
         if cfg.max_users == 0 || cfg.max_users - self.count_active().await? > 0 {
             return Ok(cfg);
         }
-        denied(format!(
-            "名额已满（上限 {} 人），请过段时间再试。空出的名额先到先得。",
-            cfg.max_users
-        ))
+        denied("领取名额已满，请稍后再试。")
     }
 
     /// 永久禁止该 Discord 账号领取：写入封禁表，并撤销其现有 Key 与身份组。
@@ -161,26 +158,19 @@ impl RegistrationService {
             let age_days =
                 snowflake_created_at(user_id).map(|t| (crate::time::now() - t) / 86_400.0);
             if age_days.is_none_or(|d| d < defaults::REGISTER_MIN_ACCOUNT_DAYS as f64) {
-                return denied(format!(
-                    "Discord 账号创建满 {} 天后才能领 Key，请稍后再来。",
-                    defaults::REGISTER_MIN_ACCOUNT_DAYS
-                ));
+                return denied("账号暂不符合领取条件。");
             }
         }
         let _g = self.lock.lock().await;
         if self.ban_reason(user_id).await?.is_some() {
-            return denied("这个 Discord 账号已被站长停用，无法领取 Key。");
+            return denied("账号已被停用，无法领取 Key。");
         }
         self.release_if_expired(user_id, true).await?;
         if self.db.registration_key_id(user_id).await?.is_some() {
-            return denied(
-                "这个 Discord 账号已经领取过 Key 了。额度在网页登录后查看；Key 找不到的话，用 /resetkey 换一把新的。",
-            );
+            return denied("已领取过 Key；遗失请用 /resetkey 更换。");
         }
         if self.issue_rate_blocked(crate::time::now()).await? {
-            return denied(
-                "本小时领取人数较多，为保护服务稳定已暂时限流，请过几分钟再用 /register 领取。",
-            );
+            return denied("领取过于频繁，请稍后再试。");
         }
         let cfg = self.check_capacity().await?;
         // 身份组门槛（后台「领 Key」可配，可跨服，可有多条、满足任意一条即可）：
@@ -204,11 +194,7 @@ impl RegistrationService {
                 }
             }
             if !passed {
-                return denied(format!(
-                    "目前只开放给「{}」：请先到 {}login 用 Discord 登录（授权时会核验身份组），再用 /register 领取。",
-                    cfg.role_note_text(),
-                    self.cfg.site_url
-                ));
+                return denied("身份组错误。");
             }
         }
         let user = DiscordUser {

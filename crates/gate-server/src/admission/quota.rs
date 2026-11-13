@@ -68,10 +68,11 @@ pub async fn quota_image_check(
         {
             return Err(GateError::with_code(
                 403,
-                format!(
-                    "今日 V4.5 额度已用完，每天 {} 张，未扣费。{reset}重置。",
-                    policy.daily_images
-                ),
+                if policy.daily_images == 0 {
+                    "当前未分配 V4.5 额度。".into()
+                } else {
+                    format!("今日 V4.5 额度已用完，{reset}重置。")
+                },
                 reasons::MEMBER_QUOTA,
             )
             .into());
@@ -82,10 +83,11 @@ pub async fn quota_image_check(
         if counter.v5 + reserved + est.v5 > i64::from(policy.daily_v5) {
             return Err(GateError::with_code(
                 403,
-                format!(
-                    "今日 V5 额度已用完，每天 {} 张，未扣费。请使用 V4.5，{reset}重置。",
-                    policy.daily_v5
-                ),
+                if policy.daily_v5 == 0 {
+                    "当前未分配 V5 额度，请使用 V4.5。".into()
+                } else {
+                    format!("今日 V5 额度已用完，{reset}重置。请使用 V4.5。")
+                },
                 reasons::MEMBER_QUOTA,
             )
             .into());
@@ -95,10 +97,11 @@ pub async fn quota_image_check(
         if !skip_site && used + reserved + est.v5 > i64::from(shared.daily_v5) {
             return Err(GateError::with_code(
                 403,
-                format!(
-                    "全站今日 V5 额度已用完，每天 {} 张，未扣费。请使用 V4.5，{reset}重置。",
-                    shared.daily_v5
-                ),
+                if shared.daily_v5 == 0 {
+                    "全站 V5 暂停，请使用 V4.5。".into()
+                } else {
+                    format!("全站今日 V5 额度已用完，{reset}重置。请使用 V4.5。")
+                },
                 reasons::SITE_QUOTA,
             )
             .into());
@@ -116,10 +119,11 @@ pub async fn quota_image_check(
         {
             return Err(GateError::with_code(
                 403,
-                format!(
-                    "全站今日 Anlas 额度已用完，每天 {} Anlas，未扣费。{reset}重置。",
-                    shared.daily_anlas
-                ),
+                if shared.daily_anlas == 0 {
+                    "全站暂未开放 Anlas 消费。".into()
+                } else {
+                    format!("全站今日 Anlas 额度不足，{reset}重置。")
+                },
                 reasons::SITE_QUOTA,
             )
             .into());
@@ -128,10 +132,11 @@ pub async fn quota_image_check(
         if counter.anlas + reserved + est.anlas > f64::from(policy.daily_anlas) {
             return Err(GateError::with_code(
                 403,
-                format!(
-                    "今日 Anlas 额度不足：已用 {:.0}，上限 {}，未扣费。{reset}重置。",
-                    counter.anlas, policy.daily_anlas
-                ),
+                if policy.daily_anlas == 0 {
+                    "当前未开通 Anlas 消费。".into()
+                } else {
+                    format!("今日 Anlas 额度不足，{reset}重置。")
+                },
                 reasons::MEMBER_QUOTA,
             )
             .into());
@@ -141,10 +146,11 @@ pub async fn quota_image_check(
         if used + reserved + est.anlas > policy.monthly_anlas {
             return Err(GateError::with_code(
                 403,
-                format!(
-                    "本月 Anlas 额度不足：已用 {used:.0}，上限 {}，未扣费。下月恢复。",
-                    policy.monthly_anlas
-                ),
+                if policy.monthly_anlas == 0.0 {
+                    "当前未分配每月 Anlas 额度。"
+                } else {
+                    "本月 Anlas 额度不足，下月恢复。"
+                },
                 reasons::MEMBER_QUOTA,
             )
             .into());
@@ -159,7 +165,7 @@ pub async fn quota_image_check(
         {
             return Err(GateError::with_code(
                 403,
-                "全站本月 Anlas 预算已用完，未扣费。免费出图不受影响，下月恢复。",
+                "全站本月 Anlas 预算不足，免费出图不受影响。",
                 reasons::SITE_QUOTA,
             )
             .into());

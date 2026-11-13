@@ -436,7 +436,7 @@ async fn ban_revokes_the_key_and_blocks_reissue_until_unban() {
     let again = issue(&e, MEMBER).await;
     assert_eq!(
         (again.0, detail(&again)),
-        (403, "这个 Discord 账号已被站长停用，无法领取 Key。")
+        (403, "账号已被停用，无法领取 Key。")
     );
     assert!(e.state.db.unban_discord(MEMBER).await.unwrap());
     assert!(!e.state.db.unban_discord(MEMBER).await.unwrap());
@@ -467,10 +467,7 @@ async fn issue_mints_a_key_with_current_welcome_message() {
     let closed = issue(&e, MEMBER).await;
     assert_eq!(
         (closed.0, closed.2),
-        (
-            403,
-            json!({"detail": "领 Key 当前已关闭，开放时间看站长公告。"})
-        )
+        (403, json!({"detail": "Key 领取暂未开放。"}))
     );
     open_registration(&e).await;
     let r = issue(&e, MEMBER).await;
@@ -517,10 +514,7 @@ async fn issue_mints_a_key_with_current_welcome_message() {
     let again = issue(&e, MEMBER).await;
     assert_eq!(
         (again.0, detail(&again)),
-        (
-            403,
-            "这个 Discord 账号已经领取过 Key 了。额度在网页登录后查看；Key 找不到的话，用 /resetkey 换一把新的。"
-        )
+        (403, "已领取过 Key；遗失请用 /resetkey 更换。")
     );
     let wrong = bridge(
         &e,
@@ -547,7 +541,7 @@ async fn issue_mints_a_key_with_current_welcome_message() {
         me.clone(),
         "领取 Key 失败（/register）".into(),
         String::new(),
-        "领 Key 当前已关闭，开放时间看站长公告。".into(),
+        "Key 领取暂未开放。".into(),
         1
     )));
     assert!(log.contains(&(
@@ -569,13 +563,7 @@ async fn issue_enforces_capacity_age_hourly_cap_and_expiry_rotation() {
     assert_eq!(issue(&e, MEMBER).await.0, 200);
     // 名额满：先到先得
     let full = issue(&e, OTHER).await;
-    assert_eq!(
-        (full.0, detail(&full)),
-        (
-            403,
-            "名额已满（上限 1 人），请过段时间再试。空出的名额先到先得。"
-        )
-    );
+    assert_eq!((full.0, detail(&full)), (403, "领取名额已满，请稍后再试。"));
     // 撤销释放名额
     assert!(svc(&e).revoke(MEMBER, true).await.unwrap());
     assert!(
@@ -627,10 +615,7 @@ async fn issue_enforces_capacity_age_hourly_cap_and_expiry_rotation() {
     let held = issue(&e, OTHER).await;
     assert_eq!(
         (held.0, detail(&held)),
-        (
-            403,
-            "这个 Discord 账号已经领取过 Key 了。额度在网页登录后查看；Key 找不到的话，用 /resetkey 换一把新的。"
-        )
+        (403, "已领取过 Key；遗失请用 /resetkey 更换。")
     );
     // 每小时领取上限
     let (e2, _d2) = setup_reg(&[]).await;
@@ -646,10 +631,7 @@ async fn issue_enforces_capacity_age_hourly_cap_and_expiry_rotation() {
     let limited = issue(&e2, "900000000000000103").await;
     assert_eq!(
         (limited.0, detail(&limited)),
-        (
-            403,
-            "本小时领取人数较多，为保护服务稳定已暂时限流，请过几分钟再用 /register 领取。"
-        )
+        (403, "领取过于频繁，请稍后再试。")
     );
     e2.state
         .db
@@ -668,10 +650,7 @@ async fn young_discord_accounts_are_refused() {
         (((ms as u64) - 1_420_070_400_000) << 22).to_string()
     };
     let young = issue(&e, &snowflake(1.0)).await;
-    assert_eq!(
-        (young.0, detail(&young)),
-        (403, "Discord 账号创建满 7 天后才能领 Key，请稍后再来。")
-    );
+    assert_eq!((young.0, detail(&young)), (403, "账号暂不符合领取条件。"));
     assert_eq!(issue(&e, &snowflake(30.0)).await.0, 200);
 }
 
@@ -702,13 +681,7 @@ async fn role_gate_needs_oauth_verification_not_the_bot_token() {
     open_registration(&e).await;
     // 没核验过：拒绝，并给出验证链接；不发任何 Discord 请求（机器人不在那个服务器里）
     let r = issue(&e, MEMBER).await;
-    assert_eq!(
-        (r.0, detail(&r)),
-        (
-            403,
-            "目前只开放给「指定身份组」：请先到 https://gate.test/login 用 Discord 登录（授权时会核验身份组），再用 /register 领取。"
-        )
-    );
+    assert_eq!((r.0, detail(&r)), (403, "身份组错误。"));
     assert!(d.seen().is_empty());
     // 授权后没有身份组 → 仍不能领
     d.script("GET", &member_path(GUILD), 200, json!({"roles": ["1"]}));
@@ -770,13 +743,7 @@ async fn role_gate_can_target_another_community_via_settings() {
         .await
         .unwrap();
     let r = issue(&e, MEMBER).await;
-    assert_eq!(
-        (r.0, detail(&r)),
-        (
-            403,
-            "目前只开放给「创作者」：请先到 https://gate.test/login 用 Discord 登录（授权时会核验身份组），再用 /register 领取。"
-        )
-    );
+    assert_eq!((r.0, detail(&r)), (403, "身份组错误。"));
     d.script(
         "GET",
         &member_path(other_guild),
@@ -808,15 +775,9 @@ async fn two_rules(e: &Env) {
 async fn role_gate_accepts_any_of_several_rules() {
     let (e, d) = setup_reg(&[]).await;
     two_rules(&e).await;
-    // 都没核验：拒绝，说明里把各条的显示名用「 或 」连起来
+    // 都没核验：拒绝，但不向成员暴露具体身份组要求
     let r = issue(&e, MEMBER).await;
-    assert_eq!(
-        (r.0, detail(&r)),
-        (
-            403,
-            "目前只开放给「类脑「社区建设组」 或 棱镜「创作者」」：请先到 https://gate.test/login 用 Discord 登录（授权时会核验身份组），再用 /register 领取。"
-        )
-    );
+    assert_eq!((r.0, detail(&r)), (403, "身份组错误。"));
     // 在第一个服务器里没有身份组、在第二个服务器里有 → 通过，只记命中的那一条
     d.script("GET", &member_path(GUILD), 200, json!({"roles": ["1"]}));
     d.script(
@@ -1013,7 +974,7 @@ async fn unreachable_discord_never_mints_when_a_role_is_required() {
     open_registration(&e).await;
     let r = issue(&e, MEMBER).await;
     assert_eq!(r.0, 403);
-    assert!(detail(&r).contains("https://gate.test/login "));
+    assert_eq!(detail(&r), "身份组错误。");
     assert!(
         e.state
             .db
@@ -2569,7 +2530,7 @@ async fn trailing_slash_in_api_base_is_tolerated() {
 }
 
 #[tokio::test]
-async fn public_meta_exposes_only_the_role_note_when_the_gate_is_configured() {
+async fn public_meta_hides_specific_role_requirements() {
     async fn fetch(e: &Env, path: &str) -> Value {
         let r = Call::new("GET", path).send(&e.state).await;
         serde_json::from_slice::<Value>(&r.2).unwrap()
@@ -2610,7 +2571,8 @@ async fn public_meta_exposes_only_the_role_note_when_the_gate_is_configured() {
     .await;
     for path in ["/public/status", "/public/live"] {
         let body = fetch(&e, path).await;
-        assert_eq!(body["registration"]["role_note"], "创作者", "{path}");
+        assert_eq!(body["registration"]["role_note"], "身份组", "{path}");
+        assert!(!body.to_string().contains("创作者"), "{path}");
         let all = body.to_string();
         assert!(!all.contains("900000000000000077") && !all.contains(GUILD));
     }

@@ -802,7 +802,7 @@ async fn no_per_member_pacing_below_the_daily_cap() {
     .await;
     assert_eq!(status, 403, "{}", String::from_utf8_lossy(&body));
     let text = String::from_utf8_lossy(&body);
-    assert!(text.contains("今日 V4.5 额度已用完，每天 200 张"), "{text}");
+    assert!(text.contains("今日 V4.5 额度已用完"), "{text}");
     assert!(!text.contains("每小时自动恢复"), "{text}");
 }
 
@@ -824,7 +824,7 @@ async fn explicit_member_limit_zero_rejects_generation_before_upstream() {
     )
     .await;
     assert_eq!(status, 403, "{}", String::from_utf8_lossy(&body));
-    assert!(err_message(&body).contains("今日 V4.5 额度已用完"));
+    assert!(err_message(&body).contains("当前未分配 V4.5 额度"));
     assert!(e.mock.requests_to("/ai/generate-image").is_empty());
 }
 
@@ -842,7 +842,7 @@ async fn explicit_global_v5_limit_zero_rejects_generation_before_upstream() {
     .await;
     assert_eq!(status, 403, "{}", String::from_utf8_lossy(&body));
     assert!(
-        err_message(&body).contains("全站今日 V5 额度已用完"),
+        err_message(&body).contains("全站 V5 暂停"),
         "{}",
         String::from_utf8_lossy(&body)
     );
@@ -1162,7 +1162,7 @@ async fn no_v5_refill_with_anlas() {
     .await;
     let text = String::from_utf8_lossy(&body).to_string();
     assert_eq!(status, 403, "{text}");
-    assert!(text.contains("今日 V5 额度已用完，每天 1 张"), "{text}");
+    assert!(text.contains("今日 V5 额度已用完"), "{text}");
     assert!(e.mock.requests_to("/ai/generate-image").is_empty());
 }
 
@@ -1377,7 +1377,7 @@ async fn second_v5_is_refused_at_once_when_the_first_holds_the_last_slot() {
     .await;
     let text = String::from_utf8_lossy(&body).to_string();
     assert_eq!(status, 403, "{text}");
-    assert!(text.contains("今日 V5 额度已用完，每天 2 张"), "{text}");
+    assert!(text.contains("今日 V5 额度已用完"), "{text}");
     // 第二张在第一张出完之前就被拒（修复前它要排到第一张出完才拿到 403）
     assert!(!first.is_finished(), "第二张应在第一张出完前就被拒");
     // 没有进排队，也没有发到上游
@@ -1512,10 +1512,7 @@ async fn paused_key_message_without_reason_is_neutral() {
     let (status, _, body) = request().await;
     assert_eq!(status, 403);
     let m = err_message(&body);
-    assert!(
-        m.contains("这把 Key 已被临时暂停，") && m.ends_with(" 自动恢复。"),
-        "{m}"
-    );
+    assert!(m == "403 风控提示：请求暂被限制，请稍后重试。", "{m}");
     assert!(!m.contains("多地") && !m.contains("仅限本人"), "{m}");
 
     e.state.pauses.set(
@@ -1526,10 +1523,7 @@ async fn paused_key_message_without_reason_is_neutral() {
     let (status, _, body) = request().await;
     assert_eq!(status, 403);
     let m = err_message(&body);
-    assert!(
-        m.contains("你的 Key 短时间内被大量拒绝，已暂停 1 小时，") && m.ends_with(" 自动恢复。"),
-        "{m}"
-    );
+    assert!(m == "403 风控提示：请求暂被限制，请稍后重试。", "{m}");
     assert!(e.mock.requests().is_empty());
 }
 
@@ -1569,20 +1563,20 @@ async fn web_login_required_blocks_until_the_member_logs_in_once() {
     let now = e.state.now();
     // 开关关着时先出一张图：缓存里记下「不要求」，打开后清缓存必须立即生效
     let (_, _, body) = ask(member).await;
-    assert!(!err_message(&body).contains("用 Discord 登录一次"));
+    assert!(!err_message(&body).contains("登录网站完成验证"));
     set_since(format!("{}", now - 10.0)).await;
 
     let (status, _, body) = ask(member).await;
     assert_eq!(status, 403);
     assert!(
-        err_message(&body).contains("用 Discord 登录一次"),
+        err_message(&body).contains("登录网站完成验证"),
         "{}",
         err_message(&body)
     );
     // 默认成员同样必须完成网页登录，没有身份豁免。
     let (status, _, body) = ask(TOKEN).await;
     assert_eq!(status, 403);
-    assert!(err_message(&body).contains("用 Discord 登录一次"));
+    assert!(err_message(&body).contains("登录网站完成验证"));
 
     // 开关之前的登录不算；之后登录一次（没有指纹也算）就放行（没登录过的结果不缓存）
     e.state
@@ -1607,7 +1601,7 @@ async fn web_login_required_blocks_until_the_member_logs_in_once() {
         .unwrap();
     let (_, _, body) = ask(member).await;
     assert!(
-        !err_message(&body).contains("用 Discord 登录一次"),
+        !err_message(&body).contains("登录网站完成验证"),
         "{}",
         err_message(&body)
     );
@@ -1620,7 +1614,7 @@ async fn web_login_required_blocks_until_the_member_logs_in_once() {
     gate_server::auth::clear_web_login_cache(e.state.db.path());
     let (_, _, body) = ask(member).await;
     assert!(
-        !err_message(&body).contains("用 Discord 登录一次"),
+        !err_message(&body).contains("登录网站完成验证"),
         "{}",
         err_message(&body)
     );
@@ -1633,7 +1627,7 @@ async fn web_login_required_blocks_until_the_member_logs_in_once() {
     common::member_key(&e.state, 2, &[("discord_id", json!("900000000000000778"))]).await;
     set_since("0".into()).await;
     let (_, _, body) = ask("nai-synthetic-0002").await;
-    assert!(!err_message(&body).contains("用 Discord 登录一次"));
+    assert!(!err_message(&body).contains("登录网站完成验证"));
 }
 
 #[tokio::test]

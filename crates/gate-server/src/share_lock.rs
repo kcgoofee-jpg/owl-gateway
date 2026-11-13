@@ -76,9 +76,9 @@ pub const FORUM_CHANNEL_ID: &str = "1558068804934705222";
 /// 规则开始生效的服务日。当天 7:00（北京时间）起，看上一个重置日。
 const START_DAY: &str = "2026-11-13";
 
-pub const MESSAGE: &str = "昨天的 V4.5 或 V5 额度已经用完，且昨日和今日尚未分享。请到 Discord「存图备份专用」发一张图（新开一帖，或在已有帖子里再补一张），发成功后会自动恢复出图。";
+pub const MESSAGE: &str = "403 风控提示：请到分享频道分享以验证。";
 
-pub const DAILY_MESSAGE: &str = "昨日和今日都没有分享图片。请到 Discord「存图备份专用」发一张图（新开一帖，或在已有帖子里再补一张），确认后自动恢复生图。按北京时间 07:00 划分服务日，昨日分享也有效。";
+pub const DAILY_MESSAGE: &str = MESSAGE;
 
 fn message(mode: Mode) -> &'static str {
     match mode {
@@ -91,9 +91,9 @@ pub fn channel_url() -> String {
     format!("https://discord.com/channels/1549726297876594720/{FORUM_CHANNEL_ID}")
 }
 
-/// 给客户端看的整句（带频道链接）。首页另有按钮，正文不重复贴链接。
+/// 客户端提示保持简短；频道入口由首页按钮提供。
 pub fn client_message() -> String {
-    format!("{MESSAGE} {}", channel_url())
+    MESSAGE.to_string()
 }
 
 pub fn starts_at() -> f64 {
@@ -150,12 +150,7 @@ pub async fn is_locked(state: &AppState, key: &Key) -> bool {
 
 pub async fn enforce(state: &AppState, key: &Key) -> Result<(), ApiError> {
     if let Some(message) = restriction(state, key).await {
-        return Err(GateError::with_code(
-            403,
-            format!("{message} {}", channel_url()),
-            reasons::SHARE_LOCK,
-        )
-        .into());
+        return Err(GateError::with_code(403, message, reasons::SHARE_LOCK).into());
     }
     Ok(())
 }

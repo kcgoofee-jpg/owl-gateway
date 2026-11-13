@@ -110,6 +110,9 @@ pub const BACKFILL: &[(&str, &str)] = &[
     (SITE_QUOTA, "%要消耗 Anlas，本站还没开放%"),
     (V5_EXHAUSTED, "%NovelAI 账号今天的 V5 免费额度用完了%"),
     (V5_EXHAUSTED, "%V5 暂停中%"),
+    (SITE_QUOTA, "%全站暂未开放 Anlas 消费%"),
+    (SITE_QUOTA, "%全站今日 Anlas 额度不足%"),
+    (SITE_QUOTA, "%全站本月 Anlas 预算不足%"),
     (MEMBER_QUOTA, "%你今天的 V4.5 免费额度用完了%"),
     (MEMBER_QUOTA, "%你今天的 V5 额度用完了%"),
     (MEMBER_QUOTA, "%你今天的 Anlas 额度不够%"),
@@ -187,6 +190,11 @@ pub const BACKFILL: &[(&str, &str)] = &[
     (KEY_INVALID, "%无效 Key 请求次数过多%"),
     (PARAM, "%角色数量超限%"),
     (SHARE_LOCK, "%存图备份专用%"),
+    (SHARE_LOCK, "%风控提示：请到分享频道分享以验证%"),
+    (MEMBER_QUOTA, "%当前未分配 V4.5 额度%"),
+    (MEMBER_QUOTA, "%当前未分配 V5 额度%"),
+    (MEMBER_QUOTA, "%当前未分配每月 Anlas 额度%"),
+    (MEMBER_QUOTA, "%当前未开通 Anlas 消费%"),
 ];
 
 /// 原因码 → 给站长看的短说明（`LABELS`，新增的码追加在末尾）。

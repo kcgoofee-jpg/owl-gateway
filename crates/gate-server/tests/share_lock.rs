@@ -505,7 +505,7 @@ async fn daily_mode_requires_each_non_exempt_member_to_share_even_without_previo
         share_lock::restriction(&e.state, &key(&e.state).await)
             .await
             .unwrap()
-            .contains("昨日和今日都没有分享")
+            .contains("风控提示：请到分享频道分享以验证")
     );
     let error = reserved
         .prepare_dispatch("abc124", "1100000002")

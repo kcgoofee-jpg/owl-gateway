@@ -24,17 +24,17 @@ import "./landing.css";
 /** 「Key 在头像里」的一次性提示（每个浏览器一次）。 */
 const KEY_HINT_KEY = "owl-key-hint";
 
-/** 登录时核验身份组（后台设了限定身份组）回到首页带的结果；no 的文案要带上身份组名称。 */
-function verifyNotice(v: string, role: string): { text: string; error: boolean } | undefined {
+/** 登录时核验身份组（后台设了限定身份组）回到首页带的结果；不披露具体身份组要求。 */
+function verifyNotice(v: string): { text: string; error: boolean } | undefined {
   switch (v) {
     case "ok":
       return {
-        text: "身份组验证通过。现在回到猫头鹰公益站的 Discord 服务器，在任意频道输入 /register 领取 Key。",
+        text: "验证通过，请在 Discord 使用 /register 领取 Key。",
         error: false,
       };
     case "no":
       return {
-        text: `没有检测到「${role}」，暂时不能领取 Key。请先获得该身份组后再来。`,
+        text: "身份组错误。",
         error: true,
       };
     case "error":
@@ -45,34 +45,25 @@ function verifyNotice(v: string, role: string): { text: string; error: boolean }
 }
 
 /** /login/callback 回到首页时带的结果（?login=failed 或 ?verify=ok|no|error）：提示一下并把查询参数从地址栏去掉。 */
-function useLoginNotice(role: string, metaReady: boolean) {
-  const [waited, setWaited] = useState(false);
+function useLoginNotice() {
   useEffect(() => {
     const params = new URLSearchParams(location.search);
     const v = params.get("login");
     const verify = params.get("verify");
     if (!v && !verify) return;
-    // 「没有身份组」的提示要带名称：站点信息还没到就先等（最多 3 秒，之后用通用说法）
-    if (verify === "no" && !metaReady && !waited) {
-      const t = setTimeout(() => setWaited(true), 3000);
-      return () => clearTimeout(t);
-    }
     if (v === "failed") {
-      toast(
-        "Discord 登录没有成功。请确认你已加入猫头鹰公益站的 Discord 服务器，然后再点一次「用 Discord 登录」。",
-        {
-          error: true,
-          ms: 9000,
-        },
-      );
+      toast("Discord 登录失败，请重试。", {
+        error: true,
+        ms: 9000,
+      });
     }
-    const n = verify ? verifyNotice(verify, role) : undefined;
+    const n = verify ? verifyNotice(verify) : undefined;
     if (n) toast(n.text, { error: n.error, ms: 9000 });
     params.delete("login");
     params.delete("verify");
     const qs = params.toString();
     history.replaceState(null, "", `${location.pathname}${qs ? `?${qs}` : ""}${location.hash}`);
-  }, [metaReady, waited, role]);
+  }, []);
 }
 
 function Loading() {
@@ -173,7 +164,6 @@ function splashLanding(store: Store): () => Promise<SplashLanding> {
 function Page({ store }: { store: Store }) {
   const me = store.me.value;
   const member = me?.logged_in ? me : null;
-  const reg = store.meta.value.registration;
   // 和圆环看的是同一个初值（页面加载时定好），两边不会对「这次播不播开屏」各说各的
   const [splash, setSplash] = useState(() => splashActive.value);
   // 「网页登录一次」提示：只对会被拦的成员显示；关掉后本次浏览器会话不再打扰。
@@ -204,7 +194,7 @@ function Page({ store }: { store: Store }) {
     }, 1200);
     return () => clearTimeout(t);
   }, [member?.has_key, splash]);
-  useLoginNotice(reg?.role_note || "指定身份组", reg !== undefined);
+  useLoginNotice();
   return (
     <>
       <div class="sky" aria-hidden="true" />

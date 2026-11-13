@@ -1,7 +1,7 @@
 //! 错误响应：三种固定格式，客户端依赖这些错误文案与字段布局，改动要先看客户端。
 //!
 //! 1. [`GateError`]（成员接口）：顶层 `statusCode` / `message` 与 NovelAI 官方错误格式一致，
-//!    客户端直接显示这句话；消息统一带「猫头鹰公益站提醒：」前缀，免得成员以为是 NovelAI 官方出错。
+//!    客户端直接显示这句话；普通消息带站点前缀，风控消息只显示状态码与简短验证提示。
 //!    `{"statusCode": s, "message": m, "error": {"message": m, "status": s, "request_id": rid, "code": code, "execution_unknown": bool, "retryable": bool}}`
 //! 3. 未预料的内部错误（500）：`{"error": {"message": "...错误编号 rid", "status": 500, "request_id": rid}}`，
 //!    并带 `X-Request-Id`。
@@ -118,22 +118,34 @@ pub fn member_error_body(
     rid: &str,
 ) -> Value {
     let (status, replaced) = member_status(status, upstream);
-    let message = replaced.map_or_else(
-        || {
-            let base = if detail.starts_with(NOTICE_PREFIX) {
-                detail.to_string()
-            } else {
-                format!("{NOTICE_PREFIX}{detail}")
-            };
-            if execution_unknown {
-                let base = base.replace("未扣费", "尚未确认记账");
-                format!("{base} 执行结果未知，请勿自动重发；请先在“我的请求”中核对。")
-            } else {
-                base
-            }
-        },
-        |m| format!("{NOTICE_PREFIX}{m}"),
-    );
+    let short = match code {
+        gate_core::reasons::SHARE_LOCK => Some(crate::share_lock::MESSAGE.to_string()),
+        gate_core::reasons::KEY_PAUSED => {
+            Some(format!("{status} 风控提示：请求暂被限制，请稍后重试。"))
+        }
+        gate_core::reasons::WEB_LOGIN => Some(format!("{status} 风控提示：请登录网站完成验证。")),
+        _ => None,
+    };
+    let message = if let Some(short) = short {
+        short
+    } else {
+        replaced.map_or_else(
+            || {
+                let base = if detail.starts_with(NOTICE_PREFIX) {
+                    detail.to_string()
+                } else {
+                    format!("{NOTICE_PREFIX}{detail}")
+                };
+                if execution_unknown {
+                    let base = base.replace("未扣费", "尚未确认记账");
+                    format!("{base} 执行结果未知，请勿自动重发；请先在“我的请求”中核对。")
+                } else {
+                    base
+                }
+            },
+            |m| format!("{NOTICE_PREFIX}{m}"),
+        )
+    };
     json!({
         "statusCode": status,
         "message": message,
@@ -302,6 +314,26 @@ impl IntoResponse for ApiError {
 mod tests {
     use super::*;
     use http_body_util::BodyExt;
+
+    #[test]
+    fn risk_response_is_short_and_keeps_machine_readable_reason() {
+        let body = member_error_body(
+            403,
+            "昨天额度已满，需要满足隐藏条件。https://example.test/private",
+            gate_core::reasons::SHARE_LOCK,
+            false,
+            false,
+            false,
+            "22abc",
+        );
+        assert_eq!(body["message"], "403 风控提示：请到分享频道分享以验证。");
+        assert_eq!(body["error"]["message"], body["message"]);
+        assert_eq!(body["error"]["code"], "share_lock");
+        assert_eq!(body["error"]["request_id"], "22abc");
+        assert_eq!(body["error"]["retryable"], false);
+        assert!(!body.to_string().contains("隐藏条件"));
+        assert!(!body.to_string().contains("example.test"));
+    }
 
     #[tokio::test]
     async fn members_never_see_402() {

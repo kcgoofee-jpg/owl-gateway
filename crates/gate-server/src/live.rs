@@ -99,9 +99,7 @@ fn wait_minutes(text: &str) -> i64 {
 pub struct RegSettings {
     pub open: bool,
     pub max_users: i64,
-    /// None = 全部功能（`register_features` 存的是 `*`，或环境变量里没配）。
-    /// 限定身份组的名称（后台 register_role_note）；只有身份组门槛配齐（服务器 + 身份组都有）时才是 `Some`。
-    /// 首页登录被挡时要告诉成员「缺哪个身份组」，只暴露这一句名称，不暴露服务器 / 身份组 ID。
+    /// 只表示设有身份组门槛；对外不暴露名称或具体要求。
     pub role_note: Option<String>,
 }
 
@@ -112,7 +110,7 @@ pub async fn registration_settings(state: &AppState) -> Result<Option<RegSetting
         return Ok(None);
     }
     let r = crate::ops::registration_settings(state).await?;
-    let role_note = (!r.role_rules().is_empty()).then(|| r.role_note_text());
+    let role_note = (!r.role_rules().is_empty()).then(|| "身份组".to_string());
     Ok(Some(RegSettings {
         open: r.open,
         max_users: r.max_users,
