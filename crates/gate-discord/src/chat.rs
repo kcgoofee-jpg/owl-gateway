@@ -430,7 +430,7 @@ pub fn site_stats_block(v: &serde_json::Value) -> String {
         format!("{label}：{n}\n")
     };
     let mut out = String::new();
-    out.push_str(&show_i64("queue_waiting", "当前排队人数"));
+    out.push_str(&show_i64("queue_waiting", "当前排队请求数"));
     out.push_str(&show_i64("images_today", "今日出图张数"));
     out.push_str(&show_i64("ok_requests_today", "今日成功请求数"));
     out.push_str(&show_i64("ok_requests_1h", "近 1 小时成功请求数"));
@@ -797,7 +797,7 @@ mod tests {
             "server_time": 1793480000.0
         });
         let s = site_stats_block(&v);
-        assert!(s.contains("当前排队人数：2"));
+        assert!(s.contains("当前排队请求数：2"));
         assert!(s.contains("今日出图张数：57"));
         assert!(
             s.contains("近 1 小时平均排队等待：813 毫秒"),
