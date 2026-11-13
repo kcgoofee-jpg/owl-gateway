@@ -382,6 +382,43 @@ async fn exclusive_token_is_hidden_from_the_site_pool_and_does_not_fall_back() {
     settle().await;
 }
 
+/// 绑定免费拼车号（allow_anlas=false）的赞助席仍套免费钳制：超大 v4.5 被收到免费小图，
+/// 不像官方专属号那样放行高规格（见 exclusive_token_is_hidden_...）。
+#[tokio::test]
+async fn bound_free_share_still_clamps_to_free_small_image() {
+    let share = gate_testkit::MockUpstream::start().await;
+    let e = setup(&[]).await;
+    let admin = Admin::login(&e.state).await;
+    let id = add_share(&admin, &share.url(), SHARE_A).await;
+    policy_for(
+        &e.state,
+        1,
+        json!({"daily_anlas": 5000, "paid_parameters": false}),
+    )
+    .await;
+    seat_mode(&admin, SUBJECT, Some(&id), "full", true, true).await;
+
+    let (status, _, body) = Call::new("POST", "/ai/generate-image")
+        .bearer(TOKEN)
+        .json(json!({
+            "input": "1girl, solo", "model": "nai-diffusion-4-5-full", "action": "generate",
+            "parameters": {"width": 1536, "height": 1536, "steps": 36, "scale": 5,
+                "sampler": "k_euler_ancestral", "n_samples": 2, "seed": 1}
+        }))
+        .send(&e.state)
+        .await;
+    assert_eq!(status.as_u16(), 200, "{}", String::from_utf8_lossy(&body));
+    let sent = share.requests_to("/ai/generate-image");
+    assert_eq!(sent.len(), 1);
+    assert!(sent[0].header("authorization").unwrap().contains(SHARE_A));
+    let p = &sent[0].json()["parameters"];
+    assert_eq!(p["n_samples"], 1, "{p}");
+    assert!(p["steps"].as_i64().unwrap() <= 28, "{p}");
+    let pixels = p["width"].as_i64().unwrap() * p["height"].as_i64().unwrap();
+    assert!(pixels <= 1024 * 1024, "{p}");
+    settle().await;
+}
+
 // ---------------------------------------------------------------- 专属 Key 自助
 
 const SHARE_A: &str = "pk-synthetic-donated-share01";
