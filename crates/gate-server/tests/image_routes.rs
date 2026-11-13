@@ -1731,6 +1731,48 @@ async fn upstream_429_pauses_all_image_generation() {
 }
 
 #[tokio::test]
+async fn upstream_429_with_healthy_peer_does_not_pause_site() {
+    let e = setup(&[(
+        "NAI_TOKENS",
+        "pst-synthetic-upstream-token,pst-second-upstream-token",
+    )])
+    .await;
+    e.mock
+        .push("/ai/generate-image", Reply::rate_limited("120"));
+    // 第一张吃到单号 429
+    let (status, _, body) = call(
+        &e.state,
+        "POST",
+        "/ai/generate-image",
+        Some(TOKEN),
+        Some(image_body("nai-diffusion-4-5-full", 1)),
+    )
+    .await;
+    assert_eq!(status, 429, "{}", String::from_utf8_lossy(&body));
+    // 关键：通用池还有健康号 → 不触发全站冷却
+    assert_eq!(
+        e.state.cooldown.remaining(e.state.now()),
+        0,
+        "单号 429 不该全站暂停"
+    );
+    // 后续请求自动改派到健康号：成功（脚本已空，走默认 200）
+    let (status, _, body) = call(
+        &e.state,
+        "POST",
+        "/ai/generate-image",
+        Some(TOKEN),
+        Some(image_body("nai-diffusion-4-5-full", 1)),
+    )
+    .await;
+    assert_eq!(status, 200, "{}", String::from_utf8_lossy(&body));
+    assert_eq!(e.state.cooldown.remaining(e.state.now()), 0);
+    // 两次打到不同的上游账号：证明限流号被冷却后自动改派
+    let sent = e.mock.requests_to("/ai/generate-image");
+    assert_eq!(sent.len(), 2, "{sent:?}");
+    assert_ne!(auth_of(&sent[0]), auth_of(&sent[1]), "应改派到另一把健康号");
+}
+
+#[tokio::test]
 async fn stream_sse_ok() {
     let e = setup(&[]).await;
     let (status, headers, body) = call(

@@ -165,12 +165,16 @@ pub(super) fn lane(
     gate_core::lane::Lane::of(key.queue_jump)
 }
 
-/// 上游 429：暂停全站图片请求（两种响应都在收尾时记日志，回调只更新冷却）。
+/// 上游 429：单号限流只冷却该号（选号会自动改派其它健康号），只有通用池全不可用才暂停全站图片请求。
 pub(super) fn on_429(state: &AppState) -> Box<dyn Fn(f64) -> BoxFuture<'static, ()> + Send + Sync> {
     let s = state.clone();
     Box::new(move |retry_after| {
         let s = s.clone();
         Box::pin(async move {
+            // 被打到的号在回调前已冷却；只要通用池还有健康号就不全站暂停，后续请求自动改派。
+            if s.nai.any_general_usable().await {
+                return;
+            }
             let secs = s.limits().image_429_cooldown_seconds.max(retry_after);
             s.block_image_generation(secs).await;
         })

@@ -388,7 +388,7 @@ impl AppState {
         }
     }
 
-    /// 上游 429：暂停全站图片请求（写库 + 写一行日志），返回剩余冷却秒数。
+    /// 上游 429 且通用池全不可用：暂停全站图片请求（写库 + 写一行日志），返回剩余冷却秒数。
     pub async fn block_image_generation(&self, retry_after: f64) -> i64 {
         let now = self.now();
         let until = self.cooldown.block(retry_after, now);

@@ -194,7 +194,7 @@ async fn image_429_cools_token_and_calls_back() {
         (err.status, err.message.as_str()),
         (
             429,
-            "NovelAI 正在限流，全站出图暂停冷却，未扣费。请稍后重试。"
+            "NovelAI 正在限流，该账号短暂冷却，未扣费。请稍后重试。"
         )
     );
     assert_eq!(*seen.lock().unwrap(), Some(120.0));
@@ -213,6 +213,79 @@ async fn image_429_cools_token_and_calls_back() {
         err.message.starts_with("本站 NovelAI 账号正在限流冷却"),
         "{}",
         err.message
+    );
+}
+
+#[tokio::test]
+async fn image_429_with_healthy_peer_keeps_general_pool_usable() {
+    let up = MockUpstream::start().await;
+    up.push("/ai/generate-image", Reply::rate_limited("120"));
+    let c = NaiClient::new(
+        config(&up.url(), false),
+        TestHooks::default(),
+        vec![(T1.into(), 0, false), (T2.into(), 0, false)],
+    )
+    .unwrap();
+    assert!(c.any_general_usable().await);
+    let seen = Arc::new(Mutex::new(None));
+    let s2 = seen.clone();
+    let cb = Callbacks {
+        on_rate_limited: Some(Box::new(move |ra| {
+            *s2.lock().unwrap() = Some(ra);
+            Box::pin(async {})
+        })),
+        ..Default::default()
+    };
+    let body = image_body(1);
+    // 一把号吃到 429：回调照常触发，但另一把健康号让通用池仍可用（不该全站暂停）
+    let err = c
+        .request(image_opts(&up.url(), &body, 1), &cb, None, &NoObserver)
+        .await
+        .unwrap_err();
+    assert_eq!(err.status, 429);
+    assert_eq!(*seen.lock().unwrap(), Some(120.0));
+    assert!(
+        c.any_general_usable().await,
+        "单号 429 后通用池仍应有健康号"
+    );
+    // 后续请求自动改派到健康号：成功（脚本已空，走默认 200）
+    let resp = c
+        .request(
+            image_opts(&up.url(), &body, 1),
+            &Callbacks::default(),
+            None,
+            &NoObserver,
+        )
+        .await
+        .unwrap();
+    assert_eq!(resp.status, 200);
+}
+
+#[tokio::test]
+async fn image_429_single_token_empties_general_pool() {
+    let up = MockUpstream::start().await;
+    up.push("/ai/generate-image", Reply::rate_limited("120"));
+    let c = NaiClient::new(
+        config(&up.url(), false),
+        TestHooks::default(),
+        vec![(T1.into(), 0, false)],
+    )
+    .unwrap();
+    assert!(c.any_general_usable().await);
+    let body = image_body(1);
+    let err = c
+        .request(
+            image_opts(&up.url(), &body, 1),
+            &Callbacks::default(),
+            None,
+            &NoObserver,
+        )
+        .await
+        .unwrap_err();
+    assert_eq!(err.status, 429);
+    assert!(
+        !c.any_general_usable().await,
+        "唯一一把号 429 后通用池应全不可用（这才该全站暂停）"
     );
 }
 
