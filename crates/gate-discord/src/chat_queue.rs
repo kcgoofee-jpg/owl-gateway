@@ -223,15 +223,11 @@ impl Naimei {
         }
     }
     pub(super) async fn enqueue_chat(&self, m: MessageInfo) {
-        let result = self.queue().admit(m.clone(), self.now());
-        let text = match result {
-            Ok(n) => format!(
-                "已接收，当前有 {n} 条请求等待处理。同频道依次回答；等待最多 3 分钟，可用 /取消 取消自己的请求。"
-            ),
-            Err(s) => s.into(),
+        let Err(text) = self.queue().admit(m.clone(), self.now()) else {
+            return; // Normal admission is silent; typing and the answer are sufficient.
         };
         if let Ok(channel) = m.channel_id.parse() {
-            self.send_chat_message(channel, &m.id, &text).await;
+            self.send_chat_message(channel, &m.id, text).await;
         }
     }
     pub(super) fn cancel_chat(&self, uid: &str) -> Result<usize, &'static str> {
