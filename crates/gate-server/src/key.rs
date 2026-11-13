@@ -26,6 +26,9 @@ pub struct Key {
     pub queue_jump: bool,
     /// 赞助席绑定的专属上游 Token；有则出图只走这把，不进全站池。
     pub bound_token_id: Option<String>,
+    /// 绑定号是否授予完整权限（官方号或开了 Anlas 的拼车号）。免费拼车号为 false，仍套免费钳制。
+    /// 由 [`resolve_bound_token`](Self::resolve_bound_token) 在能访问上游池的请求上下文里解析。
+    bound_token_full: bool,
 }
 
 impl std::fmt::Debug for Key {
@@ -69,6 +72,7 @@ impl Key {
             patron: patron_on,
             queue_jump,
             bound_token_id,
+            bound_token_full: false,
         })
     }
 
@@ -122,9 +126,27 @@ impl Key {
         self.policy.paid_parameters
     }
 
-    /// 专属捐赠账号，或已打开高规格开关：不再套免费档钳制。
+    /// 解析绑定号的能力：官方号或开了 Anlas 的拼车号授予完整权限（跳过免费钳制）；
+    /// 免费拼车号（`allow_anlas=false`）不授予，仍钳制到免费 v4.5 小图。须在能访问上游池处调用。
+    pub async fn resolve_bound_token<H: gate_upstream::client::Hooks>(
+        &mut self,
+        nai: &gate_upstream::client::NaiClient<H>,
+    ) {
+        self.bound_token_full = match self.bound_token_id.as_deref() {
+            Some(id) => nai
+                .tokens()
+                .await
+                .iter()
+                .find(|t| t.token_id == id)
+                .is_some_and(|t| !t.is_share() || t.fields().allow_anlas),
+            None => false,
+        };
+    }
+
+    /// 已打开高规格开关，或绑定了授予完整权限的专属号：不再套免费档钳制。
+    /// 绑定免费拼车号（`allow_anlas=false`）仍钳制到免费 v4.5 小图。
     pub fn skip_free_clamp(&self) -> bool {
-        self.allows_paid_parameters() || self.bound_token_id.is_some()
+        self.allows_paid_parameters() || self.bound_token_full
     }
 
     /// 挂费 V5：站长号、专属账号或已打开高规格开关。

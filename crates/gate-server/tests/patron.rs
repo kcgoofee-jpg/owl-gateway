@@ -1,8 +1,9 @@
 //! 赞助席：独立门户、插队、专属 Token。
 
 mod common;
-use common::{Admin, Call, SUBJECT, TOKEN, policy_for, send, settle, setup};
+use common::{Admin, Call, SUBJECT, TOKEN, generate, policy_for, send, settle, setup};
 use gate_core::lane::Lane;
+use gate_core::policy::mask_token;
 use gate_db::repo::keys::NewKey;
 use gate_db::repo::patron::PatronRecord;
 use gate_server::session::{PATRON_COOKIE, hash_password};
@@ -217,6 +218,7 @@ async fn patrons_skip_the_site_cap_and_keep_the_per_member_queue() {
                 self_service: true,
                 bound_token_id: None,
                 password_hash: hash_password(PORTAL),
+                portal_mode: "basic".into(),
             },
         )
         .await
@@ -377,5 +379,457 @@ async fn exclusive_token_is_hidden_from_the_site_pool_and_does_not_fall_back() {
     let text = String::from_utf8_lossy(&body);
     assert!(text.contains("专属账号"), "{text}");
     assert!(!text.contains(SHARED));
+    settle().await;
+}
+
+/// 绑定免费拼车号（allow_anlas=false）的赞助席仍套免费钳制：超大 v4.5 被收到免费小图，
+/// 不像官方专属号那样放行高规格（见 exclusive_token_is_hidden_...）。
+#[tokio::test]
+async fn bound_free_share_still_clamps_to_free_small_image() {
+    let share = gate_testkit::MockUpstream::start().await;
+    let e = setup(&[]).await;
+    let admin = Admin::login(&e.state).await;
+    let id = add_share(&admin, &share.url(), SHARE_A).await;
+    policy_for(
+        &e.state,
+        1,
+        json!({"daily_anlas": 5000, "paid_parameters": false}),
+    )
+    .await;
+    seat_mode(&admin, SUBJECT, Some(&id), "full", true, true).await;
+
+    let (status, _, body) = Call::new("POST", "/ai/generate-image")
+        .bearer(TOKEN)
+        .json(json!({
+            "input": "1girl, solo", "model": "nai-diffusion-4-5-full", "action": "generate",
+            "parameters": {"width": 1536, "height": 1536, "steps": 36, "scale": 5,
+                "sampler": "k_euler_ancestral", "n_samples": 2, "seed": 1}
+        }))
+        .send(&e.state)
+        .await;
+    assert_eq!(status.as_u16(), 200, "{}", String::from_utf8_lossy(&body));
+    let sent = share.requests_to("/ai/generate-image");
+    assert_eq!(sent.len(), 1);
+    assert!(sent[0].header("authorization").unwrap().contains(SHARE_A));
+    let p = &sent[0].json()["parameters"];
+    assert_eq!(p["n_samples"], 1, "{p}");
+    assert!(p["steps"].as_i64().unwrap() <= 28, "{p}");
+    let pixels = p["width"].as_i64().unwrap() * p["height"].as_i64().unwrap();
+    assert!(pixels <= 1024 * 1024, "{p}");
+    settle().await;
+}
+
+// ---------------------------------------------------------------- 专属 Key 自助
+
+const SHARE_A: &str = "pk-synthetic-donated-share01";
+const SHARE_B: &str = "pk-synthetic-donated-share02";
+const SHARE_NEW: &str = "pk-synthetic-rotated-share03";
+
+async fn add_share(api: &Admin, host: &str, key: &str) -> String {
+    let (status, body) = api
+        .json(
+            "POST",
+            "/share-upstreams",
+            Some(json!({"token": key, "image_host": host, "allow_anlas": false})),
+        )
+        .await;
+    assert_eq!(status, 200, "{body}");
+    token_id(key)
+}
+
+async fn share_concurrency(api: &Admin, id: &str, concurrency: i64) {
+    let (status, body) = api
+        .json(
+            "PUT",
+            &format!("/share-upstreams/{id}/settings"),
+            Some(json!({
+                "allow_anlas": false, "daily_anlas": 0, "rpm": 12,
+                "concurrency": concurrency, "post_wait_min": 1, "post_wait_max": 3,
+            })),
+        )
+        .await;
+    assert_eq!(status, 200, "{body}");
+}
+
+async fn seat_mode(
+    admin: &Admin,
+    subject: &str,
+    bound: Option<&str>,
+    mode: &str,
+    self_service: bool,
+    reset: bool,
+) -> Value {
+    let (status, body) = admin
+        .json(
+            "PUT",
+            &format!("/members/{subject}/patron"),
+            Some(json!({
+                "enabled": true,
+                "queue_jump": true,
+                "self_service": self_service,
+                "bound_token_id": bound.unwrap_or(""),
+                "portal_mode": mode,
+                "reset_password": reset,
+            })),
+        )
+        .await;
+    assert_eq!(status, 200, "{body}");
+    body
+}
+
+fn patron_cookie(cookie: &str) -> String {
+    format!("{PATRON_COOKIE}={cookie}")
+}
+
+#[tokio::test]
+async fn patron_me_shows_the_bound_share_token_without_leaking_it() {
+    let share = gate_testkit::MockUpstream::start().await;
+    let e = setup(&[]).await;
+    let admin = Admin::login(&e.state).await;
+    let id = add_share(&admin, &share.url(), SHARE_A).await;
+    share_concurrency(&admin, &id, 3).await;
+    let (s, b) = admin
+        .json(
+            "PUT",
+            &format!("/upstream-tokens/{id}/v5-limit"),
+            Some(json!({"v5_daily_limit": 0})),
+        )
+        .await;
+    assert_eq!(s, 200, "{b}");
+    let granted = seat_mode(&admin, SUBJECT, Some(&id), "full", true, true).await;
+    let password = granted["portal_password"].as_str().unwrap().to_string();
+    let cookie = patron_login(&e.state, &password).await;
+    let me = send(
+        &e.state,
+        "GET",
+        "/patron/api/me",
+        None,
+        None,
+        &[("cookie", &patron_cookie(&cookie))],
+    )
+    .await;
+    assert_eq!(me.status, 200, "{}", me.text());
+    let body = me.json();
+    assert_eq!(body["portal_mode"], "full");
+    assert_eq!(body["exclusive_account"], true);
+    let token = &body["token"];
+    assert_eq!(token["is_share"], true);
+    assert_eq!(token["enabled"], true);
+    assert_eq!(token["admin_disabled"], false);
+    assert_eq!(token["isolated"], false);
+    assert_eq!(token["concurrency"], 3);
+    assert_eq!(token["active"], 0);
+    assert_eq!(token["images_today"], 0);
+    assert_eq!(token["v5_used"], 0);
+    assert_eq!(token["v5_daily_limit"], 0);
+    assert_eq!(token["fails"], 0);
+    assert_eq!(token["blocked_for"], 0);
+    assert_eq!(token["fingerprint"], json!(mask_token(SHARE_A, 6)));
+    let text = me.text();
+    assert!(!text.contains(SHARE_A), "完整 Key 泄漏: {text}");
+    assert!(!text.contains(&share.url()), "网关地址泄漏: {text}");
+
+    // 不绑专属号的席位：token 块为 null，门户模式默认 basic。
+    let other = seat_mode(&admin, SUBJECT2, None, "basic", true, true).await;
+    let pw2 = other["portal_password"].as_str().unwrap().to_string();
+    let cookie2 = patron_login(&e.state, &pw2).await;
+    let me2 = send(
+        &e.state,
+        "GET",
+        "/patron/api/me",
+        None,
+        None,
+        &[("cookie", &patron_cookie(&cookie2))],
+    )
+    .await;
+    assert_eq!(me2.status, 200, "{}", me2.text());
+    assert_eq!(me2.json()["token"], Value::Null);
+    assert_eq!(me2.json()["portal_mode"], "basic");
+    assert_eq!(me2.json()["exclusive_account"], false);
+}
+
+#[tokio::test]
+async fn patron_token_self_service_auth_matrix() {
+    let share = gate_testkit::MockUpstream::start().await;
+    let e = setup(&[]).await;
+    let admin = Admin::login(&e.state).await;
+    let id = add_share(&admin, &share.url(), SHARE_A).await;
+    let id2 = add_share(&admin, &share.url(), SHARE_B).await;
+
+    // 未登录 401。
+    send(
+        &e.state,
+        "PUT",
+        "/patron/api/me/token/enabled",
+        None,
+        Some(json!({"enabled": false})),
+        &[],
+    )
+    .await
+    .assert_detail(401, "未登录或会话已过期");
+    send(
+        &e.state,
+        "PUT",
+        "/patron/api/me/token/rotate",
+        None,
+        Some(json!({"token": SHARE_NEW})),
+        &[],
+    )
+    .await
+    .assert_detail(401, "未登录或会话已过期");
+
+    // basic 模式：能看不能用。
+    let granted = seat_mode(&admin, SUBJECT, Some(&id), "basic", true, true).await;
+    let password = granted["portal_password"].as_str().unwrap().to_string();
+    let cookie = patron_login(&e.state, &password).await;
+    let hdrs: &[(&str, &str)] = &[("cookie", &patron_cookie(&cookie))];
+    send(
+        &e.state,
+        "PUT",
+        "/patron/api/me/token/enabled",
+        None,
+        Some(json!({"enabled": false})),
+        hdrs,
+    )
+    .await
+    .assert_detail(403, "此席位未开放 Key 自助管理，请联系站长");
+    send(
+        &e.state,
+        "PUT",
+        "/patron/api/me/token/rotate",
+        None,
+        Some(json!({"token": SHARE_NEW})),
+        hdrs,
+    )
+    .await
+    .assert_detail(403, "此席位未开放 Key 自助管理，请联系站长");
+
+    // full 但自助总开关关闭。
+    seat_mode(&admin, SUBJECT, Some(&id), "full", false, false).await;
+    send(
+        &e.state,
+        "PUT",
+        "/patron/api/me/token/enabled",
+        None,
+        Some(json!({"enabled": false})),
+        hdrs,
+    )
+    .await
+    .assert_detail(403, "此席位未开放自助管理，请联系站长");
+
+    // full + 自助，但没绑专属号。
+    seat_mode(&admin, SUBJECT, None, "full", true, false).await;
+    send(
+        &e.state,
+        "PUT",
+        "/patron/api/me/token/enabled",
+        None,
+        Some(json!({"enabled": false})),
+        hdrs,
+    )
+    .await
+    .assert_detail(403, "此席位没有绑定专属 Key");
+
+    // 席位被站长关闭：会话立刻失效（401，而不是 403）。
+    let (s, _) = admin
+        .json(
+            "PUT",
+            &format!("/members/{SUBJECT}/patron"),
+            Some(json!({"enabled": false})),
+        )
+        .await;
+    assert_eq!(s, 200);
+    send(
+        &e.state,
+        "PUT",
+        "/patron/api/me/token/enabled",
+        None,
+        Some(json!({"enabled": false})),
+        hdrs,
+    )
+    .await
+    .assert_detail(401, "未登录或会话已过期");
+
+    // 恢复 full 席位：body 校验与 Key 前缀校验。
+    seat_mode(&admin, SUBJECT, Some(&id), "full", true, false).await;
+    send(
+        &e.state,
+        "PUT",
+        "/patron/api/me/token/enabled",
+        None,
+        Some(json!({})),
+        hdrs,
+    )
+    .await
+    .assert_detail(422, "enabled 必须是布尔值");
+    send(
+        &e.state,
+        "PUT",
+        "/patron/api/me/token/enabled",
+        None,
+        Some(json!({"enabled": "yes"})),
+        hdrs,
+    )
+    .await
+    .assert_detail(422, "enabled 必须是布尔值");
+    for bad in ["pst-synthetic-official-0001", "pk-short", ""] {
+        send(
+            &e.state,
+            "PUT",
+            "/patron/api/me/token/rotate",
+            None,
+            Some(json!({"token": bad})),
+            hdrs,
+        )
+        .await
+        .assert_detail(422, "Key 格式不对：拼车网关的 Key 应以 NAI- 或 pk- 开头");
+    }
+
+    // 只能动自己绑的那把：另一个席位的专属号不受影响。
+    seat_mode(&admin, SUBJECT2, Some(&id2), "full", true, true).await;
+    let off = send(
+        &e.state,
+        "PUT",
+        "/patron/api/me/token/enabled",
+        None,
+        Some(json!({"enabled": false})),
+        hdrs,
+    )
+    .await;
+    assert_eq!(off.status, 200, "{}", off.text());
+    let tokens = e.state.nai.tokens().await;
+    let mine = tokens.iter().find(|t| t.token_id == id).unwrap();
+    let theirs = tokens.iter().find(|t| t.token_id == id2).unwrap();
+    assert!(!mine.fields().admin_enabled);
+    assert!(theirs.fields().admin_enabled);
+}
+
+#[tokio::test]
+async fn patron_full_seat_toggles_and_rotates_the_bound_share_key() {
+    let share = gate_testkit::MockUpstream::start().await;
+    let e = setup(&[]).await;
+    let admin = Admin::login(&e.state).await;
+    let id = add_share(&admin, &share.url(), SHARE_A).await;
+    share_concurrency(&admin, &id, 3).await;
+    let (s, b) = admin
+        .json(
+            "PUT",
+            &format!("/upstream-tokens/{id}/v5-limit"),
+            Some(json!({"v5_daily_limit": 0})),
+        )
+        .await;
+    assert_eq!(s, 200, "{b}");
+    let granted = seat_mode(&admin, SUBJECT, Some(&id), "full", true, true).await;
+    let password = granted["portal_password"].as_str().unwrap().to_string();
+    let cookie = patron_login(&e.state, &password).await;
+    let hdrs: &[(&str, &str)] = &[("cookie", &patron_cookie(&cookie))];
+
+    // 自助停用：与后台开关同一条路径，列表同步。
+    let off = send(
+        &e.state,
+        "PUT",
+        "/patron/api/me/token/enabled",
+        None,
+        Some(json!({"enabled": false})),
+        hdrs,
+    )
+    .await;
+    assert_eq!(off.status, 200, "{}", off.text());
+    assert_eq!(off.json()["token"]["enabled"], false);
+    assert_eq!(off.json()["token"]["admin_disabled"], true);
+    let listed = admin.get_ok("/share-upstreams").await;
+    let row = listed["accounts"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|a| a["token_id"] == id)
+        .unwrap();
+    assert_eq!(row["admin_enabled"], false);
+    let on = send(
+        &e.state,
+        "PUT",
+        "/patron/api/me/token/enabled",
+        None,
+        Some(json!({"enabled": true})),
+        hdrs,
+    )
+    .await;
+    assert_eq!(on.status, 200, "{}", on.text());
+    assert_eq!(on.json()["token"]["enabled"], true);
+
+    // 换到池里另一把 Key：409 冲突，席位绑定不动。
+    add_share(&admin, &share.url(), SHARE_B).await;
+    send(
+        &e.state,
+        "PUT",
+        "/patron/api/me/token/rotate",
+        None,
+        Some(json!({"token": SHARE_B})),
+        hdrs,
+    )
+    .await
+    .assert_detail(409, "这把 Token 已经在令牌池的另一个位置");
+    assert_eq!(
+        e.state
+            .db
+            .patron(SUBJECT)
+            .await
+            .unwrap()
+            .unwrap()
+            .bound_token_id
+            .as_deref(),
+        Some(id.as_str())
+    );
+
+    // 正常换 Key：验活 → 替换 → 席位重绑新指纹；并发与 V5 限额延续。
+    let rotated = send(
+        &e.state,
+        "PUT",
+        "/patron/api/me/token/rotate",
+        None,
+        Some(json!({"token": SHARE_NEW})),
+        hdrs,
+    )
+    .await;
+    assert_eq!(rotated.status, 200, "{}", rotated.text());
+    let body = rotated.json();
+    let new_id = token_id(SHARE_NEW);
+    assert_eq!(
+        body["token"]["fingerprint"],
+        json!(mask_token(SHARE_NEW, 6))
+    );
+    assert_eq!(body["token"]["concurrency"], 3);
+    assert_eq!(body["token"]["v5_daily_limit"], 0);
+    assert_eq!(body["token"]["enabled"], true);
+    assert!(!rotated.text().contains(SHARE_NEW), "完整 Key 泄漏");
+    assert!(!rotated.text().contains(&share.url()), "网关地址泄漏");
+    assert_eq!(
+        e.state
+            .db
+            .patron(SUBJECT)
+            .await
+            .unwrap()
+            .unwrap()
+            .bound_token_id
+            .as_deref(),
+        Some(new_id.as_str())
+    );
+    let exclusive = e.state.nai.exclusive_tokens().await;
+    assert!(exclusive.contains(&new_id) && !exclusive.contains(&id));
+    let listed = admin.get_ok("/share-upstreams").await;
+    let ids: Vec<&str> = listed["accounts"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|a| a["token_id"].as_str().unwrap())
+        .collect();
+    assert!(!ids.contains(&id.as_str()) && ids.contains(&new_id.as_str()));
+
+    // 席位成员出图走新 Key（专属路由跟随重绑）。
+    let (status, body) = generate(&e.state, TOKEN).await;
+    assert_eq!(status, 200, "{}", String::from_utf8_lossy(&body));
+    let reqs = share.requests_to("/ai/generate-image");
+    let last = reqs.last().expect("share upstream saw the image");
+    assert!(last.header("authorization").unwrap().contains(SHARE_NEW));
     settle().await;
 }

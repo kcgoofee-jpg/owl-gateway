@@ -131,7 +131,8 @@ impl Reserved {
         let row = self.state.db.get_key(self.key.id()).await?.ok_or_else(|| {
             GateError::with_code(403, "这把 Key 已失效，未扣费。", reasons::KEY_DISABLED)
         })?;
-        let current = Key::load(&self.state.db, row).await?;
+        let mut current = Key::load(&self.state.db, row).await?;
+        current.resolve_bound_token(&self.state.nai).await;
         if current.subject() != self.key.subject() {
             return Err(GateError::with_code(
                 403,

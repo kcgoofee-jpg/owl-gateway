@@ -7,7 +7,7 @@ mod jobs;
 mod member_ops;
 mod member_rules;
 mod members;
-mod ops;
+pub(crate) mod ops;
 mod records;
 mod req;
 

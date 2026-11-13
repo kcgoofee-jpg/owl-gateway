@@ -30,6 +30,8 @@ pub fn router() -> Router<AppState> {
         .route("/patron/api/me", get(me))
         .route("/patron/api/me/features", put(set_features))
         .route("/patron/api/me/password", post(change_password))
+        .route("/patron/api/me/token/enabled", put(set_token_enabled))
+        .route("/patron/api/me/token/rotate", put(rotate_token))
 }
 
 fn field(body: &serde_json::Map<String, Value>, name: &str) -> String {
@@ -121,11 +123,48 @@ async fn me_body(state: &AppState, session: &PatronSession) -> Result<Value, Api
         "welcome": WELCOME,
         "queue_jump": session.profile.queue_jump,
         "self_service": session.profile.self_service,
+        "portal_mode": session.profile.portal_mode,
         "exclusive_account": exclusive.is_some(),
         "account_hint": account_hint(state, exclusive.as_deref()).await,
         "key_fingerprint": if token.is_empty() { Value::Null } else { json!(mask_token(&token, 6)) },
+        "token": exclusive_token_view(state, exclusive.as_deref()).await?,
         "features": feature_map(&snapshot.effective),
         "fields": gate_core::member_policy::policy_fields(),
+    }))
+}
+
+/// 专属 Key 的自助视图：打码指纹、启停、并发与今日用量。完整 Key 与网关地址不出现。
+async fn exclusive_token_view(state: &AppState, token_id: Option<&str>) -> Result<Value, ApiError> {
+    let Some(id) = token_id else {
+        return Ok(Value::Null);
+    };
+    let Some(token) = state
+        .nai
+        .tokens()
+        .await
+        .into_iter()
+        .find(|t| t.token_id == id)
+    else {
+        return Ok(json!({"missing": true}));
+    };
+    let fields = token.fields();
+    let day = state.day();
+    let used = state.db.get_upstream_counter(id, &day).await?;
+    let anlas = state.db.upstream_anlas_used(id, &day).await?;
+    Ok(json!({
+        "fingerprint": mask_token(&token.token, 6),
+        "is_share": token.is_share(),
+        "enabled": fields.admin_enabled && !fields.disabled,
+        "admin_disabled": !fields.admin_enabled,
+        "isolated": fields.disabled,
+        "concurrency": token.image_slots.limit(),
+        "active": token.image_slots.active(),
+        "fails": fields.fails,
+        "blocked_for": ((fields.blocked_until - state.now()) as i64).max(0),
+        "images_today": used.images,
+        "v5_used": used.v5,
+        "v5_daily_limit": fields.v5_daily_limit,
+        "anlas_used_today": gate_core::values::float(anlas),
     }))
 }
 
@@ -259,4 +298,81 @@ async fn change_password(
         ),
     );
     Ok(resp)
+}
+
+/// 专属 Key 自助的前提：席位开启、绑定了 Token、自助总开关打开、且门户模式为 `full`。
+/// 返回绑定的 token_id。
+fn require_full_seat(session: &PatronSession) -> Result<String, ApiError> {
+    if !session.profile.enabled {
+        return Err(HttpError::new(403, "席位已关闭，请联系站长").into());
+    }
+    let id = session
+        .profile
+        .bound_token_id
+        .as_deref()
+        .map(str::trim)
+        .filter(|s| !s.is_empty())
+        .map(str::to_string)
+        .ok_or_else(|| HttpError::new(403, "此席位没有绑定专属 Key"))?;
+    if !session.profile.self_service {
+        return Err(HttpError::new(403, "此席位未开放自助管理，请联系站长").into());
+    }
+    if !session.profile.full_portal() {
+        return Err(HttpError::new(403, "此席位未开放 Key 自助管理，请联系站长").into());
+    }
+    Ok(id)
+}
+
+async fn set_token_enabled(
+    State(state): State<AppState>,
+    session: PatronSession,
+    req: Request,
+) -> Result<Response, ApiError> {
+    let id = require_full_seat(&session)?;
+    let (parts, body) = req.into_parts();
+    let body = read_json_body(&parts.headers, body, BODY_LIMIT).await?;
+    let Some(enabled) = body.get("enabled").and_then(Value::as_bool) else {
+        return Err(HttpError::new(422, "enabled 必须是布尔值").into());
+    };
+    crate::routes::admin::ops::upstream_share::patron_set_enabled(&state, &id, enabled).await?;
+    me(State(state), session).await
+}
+
+async fn rotate_token(
+    State(state): State<AppState>,
+    mut session: PatronSession,
+    req: Request,
+) -> Result<Response, ApiError> {
+    let old_id = require_full_seat(&session)?;
+    let (parts, body) = req.into_parts();
+    let body = read_json_body(&parts.headers, body, BODY_LIMIT).await?;
+    let token = field(&body, "token");
+    if !gate_upstream::token_store::valid_share_token(&token) {
+        return Err(
+            HttpError::new(422, "Key 格式不对：拼车网关的 Key 应以 NAI- 或 pk- 开头").into(),
+        );
+    }
+    let new_id =
+        crate::routes::admin::ops::upstream_share::patron_replace_token(&state, &old_id, &token)
+            .await?;
+    // 替换会解绑旧指纹（token_id 已变）：用库里的最新席位记录做乐观并发，重绑到新指纹。
+    let current = state.db.patron(&session.subject).await?;
+    match current {
+        Some(record) => {
+            let mut next = record.clone();
+            next.bound_token_id = Some(new_id);
+            state
+                .db
+                .save_patron(Some(record), next.clone())
+                .await?
+                .map_err(|e| HttpError::new(409, e.to_string()))?;
+            state.refresh_exclusive_tokens().await;
+            session.profile = next;
+        }
+        None => {
+            tracing::warn!(target: "patron", "更换 Key 后席位已不存在，专属绑定未恢复");
+            return Err(HttpError::new(409, "席位已变更，请联系站长重新绑定").into());
+        }
+    }
+    me(State(state), session).await
 }

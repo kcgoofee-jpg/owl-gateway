@@ -19,6 +19,7 @@ export type PatronView = {
   queue_jump: boolean;
   self_service: boolean;
   has_password: boolean;
+  portal_mode?: "basic" | "full";
   bound_token_id?: string;
 };
 export type PolicySnapshot = {
