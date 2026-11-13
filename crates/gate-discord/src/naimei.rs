@@ -58,7 +58,7 @@ const CHAT_HISTORY_TURNS: usize = 6;
 /// Discord 单条消息长度上限（2000 字符，留了余量）。
 const DISCORD_MESSAGE_LIMIT: usize = 1900;
 /// 上游额度/并发不足时的兜底话术（不透露任何内部实现）。
-const CHAT_QUOTA: &str = "呜——我的脑子今天被大家用光光啦 (´•̥ω•̥`) 过一阵再来戳我吧～";
+const CHAT_QUOTA: &str = "聊天上游当前限流或额度受限，请稍后再试。分享检测和直接查询仍可使用。";
 /// 其他对话失败时的兜底话术。
 const CHAT_IMAGE_FAILED: &str = "这次没能读到图片。请重新上传 PNG、JPG 或 WebP（单张不超过 10MB，合计不超过 20MB），再带上问题叫我。";
 const CHAT_FAILED: &str =
@@ -656,7 +656,7 @@ impl Naimei {
             .await
             .unwrap_or_else(|_| "频道背景暂时不可用，不猜测来源或规则".into())
         } else {
-            "未获授权读取历史，只使用当前成员本条消息，不猜测其他成员的内容。".into()
+            "本轮未取得历史，只使用当前成员本条消息，不猜测其他成员内容，也不将数据缺失说成用户没有权限。".into()
         };
         for (name, content) in &req.text_files {
             channel_ctx.push_str(&format!("\n成员附带的文本文件 [{name}]:\n{content}\n"));

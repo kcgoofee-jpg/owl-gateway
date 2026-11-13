@@ -161,3 +161,86 @@ async fn failed_worker_returns_classified_error_and_stays_healthy() {
     );
     t.abort();
 }
+
+struct LoopModel {
+    calls: std::sync::atomic::AtomicUsize,
+    always_more: bool,
+}
+async fn multi_round_model(State(s): State<Arc<LoopModel>>, Json(_): Json<Value>) -> Json<Value> {
+    let n = s.calls.fetch_add(1, std::sync::atomic::Ordering::SeqCst) + 1;
+    if n > 3 && !s.always_more {
+        return Json(
+            json!({"choices":[{"message":{"role":"assistant","content":"三次查询已整理完成"}}]}),
+        );
+    }
+    Json(
+        json!({"choices":[{"message":{"role":"assistant","content":null,"tool_calls":[{"id":format!("synthetic-{n}"),"type":"function","function":{"name":match n{1=>"site_status",2=>"member_status",_=>"upstream_status"},"arguments":"{}"}}]}}]}),
+    )
+}
+async fn check_three_rounds(always_more: bool) -> String {
+    let model = Arc::new(LoopModel {
+        calls: std::sync::atomic::AtomicUsize::new(0),
+        always_more,
+    });
+    let tools = Arc::new(Mock::default());
+    let (model_url, mt) = serve(
+        Router::new()
+            .route("/v1/chat/completions", post(multi_round_model))
+            .with_state(model.clone()),
+    )
+    .await;
+    let (core_url, ct) = serve(
+        Router::new()
+            .route("/tools", post(tool))
+            .with_state(tools.clone()),
+    )
+    .await;
+    let chat = Chat::local(ChatCfg {
+        base_url: model_url,
+        api_key: "synthetic".into(),
+        model: "synthetic".into(),
+        stream: false,
+    });
+    let (url, wt) = serve(worker::router(chat, "synthetic-worker".into(), core_url)).await;
+    let result: Value = reqwest::Client::new()
+        .post(format!("{url}/reply"))
+        .timeout(std::time::Duration::from_secs(3))
+        .bearer_auth("synthetic-worker")
+        .json(&worker::Request {
+            system: "仅按实时事实回答".into(),
+            history: vec![],
+            user: json!("综合查询"),
+            actor: Some(ToolRequest {
+                actor: "900000000000000005".into(),
+                channel: "900000000000000004".into(),
+                name: String::new(),
+                arguments: json!({}),
+            }),
+        })
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    assert_eq!(
+        model.calls.load(std::sync::atomic::Ordering::SeqCst),
+        if always_more { 9 } else { 4 }
+    );
+    assert_eq!(tools.tools.lock().unwrap().len(), 3);
+    assert!(result.get("kind").is_none(), "{result}");
+    mt.abort();
+    ct.abort();
+    wt.abort();
+    result["answer"].as_str().unwrap().to_owned()
+}
+#[tokio::test]
+async fn three_tool_rounds_leave_a_final_answer_turn() {
+    assert_eq!(check_three_rounds(false).await, "三次查询已整理完成");
+}
+#[tokio::test]
+async fn repeated_tool_requests_end_with_an_explanation_not_an_upstream_failure() {
+    let answer = check_three_rounds(true).await;
+    assert!(answer.contains("不能确认答案"));
+    assert!(answer.contains("直接查询"));
+}

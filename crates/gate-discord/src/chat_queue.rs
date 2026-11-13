@@ -111,8 +111,8 @@ impl Queue {
             .iter()
             .filter(|j| j.message.author.as_ref().is_some_and(|u| u.id == uid))
             .collect();
-        if mine.len() >= 2 || mine.iter().any(|j| !j.running) {
-            return Err("你已有一条等待中的请求，请等待或使用 /取消。");
+        if mine.len() >= 2 {
+            return Err("你已有两个问题在处理或等待，请稍后再问，或使用 /取消。");
         }
         if self.jobs.iter().filter(|j| !j.running).count() >= 32 {
             return Err("聊天队列已满，请稍后重试。");
@@ -145,9 +145,20 @@ impl Queue {
             .filter_map(|j| j.message.author.as_ref().map(|u| u.id.clone()))
             .collect();
         let images = running.iter().filter(|j| has_images(&j.message)).count();
+        let mut pending_channels = HashSet::new();
+        let mut pending_users = HashSet::new();
         let pos = self.jobs.iter().position(|j| {
-            !j.running
-                && now - j.at < 180.0
+            if j.running || now - j.at >= 180.0 {
+                return false;
+            }
+            let first_channel = pending_channels.insert(j.message.channel_id.clone());
+            let first_user = j
+                .message
+                .author
+                .as_ref()
+                .is_none_or(|u| pending_users.insert(u.id.clone()));
+            first_channel
+                && first_user
                 && !channels.contains(&j.message.channel_id)
                 && !j
                     .message
@@ -352,7 +363,8 @@ mod tests {
         q.next(2.0).unwrap();
         q.next(2.0).unwrap();
         assert!(q.next(2.0).is_none());
-        assert!(q.admit(m(9, 9, 2, false), 3.0).is_err());
+        assert!(q.admit(m(9, 9, 2, false), 3.0).is_ok());
+        assert!(q.admit(m(10, 10, 2, false), 3.0).is_err());
     }
     #[test]
     fn circuit_and_expiry() {
@@ -410,5 +422,28 @@ mod tests {
         for _ in 0..4 {
             assert!(q.next(2.0).is_some());
         }
+    }
+    #[test]
+    fn rapid_two_messages_are_admitted_before_the_scheduler_starts() {
+        let mut q = Queue::default();
+        assert!(q.admit(m(1, 1, 1, false), 1.0).is_ok());
+        assert!(q.admit(m(2, 1, 1, false), 1.01).is_ok());
+        assert!(q.admit(m(3, 1, 1, false), 1.02).is_err());
+        assert_eq!(q.next(2.0).unwrap().id, "1");
+        assert!(q.next(2.0).is_none());
+        q.finish("1", false, 3.0);
+        assert_eq!(q.next(3.1).unwrap().id, "2");
+    }
+    #[test]
+    fn text_cannot_overtake_an_earlier_image_in_the_same_channel() {
+        let mut q = Queue::default();
+        q.admit(m(1, 1, 1, true), 1.0).unwrap();
+        q.admit(m(2, 2, 2, true), 1.0).unwrap();
+        q.next(1.1).unwrap();
+        q.next(1.1).unwrap();
+        q.admit(m(3, 3, 3, true), 1.2).unwrap();
+        q.admit(m(4, 3, 4, false), 1.3).unwrap();
+        q.admit(m(5, 5, 5, false), 1.4).unwrap();
+        assert_eq!(q.next(1.5).unwrap().id, "5");
     }
 }

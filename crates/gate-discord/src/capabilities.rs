@@ -64,7 +64,7 @@ pub const CAPABILITIES: &[Capability] = &[
     Capability {
         name: "bot_status",
         command: "奶妹状态",
-        description: "分别查询 Discord、分享和聊天队列健康",
+        description: "查询当前生产版本、对话模型、Discord 连接和分享及聊天队列健康",
         source: "bot",
         timeout: 8,
     },
@@ -142,7 +142,7 @@ impl Naimei {
                 .await
                 .unwrap_or(json!({"error":"上游状态暂不可用，不能推断模型正常"})),
             "bot_status" => {
-                let mut v = json!({"discord_connected":self.connected(),"share_detection":self.share_detection_report(),"chat":self.chat_status(),"reactions":self.reaction_status()});
+                let mut v = json!({"build":{"version":env!("CARGO_PKG_VERSION"),"commit":std::env::var("OWL_BUILD_SHA").ok().filter(|s|s.len()==40&&s.bytes().all(|b|b.is_ascii_hexdigit())),"chat_model":self.chat.as_ref().map(Chat::model)},"commands":crate::commands::definitions().iter().map(|d|json!({"name":d["name"],"type":d["type"],"description":d["description"]})).collect::<Vec<_>>(),"model_tools":CAPABILITIES.iter().map(|c|c.name).collect::<Vec<_>>(),"discord_connected":self.connected(),"share_detection":self.share_detection_report(),"chat":self.chat_status(),"reactions":self.reaction_status()});
                 if self.is_admin(&r.actor).await {
                     v["resources"] = resources();
                 }

@@ -103,7 +103,7 @@
   },
   {
     "name": "奶妹状态",
-    "description": "分别查询 Discord、分享和聊天队列健康",
+    "description": "查询当前生产版本、对话模型、Discord 连接和分享及聊天队列健康",
     "type": 1,
     "options": [],
     "nsfw": false,

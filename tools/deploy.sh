@@ -94,7 +94,7 @@ IFS='|' read -r conclusion sha < <(gh run view "$run_id" -R "$REPO" --json concl
 [[ $conclusion == success ]] || die "run $run_id concluded '$conclusion'; refusing to deploy"
 say "run $run_id = ${sha:0:7}: $(git log -1 --format=%s "$sha" 2>/dev/null || echo '(commit not fetched locally)')"
 
-live=$(remote "a=\$(docker image inspect -f '{{.Id}}' owl-gate:$sha 2>/dev/null); b=\$(docker inspect -f '{{.Image}}' owl-gate 2>/dev/null); [ -n \"\$a\" ] && [ \"\$a\" = \"\$b\" ] && echo running" || true)
+live=$(remote "revision=\$(docker inspect -f '{{ index .Config.Labels \"org.opencontainers.image.revision\" }}' owl-gate 2>/dev/null); if [ \"\$revision\" = \"$sha\" ]; then echo running; else a=\$(docker image inspect -f '{{.Id}}' owl-gate:$sha 2>/dev/null); b=\$(docker inspect -f '{{.Image}}' owl-gate 2>/dev/null); [ -n \"\$a\" ] && [ \"\$a\" = \"\$b\" ] && echo running; fi" || true)
 if [[ $live == running ]]; then
   say "owl-gate:${sha:0:7} is already running; syncing mirror resources only"
   tools/sync-mirror.sh
@@ -191,6 +191,9 @@ ssh "${KEY[@]}" "root@$OWL_IP" "bash -s -- $(printf %q "$DOMAIN")" < tools/deplo
 
 curl -fsS -m 10 "https://$DOMAIN/healthz" | grep -q '"ok":true' || die "public /healthz not ok"
 remote "mkdir -p /opt/owl/releases/$(printf %q "$sha"); cp /opt/owl/compose.yml /opt/owl/releases/$(printf %q "$sha")/compose.yml; printf '%s\n' $(printf %q "$sha") > /opt/owl/live.sha" >/dev/null
+# All running services and rollback tags keep their image references. Only generated,
+# unused image/build layers are reclaimed; volumes and application data are untouched.
+remote 'docker image prune -f; docker builder prune -f --filter until=168h' || true
 say "live: owl-gate:${sha:0:7} ($((SECONDS - start))s total)"
 say "https://github.com/$REPO/commit/$sha"
 

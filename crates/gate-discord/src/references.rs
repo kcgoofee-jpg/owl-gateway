@@ -53,7 +53,7 @@ impl Naimei {
         let actor = m.author.as_ref().map(|u| u.id.as_str()).unwrap_or("");
         let readable = self.context_readable(actor, &m.channel_id).await;
         if !readable {
-            out.push_str("[未能确认提问者具有读取历史权限；仅使用本人本条消息，不读取引用或频道历史，不猜测原作者]\n");
+            out.push_str("[本轮未取得引用或历史数据；仅使用本人本条消息，不读取未核实的引用或历史。不猜测原作者，也不要把暂时取不到数据说成用户没有权限]\n");
             return (out, images, false);
         }
         let mut checked = HashSet::from([m.channel_id.clone()]);
@@ -72,7 +72,7 @@ impl Naimei {
             if !checked.contains(cid) {
                 if !self.context_readable(actor, cid).await {
                     out.push_str(
-                        "[跨频道引用未获提问者读取权限或暂时无法核实；不读取原文和原作者]\n",
+                        "[跨频道来源本轮不可用；不读取未核实可见性的原文和原作者。可以正常处理用户本条提供的内容，不推断他没有权限]\n",
                     );
                     break;
                 }
@@ -284,7 +284,7 @@ mod permission_tests {
         let (text, images, history) = app.reference_context(&message()).await;
         assert!(history);
         assert!(images.is_empty());
-        assert!(text.contains("跨频道引用未获"));
+        assert!(text.contains("跨频道来源本轮不可用"));
         assert!(!text.contains("synthetic-private-original"));
         assert!(!text.contains("private-author"));
         assert!(
