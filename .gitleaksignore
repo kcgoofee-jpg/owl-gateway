@@ -7,3 +7,12 @@
 458fed44374a2473ba98ec5ca785bcd0bfd73e80:crates/gate-db/src/archive_removal.rs:generic-api-key:113
 # quota_9999_migrated: 测试中的旧配额迁移标记。
 6386bb010036ce8eec0c0f603add0cd2ab8bcb4a:crates/gate-db/src/bootstrap.rs:generic-api-key:600
+# 3bc293c 的单元测试占位 Token（pst-/NAI-abcdefghijklmnop…，字母表合成值，已人工核对非真实凭据）。
+# 全历史扫描（workflow_dispatch）才会翻出；push 增量扫描不受影响。
+3bc293c9092bc64ea1496031d1aca763c79e87a4:crates/gate-upstream/src/client.rs:generic-api-key:418
+3bc293c9092bc64ea1496031d1aca763c79e87a4:crates/gate-upstream/src/client.rs:generic-api-key:424
+3bc293c9092bc64ea1496031d1aca763c79e87a4:crates/gate-upstream/src/token_store.rs:generic-api-key:257
+3bc293c9092bc64ea1496031d1aca763c79e87a4:crates/gate-upstream/src/token_store.rs:generic-api-key:258
+3bc293c9092bc64ea1496031d1aca763c79e87a4:crates/gate-upstream/src/token_store.rs:generic-api-key:259
+3bc293c9092bc64ea1496031d1aca763c79e87a4:crates/gate-upstream/src/token_store.rs:generic-api-key:260
+3bc293c9092bc64ea1496031d1aca763c79e87a4:crates/gate-upstream/src/token_store.rs:generic-api-key:261

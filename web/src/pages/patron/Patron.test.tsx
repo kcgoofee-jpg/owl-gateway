@@ -92,7 +92,7 @@ it("full 模式展示专属 Key 详情，可启停、可换 Key", async () => {
   expect(sendJSON).toHaveBeenCalledWith("PUT", "/patron/api/me/token/enabled", { enabled: false });
   expect(tokenSection().textContent).toContain("已停用");
 
-  vi.mocked(sendJSON).mockResolvedValue(me({ token: { ...TOKEN, fingerprint: "pk-new…0002" } }));
+  vi.mocked(sendJSON).mockResolvedValue(me({ token: { ...TOKEN, fingerprint: "pk-syn…0002" } }));
   const input = tokenSection().querySelector('input[type="password"]') as HTMLInputElement;
   await act(async () => {
     input.value = "  pk-synthetic-rotated-share03  ";
@@ -105,7 +105,7 @@ it("full 模式展示专属 Key 详情，可启停、可换 Key", async () => {
   expect(sendJSON).toHaveBeenCalledWith("PUT", "/patron/api/me/token/rotate", {
     token: "pk-synthetic-rotated-share03",
   });
-  expect(tokenSection().textContent).toContain("pk-new…0002");
+  expect(tokenSection().textContent).toContain("pk-syn…0002");
 });
 
 it("basic 模式只看详情，没有启停和换 Key 控件", async () => {
