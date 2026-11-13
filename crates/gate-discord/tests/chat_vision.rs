@@ -31,7 +31,7 @@ async fn streaming_and_nonstreaming_requests_contain_decodable_inline_images() {
     image::DynamicImage::ImageRgba8(image::RgbaImage::from_pixel(
         4,
         4,
-        image::Rgba([255, 0, 0, 255]),
+        image::Rgba([255, 0, 0, 128]),
     ))
     .write_to(&mut png, image::ImageFormat::Png)
     .unwrap();

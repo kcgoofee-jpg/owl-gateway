@@ -55,7 +55,7 @@ const DISCORD_MESSAGE_LIMIT: usize = 1900;
 /// 上游额度/并发不足时的兜底话术（不透露任何内部实现）。
 const CHAT_QUOTA: &str = "呜——我的脑子今天被大家用光光啦 (´•̥ω•̥`) 过一阵再来戳我吧～";
 /// 其他对话失败时的兜底话术。
-const CHAT_IMAGE_FAILED: &str = "这次没能读到图片。请重新上传 PNG、JPG 或 WebP（单张不超过 4MB，合计不超过 8MB），再带上问题叫我。";
+const CHAT_IMAGE_FAILED: &str = "这次没能读到图片。请重新上传 PNG、JPG 或 WebP（单张不超过 10MB，合计不超过 20MB），再带上问题叫我。";
 const CHAT_FAILED: &str = "呜，刚才走神了……再戳我一次试试 (´･ω･`)";
 
 /// 命令执行中可能出现的错误；全部会被统一接住：打日志，并回成员「出了点问题」。

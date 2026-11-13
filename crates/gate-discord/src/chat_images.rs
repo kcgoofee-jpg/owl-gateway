@@ -5,6 +5,8 @@ use reqwest::{Client, Url};
 use serde_json::Value;
 use std::{sync::OnceLock, time::Duration};
 
+const INPUT_IMAGE_LIMIT: usize = 10 * 1024 * 1024;
+const INPUT_TOTAL_LIMIT: usize = 20 * 1024 * 1024;
 pub(crate) const IMAGE_LIMIT: usize = 4 * 1024 * 1024;
 const TOTAL_LIMIT: usize = 8 * 1024 * 1024;
 
@@ -35,7 +37,7 @@ fn normalize(bytes: Vec<u8>) -> Result<(&'static str, Vec<u8>), ChatError> {
         .with_guessed_format()
         .map_err(|_| ChatError::ImageInput("图片格式无效"))?;
     let mut limits = image::Limits::default();
-    limits.max_alloc = Some(32 * 1024 * 1024);
+    limits.max_alloc = Some(96 * 1024 * 1024);
     limits.max_image_width = Some(8192);
     limits.max_image_height = Some(8192);
     reader.limits(limits);
@@ -47,10 +49,17 @@ fn normalize(bytes: Vec<u8>) -> Result<(&'static str, Vec<u8>), ChatError> {
     } else {
         decoded
     };
-    let alpha = decoded.color().has_alpha();
+    // Opaque RGBA uploads should use JPEG too; retaining a redundant alpha channel
+    // can make an ordinary generated PNG exceed the normalized payload budget.
+    let alpha = decoded.color().has_alpha() && decoded.to_rgba8().pixels().any(|p| p[3] != 255);
+    let decoded = if alpha && (decoded.width() > 1000 || decoded.height() > 1000) {
+        decoded.thumbnail(1000, 1000)
+    } else {
+        decoded
+    };
     let mut output = Cursor::new(Vec::new());
     if alpha {
-        decoded
+        image::DynamicImage::ImageRgba8(decoded.to_rgba8())
             .write_to(&mut output, ImageFormat::Png)
             .map_err(|_| ChatError::ImageInput("图片转换失败"))?;
     } else {
@@ -122,7 +131,7 @@ pub(crate) async fn inline(mut user: Value) -> Result<Value, ChatError> {
             .build()
             .expect("图片客户端配置固定")
     });
-    let mut remaining = TOTAL_LIMIT;
+    let mut remaining = INPUT_TOTAL_LIMIT;
     let mut encoded_remaining = TOTAL_LIMIT;
     let mut count = 0;
     for part in parts {
@@ -136,7 +145,7 @@ pub(crate) async fn inline(mut user: Value) -> Result<Value, ChatError> {
         let raw = part["image_url"]["url"]
             .as_str()
             .ok_or(ChatError::ImageInput("图片链接无效"))?;
-        let limit = IMAGE_LIMIT.min(remaining);
+        let limit = INPUT_IMAGE_LIMIT.min(remaining);
         let bytes = if raw.starts_with("data:") {
             if raw.len() > limit.saturating_mul(4) / 3 + 128 {
                 return Err(ChatError::ImageInput("图片超过大小限制"));
@@ -155,9 +164,19 @@ pub(crate) async fn inline(mut user: Value) -> Result<Value, ChatError> {
             download(client, discord_image_url(raw)?, limit).await?
         };
         remaining -= bytes.len();
-        let (mime, bytes) = tokio::task::spawn_blocking(move || normalize(bytes))
+        static DECODE: OnceLock<std::sync::Arc<tokio::sync::Semaphore>> = OnceLock::new();
+        let permit = DECODE
+            .get_or_init(|| std::sync::Arc::new(tokio::sync::Semaphore::new(1)))
+            .clone()
+            .acquire_owned()
             .await
-            .map_err(|_| ChatError::ImageInput("图片转换失败"))??;
+            .expect("图片解码池不会关闭");
+        let (mime, bytes) = tokio::task::spawn_blocking(move || {
+            let _permit = permit;
+            normalize(bytes)
+        })
+        .await
+        .map_err(|_| ChatError::ImageInput("图片转换失败"))??;
         if bytes.len() > encoded_remaining {
             return Err(ChatError::ImageInput("图片合计超过大小限制"));
         }
@@ -193,7 +212,7 @@ mod tests {
         image::DynamicImage::ImageRgba8(image::RgbaImage::from_pixel(
             2,
             2,
-            image::Rgba([255, 0, 0, 255]),
+            image::Rgba([255, 0, 0, 128]),
         ))
         .write_to(&mut png, image::ImageFormat::Png)
         .unwrap();
@@ -282,5 +301,53 @@ mod large_image_tests {
         assert_eq!(mime, "image/jpeg");
         assert!(decoded.width() <= 2048 && decoded.height() <= 2048);
         assert!(output.len() <= IMAGE_LIMIT);
+    }
+}
+
+#[cfg(test)]
+mod ordinary_upload_tests {
+    use super::*;
+    use serde_json::json;
+    #[test]
+    fn ordinary_four_k_rgba_images_fit_the_bounded_decoder() {
+        let picture = image::DynamicImage::ImageRgba8(image::RgbaImage::from_pixel(
+            4096,
+            4096,
+            image::Rgba([255, 0, 0, 255]),
+        ));
+        let mut encoded = std::io::Cursor::new(Vec::new());
+        picture
+            .write_to(&mut encoded, image::ImageFormat::Png)
+            .unwrap();
+        drop(picture);
+        let (mime, result) = normalize(encoded.into_inner()).unwrap();
+        assert_eq!(mime, "image/jpeg");
+        assert_eq!(image::load_from_memory(&result).unwrap().width(), 2048);
+    }
+
+    #[tokio::test]
+    async fn opaque_png_above_four_megabytes_is_accepted_and_compacted() {
+        let mut seed = 0x1234_5678u32;
+        let picture = image::RgbaImage::from_fn(1536, 1536, |_, _| {
+            let mut next = || {
+                seed ^= seed << 13;
+                seed ^= seed >> 17;
+                seed ^= seed << 5;
+                seed as u8
+            };
+            image::Rgba([next(), next(), next(), 255])
+        });
+        let mut encoded = std::io::Cursor::new(Vec::new());
+        image::DynamicImage::ImageRgba8(picture)
+            .write_to(&mut encoded, image::ImageFormat::Png)
+            .unwrap();
+        let raw = encoded.into_inner();
+        assert!(raw.len() > 4 * 1024 * 1024 && raw.len() < INPUT_IMAGE_LIMIT);
+        let value=inline(json!([{"type":"image_url","image_url":{"url":format!("data:image/png;base64,{}",STANDARD.encode(raw))}}])).await.unwrap();
+        let url = value[0]["image_url"]["url"].as_str().unwrap();
+        assert!(url.starts_with("data:image/jpeg;base64,"));
+        let result = STANDARD.decode(url.split_once(',').unwrap().1).unwrap();
+        assert!(result.len() < IMAGE_LIMIT);
+        assert_eq!(image::load_from_memory(&result).unwrap().width(), 1536);
     }
 }
