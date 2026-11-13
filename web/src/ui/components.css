@@ -190,7 +190,6 @@
   height: 100%;
   border-radius: inherit;
   background: var(--accent);
-  transition: width 0.4s ease;
 }
 .meter--v5 .meter__fill {
   background: var(--v5);
@@ -422,15 +421,8 @@
 .skel {
   display: block;
   border-radius: var(--radius-sm);
-  background: linear-gradient(90deg, var(--surface-2), var(--surface-3), var(--surface-2));
-  background-size: 200% 100%;
-  animation: skel 1.4s ease-in-out infinite;
+  background: var(--surface-2);
   min-height: 1em;
-}
-@keyframes skel {
-  to {
-    background-position: -200% 0;
-  }
 }
 
 /* ---------- Table ---------- */

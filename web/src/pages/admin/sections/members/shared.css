@@ -307,7 +307,6 @@
 
 .xa-busy {
   opacity: 0.6;
-  transition: opacity 0.15s;
 }
 
 /* 分区根容器：外壳的内容区是 grid（列宽 auto），宽表格会把整列撑出屏幕；这里固定成 minmax(0, 1fr)，宽内容只在自己的滚动框里滚 */
