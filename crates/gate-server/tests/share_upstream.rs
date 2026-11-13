@@ -167,6 +167,8 @@ async fn donated_pk_key_is_accepted_as_share_credential() {
     let row = &listed["accounts"][0];
     assert_eq!(row["image_host"], json!(share.url().trim_end_matches('/')));
     assert_eq!(row["allow_anlas"], json!(false));
+    // 未绑定赞助席的拼车 Key 不是捐赠来源。
+    assert_eq!(row["exclusive"], json!(false));
     let id = row["token_id"].as_str().unwrap().to_string();
     assert_eq!(id, gate_upstream::headers::token_id(key));
     let restarted = e.restart().await;

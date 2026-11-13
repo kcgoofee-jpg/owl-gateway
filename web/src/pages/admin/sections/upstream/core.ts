@@ -207,6 +207,8 @@ export type ShareAccount = {
   position: number;
   token: string;
   image_host: string | null;
+  /** 赞助席专属捐赠账号：绑定到启用的赞助席，不进普通选号池。其余拼车才是朋友网关。 */
+  exclusive?: boolean;
   usable: boolean;
   admin_enabled: boolean;
   disabled: boolean;

@@ -482,7 +482,7 @@ fn patron_cookie(cookie: &str) -> String {
 }
 
 #[tokio::test]
-async fn patron_me_shows_the_bound_share_token_without_leaking_it() {
+async fn patron_me_shows_the_bound_share_token_in_plaintext_but_hides_the_host() {
     let share = gate_testkit::MockUpstream::start().await;
     let e = setup(&[]).await;
     let admin = Admin::login(&e.state).await;
@@ -525,8 +525,10 @@ async fn patron_me_shows_the_bound_share_token_without_leaking_it() {
     assert_eq!(token["fails"], 0);
     assert_eq!(token["blocked_for"], 0);
     assert_eq!(token["fingerprint"], json!(mask_token(SHARE_A, 6)));
+    // 捐赠者本人门户明文显示完整 Key（站长 11-13：赞助席没必要隐藏 key）；网关地址仍不下发。
+    assert_eq!(token["token"], json!(SHARE_A));
     let text = me.text();
-    assert!(!text.contains(SHARE_A), "完整 Key 泄漏: {text}");
+    assert!(text.contains(SHARE_A), "本人门户应明文显示完整 Key: {text}");
     assert!(!text.contains(&share.url()), "网关地址泄漏: {text}");
 
     // 不绑专属号的席位：token 块为 null，门户模式默认 basic。
@@ -801,7 +803,10 @@ async fn patron_full_seat_toggles_and_rotates_the_bound_share_key() {
     assert_eq!(body["token"]["concurrency"], 3);
     assert_eq!(body["token"]["v5_daily_limit"], 0);
     assert_eq!(body["token"]["enabled"], true);
-    assert!(!rotated.text().contains(SHARE_NEW), "完整 Key 泄漏");
+    assert!(
+        rotated.text().contains(SHARE_NEW),
+        "本人门户应明文显示更换后的完整 Key"
+    );
     assert!(!rotated.text().contains(&share.url()), "网关地址泄漏");
     assert_eq!(
         e.state
@@ -817,13 +822,20 @@ async fn patron_full_seat_toggles_and_rotates_the_bound_share_key() {
     let exclusive = e.state.nai.exclusive_tokens().await;
     assert!(exclusive.contains(&new_id) && !exclusive.contains(&id));
     let listed = admin.get_ok("/share-upstreams").await;
-    let ids: Vec<&str> = listed["accounts"]
-        .as_array()
-        .unwrap()
+    let rows = listed["accounts"].as_array().unwrap();
+    let ids: Vec<&str> = rows
         .iter()
         .map(|a| a["token_id"].as_str().unwrap())
         .collect();
     assert!(!ids.contains(&id.as_str()) && ids.contains(&new_id.as_str()));
+    // 来源标签：绑定到启用赞助席的新 Key 是捐赠（exclusive），池里另一把未绑定的是拼车平台。
+    let new_row = rows.iter().find(|a| a["token_id"] == new_id).unwrap();
+    assert_eq!(new_row["exclusive"], json!(true));
+    let b_row = rows
+        .iter()
+        .find(|a| a["token_id"] == token_id(SHARE_B))
+        .unwrap();
+    assert_eq!(b_row["exclusive"], json!(false));
 
     // 席位成员出图走新 Key（专属路由跟随重绑）。
     let (status, body) = generate(&e.state, TOKEN).await;

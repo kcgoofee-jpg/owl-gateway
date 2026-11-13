@@ -37,6 +37,8 @@ async fn list(State(state): State<AppState>, _s: AdminSession) -> ApiResult {
     let day = state.day();
     let all = state.nai.tokens().await;
     let pool_size = all.len();
+    // 捐赠 = 拼车 ∩ 专属（绑定到启用的赞助席）；其余拼车才是朋友网关。来源标签据此区分。
+    let exclusive = state.nai.exclusive_tokens().await;
     let shares: Vec<_> = all.into_iter().filter(|t| t.is_share()).collect();
     let stats_pool: Vec<Value> = shares
         .iter()
@@ -61,6 +63,7 @@ async fn list(State(state): State<AppState>, _s: AdminSession) -> ApiResult {
             "position": fields.kind_index,
             "token": gate_core::policy::mask_token(&token.token, 6),
             "image_host": token.image_host,
+            "exclusive": exclusive.contains(&token.token_id),
             "usable": token.usable(now),
             "admin_enabled": fields.admin_enabled,
             "disabled": fields.disabled,
