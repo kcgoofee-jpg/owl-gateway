@@ -3308,3 +3308,170 @@ async fn personal_channel_replacement_keeps_the_new_binding_and_retires_the_old_
     assert_eq!(share_image(&e, &cookie, SHARE_HOOK).await.0, 409);
     assert_eq!(d.seen().len(), count);
 }
+
+// ------------------------------------------------------------------ 赞助席 Discord 登录
+
+/// 给某个 Discord ID 开一个赞助席（Discord 登录按 Discord ID 找席位）。
+async fn seed_patron_seat(e: &Env, subject: &str, enabled: bool) {
+    let seat = gate_db::repo::patron::PatronRecord {
+        subject: subject.into(),
+        enabled,
+        queue_jump: true,
+        self_service: true,
+        bound_token_id: None,
+        password_hash: gate_server::session::hash_password("patron-portal-pass"),
+        portal_mode: "basic".into(),
+    };
+    e.state.db.save_patron(None, seat).await.unwrap().unwrap();
+}
+
+#[tokio::test]
+async fn patron_discord_login_issues_patron_cookie_not_member_cookie() {
+    let (e, d) = setup_reg(&[]).await;
+    seed_patron_seat(&e, MEMBER, true).await;
+
+    // 起点：跳去 Discord，state 以 P. 开头（赞助席用途），只要 identify，不申请身份组
+    let (s, h, _) = get_raw(&e, "/patron/api/login/discord", None).await;
+    assert_eq!(s, 307);
+    let state = cookie_value(&h, "owl_login_state");
+    assert!(state.starts_with("P."), "{state}");
+    let loc = h["location"].to_str().unwrap();
+    assert!(
+        loc.starts_with("https://discord.com/oauth2/authorize?"),
+        "{loc}"
+    );
+    assert!(loc.contains("scope=identify+guilds+connections"), "{loc}");
+    assert!(!loc.contains("guilds.members.read"), "{loc}");
+
+    // 回调：命中启用的席位 → 发赞助席 Cookie（Path=/patron）、清 state、回 /patron
+    let (s, h, _) = get_raw(
+        &e,
+        &format!("/login/callback?code=abc&state={state}"),
+        Some(&format!("owl_login_state={state}")),
+    )
+    .await;
+    assert_eq!((s, h["location"].to_str().unwrap()), (307, "/patron"));
+    let cookies = set_cookies(&h);
+    let patron = cookies
+        .iter()
+        .find(|c| c.starts_with("nai_gate_patron="))
+        .expect("应发赞助席 Cookie");
+    assert!(
+        patron.contains("Path=/patron")
+            && patron.contains("HttpOnly")
+            && patron.contains("SameSite=strict"),
+        "{patron}"
+    );
+    assert!(
+        cookies
+            .iter()
+            .any(|c| c.starts_with("owl_login_state=\"\"")),
+        "应清 state Cookie: {cookies:?}"
+    );
+    assert!(
+        !cookies.iter().any(|c| c.starts_with("owl_member=")),
+        "赞助席登录不应发成员会话 Cookie: {cookies:?}"
+    );
+    // 只换授权码 + 查身份（+connections），绝不查身份组
+    let calls = d.calls();
+    assert!(
+        calls.contains(&"POST /oauth2/token".to_string()),
+        "{calls:?}"
+    );
+    assert!(calls.contains(&"GET /users/@me".to_string()), "{calls:?}");
+    assert!(!calls.iter().any(|c| c.contains("/members/")), "{calls:?}");
+
+    // 拿到的赞助席 Cookie 能进自己的门户
+    let ck = format!("nai_gate_patron={}", cookie_value(&h, "nai_gate_patron"));
+    let (s, _, body) = get_raw(&e, "/patron/api/me", Some(&ck)).await;
+    assert_eq!(s, 200);
+    let v: Value = serde_json::from_slice(&body).unwrap();
+    assert_eq!(v["ok"], json!(true));
+}
+
+#[tokio::test]
+async fn patron_discord_login_without_enabled_seat_fails() {
+    // 没有席位：回门户并提示失败，不发任何会话
+    let (e, _d) = setup_reg(&[]).await;
+    let (_, h, _) = get_raw(&e, "/patron/api/login/discord", None).await;
+    let state = cookie_value(&h, "owl_login_state");
+    let (s, h, _) = get_raw(
+        &e,
+        &format!("/login/callback?code=abc&state={state}"),
+        Some(&format!("owl_login_state={state}")),
+    )
+    .await;
+    assert_eq!(
+        (s, h["location"].to_str().unwrap()),
+        (307, "/patron?login=failed")
+    );
+    assert!(
+        !set_cookies(&h)
+            .iter()
+            .any(|c| c.starts_with("nai_gate_patron=")),
+        "没有席位不应发赞助席 Cookie"
+    );
+
+    // 席位停用：同样失败
+    let (e, _d) = setup_reg(&[]).await;
+    seed_patron_seat(&e, MEMBER, false).await;
+    let (_, h, _) = get_raw(&e, "/patron/api/login/discord", None).await;
+    let state = cookie_value(&h, "owl_login_state");
+    let (s, h, _) = get_raw(
+        &e,
+        &format!("/login/callback?code=abc&state={state}"),
+        Some(&format!("owl_login_state={state}")),
+    )
+    .await;
+    assert_eq!(
+        (s, h["location"].to_str().unwrap()),
+        (307, "/patron?login=failed")
+    );
+    assert!(
+        !set_cookies(&h)
+            .iter()
+            .any(|c| c.starts_with("nai_gate_patron=")),
+        "停用席位不应发赞助席 Cookie"
+    );
+}
+
+#[tokio::test]
+async fn patron_discord_login_works_during_maintenance_but_member_login_does_not() {
+    let (e, _d) = setup_reg(&[]).await;
+    seed_patron_seat(&e, MEMBER, true).await;
+    // 维护前拿一个成员登录 state（p.），维护后它的回调应被挡
+    let (_, h, _) = get_raw(&e, "/login", None).await;
+    let member_state = cookie_value(&h, "owl_login_state");
+    assert!(member_state.starts_with("p."), "{member_state}");
+
+    set_setting(&e, "maintenance_mode", "1").await;
+
+    // 成员登录入口与回调都被维护挡住（503，请求无 Accept: text/html）
+    assert_eq!(get_raw(&e, "/login", None).await.0, 503);
+    let (s, _, _) = get_raw(
+        &e,
+        &format!("/login/callback?code=abc&state={member_state}"),
+        Some(&format!("owl_login_state={member_state}")),
+    )
+    .await;
+    assert_eq!(s, 503, "成员登录回调维护期间应被挡");
+
+    // 赞助席登录入口（/patron/ 豁免）与回调（state P. 单独放行）仍可用
+    let (s, h, _) = get_raw(&e, "/patron/api/login/discord", None).await;
+    assert_eq!(s, 307);
+    let patron_state = cookie_value(&h, "owl_login_state");
+    assert!(patron_state.starts_with("P."), "{patron_state}");
+    let (s, h, _) = get_raw(
+        &e,
+        &format!("/login/callback?code=abc&state={patron_state}"),
+        Some(&format!("owl_login_state={patron_state}")),
+    )
+    .await;
+    assert_eq!((s, h["location"].to_str().unwrap()), (307, "/patron"));
+    assert!(
+        set_cookies(&h)
+            .iter()
+            .any(|c| c.starts_with("nai_gate_patron=")),
+        "维护期间赞助席 Discord 登录仍应发 Cookie"
+    );
+}

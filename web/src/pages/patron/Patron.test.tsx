@@ -1,7 +1,7 @@
 import { render } from "preact";
 import { act } from "preact/test-utils";
 import { afterEach, expect, it, vi } from "vitest";
-import { getJSON, sendJSON } from "../../lib/api";
+import { ApiError, getJSON, sendJSON } from "../../lib/api";
 import { Patron } from "./Patron";
 
 vi.mock("../../lib/api", async (original) => ({
@@ -23,6 +23,7 @@ const FEATURES = {
 
 const TOKEN = {
   fingerprint: "pk-syn…0001",
+  token: "pk-synthetic-donated-share01",
   is_share: true,
   enabled: true,
   admin_disabled: false,
@@ -78,11 +79,11 @@ function tokenSection(): HTMLElement {
 it("full 模式展示专属 Key 详情，可启停、可换 Key", async () => {
   await show(me());
   const section = tokenSection();
-  expect(section.textContent).toContain("pk-syn…0001");
+  expect(section.textContent).toContain("pk-synthetic-donated-share01");
+  expect(section.textContent).toContain("仅你本人可见");
   expect(section.textContent).toContain("1/3");
   expect(section.textContent).toContain("4 张");
   expect(section.textContent).toContain("启用中");
-  expect(section.textContent).not.toContain("pk-synthetic-donated-share01");
 
   vi.mocked(sendJSON).mockResolvedValue(me({ token: { ...TOKEN, enabled: false, admin_disabled: true } }));
   const toggle = section.querySelector('[role="switch"]') as HTMLButtonElement;
@@ -92,7 +93,9 @@ it("full 模式展示专属 Key 详情，可启停、可换 Key", async () => {
   expect(sendJSON).toHaveBeenCalledWith("PUT", "/patron/api/me/token/enabled", { enabled: false });
   expect(tokenSection().textContent).toContain("已停用");
 
-  vi.mocked(sendJSON).mockResolvedValue(me({ token: { ...TOKEN, fingerprint: "pk-syn…0002" } }));
+  vi.mocked(sendJSON).mockResolvedValue(
+    me({ token: { ...TOKEN, token: "pk-synthetic-rotated-share03", fingerprint: "pk-syn…0002" } }),
+  );
   const input = tokenSection().querySelector('input[type="password"]') as HTMLInputElement;
   await act(async () => {
     input.value = "  pk-synthetic-rotated-share03  ";
@@ -105,13 +108,13 @@ it("full 模式展示专属 Key 详情，可启停、可换 Key", async () => {
   expect(sendJSON).toHaveBeenCalledWith("PUT", "/patron/api/me/token/rotate", {
     token: "pk-synthetic-rotated-share03",
   });
-  expect(tokenSection().textContent).toContain("pk-syn…0002");
+  expect(tokenSection().textContent).toContain("pk-synthetic-rotated-share03");
 });
 
 it("basic 模式只看详情，没有启停和换 Key 控件", async () => {
   await show(me({ portal_mode: "basic" }));
   const section = tokenSection();
-  expect(section.textContent).toContain("pk-syn…0001");
+  expect(section.textContent).toContain("pk-synthetic-donated-share01");
   expect(section.textContent).toContain("联系站长开通完整模式");
   expect(section.querySelector('[role="switch"]')).toBeNull();
   expect(section.querySelector('input[type="password"]')).toBeNull();
@@ -140,4 +143,32 @@ it("绑定的 Key 丢失时提示联系站长", async () => {
 it("未绑定专属号时不渲染 Key 分区", async () => {
   await show(me({ token: null, exclusive_account: false }));
   expect(root.querySelector('[aria-label="专属 Key"]')).toBeNull();
+});
+
+async function showLogin(query: string) {
+  history.replaceState(null, "", `/patron?login=${query}`);
+  vi.mocked(getJSON).mockRejectedValue(new ApiError(401, "未登录"));
+  root = document.createElement("div");
+  document.body.append(root);
+  await act(async () => {
+    render(<Patron />, root);
+  });
+  await act(async () => {});
+}
+
+it("登录页提供 Discord 登录入口，并显示回调失败原因", async () => {
+  await showLogin("failed");
+  expect(root.textContent).toContain("Discord 登录失败");
+  expect(root.textContent).toContain("没有启用的赞助席");
+  const btn = [...root.querySelectorAll("button")].find((b) => b.textContent === "用 Discord 登录");
+  expect(btn).toBeTruthy();
+  // type=button：点它不会提交密码表单，而是跳去 Discord 登录启动路由
+  expect(btn?.getAttribute("type")).toBe("button");
+  expect(sendJSON).not.toHaveBeenCalled();
+});
+
+it("Discord 登录未配置时提示用密码进入", async () => {
+  await showLogin("unavailable");
+  expect(root.textContent).toContain("尚未配置 Discord 登录");
+  expect(root.textContent).toContain("请用门户密码进入");
 });

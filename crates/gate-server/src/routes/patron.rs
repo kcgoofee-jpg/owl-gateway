@@ -3,14 +3,15 @@
 use crate::body::read_json_body;
 use crate::error::{ApiError, HttpError, ok_json};
 use crate::session::{
-    ADMIN_SESSION_SECS, PATRON_COOKIE, PATRON_COOKIE_PATH, PatronSession,
-    delete_cookie_header_path, hash_password, hit_login, make_patron_cookie, origin_ok,
-    password_matches, set_cookie_header_path,
+    ADMIN_SESSION_SECS, LoginMode, PATRON_COOKIE, PATRON_COOKIE_PATH, PatronSession, STATE_COOKIE,
+    delete_cookie_header, delete_cookie_header_path, hash_password, hit_login, make_patron_cookie,
+    origin_ok, password_matches, set_cookie_header, set_cookie_header_path, sign_login_state,
 };
 use crate::state::AppState;
 use axum::Router;
+use axum::body::Body;
 use axum::extract::{Request, State};
-use axum::http::HeaderMap;
+use axum::http::{HeaderMap, HeaderValue, StatusCode};
 use axum::response::Response;
 use axum::routing::{get, post, put};
 use gate_core::member_policy::{MemberOverrides, MemberPolicy};
@@ -26,12 +27,84 @@ const WELCOME: &str =
 pub fn router() -> Router<AppState> {
     Router::new()
         .route("/patron/api/login", post(login))
+        .route("/patron/api/login/discord", get(login_discord))
         .route("/patron/api/logout", post(logout))
         .route("/patron/api/me", get(me))
         .route("/patron/api/me/features", put(set_features))
         .route("/patron/api/me/password", post(change_password))
         .route("/patron/api/me/token/enabled", put(set_token_enabled))
         .route("/patron/api/me/token/rotate", put(rotate_token))
+}
+
+/// `RedirectResponse(url)`：307，没有响应体（与成员网页登录一致）。
+fn redirect(location: &str) -> Response {
+    let mut resp = Response::new(Body::empty());
+    *resp.status_mut() = StatusCode::TEMPORARY_REDIRECT;
+    if let Ok(v) = HeaderValue::from_str(location) {
+        resp.headers_mut().insert("location", v);
+    }
+    resp.headers_mut()
+        .insert("content-length", HeaderValue::from_static("0"));
+    resp
+}
+
+/// 赞助席「用 Discord 登录」：复用成员网页 OAuth，签一个 `Patron` 用途的 state，
+/// 回调到共用的 `/login/callback`（Discord 只登记了这一个 redirect_uri），在那里改发赞助席 Cookie。
+/// 没配 Discord 登录时回门户并提示不可用；密码登录始终可用。
+async fn login_discord(State(state): State<AppState>) -> Response {
+    let Some(svc) = state.registration.as_deref() else {
+        return redirect("/patron?login=unavailable");
+    };
+    use base64::Engine;
+    let nonce = base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(rand::random::<[u8; 24]>());
+    let st = sign_login_state(
+        &state.secret_key,
+        LoginMode::Patron,
+        &nonce,
+        "",
+        state.now() as i64,
+    );
+    let mut resp = redirect(&svc.web_login_url(&st, false));
+    resp.headers_mut().append(
+        "set-cookie",
+        set_cookie_header(STATE_COOKIE, &st, 600, true, "lax"),
+    );
+    resp
+}
+
+/// 共用的 `/login/callback` 在识别出 `Patron` 用途后转到这里：按 Discord ID 找启用的赞助席，
+/// 命中就发赞助席 Cookie 回门户；没有席位 / 席位停用 / 查库失败都回门户并提示失败（不发任何会话）。
+pub(crate) async fn discord_callback(
+    state: &AppState,
+    who: &crate::registration::WebIdentity,
+) -> Response {
+    let seat = state.db.patron(&who.id).await.ok().flatten();
+    let matched = seat
+        .as_ref()
+        .filter(|p| p.enabled && !p.password_hash.is_empty());
+    let mut resp = match matched {
+        Some(p) => {
+            let mut r = redirect("/patron");
+            r.headers_mut().append(
+                "set-cookie",
+                set_cookie_header_path(
+                    PATRON_COOKIE,
+                    &make_patron_cookie(state, &p.subject, &p.password_hash),
+                    ADMIN_SESSION_SECS,
+                    state.env.admin_cookie_secure,
+                    "strict",
+                    PATRON_COOKIE_PATH,
+                ),
+            );
+            r
+        }
+        None => redirect("/patron?login=failed"),
+    };
+    resp.headers_mut().append(
+        "set-cookie",
+        delete_cookie_header(STATE_COOKIE, false, "lax", false),
+    );
+    resp
 }
 
 fn field(body: &serde_json::Map<String, Value>, name: &str) -> String {
@@ -133,7 +206,8 @@ async fn me_body(state: &AppState, session: &PatronSession) -> Result<Value, Api
     }))
 }
 
-/// 专属 Key 的自助视图：打码指纹、启停、并发与今日用量。完整 Key 与网关地址不出现。
+/// 专属 Key 的自助视图：完整 Key 仅在捐赠者本人门户明文显示，另附启停、并发与今日用量。
+/// 网关地址仍不下发；后台列表、日志与报错继续打码。
 async fn exclusive_token_view(state: &AppState, token_id: Option<&str>) -> Result<Value, ApiError> {
     let Some(id) = token_id else {
         return Ok(Value::Null);
@@ -153,6 +227,7 @@ async fn exclusive_token_view(state: &AppState, token_id: Option<&str>) -> Resul
     let anlas = state.db.upstream_anlas_used(id, &day).await?;
     Ok(json!({
         "fingerprint": mask_token(&token.token, 6),
+        "token": token.token,
         "is_share": token.is_share(),
         "enabled": fields.admin_enabled && !fields.disabled,
         "admin_disabled": !fields.admin_enabled,

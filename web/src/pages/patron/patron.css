@@ -71,6 +71,17 @@
   font-weight: 500;
 }
 
+.pt-key {
+  display: grid;
+  gap: var(--sp-2);
+  padding: var(--sp-3) 0;
+}
+
+.pt-key__label {
+  color: var(--muted);
+  font-size: var(--fs-sm);
+}
+
 .pt-rotate {
   display: grid;
   gap: var(--sp-3);

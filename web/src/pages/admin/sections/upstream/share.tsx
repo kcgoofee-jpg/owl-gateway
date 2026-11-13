@@ -21,6 +21,7 @@ import {
 function ShareDialog(props: {
   mode: "add" | "replace";
   target?: ShareAccount | undefined;
+  noun: string;
   onClose: () => void;
 }) {
   const add = props.mode === "add";
@@ -69,7 +70,9 @@ function ShareDialog(props: {
     <Dialog
       open
       title={
-        add ? "添加拼车网关" : `替换拼车网关：#${props.target?.position ?? ""} ${props.target?.token ?? ""}`
+        add
+          ? `添加${props.noun}`
+          : `替换${props.noun}：#${props.target?.position ?? ""} ${props.target?.token ?? ""}`
       }
       onClose={close}
       footer={
@@ -82,7 +85,7 @@ function ShareDialog(props: {
             onClick={() => void submit()}
             disabled={busyNow || !token.trim() || !host.trim()}
           >
-            {busyNow ? "正在向拼车网关验证…" : add ? "添加" : "替换"}
+            {busyNow ? `正在向${props.noun}验证…` : add ? "添加" : "替换"}
           </Button>
         </>
       }
@@ -201,8 +204,11 @@ function ShareCard(props: {
   return (
     <Card class="up-account">
       <header class="token__head">
-        <h2 class="up-account__title">拼车 {a.position}</h2>
+        <h2 class="up-account__title">
+          {a.exclusive ? "捐赠" : "拼车"} {a.position}
+        </h2>
         <span class="token__name mono">{a.token}</span>
+        {a.exclusive && <Badge tone="info">赞助席专属</Badge>}
         <Badge {...withTone(st.tone)} dot>
           {st.text}
         </Badge>
@@ -262,12 +268,17 @@ function ShareCard(props: {
   );
 }
 
-export function ShareUpstream() {
+export function ShareUpstream(props: { source?: "relay" | "donated" }) {
+  const donated = props.source === "donated";
+  const noun = donated ? "捐赠网关" : "拼车网关";
   const { data, error, loading } = useAdmin<SharePage>("/admin/api/share-upstreams");
   const [dialog, setDialog] = useState<{ mode: "add" | "replace"; target?: ShareAccount } | null>(null);
   const [del, setDel] = useState<ShareAccount | null>(null);
   const [toggle, setToggle] = useState<ShareAccount | null>(null);
   const pool = data?.accounts ?? [];
+  // 捐赠 = 专属拼车（绑定启用的赞助席）；拼车平台 = 其余拼车。
+  // poolSize 和「最后一把可用上游」仍按全部拼车算，不受当前页筛选影响。
+  const visible = pool.filter((a) => (a.exclusive === true) === donated);
   const poolSize = data?.pool_size ?? pool.length;
   const lastUsable =
     toggle?.admin_enabled === true &&
@@ -279,21 +290,30 @@ export function ShareUpstream() {
     <Sect>
       <div class="section-head">
         <p>
-          把朋友的拼车网关当额外上游。份额余量来自对方钱包，不是官网电池。生图、流式、Vibe
-          编码和放大走拼车。标签补全和导演工具目前仍走官方号。
+          {donated
+            ? "赞助席捐赠的专属网关：只服务绑定它的那位赞助者，不进全站选号池，份额余量来自捐赠者钱包。在成员详情把赞助身份设为「账号赞助」并绑定其捐赠的拼车 Key 后出现在这里。"
+            : "把朋友的拼车网关当额外上游。份额余量来自对方钱包，不是官网电池。生图、流式、Vibe 编码和放大走拼车。标签补全和导演工具目前仍走官方号。"}
         </p>
         <span class="spacer" />
-        <Button variant="primary" onClick={() => setDialog({ mode: "add" })}>
-          <Plus size={16} aria-hidden="true" />
-          添加拼车网关
-        </Button>
+        {!donated && (
+          <Button variant="primary" onClick={() => setDialog({ mode: "add" })}>
+            <Plus size={16} aria-hidden="true" />
+            添加拼车网关
+          </Button>
+        )}
       </div>
       {loading && !data && <Loading rows={2} />}
       {!data && error && <LoadError error={error} />}
-      {data && pool.length === 0 && <Notice>还没有拼车网关。官方账号在「官方账号」页。</Notice>}
+      {data && visible.length === 0 && (
+        <Notice>
+          {donated
+            ? "还没有捐赠账号。在成员详情把赞助身份设为「账号赞助」并绑定其捐赠的拼车 Key。"
+            : "还没有拼车网关。官方账号在「官方账号」页，捐赠账号在「捐赠账号」页。"}
+        </Notice>
+      )}
       {data && (
         <div class="stack">
-          {pool
+          {visible
             .slice()
             .sort(
               (x, y) =>
@@ -313,10 +333,12 @@ export function ShareUpstream() {
             ))}
         </div>
       )}
-      {dialog && <ShareDialog mode={dialog.mode} target={dialog.target} onClose={() => setDialog(null)} />}
+      {dialog && (
+        <ShareDialog mode={dialog.mode} target={dialog.target} noun={noun} onClose={() => setDialog(null)} />
+      )}
       {del && (
         <ConfirmDialog
-          title="删除拼车网关？"
+          title={`删除${noun}？`}
           confirmText="删除"
           danger
           onClose={() => setDel(null)}
@@ -325,7 +347,7 @@ export function ShareUpstream() {
               "DELETE",
               `/admin/api/share-upstreams/${encodeURIComponent(del.token_id)}`,
               undefined,
-              "已删除拼车网关",
+              `已删除${noun}`,
             )
           }
         >
@@ -335,7 +357,7 @@ export function ShareUpstream() {
       )}
       {toggle && (
         <ConfirmDialog
-          title={toggle.admin_enabled ? "停用这条拼车网关？" : "启用这条拼车网关？"}
+          title={toggle.admin_enabled ? `停用这条${noun}？` : `启用这条${noun}？`}
           confirmText={toggle.admin_enabled ? "停用" : "启用"}
           danger={toggle.admin_enabled}
           onClose={() => setToggle(null)}
@@ -344,7 +366,7 @@ export function ShareUpstream() {
               "PUT",
               `/admin/api/upstream-tokens/${encodeURIComponent(toggle.token_id)}/enabled`,
               { enabled: !toggle.admin_enabled },
-              toggle.admin_enabled ? "拼车网关已停用" : "拼车网关已启用",
+              toggle.admin_enabled ? `${noun}已停用` : `${noun}已启用`,
             )
           }
         >

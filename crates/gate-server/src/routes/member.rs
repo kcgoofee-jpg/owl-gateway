@@ -147,6 +147,9 @@ async fn login_callback(
             }
             return Ok(response);
         }
+        if given.starts_with("P.") {
+            return Ok(redirect("/patron?login=failed"));
+        }
         return Ok(redirect("/?login=failed"));
     };
     if mode == LoginMode::Webhook {
@@ -155,9 +158,19 @@ async fn login_callback(
     let verify = mode == LoginMode::Verify;
     let who = match svc.web_identify(code, verify).await {
         Ok(w) => w,
-        Err(RegErr::Denied(_)) => return Ok(redirect("/?login=failed")),
+        Err(RegErr::Denied(_)) => {
+            return Ok(redirect(if mode == LoginMode::Patron {
+                "/patron?login=failed"
+            } else {
+                "/?login=failed"
+            }));
+        }
         Err(RegErr::Internal(m)) => return Err(internal(m)),
     };
+    // 赞助席登录：只发赞助席 Cookie，不走成员会话 / 成员登录记录。
+    if mode == LoginMode::Patron {
+        return Ok(crate::routes::patron::discord_callback(&state, &who).await);
+    }
     // 记一次网页登录：web_logins 永久保留，「每位成员到网页登录一次」开关按它放行；
     // 设备指纹状态：没带 = none；带了但服务端没算过（不是 /public/device-fp 发的）= unknown，疑似伪造；否则 ok。
     // 只有 ok 的指纹记进 device_logins（同一个设备指纹下登录了多个 Discord 账号 = 疑似小号）。

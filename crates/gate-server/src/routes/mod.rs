@@ -8,7 +8,7 @@ mod landing;
 mod me;
 mod member;
 mod pages;
-mod patron;
+pub(crate) mod patron;
 pub(crate) mod public;
 mod realtime;
 mod registration;
@@ -63,6 +63,17 @@ fn maintenance_bypass(path: &str) -> bool {
         )
 }
 
+/// 维护期间仍放行赞助席的 Discord 登录回调（state 以 `P.` 开头）：赞助席门户本就豁免维护，
+/// 登录回调共用 `/login/callback`（Discord 只登记了这一个 redirect_uri），故按 state 前缀单独放行。
+/// 成员登录回调不放行；真正的签名与 Cookie 校验仍在回调里做，伪造前缀只会走到失败跳转，不开任何成员功能。
+fn patron_login_callback(request: &Request<Body>) -> bool {
+    request.uri().path() == "/login/callback"
+        && request
+            .uri()
+            .query()
+            .is_some_and(|q| q.split('&').any(|kv| kv.starts_with("state=P.")))
+}
+
 fn listed_owner(id: &str, owners: &[String]) -> bool {
     !id.is_empty() && owners.iter().any(|owner| owner == id)
 }
@@ -96,7 +107,7 @@ async fn maintenance_gate(
     request: Request<Body>,
     next: Next,
 ) -> Response {
-    if maintenance_bypass(request.uri().path()) {
+    if maintenance_bypass(request.uri().path()) || patron_login_callback(&request) {
         return next.run(request).await;
     }
     // 维护开关读取失败时 fail closed：避免数据库异常时继续接受新请求。

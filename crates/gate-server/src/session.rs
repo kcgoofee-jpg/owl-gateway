@@ -359,12 +359,14 @@ fn member_secret(state: &AppState) -> String {
     format!("{}:member-login", state.secret_key)
 }
 
-/// 登录授权的用途：普通登录只要 identify；验证身份组要多申请 guilds.members.read。
+/// 登录授权的用途：普通登录只要 identify；验证身份组要多申请 guilds.members.read；
+/// 赞助席复用同一套网页 OAuth，回调里改发赞助席 Cookie（不进成员会话）。
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum LoginMode {
     Plain,
     Verify,
     Webhook,
+    Patron,
 }
 
 /// 授权 state 的有效期（秒）。
@@ -387,6 +389,7 @@ pub fn sign_login_state(
         LoginMode::Plain => 'p',
         LoginMode::Verify => 'v',
         LoginMode::Webhook => 'w',
+        LoginMode::Patron => 'P',
     };
     // dev = 浏览器设备指纹（十六进制，可空）：跟着签名 state 走一圈 Discord 再回来
     let payload = format!("{m}.{nonce}.{}.{dev}", now + LOGIN_STATE_SECS);
@@ -414,6 +417,7 @@ pub fn verify_login_state(secret_key: &str, raw: &str, now: i64) -> Option<(Logi
         "p" => LoginMode::Plain,
         "v" => LoginMode::Verify,
         "w" => LoginMode::Webhook,
+        "P" => LoginMode::Patron,
         _ => return None,
     };
     Some((mode, dev.to_string()))
@@ -529,6 +533,17 @@ mod tests {
         assert_eq!(
             verify_login_state(k, &p, now + 599),
             Some((LoginMode::Plain, String::new()))
+        );
+        // 赞助席用途：大写 P，与普通登录 p 区分；改前缀即破坏签名
+        let patron = sign_login_state(k, LoginMode::Patron, "abc_-123", "", now);
+        assert!(patron.starts_with("P."), "{patron}");
+        assert_eq!(
+            verify_login_state(k, &patron, now),
+            Some((LoginMode::Patron, String::new()))
+        );
+        assert_eq!(
+            verify_login_state(k, &patron.replacen("P.", "p.", 1), now),
+            None
         );
         // 过期（10 分钟）
         assert_eq!(verify_login_state(k, &v, now + LOGIN_STATE_SECS), None);

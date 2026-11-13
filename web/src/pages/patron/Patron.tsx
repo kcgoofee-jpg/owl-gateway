@@ -5,7 +5,7 @@ import { useEffect, useRef, useState } from "preact/hooks";
 import { ApiError, getJSON, sendJSON } from "../../lib/api";
 import { FEATURE_COPY, FEATURE_FIELDS } from "../../lib/member-policy";
 import { reduceMotion } from "../../lib/motion";
-import { Badge, Button, Field, Notice, toast } from "../../ui";
+import { Badge, Button, CopyField, Field, Notice, toast } from "../../ui";
 import "../../ui/chrome.css";
 import "../landing/landing.css";
 import { SwitchRow } from "../../ui/Switch";
@@ -13,10 +13,11 @@ import "./patron.css";
 
 type Features = Record<(typeof FEATURE_FIELDS)[number], boolean>;
 
-/** 专属 Key 的自助视图：只有打码指纹与状态，完整 Key 和网关地址不下发。 */
+/** 专属 Key 的自助视图：完整 Key 仅在捐赠者本人门户明文显示；网关地址仍不下发。 */
 type TokenView = {
   missing?: boolean;
   fingerprint?: string;
+  token?: string;
   is_share?: boolean;
   enabled?: boolean;
   admin_disabled?: boolean;
@@ -82,7 +83,12 @@ function Grain() {
 
 function Login(props: { onOk: () => void }) {
   const [pw, setPw] = useState("");
-  const [err, setErr] = useState("");
+  const [err, setErr] = useState(() => {
+    const flag = new URLSearchParams(location.search).get("login");
+    if (flag === "failed") return "Discord 登录失败：这个 Discord 账号没有启用的赞助席。";
+    if (flag === "unavailable") return "本站尚未配置 Discord 登录，请用门户密码进入。";
+    return "";
+  });
   const [pending, setPending] = useState(false);
   return (
     <main class="pt-page">
@@ -129,6 +135,16 @@ function Login(props: { onOk: () => void }) {
         <Button type="submit" variant="primary" size="lg" disabled={pending || !pw}>
           {pending ? "登录中…" : "进入"}
         </Button>
+        <Button
+          type="button"
+          size="lg"
+          onClick={() => {
+            location.href = "/patron/api/login/discord";
+          }}
+        >
+          用 Discord 登录
+        </Button>
+        <p class="pt-hint">Discord 登录需席位已绑定你的 Discord 账号。</p>
       </form>
     </main>
   );
@@ -166,6 +182,7 @@ function TokenCard(props: { me: Me; onLogout: () => void; onReload: (me: Me) => 
     );
   }
   const blocked = t.blocked_for ?? 0;
+  const keyValue = t.token ?? t.fingerprint ?? "";
   return (
     <section class="card pt-card" aria-label="专属 Key">
       <h2 class="pt-h2">专属 Key</h2>
@@ -188,13 +205,13 @@ function TokenCard(props: { me: Me; onLogout: () => void; onReload: (me: Me) => 
       {blocked > 0 && (
         <Notice tone="warn">上游限流冷却中，约 {blocked} 秒后自动恢复，期间请求会排队或稍后再试。</Notice>
       )}
-      <dl class="pt-kv">
-        <div>
-          <dt>指纹</dt>
-          <dd>
-            <code>{t.fingerprint}</code>
-          </dd>
+      {keyValue && (
+        <div class="pt-key">
+          <span class="pt-key__label">专属 Key（明文，仅你本人可见）</span>
+          <CopyField value={keyValue} label="专属 Key" wrap />
         </div>
+      )}
+      <dl class="pt-kv">
         <div>
           <dt>并发</dt>
           <dd>
