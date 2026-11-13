@@ -6,10 +6,12 @@ import { PatronSeatButtons } from "./MemberDetail";
 
 vi.mock("./actions", () => ({ call: vi.fn() }));
 vi.mock("../../data", () => ({
-  useAdmin: () => ({
-    data: {
-      accounts: [{ token_id: "token-donated", position: 1, token: "pst-te…0001", exclusive: false }],
-    },
+  useAdmin: (url: string) => ({
+    data: url.includes("share-upstreams")
+      ? { accounts: [{ token_id: "token-share", position: 1, token: "pk-syn…0001" }] }
+      : {
+          accounts: [{ token_id: "token-donated", position: 1, token: "pst-te…0001", exclusive: false }],
+        },
     error: null,
     loading: false,
   }),
@@ -38,6 +40,8 @@ it("opens a patron seat with queue jump and optional bound token", async () => {
   expect(call).toHaveBeenCalledWith("PUT", "/admin/api/members/900000000000000001/patron", {
     enabled: true,
     queue_jump: true,
+    self_service: true,
+    portal_mode: "basic",
     bound_token_id: "",
   });
   expect(root.textContent).toContain("once-only-password");
@@ -73,4 +77,53 @@ it("shows save errors", async () => {
     save?.click();
   });
   expect(root.querySelector('[role="alert"]')?.textContent).toBe("这把上游 Token 已绑定其他赞助席");
+});
+
+it("binds share credentials and grants the full portal mode", async () => {
+  root = document.createElement("div");
+  document.body.append(root);
+  vi.mocked(call).mockResolvedValue({ ok: true, data: {} });
+  await act(() =>
+    render(
+      <PatronSeatButtons
+        subject="900000000000000001"
+        patron={{
+          enabled: true,
+          queue_jump: true,
+          self_service: true,
+          has_password: true,
+          portal_mode: "basic",
+        }}
+      />,
+      root,
+    ),
+  );
+  const selects = [...root.querySelectorAll("select")];
+  expect(selects).toHaveLength(2);
+  const tokenSelect = selects[0] as HTMLSelectElement;
+  expect([...tokenSelect.options].map((o) => o.textContent)).toEqual([
+    "不绑定（全站池）",
+    "账号 1 · pst-te…0001",
+    "拼车 1 · pk-syn…0001",
+  ]);
+  await act(async () => {
+    tokenSelect.value = "token-share";
+    tokenSelect.dispatchEvent(new Event("change", { bubbles: true }));
+  });
+  const modeSelect = selects[1] as HTMLSelectElement;
+  await act(async () => {
+    modeSelect.value = "full";
+    modeSelect.dispatchEvent(new Event("change", { bubbles: true }));
+  });
+  const save = [...root.querySelectorAll("button")].find((b) => b.textContent === "保存");
+  await act(async () => {
+    save?.click();
+  });
+  expect(call).toHaveBeenCalledWith("PUT", "/admin/api/members/900000000000000001/patron", {
+    enabled: true,
+    queue_jump: true,
+    self_service: true,
+    portal_mode: "full",
+    bound_token_id: "token-share",
+  });
 });

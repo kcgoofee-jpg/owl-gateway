@@ -239,7 +239,8 @@ export type SharePage = {
 export function shareTokenProblem(t: string): string | null {
   const v = t.trim();
   if (!v) return "请粘贴拼车网关 Key";
-  if (!v.startsWith("NAI-")) return "Key 格式不对：拼车网关的 Key 应以 NAI- 开头";
+  if (!v.startsWith("NAI-") && !v.startsWith("pk-"))
+    return "Key 格式不对：拼车网关的 Key 应以 NAI- 或 pk- 开头";
   return null;
 }
 

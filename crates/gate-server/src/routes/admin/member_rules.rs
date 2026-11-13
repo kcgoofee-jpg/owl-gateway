@@ -130,6 +130,7 @@ struct PatronSeat {
     queue_jump: Option<bool>,
     self_service: Option<bool>,
     bound_token_id: Option<String>,
+    portal_mode: Option<String>,
     #[serde(default)]
     reset_password: bool,
 }
@@ -159,6 +160,15 @@ async fn set_patron(
         }
     }
     let existing = state.db.patron(&subject).await?;
+    let portal_mode = seat.portal_mode.unwrap_or_else(|| {
+        existing
+            .as_ref()
+            .map(|p| p.portal_mode.clone())
+            .unwrap_or_else(|| "basic".into())
+    });
+    if !gate_db::repo::patron::PORTAL_MODES.contains(&portal_mode.as_str()) {
+        return Err(HttpError::new(422, "门户模式只能是 basic 或 full").into());
+    }
     let mut password = None;
     let mut password_hash = existing
         .as_ref()
@@ -180,6 +190,7 @@ async fn set_patron(
                 self_service: seat.self_service.unwrap_or(true),
                 bound_token_id: bound,
                 password_hash,
+                portal_mode,
             },
         )
         .await?

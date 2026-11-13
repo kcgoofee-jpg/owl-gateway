@@ -222,7 +222,9 @@ async fn share_payload(
         .map(|v| primitives::strip(&validation::text(v)).to_string())
         .unwrap_or_default();
     if !token_store::valid_share_token(&token) {
-        return Err(HttpError::new(422, "Key 格式不对：拼车网关的 Key 应以 NAI- 开头").into());
+        return Err(
+            HttpError::new(422, "Key 格式不对：拼车网关的 Key 应以 NAI- 或 pk- 开头").into(),
+        );
     }
     let host = match body.get("image_host") {
         None | Some(Value::Null) if !require_host => None,
@@ -285,6 +287,56 @@ async fn verify_share(
             };
             HttpError::new(422, mapped).into()
         })
+}
+
+// ------------------------------------------------------------------ 赞助席自助
+
+/// 赞助席自助启停自己绑定的专属拼车 Key。与后台开关同一条路径；
+/// 停用时会等这把 Key 手上在途的图跑完才返回。
+pub(crate) async fn patron_set_enabled(
+    state: &AppState,
+    id: &str,
+    enabled: bool,
+) -> Result<(), ApiError> {
+    share_token(state, id).await?;
+    let _serial = state.token_edits.lock().await;
+    state.db.set_upstream_token_enabled(id, enabled).await?;
+    if !state.nai.set_admin_enabled(id, enabled).await {
+        return Err(HttpError::new(404, NOT_FOUND).into());
+    }
+    upstream::alert_owner(
+        state,
+        "赞助席自助改动了一条拼车网关凭据的启停。如果这不是你授意的，请检查席位设置。",
+    );
+    Ok(())
+}
+
+/// 赞助席自助更换专属拼车 Key：沿用原网关地址（不接受新地址），先验活再替换。
+/// 返回新 token_id；席位重绑到新指纹由调用方完成（替换会解绑旧指纹）。
+pub(crate) async fn patron_replace_token(
+    state: &AppState,
+    old_id: &str,
+    token: &str,
+) -> Result<String, ApiError> {
+    let existing = share_token(state, old_id).await?;
+    let Some(host) = existing.image_host.clone() else {
+        return Err(HttpError::new(404, NOT_FOUND).into());
+    };
+    verify_share(state, token, &host, Some(old_id)).await?;
+    upstream::edit_pool(
+        state,
+        Edit::Replace {
+            id: old_id.to_string(),
+            token: token.to_string(),
+            image_host: Some(host),
+        },
+    )
+    .await?;
+    upstream::alert_owner(
+        state,
+        "赞助席自助替换了一条拼车网关凭据。如果这不是你授意的，请检查席位设置。",
+    );
+    Ok(gate_upstream::headers::token_id(token))
 }
 
 fn remaining(sub: &Value) -> Map<String, Value> {

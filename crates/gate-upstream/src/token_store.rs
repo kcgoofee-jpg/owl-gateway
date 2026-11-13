@@ -3,8 +3,8 @@
 //! 原始 Token 不写进 SQLite（数据库备份里不会有它）。文件存在时它是令牌池的唯一来源；
 //! 不存在或不含有效的旧格式 Token 时回退到 `.env` 的 `NAI_TOKENS`。
 //!
-//! 官方号是 `pst-…`，没有 `image_host`。拼车号是 `NAI-…`，必须带自己的 HTTPS 地址
-//! （测试允许 `http://127.0.0.1` / `http://localhost`）。
+//! 官方号是 `pst-…`，没有 `image_host`。拼车号是 `NAI-…` 或 `pk-…`（第三方捐赠
+//! 中转），必须带自己的 HTTPS 地址（测试允许 `http://127.0.0.1` / `http://localhost`）。
 
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
@@ -127,9 +127,11 @@ pub fn valid_official_token(token: &str) -> bool {
     token.strip_prefix("pst-").is_some_and(rest_ok)
 }
 
-/// `^NAI-[A-Za-z0-9_\-]{16,200}$`
+/// `^NAI-[A-Za-z0-9_\-]{16,200}$` 或 `^pk-[A-Za-z0-9_\-]{16,200}$`（捐赠中转）。
 pub fn valid_share_token(token: &str) -> bool {
-    token.strip_prefix("NAI-").is_some_and(rest_ok)
+    ["NAI-", "pk-"]
+        .iter()
+        .any(|p| token.strip_prefix(p).is_some_and(rest_ok))
 }
 
 /// 官方号（无 Host 的 `pst-`）。拼车号请用 [`valid_share_token`]。
@@ -314,5 +316,29 @@ mod tests {
         );
         assert!(normalize_share_host("http://127.0.0.1:18081").is_some());
         assert!(normalize_share_host("http://example.com").is_none());
+    }
+
+    #[test]
+    fn share_keys_accept_nai_and_pk_prefixes_only() {
+        assert!(valid_share_token("NAI-synthetic-share-0001"));
+        assert!(valid_share_token("pk-synthetic-donated-0001"));
+        assert!(!valid_share_token("pk-short"));
+        assert!(!valid_share_token("pk-含中文的key不是合法格式"));
+        assert!(!valid_share_token("pst-synthetic-official-0001"));
+        assert!(!valid_share_token("sk-synthetic-other-0001"));
+        assert!(valid_official_token("pst-synthetic-official-0001"));
+        assert!(!valid_official_token("pk-synthetic-donated-0001"));
+    }
+
+    #[test]
+    fn donated_pk_key_roundtrips_as_a_share_entry() {
+        let dir = tempfile::tempdir().unwrap();
+        let p = dir.path().join("upstream_tokens.json");
+        let donated = Entry::share("pk-synthetic-donated-0001", "https://relay.example", false);
+        save(&p, std::slice::from_ref(&donated)).unwrap();
+        assert_eq!(load(&p, None).unwrap().unwrap(), vec![donated]);
+        std::fs::write(&p, r#"{"tokens":[{"token":"pk-synthetic-donated-0001"}]}"#).unwrap();
+        // 没有 image_host 的 pk- 不是合法拼车凭据，整份文件判无效。
+        assert!(load(&p, None).unwrap().is_none());
     }
 }

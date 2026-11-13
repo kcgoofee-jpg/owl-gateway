@@ -16,8 +16,21 @@ pub enum SeatConflict {
 
 pub const PATRON_KEY: &str = "patron_profiles";
 
+/// 自助门户能力范围：`basic` 只看状态和改功能开关，`full` 另可启停/更换专属 Key。
+pub const PORTAL_MODES: [&str; 2] = ["basic", "full"];
+
 fn default_true() -> bool {
     true
+}
+
+fn default_portal_mode() -> String {
+    "basic".into()
+}
+
+impl PatronRecord {
+    pub fn full_portal(&self) -> bool {
+        self.portal_mode == "full"
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -33,6 +46,8 @@ pub struct PatronRecord {
     pub bound_token_id: Option<String>,
     #[serde(default)]
     pub password_hash: String,
+    #[serde(default = "default_portal_mode")]
+    pub portal_mode: String,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize)]
@@ -41,6 +56,7 @@ pub struct PatronView {
     pub queue_jump: bool,
     pub self_service: bool,
     pub has_password: bool,
+    pub portal_mode: String,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub bound_token_id: Option<String>,
 }
@@ -58,6 +74,7 @@ impl PatronRecord {
             queue_jump: self.queue_jump,
             self_service: self.self_service,
             has_password: !self.password_hash.is_empty(),
+            portal_mode: self.portal_mode.clone(),
             bound_token_id: nonempty(self.bound_token_id.as_deref()),
         }
     }
@@ -161,6 +178,9 @@ impl Db {
         record: PatronRecord,
     ) -> Result<std::result::Result<(), SeatConflict>> {
         valid_subject(&record.subject)?;
+        if !PORTAL_MODES.contains(&record.portal_mode.as_str()) {
+            return Err(invalid("门户模式只能是 basic 或 full"));
+        }
         if let Some(id) = record.bound_token_id.as_deref()
             && id.trim().is_empty()
         {

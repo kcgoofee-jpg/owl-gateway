@@ -13,14 +13,34 @@ import "./patron.css";
 
 type Features = Record<(typeof FEATURE_FIELDS)[number], boolean>;
 
+/** 专属 Key 的自助视图：只有打码指纹与状态，完整 Key 和网关地址不下发。 */
+type TokenView = {
+  missing?: boolean;
+  fingerprint?: string;
+  is_share?: boolean;
+  enabled?: boolean;
+  admin_disabled?: boolean;
+  isolated?: boolean;
+  concurrency?: number;
+  active?: number;
+  fails?: number;
+  blocked_for?: number;
+  images_today?: number;
+  v5_used?: number;
+  v5_daily_limit?: number;
+  anlas_used_today?: number;
+};
+
 type Me = {
   site_name: string;
   welcome: string;
   queue_jump: boolean;
   self_service: boolean;
+  portal_mode: "basic" | "full";
   exclusive_account: boolean;
   account_hint: string | null;
   key_fingerprint: string | null;
+  token: TokenView | null;
   features: Features;
 };
 
@@ -114,6 +134,147 @@ function Login(props: { onOk: () => void }) {
   );
 }
 
+/** 专属 Key 分区：状态与用量人人可见；启停和换 Key 只在完整模式开放。 */
+function TokenCard(props: { me: Me; onLogout: () => void; onReload: (me: Me) => void }) {
+  const t = props.me.token;
+  const [pending, setPending] = useState(false);
+  const [newKey, setNewKey] = useState("");
+  const [err, setErr] = useState("");
+  if (!t) return null;
+  const full = props.me.portal_mode === "full" && props.me.self_service;
+  const act = async (run: () => Promise<Me>, okText: string): Promise<boolean> => {
+    setPending(true);
+    setErr("");
+    try {
+      props.onReload(await run());
+      toast(okText);
+      return true;
+    } catch (e) {
+      if (e instanceof ApiError && e.status === 401) props.onLogout();
+      else setErr(e instanceof Error ? e.message : String(e));
+      return false;
+    } finally {
+      setPending(false);
+    }
+  };
+  if (t.missing) {
+    return (
+      <section class="card pt-card" aria-label="专属 Key">
+        <h2 class="pt-h2">专属 Key</h2>
+        <Notice tone="warn">绑定的专属 Key 已不在令牌池里，请联系站长重新绑定。</Notice>
+      </section>
+    );
+  }
+  const blocked = t.blocked_for ?? 0;
+  return (
+    <section class="card pt-card" aria-label="专属 Key">
+      <h2 class="pt-h2">专属 Key</h2>
+      <div class="pt-status">
+        {t.isolated ? (
+          <Badge tone="danger">已隔离</Badge>
+        ) : t.admin_disabled ? (
+          <Badge tone="info">已停用</Badge>
+        ) : (
+          <Badge tone="ok">启用中</Badge>
+        )}
+        {blocked > 0 && <Badge tone="warn">冷却 {blocked}s</Badge>}
+        {t.is_share && <Badge tone="accent">拼车网关</Badge>}
+      </div>
+      {t.isolated && (
+        <Notice tone="danger">
+          这把 Key 被上游隔离了（可能已失效）。{full ? "可在下方直接更换。" : "请联系站长处理。"}
+        </Notice>
+      )}
+      {blocked > 0 && (
+        <Notice tone="warn">上游限流冷却中，约 {blocked} 秒后自动恢复，期间请求会排队或稍后再试。</Notice>
+      )}
+      <dl class="pt-kv">
+        <div>
+          <dt>指纹</dt>
+          <dd>
+            <code>{t.fingerprint}</code>
+          </dd>
+        </div>
+        <div>
+          <dt>并发</dt>
+          <dd>
+            {t.active ?? 0}/{t.concurrency ?? 1}（进行中/上限）
+          </dd>
+        </div>
+        <div>
+          <dt>今日出图</dt>
+          <dd>{t.images_today ?? 0} 张</dd>
+        </div>
+        <div>
+          <dt>今日 V5</dt>
+          <dd>
+            {t.v5_used ?? 0}/{t.v5_daily_limit ?? 0}
+            {(t.v5_daily_limit ?? 0) === 0 ? "（未开放）" : ""}
+          </dd>
+        </div>
+        <div>
+          <dt>今日 Anlas</dt>
+          <dd>{t.anlas_used_today ?? 0}</dd>
+        </div>
+        <div>
+          <dt>连续失败</dt>
+          <dd>{t.fails ?? 0} 次</dd>
+        </div>
+      </dl>
+      {full ? (
+        <>
+          <SwitchRow
+            title="启用这把 Key"
+            desc="停用后新请求不再走这把 Key；手上在途的图会跑完。"
+            checked={!t.admin_disabled}
+            disabled={pending}
+            onChange={(next) =>
+              void act(
+                () => sendJSON<Me>("PUT", "/patron/api/me/token/enabled", { enabled: next }),
+                next ? "已启用" : "已停用",
+              )
+            }
+          />
+          <form
+            class="pt-rotate"
+            onSubmit={(e) => {
+              e.preventDefault();
+              void act(
+                () => sendJSON<Me>("PUT", "/patron/api/me/token/rotate", { token: newKey.trim() }),
+                "已更换专属 Key",
+              ).then((ok) => {
+                if (ok) setNewKey("");
+              });
+            }}
+          >
+            <Field label="更换 Key（NAI- 或 pk- 开头，沿用原网关地址，先验活再替换）">
+              <input
+                class="input"
+                type="password"
+                autoComplete="off"
+                placeholder="粘贴新的拼车 Key"
+                value={newKey}
+                disabled={pending}
+                onInput={(e) => setNewKey((e.target as HTMLInputElement).value)}
+              />
+            </Field>
+            <Button type="submit" disabled={pending || !newKey.trim()}>
+              {pending ? "正在验证…" : "验证并更换"}
+            </Button>
+          </form>
+        </>
+      ) : (
+        <p class="pt-hint">当前席位只能查看状态；需要启停或更换 Key，请联系站长开通完整模式。</p>
+      )}
+      {err && (
+        <p class="pt-err" role="alert">
+          {err}
+        </p>
+      )}
+    </section>
+  );
+}
+
 function Seat(props: { me: Me; onLogout: () => void; onReload: (me: Me) => void }) {
   const { me } = props;
   const [pending, setPending] = useState(false);
@@ -135,7 +296,7 @@ function Seat(props: { me: Me; onLogout: () => void; onReload: (me: Me) => void 
   return (
     <main class="pt-page">
       <Grain />
-      <div class="wrap wrap--narrow">
+      <div class="wrap wrap--narrow pt-stack">
         <section class="card pt-card" aria-label="赞助席">
           <div class="pt-brand">
             <img src="/_owl/favicon.svg" alt="" width="32" height="32" />
@@ -151,6 +312,10 @@ function Seat(props: { me: Me; onLogout: () => void; onReload: (me: Me) => void 
           </div>
           {me.account_hint && <Notice tone="warn">{me.account_hint}</Notice>}
           {me.key_fingerprint && <p class="pt-meta">Key {me.key_fingerprint}</p>}
+        </section>
+        <TokenCard me={me} onLogout={props.onLogout} onReload={props.onReload} />
+        <section class="card pt-card" aria-label="功能与密码">
+          <h2 class="pt-h2">功能开关</h2>
           <section class="pt-switches" aria-label="功能开关">
             {FEATURE_FIELDS.map((name) => (
               <SwitchRow

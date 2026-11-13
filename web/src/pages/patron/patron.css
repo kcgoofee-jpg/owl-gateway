@@ -34,6 +34,50 @@
   line-height: 1.25;
 }
 
+.pt-stack {
+  display: grid;
+  gap: var(--sp-5);
+}
+
+.pt-h2 {
+  margin: 0;
+  font-size: var(--fs-lg);
+  line-height: 1.3;
+}
+
+.pt-kv {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+  gap: var(--sp-3);
+  margin: 0;
+}
+
+.pt-kv > div {
+  display: grid;
+  gap: 2px;
+}
+
+.pt-kv dt {
+  color: var(--muted);
+  font-size: var(--fs-sm);
+}
+
+.pt-kv dd {
+  margin: 0;
+  font-weight: 600;
+}
+
+.pt-kv code {
+  font-weight: 500;
+}
+
+.pt-rotate {
+  display: grid;
+  gap: var(--sp-3);
+  padding-top: var(--sp-4);
+  border-top: 1px solid var(--border);
+}
+
 .pt-lead,
 .pt-hint,
 .pt-err {

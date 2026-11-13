@@ -5,7 +5,7 @@ import { dayOf, fullTime, rel } from "../../../../lib/format";
 import { Badge, Button, copyText, Menu, toast } from "../../../../ui";
 import { useAdmin } from "../../data";
 import { exceptionCount, FEATURE_FIELDS, type PatronView, policyLabel } from "../member-policy";
-import type { UpstreamPage } from "../upstream/core";
+import type { SharePage, UpstreamPage } from "../upstream/core";
 import { call } from "./actions";
 import {
   type Issue,
@@ -284,19 +284,26 @@ export function MemberDetail(props: { m: MemberRow; now: number; act: DetailActi
 
 export function PatronSeatButtons({ subject, patron }: { subject: string; patron?: PatronView | undefined }) {
   const upstream = useAdmin<UpstreamPage>("/admin/api/upstream");
+  const shares = useAdmin<SharePage>("/admin/api/share-upstreams");
   const [pending, setPending] = useState(false);
   const [error, setError] = useState("");
   const [password, setPassword] = useState("");
   const [tokenId, setTokenId] = useState(patron?.bound_token_id ?? "");
   const [jump, setJump] = useState(patron?.queue_jump === true);
+  const [selfService, setSelfService] = useState(patron?.self_service !== false);
+  const [mode, setMode] = useState<string>(patron?.portal_mode ?? "basic");
   const enabled = patron?.enabled === true;
   useEffect(() => {
     setTokenId(patron?.bound_token_id ?? "");
     setJump(patron?.queue_jump === true);
-  }, [patron?.bound_token_id, patron?.queue_jump]);
+    setSelfService(patron?.self_service !== false);
+    setMode(patron?.portal_mode ?? "basic");
+  }, [patron?.bound_token_id, patron?.queue_jump, patron?.self_service, patron?.portal_mode]);
   const save = async (body: {
     enabled: boolean;
     queue_jump?: boolean;
+    self_service?: boolean;
+    portal_mode?: string;
     bound_token_id?: string;
     reset_password?: boolean;
   }) => {
@@ -317,6 +324,7 @@ export function PatronSeatButtons({ subject, patron }: { subject: string; patron
     toast(body.enabled ? (next ? "赞助席已开启，请把密码交给对方" : "赞助席已更新") : "赞助席已关闭");
   };
   const accounts = upstream.data?.accounts ?? [];
+  const shareAccounts = shares.data?.accounts ?? [];
   return (
     <section class="mb-patron" aria-label="赞助席">
       <h4 class="mb-h4">赞助席</h4>
@@ -336,6 +344,18 @@ export function PatronSeatButtons({ subject, patron }: { subject: string; patron
             />
             插队
           </label>
+          <label
+            class="mb-patron__jump"
+            title="自助总开关：关闭后对方只能看状态，不能改功能开关，也不能管理 Key"
+          >
+            <input
+              type="checkbox"
+              checked={selfService}
+              disabled={pending}
+              onChange={(e) => setSelfService((e.target as HTMLInputElement).checked)}
+            />
+            自助
+          </label>
           <label class="field-inline" title="绑定捐赠 Token 后只走那把账号；不绑则走全站池">
             <span class="field-inline__k">专属号</span>
             <select
@@ -351,6 +371,23 @@ export function PatronSeatButtons({ subject, patron }: { subject: string; patron
                   {a.exclusive ? " · 专属" : ""}
                 </option>
               ))}
+              {shareAccounts.map((a) => (
+                <option key={a.token_id} value={a.token_id}>
+                  拼车 {a.position} · {a.token}
+                </option>
+              ))}
+            </select>
+          </label>
+          <label class="field-inline" title="基础：功能开关 + 用量查看；完整：另可自助启停、更换专属 Key">
+            <span class="field-inline__k">门户模式</span>
+            <select
+              class="select"
+              value={mode}
+              disabled={pending}
+              onChange={(e) => setMode((e.target as HTMLSelectElement).value)}
+            >
+              <option value="basic">基础（开关 + 用量）</option>
+              <option value="full">完整（另可启停 / 换 Key）</option>
             </select>
           </label>
         </>
@@ -361,7 +398,15 @@ export function PatronSeatButtons({ subject, patron }: { subject: string; patron
             <Button
               size="sm"
               disabled={pending}
-              onClick={() => void save({ enabled: true, queue_jump: jump, bound_token_id: tokenId })}
+              onClick={() =>
+                void save({
+                  enabled: true,
+                  queue_jump: jump,
+                  self_service: selfService,
+                  portal_mode: mode,
+                  bound_token_id: tokenId,
+                })
+              }
             >
               保存
             </Button>
@@ -373,6 +418,8 @@ export function PatronSeatButtons({ subject, patron }: { subject: string; patron
                 void save({
                   enabled: true,
                   queue_jump: jump,
+                  self_service: selfService,
+                  portal_mode: mode,
                   bound_token_id: tokenId,
                   reset_password: true,
                 })
@@ -394,7 +441,15 @@ export function PatronSeatButtons({ subject, patron }: { subject: string; patron
             size="sm"
             disabled={pending}
             title="开启后默认插队，可再改专属号"
-            onClick={() => void save({ enabled: true, queue_jump: true, bound_token_id: tokenId })}
+            onClick={() =>
+              void save({
+                enabled: true,
+                queue_jump: true,
+                self_service: selfService,
+                portal_mode: mode,
+                bound_token_id: tokenId,
+              })
+            }
           >
             开启
           </Button>

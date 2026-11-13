@@ -43,7 +43,15 @@ async fn share_crud_persists_and_stays_off_the_official_page() {
         "/share-upstreams",
         Some(json!({"token": "pst-synthetic-not-a-share", "image_host": host})),
         422,
-        "Key 格式不对：拼车网关的 Key 应以 NAI- 开头",
+        "Key 格式不对：拼车网关的 Key 应以 NAI- 或 pk- 开头",
+    )
+    .await;
+    api.fails(
+        "POST",
+        "/share-upstreams",
+        Some(json!({"token": "pk-short", "image_host": host})),
+        422,
+        "Key 格式不对：拼车网关的 Key 应以 NAI- 或 pk- 开头",
     )
     .await;
     api.fails(
@@ -137,6 +145,38 @@ async fn share_crud_persists_and_stays_off_the_official_page() {
             .unwrap()
             .len(),
         0
+    );
+}
+
+#[tokio::test]
+async fn donated_pk_key_is_accepted_as_share_credential() {
+    let share = MockUpstream::start().await;
+    let e = setup(&[]).await;
+    let api = Admin::login_bare(&e.state).await;
+    let key = "pk-synthetic-donated-share-key01";
+    let (status, body) = api
+        .json(
+            "POST",
+            "/share-upstreams",
+            Some(json!({"token": key, "image_host": share.url(), "allow_anlas": false})),
+        )
+        .await;
+    assert_eq!(status, 200, "{body}");
+    let listed = api.get_ok("/share-upstreams").await;
+    assert_eq!(listed["accounts"].as_array().unwrap().len(), 1);
+    let row = &listed["accounts"][0];
+    assert_eq!(row["image_host"], json!(share.url().trim_end_matches('/')));
+    assert_eq!(row["allow_anlas"], json!(false));
+    let id = row["token_id"].as_str().unwrap().to_string();
+    assert_eq!(id, gate_upstream::headers::token_id(key));
+    let restarted = e.restart().await;
+    assert!(
+        restarted
+            .nai
+            .tokens()
+            .await
+            .iter()
+            .any(|t| t.token_id == id && t.is_share())
     );
 }
 

@@ -17,7 +17,7 @@ mod system;
 mod upstream;
 mod upstream_details;
 mod upstream_information;
-mod upstream_share;
+pub(crate) mod upstream_share;
 
 use crate::state::AppState;
 use axum::Router;
