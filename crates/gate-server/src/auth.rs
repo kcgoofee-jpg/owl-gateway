@@ -170,8 +170,7 @@ pub async fn authenticate(state: &AppState, parts: &Parts, passive: bool) -> Res
         )
         .into());
     };
-    let mut key = Key::load(&state.db, row).await?;
-    key.resolve_bound_token(&state.nai).await;
+    let key = Key::load(&state.db, row).await?;
     ctx.set_key(key.id(), key.name());
     if let Some(e) = key_status_error(&key, now) {
         return Err(e.into());

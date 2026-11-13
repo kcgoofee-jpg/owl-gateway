@@ -28,7 +28,7 @@
 | V5 优先 `guard_v5_priority` | — | 已删除（11-12） | 11-07 曾让 V5 走短作业车道。11-12 整段删除：V5 与 V4.5 同一普通车道。旧代码在 GitHub tag `archive/v5-priority-lane`。库里的 `guard_v5_priority` 行不再读。站长号 / 赞助席插队（`queue_jump` → `Lane::Jump`）仍排在所有等待中的生图前面 |
 | 每把 Key 每分钟请求数 | 成员 Key 5；后台手建 Key 10（代码常量，`defaults.rs`；手建时可在弹窗里改） | 未核对 | 生图 / 放大 / 导演工具 / Vibe / 标签补全都计数（10-31 起标签补全也计入，以前不计导致客户端可以无节制灌），被拒的也计。超出回 429（`key_rate`） |
 | 排队超时 `runtime_queue_timeout` | 90 秒（代码常量；后台可改，范围 15～300） | 90 | 超时回 429（`queue_timeout`） |
-| 上游 429 后的全站冷却 `runtime_image_429_cooldown_seconds` | 60 秒（代码常量；后台可改，范围 60～3600） | 180 | 单号 429 只冷却该号并自动改派其它健康号；只有通用池（非专属捐赠号）所有账号都不可用才全站暂停。实际冷却 = max(此值, 上游 Retry-After)，Retry-After 先夹到 5～3600 秒。全站冷却期内所有图片请求回 429（`cooldown`）；冷却状态跨重启保留（`image_cooldown_until`，超过 1 小时的值视为无效） |
+| 上游 429 后的全站冷却 `runtime_image_429_cooldown_seconds` | 60 秒（代码常量；后台可改，范围 60～3600） | 180 | 单号 429 只冷却该号并自动改派其它健康号；只有池里所有账号都不可用才全站暂停。实际冷却 = max(此值, 上游 Retry-After)，Retry-After 先夹到 5～3600 秒。全站冷却期内所有图片请求回 429（`cooldown`）；冷却状态跨重启保留（`image_cooldown_until`，超过 1 小时的值视为无效） |
 | 上游连续 403（图片通道） | — | — | 连续 3 次 → 该 Token 冷却 5 → 15 → 45 → 60 分钟（`min(60, 5×3ⁿ)`），24 小时内没有 403 档位归零；私信站长。每个 Token 的 429 / 403 冷却和档位跨重启保留（设置 `upstream_token_cooldowns`，超过 1 小时的冷却、24 小时前的 403 视为无效） |
 | 无效 Key 防爆破 | 同一 IP（IPv6 按 /64）600 秒内 ≥ 20 次无效 Key → 拦截 900 秒（代码常量） | — | 只拦无效 Key；有效 Key 不受影响。后台登录和赞助席登录共用一套：每 IP 300 秒内最多 5 次（代码常量） |
 | V5 官方额度查询 | 只在真实 V5 出图时刷新缓存 | 「低」线固定 20% | 缓存：剩 ≤ 2% 为 15 秒，低于 20%（后台的「V5 余量低提示线」`v5_alert_threshold` 10-23 删除，旧值不再读）为 60 秒，其余 300 秒。定时任务「上游 V5 快照」每小时最多再主动读一次订阅信息 |
@@ -81,7 +81,7 @@
 
 ### 2.4 Anlas
 
-成员 Anlas 走个人每日/每月上限和全站 PVP 池。Vibe 编码、精确参考、图生图 / 局部重绘、以及打开 `paid_parameters`（或绑了专属 Token）后的超规格生图都会扣 Anlas。上游号是否有 Anlas 仍看 `allow_anlas`。
+成员 Anlas 走个人每日/每月上限和全站 PVP 池。Vibe 编码、精确参考、图生图 / 局部重绘、以及打开 `paid_parameters` 后的超规格生图都会扣 Anlas。上游号是否有 Anlas 仍看 `allow_anlas`。
 
 | 项 | 代码默认 | 线上 | 说明 |
 |---|---|---|---|
@@ -92,13 +92,13 @@
 
 价格（码 `policy.rs`）：Vibe 编码 2 Anlas/张；精确参考 5 Anlas/张/图；V4 / V4.5 的 Vibe 超过 4 张，每多 1 张 +2/图。Anlas 自动分配（旧的分配池）已删除，快照里残留的 `anlas_pool_last` 等键不再被读取。
 
-### 2.5 免费规格（未开 `paid_parameters`、也没有专属 Token 时裁剪；数值写死在 `policy.rs`）
+### 2.5 免费规格（未开 `paid_parameters` 时裁剪；数值写死在 `policy.rs`）
 
 - 每次 1 张（`n_samples` 强制为 1）；步数 ≤ 28（`FREE_MAX_STEPS`）；SMEA 关闭。
 - V4.5 及更早的模型：总像素 ≤ 1024×1024 = 1048576（`FREE_MAX_PIXELS`），宽高取 64 的倍数，超出等比缩小。
 - V5：不超过三个预设之一——832×1216、1216×832、1024×1024，超出按长宽比吸附（> 1.1 → 1216×832，< 0.9 → 832×1216，其余 1024×1024）。
-- 图生图 / 局部重绘只对成员规则勾了 `img2img` 的 Key 开放，其余回 400；即使尺寸步数都在免费档内也扣 Anlas。V5 图生图还需要高规格开关（或专属 Token），否则 403。ControlNet 一律 400（与高规格开关无关）。角色参考（`characterReferences`）在免费档被移除。
-- 打开 `paid_parameters` 或赞助席绑定了专属 Token 时不再套上面的免费档裁剪；一次超过 6 张直接 400。功能开关在成员规则里：`image`、`v5`、`upscale`、`augment`、`vibe`、`tags`、`img2img`、`paid_parameters`。站点级 `features_global` 已删除。
+- 图生图 / 局部重绘只对成员规则勾了 `img2img` 的 Key 开放，其余回 400；即使尺寸步数都在免费档内也扣 Anlas。V5 图生图还需要高规格开关，否则 403。ControlNet 一律 400（与高规格开关无关）。角色参考（`characterReferences`）在免费档被移除。
+- 打开 `paid_parameters` 时不再套上面的免费档裁剪；一次超过 6 张直接 400。功能开关在成员规则里：`image`、`v5`、`upscale`、`augment`、`vibe`、`tags`、`img2img`、`paid_parameters`。站点级 `features_global` 已删除。
 - 上游对「模型不存在」回的是 403，网关会窥探一小段响应体把「模型级 403」和「账号级 403」分开（只有账号级才计入账号健康度和 403 冷却）。
 
 ### 2.6 重置券
@@ -252,10 +252,10 @@
 
 服务端可通过 `OWNER_IMAGE_SUBJECT` 持久绑定单一成员。完整功能只对绑定成员生效，默认关闭；普通测试使用当前成员默认规则。完整功能不豁免个人或全站预算、V5 暂停和账号保护，不向其他成员扩散。启用后排队走插队车道（排在所有等待中的 V5 / V4.5 前面），全站排满时仍能入队（每人排队上限和 RPM 照旧）。高规格 V5 可在完整功能下使用成员 Anlas 预算，其余成员保持现有免费规格限制。后台详情显示双向快捷切换，原 Key、用量和账本保留。
 
-## 赞助席与专属 Token
+## 赞助席与捐赠 Token
 
 站长在成员详情给指定 Discord 成员开「赞助席」（`site_settings.patron_profiles`，不进 git，不写捐赠者名单）。对方走 `/patron`，Cookie `nai_gate_patron`（`Path=/patron`，SameSite=Strict），登录限速与后台相同。页面只有欢迎文案和自己 Key 的功能开关（`FEATURE_FIELDS`），没有成员列表、日志、上游、运行保护。打开席位后插队立即生效，不必等对方登录。
 
 - **金钱赞助**（无绑定 Token）：出图仍走全站共用账号；插队；可自开 `paid_parameters` 等开关。挂费走全站 Anlas / V5 池，个人每日上限仍由站长设。
-- **账号赞助**（`bound_token_id`）：这把上游 Token 不进普通选号池、不计入全站 `queue_cap` / `usable_token_ids`。绑定成员只派到这把号，冷却、停用或额度不足时回 429/503，不改走站账号。派发前不再套免费档裁剪（`FREE_MAX_PIXELS` / 步数 / `n_samples=1`）。Anlas 花在捐赠账号上，不扣全站池、不受全站 V5 暂停。后台上游页打码 Token 并标「专属」。
+- **账号赞助**（`bound_token_id`）：捐赠的拼车 Token 和其他上游一样进普通选号池、计入全站 `queue_cap` / `usable_token_ids`，社区任何成员出图都可能派到它。绑定成员不被钉在这把号上，冷却 / 停用 / 见底时按正常选号回落到其它可用上游。是否套免费档裁剪只看成员自己的 `paid_parameters`，捐赠不再额外授予挂费权限、也不跳过全站 Anlas / V5 预算。落在捐赠拼车号上的请求花捐赠者钱包（拼车号固有行为），落在官方号上的照常花全站池。`bound_token_id` 只用于门户管理与来源标签：捐赠者本人可在 `/patron` 自助启停、更换这把 Key。后台上游页打码 Token 并标「捐赠」。
 - 插队与站长号共用 `queue_jump` → `Lane::Jump` + `skip_site_cap`。排在所有等待中的生图前面。仍遵守维护、全站熔断、该 Token 自己的上游 429/403、模型本身不支持的组合。

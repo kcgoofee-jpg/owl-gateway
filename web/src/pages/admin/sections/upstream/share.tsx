@@ -205,10 +205,10 @@ function ShareCard(props: {
     <Card class="up-account">
       <header class="token__head">
         <h2 class="up-account__title">
-          {a.exclusive ? "捐赠" : "拼车"} {a.position}
+          {a.donated ? "捐赠" : "拼车"} {a.position}
         </h2>
         <span class="token__name mono">{a.token}</span>
-        {a.exclusive && <Badge tone="info">赞助席专属</Badge>}
+        {a.donated && <Badge tone="info">赞助席捐赠</Badge>}
         <Badge {...withTone(st.tone)} dot>
           {st.text}
         </Badge>
@@ -276,9 +276,9 @@ export function ShareUpstream(props: { source?: "relay" | "donated" }) {
   const [del, setDel] = useState<ShareAccount | null>(null);
   const [toggle, setToggle] = useState<ShareAccount | null>(null);
   const pool = data?.accounts ?? [];
-  // 捐赠 = 专属拼车（绑定启用的赞助席）；拼车平台 = 其余拼车。
+  // 捐赠 = 绑定启用赞助席的拼车号（共享入池）；拼车平台 = 其余拼车。
   // poolSize 和「最后一把可用上游」仍按全部拼车算，不受当前页筛选影响。
-  const visible = pool.filter((a) => (a.exclusive === true) === donated);
+  const visible = pool.filter((a) => (a.donated === true) === donated);
   const poolSize = data?.pool_size ?? pool.length;
   const lastUsable =
     toggle?.admin_enabled === true &&
@@ -291,7 +291,7 @@ export function ShareUpstream(props: { source?: "relay" | "donated" }) {
       <div class="section-head">
         <p>
           {donated
-            ? "赞助席捐赠的专属网关：只服务绑定它的那位赞助者，不进全站选号池，份额余量来自捐赠者钱包。在成员详情把赞助身份设为「账号赞助」并绑定其捐赠的拼车 Key 后出现在这里。"
+            ? "赞助席捐赠的拼车网关：和其他上游一样进全站共享池，社区出图都会用到它，份额余量来自捐赠者钱包。捐赠者本人可自助启停、更换这把 Key，并享有插队（插队是成员级特权，与这把 Key 无关）。在成员详情开通赞助席并绑定其捐赠的拼车 Key 后出现在这里。"
             : "把朋友的拼车网关当额外上游。份额余量来自对方钱包，不是官网电池。生图、流式、Vibe 编码和放大走拼车。标签补全和导演工具目前仍走官方号。"}
         </p>
         <span class="spacer" />
@@ -307,7 +307,7 @@ export function ShareUpstream(props: { source?: "relay" | "donated" }) {
       {data && visible.length === 0 && (
         <Notice>
           {donated
-            ? "还没有捐赠账号。在成员详情把赞助身份设为「账号赞助」并绑定其捐赠的拼车 Key。"
+            ? "还没有捐赠账号。在成员详情开通赞助席并绑定其捐赠的拼车 Key。"
             : "还没有拼车网关。官方账号在「官方账号」页，捐赠账号在「捐赠账号」页。"}
         </Notice>
       )}

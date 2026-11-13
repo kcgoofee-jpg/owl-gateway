@@ -195,7 +195,6 @@ async fn set_patron(
         )
         .await?
         .map_err(|e| HttpError::new(409, e.to_string()))?;
-    state.refresh_exclusive_tokens().await;
     let mut body = json!(state.db.member_policy(&subject).await?);
     if let Some(obj) = body.as_object_mut() {
         obj.insert("fields".into(), gate_core::member_policy::policy_fields());

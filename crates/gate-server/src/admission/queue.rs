@@ -37,16 +37,15 @@ fn guard_io(e: crate::guard::GuardIoError) -> ApiError {
     InternalError(e.to_string()).into()
 }
 
-/// 当前可用的上游账号（`[t for t in pool if t.usable]`）。专属捐赠 Token 不计入全站池。
+/// 当前可用的上游账号（`[t for t in pool if t.usable]`）。捐赠号和普通拼车号一样计入全站共享池。
 pub async fn usable_token_ids(state: &AppState) -> Vec<String> {
     let now = state.now();
-    let exclusive = state.nai.exclusive_tokens().await;
     state
         .nai
         .tokens()
         .await
         .into_iter()
-        .filter(|t| t.usable(now) && !exclusive.contains(&t.token_id))
+        .filter(|t| t.usable(now))
         .map(|t| t.token_id.clone())
         .collect()
 }

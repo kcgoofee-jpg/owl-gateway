@@ -21,8 +21,7 @@ pub async fn quota_image_check(
 ) -> Result<(), ApiError> {
     let policy = key.refresh_policy(&state.db).await?;
     let shared = state.db.shared_budgets().await?;
-    let skip_site = key.skip_site_budget();
-    if est.v5 > 0 && !skip_site && crate::ops::v5_paused(&state.db).await? {
+    if est.v5 > 0 && crate::ops::v5_paused(&state.db).await? {
         return Err(GateError::with_code(
             403,
             gate_core::quota::V5_PAUSED_TEXT,
@@ -94,7 +93,7 @@ pub async fn quota_image_check(
         }
         let used = state.db.day_v5_total(&day).await?;
         let reserved: i64 = pending.iter().filter(|r| r.day == day).map(|r| r.v5).sum();
-        if !skip_site && used + reserved + est.v5 > i64::from(shared.daily_v5) {
+        if used + reserved + est.v5 > i64::from(shared.daily_v5) {
             return Err(GateError::with_code(
                 403,
                 if shared.daily_v5 == 0 {
@@ -113,9 +112,8 @@ pub async fn quota_image_check(
             .filter(|r| r.day == day)
             .map(|r| r.anlas)
             .sum();
-        if !skip_site
-            && state.db.day_anlas_total(&day).await? + reserved + est.anlas
-                > f64::from(shared.daily_anlas)
+        if state.db.day_anlas_total(&day).await? + reserved + est.anlas
+            > f64::from(shared.daily_anlas)
         {
             return Err(GateError::with_code(
                 403,
@@ -160,9 +158,7 @@ pub async fn quota_image_check(
             .filter(|r| r.month == month)
             .map(|r| r.anlas)
             .sum();
-        if !skip_site
-            && state.db.month_anlas_all(&month).await? + reserved + est.anlas > shared.monthly_anlas
-        {
+        if state.db.month_anlas_all(&month).await? + reserved + est.anlas > shared.monthly_anlas {
             return Err(GateError::with_code(
                 403,
                 "全站本月 Anlas 预算不足，免费出图不受影响。",

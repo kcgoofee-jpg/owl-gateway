@@ -541,7 +541,6 @@ async fn stream_retries_a_concurrency_lock_but_not_a_rate_limit() {
                 &Callbacks::default(),
                 None,
                 &NoObserver,
-                None,
                 false,
             )
             .await

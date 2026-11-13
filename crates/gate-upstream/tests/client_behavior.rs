@@ -217,7 +217,7 @@ async fn image_429_cools_token_and_calls_back() {
 }
 
 #[tokio::test]
-async fn image_429_with_healthy_peer_keeps_general_pool_usable() {
+async fn image_429_with_healthy_peer_keeps_pool_usable() {
     let up = MockUpstream::start().await;
     up.push("/ai/generate-image", Reply::rate_limited("120"));
     let c = NaiClient::new(
@@ -226,7 +226,7 @@ async fn image_429_with_healthy_peer_keeps_general_pool_usable() {
         vec![(T1.into(), 0, false), (T2.into(), 0, false)],
     )
     .unwrap();
-    assert!(c.any_general_usable().await);
+    assert!(c.any_usable().await);
     let seen = Arc::new(Mutex::new(None));
     let s2 = seen.clone();
     let cb = Callbacks {
@@ -237,17 +237,14 @@ async fn image_429_with_healthy_peer_keeps_general_pool_usable() {
         ..Default::default()
     };
     let body = image_body(1);
-    // 一把号吃到 429：回调照常触发，但另一把健康号让通用池仍可用（不该全站暂停）
+    // 一把号吃到 429：回调照常触发，但另一把健康号让池仍可用（不该全站暂停）
     let err = c
         .request(image_opts(&up.url(), &body, 1), &cb, None, &NoObserver)
         .await
         .unwrap_err();
     assert_eq!(err.status, 429);
     assert_eq!(*seen.lock().unwrap(), Some(120.0));
-    assert!(
-        c.any_general_usable().await,
-        "单号 429 后通用池仍应有健康号"
-    );
+    assert!(c.any_usable().await, "单号 429 后池仍应有健康号");
     // 后续请求自动改派到健康号：成功（脚本已空，走默认 200）
     let resp = c
         .request(
@@ -262,7 +259,7 @@ async fn image_429_with_healthy_peer_keeps_general_pool_usable() {
 }
 
 #[tokio::test]
-async fn image_429_single_token_empties_general_pool() {
+async fn image_429_single_token_empties_pool() {
     let up = MockUpstream::start().await;
     up.push("/ai/generate-image", Reply::rate_limited("120"));
     let c = NaiClient::new(
@@ -271,7 +268,7 @@ async fn image_429_single_token_empties_general_pool() {
         vec![(T1.into(), 0, false)],
     )
     .unwrap();
-    assert!(c.any_general_usable().await);
+    assert!(c.any_usable().await);
     let body = image_body(1);
     let err = c
         .request(
@@ -284,8 +281,8 @@ async fn image_429_single_token_empties_general_pool() {
         .unwrap_err();
     assert_eq!(err.status, 429);
     assert!(
-        !c.any_general_usable().await,
-        "唯一一把号 429 后通用池应全不可用（这才该全站暂停）"
+        !c.any_usable().await,
+        "唯一一把号 429 后池应全不可用（这才该全站暂停）"
     );
 }
 
@@ -525,7 +522,6 @@ async fn token_disabled_during_slot_wait_is_not_used_for_nonstream_or_stream_pos
                 &Callbacks::default(),
                 None,
                 &NoObserver,
-                None,
                 false,
             )
             .await
@@ -801,7 +797,6 @@ async fn image_stream_settles_completed_images() {
             &Callbacks::default(),
             None,
             &NoObserver,
-            None,
             false,
         )
         .await
@@ -966,7 +961,6 @@ async fn compressed_msgpack_stream_is_complete() {
                 &Callbacks::default(),
                 None,
                 &NoObserver,
-                None,
                 false,
             )
             .await
@@ -1034,7 +1028,6 @@ async fn compressed_msgpack_stream_is_not_buffered() {
                 &Callbacks::default(),
                 None,
                 &NoObserver,
-                None,
                 false,
             )
             .await

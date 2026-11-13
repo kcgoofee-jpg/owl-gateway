@@ -45,7 +45,7 @@ function me(overrides: Record<string, unknown> = {}) {
     queue_jump: true,
     self_service: true,
     portal_mode: "full",
-    exclusive_account: true,
+    donated_account: true,
     account_hint: null,
     key_fingerprint: "nai-te…0001",
     token: TOKEN,
@@ -71,12 +71,12 @@ async function show(data: Record<string, unknown>) {
 }
 
 function tokenSection(): HTMLElement {
-  const el = root.querySelector('[aria-label="专属 Key"]');
-  if (!el) throw new Error("专属 Key 分区未渲染");
+  const el = root.querySelector('[aria-label="捐赠 Key"]');
+  if (!el) throw new Error("捐赠 Key 分区未渲染");
   return el as HTMLElement;
 }
 
-it("full 模式展示专属 Key 详情，可启停、可换 Key", async () => {
+it("full 模式展示捐赠 Key 详情，可启停、可换 Key", async () => {
   await show(me());
   const section = tokenSection();
   expect(section.textContent).toContain("pk-synthetic-donated-share01");
@@ -140,9 +140,9 @@ it("绑定的 Key 丢失时提示联系站长", async () => {
   expect(tokenSection().textContent).toContain("已不在令牌池里");
 });
 
-it("未绑定专属号时不渲染 Key 分区", async () => {
-  await show(me({ token: null, exclusive_account: false }));
-  expect(root.querySelector('[aria-label="专属 Key"]')).toBeNull();
+it("未绑定捐赠号时不渲染 Key 分区", async () => {
+  await show(me({ token: null, donated_account: false }));
+  expect(root.querySelector('[aria-label="捐赠 Key"]')).toBeNull();
 });
 
 async function showLogin(query: string) {

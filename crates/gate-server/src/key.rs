@@ -24,11 +24,6 @@ pub struct Key {
     pub patron: bool,
     /// 站长号或赞助席插队：排在所有等待中的生图前面，并越过全站排队满。
     pub queue_jump: bool,
-    /// 赞助席绑定的专属上游 Token；有则出图只走这把，不进全站池。
-    pub bound_token_id: Option<String>,
-    /// 绑定号是否授予完整权限（官方号或开了 Anlas 的拼车号）。免费拼车号为 false，仍套免费钳制。
-    /// 由 [`resolve_bound_token`](Self::resolve_bound_token) 在能访问上游池的请求上下文里解析。
-    bound_token_full: bool,
 }
 
 impl std::fmt::Debug for Key {
@@ -46,24 +41,17 @@ impl Key {
         if credential.id <= 0 || !matches!(credential.enabled, 0 | 1) {
             return Err(DbError::Invalid("Key 凭据值无效".into()));
         }
-        let (policy, owner_image_full, patron_on, queue_jump, bound_token_id) =
+        let (policy, owner_image_full, patron_on, queue_jump) =
             match credential.discord_id.as_deref().filter(|s| !s.is_empty()) {
                 Some(subject) => {
                     let snapshot = db.member_policy(subject).await?;
                     let owner_image_full = snapshot.owner_image.is_some_and(|p| p.enabled);
                     let patron = snapshot.patron.as_ref().filter(|p| p.enabled);
                     let patron_on = patron.is_some();
-                    let bound_token_id = patron.and_then(|p| p.bound_token_id.clone());
                     let queue_jump = owner_image_full || patron.is_some_and(|p| p.queue_jump);
-                    (
-                        snapshot.effective,
-                        owner_image_full,
-                        patron_on,
-                        queue_jump,
-                        bound_token_id,
-                    )
+                    (snapshot.effective, owner_image_full, patron_on, queue_jump)
                 }
-                None => (db.member_defaults().await?, false, false, false, None),
+                None => (db.member_defaults().await?, false, false, false),
             };
         Ok(Self {
             credential,
@@ -71,8 +59,6 @@ impl Key {
             owner_image_full,
             patron: patron_on,
             queue_jump,
-            bound_token_id,
-            bound_token_full: false,
         })
     }
 
@@ -126,36 +112,13 @@ impl Key {
         self.policy.paid_parameters
     }
 
-    /// 解析绑定号的能力：官方号或开了 Anlas 的拼车号授予完整权限（跳过免费钳制）；
-    /// 免费拼车号（`allow_anlas=false`）不授予，仍钳制到免费 v4.5 小图。须在能访问上游池处调用。
-    pub async fn resolve_bound_token<H: gate_upstream::client::Hooks>(
-        &mut self,
-        nai: &gate_upstream::client::NaiClient<H>,
-    ) {
-        self.bound_token_full = match self.bound_token_id.as_deref() {
-            Some(id) => nai
-                .tokens()
-                .await
-                .iter()
-                .find(|t| t.token_id == id)
-                .is_some_and(|t| !t.is_share() || t.fields().allow_anlas),
-            None => false,
-        };
-    }
-
-    /// 已打开高规格开关，或绑定了授予完整权限的专属号：不再套免费档钳制。
-    /// 绑定免费拼车号（`allow_anlas=false`）仍钳制到免费 v4.5 小图。
+    /// 已打开高规格开关：不再套免费档钳制。捐赠号是共享容量，不额外授予成员权限。
     pub fn skip_free_clamp(&self) -> bool {
-        self.allows_paid_parameters() || self.bound_token_full
+        self.allows_paid_parameters()
     }
 
-    /// 挂费 V5：站长号、专属账号或已打开高规格开关。
+    /// 挂费 V5：站长号或已打开高规格开关。
     pub fn allows_paid_v5(&self) -> bool {
         self.owner_image_full || self.skip_free_clamp()
-    }
-
-    /// 专属 Token 的 Anlas / V5 不占全站池，也不受全站 V5 暂停。
-    pub fn skip_site_budget(&self) -> bool {
-        self.bound_token_id.is_some()
     }
 }

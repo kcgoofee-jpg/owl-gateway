@@ -419,7 +419,6 @@ async fn perform_stream(
                 &cb,
                 allow,
                 ctx,
-                prep.key.bound_token_id.as_deref(),
                 false,
             );
             tokio::pin!(open);

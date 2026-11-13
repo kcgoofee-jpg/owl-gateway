@@ -37,8 +37,8 @@ async fn list(State(state): State<AppState>, _s: AdminSession) -> ApiResult {
     let day = state.day();
     let all = state.nai.tokens().await;
     let pool_size = all.len();
-    // 捐赠 = 拼车 ∩ 专属（绑定到启用的赞助席）；其余拼车才是朋友网关。来源标签据此区分。
-    let exclusive = state.nai.exclusive_tokens().await;
+    // 捐赠 = 拼车 ∩ 绑定到启用赞助席的号；其余拼车才是朋友网关。来源标签据此区分（不影响选号）。
+    let donated = state.db.donated_token_ids().await?;
     let shares: Vec<_> = all.into_iter().filter(|t| t.is_share()).collect();
     let stats_pool: Vec<Value> = shares
         .iter()
@@ -63,7 +63,7 @@ async fn list(State(state): State<AppState>, _s: AdminSession) -> ApiResult {
             "position": fields.kind_index,
             "token": gate_core::policy::mask_token(&token.token, 6),
             "image_host": token.image_host,
-            "exclusive": exclusive.contains(&token.token_id),
+            "donated": donated.contains(&token.token_id),
             "usable": token.usable(now),
             "admin_enabled": fields.admin_enabled,
             "disabled": fields.disabled,
@@ -294,7 +294,7 @@ async fn verify_share(
 
 // ------------------------------------------------------------------ 赞助席自助
 
-/// 赞助席自助启停自己绑定的专属拼车 Key。与后台开关同一条路径；
+/// 赞助席自助启停自己捐赠的拼车 Key。与后台开关同一条路径；
 /// 停用时会等这把 Key 手上在途的图跑完才返回。
 pub(crate) async fn patron_set_enabled(
     state: &AppState,
@@ -314,7 +314,7 @@ pub(crate) async fn patron_set_enabled(
     Ok(())
 }
 
-/// 赞助席自助更换专属拼车 Key：沿用原网关地址（不接受新地址），先验活再替换。
+/// 赞助席自助更换捐赠的拼车 Key：沿用原网关地址（不接受新地址），先验活再替换。
 /// 返回新 token_id；席位重绑到新指纹由调用方完成（替换会解绑旧指纹）。
 pub(crate) async fn patron_replace_token(
     state: &AppState,

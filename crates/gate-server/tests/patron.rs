@@ -1,4 +1,4 @@
-//! 赞助席：独立门户、插队、专属 Token。
+//! 赞助席：独立门户、插队、捐赠 Token 管理（捐赠号共享入池，不独占选号）。
 
 mod common;
 use common::{Admin, Call, SUBJECT, TOKEN, generate, policy_for, send, settle, setup};
@@ -113,7 +113,7 @@ async fn patron_portal_is_separate_from_admin_and_password_change_drops_the_sess
     assert_eq!(me.status, 200, "{}", me.text());
     let body = me.json();
     assert_eq!(body["queue_jump"], true);
-    assert_eq!(body["exclusive_account"], false);
+    assert_eq!(body["donated_account"], false);
     assert!(body["welcome"].as_str().unwrap().contains("席位"));
     assert_eq!(body["features"]["image"], true);
 
@@ -275,11 +275,13 @@ async fn patrons_skip_the_site_cap_and_keep_the_per_member_queue() {
 }
 
 #[tokio::test]
-async fn exclusive_token_is_hidden_from_the_site_pool_and_does_not_fall_back() {
+async fn donated_token_is_pooled_for_community_and_seat_does_not_pin() {
     let e = setup(&[("NAI_TOKENS", &format!("{SHARED},{DONATED}"))]).await;
     let admin = Admin::login(&e.state).await;
     let donated_id = token_id(DONATED);
+    let shared_id = token_id(SHARED);
     grant_seat(&admin, SUBJECT, true, Some(&donated_id), true).await;
+    // 一把捐赠号同一时刻只能绑给一个启用的席位。
     let taken = admin
         .json(
             "PUT",
@@ -292,14 +294,8 @@ async fn exclusive_token_is_hidden_from_the_site_pool_and_does_not_fall_back() {
         )
         .await;
     assert_eq!(taken.0, 409, "{}", taken.1);
-    policy_for(
-        &e.state,
-        1,
-        json!({"daily_anlas": 500, "paid_parameters": false}),
-    )
-    .await;
-    assert!(e.state.nai.exclusive_tokens().await.contains(&donated_id));
 
+    // 社区路人成员（不是赞助席）：普通免费规则。
     let key: NewKey = serde_json::from_value(json!({
         "name": "路人", "token": TOKEN2, "discord_id": SUBJECT2,
     }))
@@ -313,28 +309,20 @@ async fn exclusive_token_is_hidden_from_the_site_pool_and_does_not_fall_back() {
                 daily_images: Some(100),
                 rpm: Some(60),
                 image: Some(true),
-                paid_parameters: Some(true),
                 ..Default::default()
             },
         )
         .await
         .unwrap();
 
-    let (status, _, body) = Call::new("POST", "/ai/generate-image")
-        .bearer(TOKEN)
-        .json(json!({
-            "input": "1girl, solo", "model": "nai-diffusion-4-5-full", "action": "generate",
-            "parameters": {"width": 1536, "height": 1536, "steps": 36, "scale": 5,
-                "sampler": "k_euler_ancestral", "n_samples": 2, "seed": 1}
-        }))
-        .send(&e.state)
+    // 捐赠号进全站共享池：只留它可用时，社区流量必须能选到它（旧独占机制下这里会 503）。
+    admin
+        .json(
+            "PUT",
+            &format!("/upstream-tokens/{shared_id}/enabled"),
+            Some(json!({"enabled": false})),
+        )
         .await;
-    assert_eq!(status, 200, "{}", String::from_utf8_lossy(&body));
-    let first = &e.mock.requests_to("/ai/generate-image")[0];
-    assert!(first.header("authorization").unwrap().contains(DONATED));
-    assert_eq!(first.json()["parameters"]["n_samples"], 2);
-    assert_eq!(first.json()["parameters"]["width"], 1536);
-
     let (status, _, body) = Call::new("POST", "/ai/generate-image")
         .bearer(TOKEN2)
         .json(json!({
@@ -345,20 +333,17 @@ async fn exclusive_token_is_hidden_from_the_site_pool_and_does_not_fall_back() {
         .send(&e.state)
         .await;
     assert_eq!(status, 200, "{}", String::from_utf8_lossy(&body));
-    let second = &e.mock.requests_to("/ai/generate-image")[1];
-    assert!(second.header("authorization").unwrap().contains(SHARED));
-    assert!(!second.header("authorization").unwrap().contains(DONATED));
+    let first = &e.mock.requests_to("/ai/generate-image")[0];
+    assert!(first.header("authorization").unwrap().contains(DONATED));
 
-    let (s, page) = admin.json("GET", "/upstream", None).await;
-    assert_eq!(s, 200);
-    let donated_row = page["accounts"]
-        .as_array()
-        .unwrap()
-        .iter()
-        .find(|a| a["token_id"] == donated_id)
-        .unwrap();
-    assert_eq!(donated_row["exclusive"], true);
-
+    // 赞助席本人不被钉死在捐赠号上：捐赠号停用、另一把健康号可用时，照常改派出图。
+    admin
+        .json(
+            "PUT",
+            &format!("/upstream-tokens/{shared_id}/enabled"),
+            Some(json!({"enabled": true})),
+        )
+        .await;
     admin
         .json(
             "PUT",
@@ -375,19 +360,30 @@ async fn exclusive_token_is_hidden_from_the_site_pool_and_does_not_fall_back() {
         }))
         .send(&e.state)
         .await;
-    assert_eq!(status.as_u16(), 503, "{}", String::from_utf8_lossy(&body));
-    let text = String::from_utf8_lossy(&body);
-    assert!(text.contains("专属账号"), "{text}");
-    assert!(!text.contains(SHARED));
+    assert_eq!(status, 200, "{}", String::from_utf8_lossy(&body));
+    let second = &e.mock.requests_to("/ai/generate-image")[1];
+    assert!(second.header("authorization").unwrap().contains(SHARED));
+
+    // 后台来源标签：捐赠号标 donated（仅标签，不影响选号）。
+    let (s, page) = admin.json("GET", "/upstream", None).await;
+    assert_eq!(s, 200);
+    let donated_row = page["accounts"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|a| a["token_id"] == donated_id)
+        .unwrap();
+    assert_eq!(donated_row["donated"], true);
     settle().await;
 }
 
-/// 绑定免费拼车号（allow_anlas=false）的赞助席仍套免费钳制：超大 v4.5 被收到免费小图，
-/// 不像官方专属号那样放行高规格（见 exclusive_token_is_hidden_...）。
+/// 赞助席绑定免费拼车号（allow_anlas=false）、本人没开高规格开关时仍套免费钳制：
+/// 超大 v4.5 被收到免费小图。捐赠号是共享容量，不额外授予成员高规格权限。
 #[tokio::test]
 async fn bound_free_share_still_clamps_to_free_small_image() {
     let share = gate_testkit::MockUpstream::start().await;
-    let e = setup(&[]).await;
+    // 池里只留这把捐赠拼车号（无官方号），出图必然走它，便于核对钳制后的参数。
+    let e = setup(&[("NAI_TOKENS", "")]).await;
     let admin = Admin::login(&e.state).await;
     let id = add_share(&admin, &share.url(), SHARE_A).await;
     policy_for(
@@ -419,7 +415,7 @@ async fn bound_free_share_still_clamps_to_free_small_image() {
     settle().await;
 }
 
-// ---------------------------------------------------------------- 专属 Key 自助
+// ---------------------------------------------------------------- 捐赠 Key 自助
 
 const SHARE_A: &str = "pk-synthetic-donated-share01";
 const SHARE_B: &str = "pk-synthetic-donated-share02";
@@ -511,7 +507,7 @@ async fn patron_me_shows_the_bound_share_token_in_plaintext_but_hides_the_host()
     assert_eq!(me.status, 200, "{}", me.text());
     let body = me.json();
     assert_eq!(body["portal_mode"], "full");
-    assert_eq!(body["exclusive_account"], true);
+    assert_eq!(body["donated_account"], true);
     let token = &body["token"];
     assert_eq!(token["is_share"], true);
     assert_eq!(token["enabled"], true);
@@ -531,7 +527,7 @@ async fn patron_me_shows_the_bound_share_token_in_plaintext_but_hides_the_host()
     assert!(text.contains(SHARE_A), "本人门户应明文显示完整 Key: {text}");
     assert!(!text.contains(&share.url()), "网关地址泄漏: {text}");
 
-    // 不绑专属号的席位：token 块为 null，门户模式默认 basic。
+    // 不绑捐赠号的席位：token 块为 null，门户模式默认 basic。
     let other = seat_mode(&admin, SUBJECT2, None, "basic", true, true).await;
     let pw2 = other["portal_password"].as_str().unwrap().to_string();
     let cookie2 = patron_login(&e.state, &pw2).await;
@@ -547,7 +543,7 @@ async fn patron_me_shows_the_bound_share_token_in_plaintext_but_hides_the_host()
     assert_eq!(me2.status, 200, "{}", me2.text());
     assert_eq!(me2.json()["token"], Value::Null);
     assert_eq!(me2.json()["portal_mode"], "basic");
-    assert_eq!(me2.json()["exclusive_account"], false);
+    assert_eq!(me2.json()["donated_account"], false);
 }
 
 #[tokio::test]
@@ -619,7 +615,7 @@ async fn patron_token_self_service_auth_matrix() {
     .await
     .assert_detail(403, "此席位未开放自助管理，请联系站长");
 
-    // full + 自助，但没绑专属号。
+    // full + 自助，但没绑捐赠号。
     seat_mode(&admin, SUBJECT, None, "full", true, false).await;
     send(
         &e.state,
@@ -630,7 +626,7 @@ async fn patron_token_self_service_auth_matrix() {
         hdrs,
     )
     .await
-    .assert_detail(403, "此席位没有绑定专属 Key");
+    .assert_detail(403, "此席位没有绑定捐赠 Key");
 
     // 席位被站长关闭：会话立刻失效（401，而不是 403）。
     let (s, _) = admin
@@ -687,7 +683,7 @@ async fn patron_token_self_service_auth_matrix() {
         .assert_detail(422, "Key 格式不对：拼车网关的 Key 应以 NAI- 或 pk- 开头");
     }
 
-    // 只能动自己绑的那把：另一个席位的专属号不受影响。
+    // 只能动自己绑的那把：另一个席位的捐赠号不受影响。
     seat_mode(&admin, SUBJECT2, Some(&id2), "full", true, true).await;
     let off = send(
         &e.state,
@@ -819,8 +815,8 @@ async fn patron_full_seat_toggles_and_rotates_the_bound_share_key() {
             .as_deref(),
         Some(new_id.as_str())
     );
-    let exclusive = e.state.nai.exclusive_tokens().await;
-    assert!(exclusive.contains(&new_id) && !exclusive.contains(&id));
+    let donated = e.state.db.donated_token_ids().await.unwrap();
+    assert!(donated.contains(&new_id) && !donated.contains(&id));
     let listed = admin.get_ok("/share-upstreams").await;
     let rows = listed["accounts"].as_array().unwrap();
     let ids: Vec<&str> = rows
@@ -828,20 +824,17 @@ async fn patron_full_seat_toggles_and_rotates_the_bound_share_key() {
         .map(|a| a["token_id"].as_str().unwrap())
         .collect();
     assert!(!ids.contains(&id.as_str()) && ids.contains(&new_id.as_str()));
-    // 来源标签：绑定到启用赞助席的新 Key 是捐赠（exclusive），池里另一把未绑定的是拼车平台。
+    // 来源标签：绑定到启用赞助席的新 Key 是捐赠（donated），池里另一把未绑定的是拼车平台。
     let new_row = rows.iter().find(|a| a["token_id"] == new_id).unwrap();
-    assert_eq!(new_row["exclusive"], json!(true));
+    assert_eq!(new_row["donated"], json!(true));
     let b_row = rows
         .iter()
         .find(|a| a["token_id"] == token_id(SHARE_B))
         .unwrap();
-    assert_eq!(b_row["exclusive"], json!(false));
+    assert_eq!(b_row["donated"], json!(false));
 
-    // 席位成员出图走新 Key（专属路由跟随重绑）。
+    // 席位成员仍能正常出图：捐赠号共享入池，不再钉死路由（可能走池里任意一把健康号）。
     let (status, body) = generate(&e.state, TOKEN).await;
     assert_eq!(status, 200, "{}", String::from_utf8_lossy(&body));
-    let reqs = share.requests_to("/ai/generate-image");
-    let last = reqs.last().expect("share upstream saw the image");
-    assert!(last.header("authorization").unwrap().contains(SHARE_NEW));
     settle().await;
 }

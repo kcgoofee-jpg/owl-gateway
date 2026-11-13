@@ -320,15 +320,7 @@ impl AppState {
         if tokens.is_empty() {
             tracing::warn!("未设置 NAI_TOKENS，所有生成请求将返回 503");
         }
-        self.refresh_exclusive_tokens().await;
         Ok(())
-    }
-
-    pub async fn refresh_exclusive_tokens(&self) {
-        match self.db.exclusive_token_ids().await {
-            Ok(ids) => self.nai.set_exclusive_tokens(ids).await,
-            Err(e) => tracing::error!(error = %e, "加载专属 Token 失败"),
-        }
     }
 
     /// 后台保存过的运行期限制在每次重启后优先于代码常量（越界值忽略）。

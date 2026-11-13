@@ -128,7 +128,7 @@ export function AccountCard(props: {
       <header class="token__head">
         <h2 class="up-account__title">账号 {a.position}</h2>
         <span class="token__name mono">{a.token}</span>
-        {a.exclusive && <Badge tone="info">专属</Badge>}
+        {a.donated && <Badge tone="info">捐赠</Badge>}
         <Badge {...withTone(st.tone)} dot>
           {st.text}
         </Badge>
