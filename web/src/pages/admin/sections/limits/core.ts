@@ -20,7 +20,7 @@ const RUNTIME_COPY: Record<string, { label: string; unit: string; hint: string }
   image_429_cooldown_seconds: {
     label: "429 冷却",
     unit: "秒",
-    hint: "上游返回 429 后，全站暂停出图多久（上游要求更久时按上游；那个账号另按上游要求单独冷却）",
+    hint: "所有上游账号都不可用时，全站暂停出图多久（单号 429 只冷却该号、自动改派其它健康号；上游要求更久时按上游）",
   },
 };
 

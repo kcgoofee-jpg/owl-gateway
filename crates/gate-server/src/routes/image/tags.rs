@@ -119,20 +119,17 @@ async fn suggest(
     opts.image_lane = true;
     opts.wait_for_image_slot = false;
     opts.official_only = true;
-    let (s, c, k) = (state.clone(), ctx.clone(), key.clone());
+    let s = state.clone();
     let cb = Callbacks {
         on_rate_limited: Some(Box::new(move |retry_after| {
-            let (s, c, k) = (s.clone(), c.clone(), k.clone());
+            let s = s.clone();
             Box::pin(async move {
+                // 单号限流只冷却该号；通用池还有健康号就不全站暂停（错误由下方收尾记日志）。
+                if s.nai.any_general_usable().await {
+                    return;
+                }
                 let secs = s.limits().image_429_cooldown_seconds.max(retry_after);
-                let cooldown = s.block_image_generation(secs).await;
-                s.record(
-                    &c,
-                    &k,
-                    Entry::new("tags", "", "error").detail(format!(
-                        "上游限流(429)：全站图片生成暂停约 {cooldown} 秒，保护上游 Token"
-                    )),
-                );
+                s.block_image_generation(secs).await;
             })
         })),
         ..Default::default()
@@ -141,14 +138,11 @@ async fn suggest(
         Ok(r) => r,
         Err(e) if e.transport => return Err(upstream_transport(ctx, e.message)),
         Err(e) => {
-            if e.status != 429 {
-                // 真实上游 429 已由回调记录
-                state.record(
-                    ctx,
-                    key,
-                    Entry::new("tags", "", "error").detail(e.message.clone()),
-                );
-            }
+            state.record(
+                ctx,
+                key,
+                Entry::new("tags", "", "error").detail(e.message.clone()),
+            );
             return Err(up_to_gate(e).into());
         }
     };

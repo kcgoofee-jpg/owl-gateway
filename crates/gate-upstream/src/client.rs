@@ -342,6 +342,11 @@ impl<H: Hooks> NaiClient<H> {
         inner.pool.v5_free_open(&inner.hooks).await
     }
 
+    /// 通用池里现在还有没有可用账号（单号 429 时据此决定要不要全站暂停，见 `Pool::any_general_usable`）。
+    pub async fn any_general_usable(&self) -> bool {
+        self.inner.pool.any_general_usable(&self.inner.hooks).await
+    }
+
     // ---------------- 健康标记（见 pool.rs） ----------------
 
     /// 对订阅、账号信息等读接口返回的 401 执行与生图相同的凭据隔离和持久化。

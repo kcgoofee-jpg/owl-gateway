@@ -243,7 +243,7 @@ pub(crate) async fn retry_after_lock<H: Hooks>(
     .is_ok()
 }
 
-const RATE_LIMITED_IMAGE: &str = "NovelAI 正在限流，全站出图暂停冷却，未扣费。请稍后重试。";
+const RATE_LIMITED_IMAGE: &str = "NovelAI 正在限流，该账号短暂冷却，未扣费。请稍后重试。";
 const MODEL_403: &str =
     "NovelAI 不支持该模型，未扣费。请改用本站支持的模型，如 nai-diffusion-4-5-full。";
 const ACCOUNT_403: &str = "NovelAI 拒绝了本次请求，本站已暂停使用该账号，未扣费。请稍后重试。";

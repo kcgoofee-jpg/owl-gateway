@@ -785,6 +785,17 @@ impl Pool {
         self.state.lock().await.exclusive.clone()
     }
 
+    /// 通用池（非专属捐赠号）里现在还有没有可用账号：后台启用、没失效、不在 429/403 冷却中。
+    /// 单号 429 时只要这里仍为 true 就不该全站暂停——被打到的号已先冷却，后续请求会自动改派到
+    /// 这些健康号（见 [`crate::dispatch`] 选号）；只有通用池全不可用才触发全站冷却。
+    pub(crate) async fn any_general_usable(&self, hooks: &dyn Hooks) -> bool {
+        let pool = self.state.lock().await;
+        let now = hooks.now();
+        pool.tokens
+            .iter()
+            .any(|t| !pool.exclusive.contains(&t.token_id) && t.usable(now))
+    }
+
     #[allow(clippy::too_many_arguments)] // 费用要求、车道、公平信息都只在选号这一层用
     pub(crate) async fn pick(
         &self,

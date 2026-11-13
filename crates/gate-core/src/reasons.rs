@@ -178,6 +178,7 @@ pub const BACKFILL: &[(&str, &str)] = &[
     (MEMBER_QUEUE_FULL, "%张在排队，请等前面完成后再发%"),
     (UPSTREAM_LOCKED, "%上一张图仍未释放%"),
     (COOLDOWN, "%全站出图暂停冷却%"),
+    (COOLDOWN, "%该账号短暂冷却%"),
     (QUEUE_TIMEOUT, "%额度核对超时%"),
     (BODY_ABORT, "%上传中断，%"),
     (FEATURE_OFF, "%本站未开放此功能%"),
@@ -359,6 +360,10 @@ mod tests {
         assert_eq!(
             classify("全站排队已满，最多同时排 4 张，未扣费。"),
             QUEUE_FULL
+        );
+        assert_eq!(
+            classify("NovelAI 正在限流，该账号短暂冷却，未扣费。请稍后重试。"),
+            COOLDOWN
         );
         assert_eq!(classify("upstream 500（nai-diffusion-5-full）"), "");
         assert!(BACKFILL.iter().all(|(_, p)| p.starts_with('%')
