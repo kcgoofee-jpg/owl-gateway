@@ -69,6 +69,12 @@ export function useAdmin<T>(url: string | null): {
       .then((data) => {
         cache.set(url, data);
         fetchedTick.set(url, t);
+        // 与 getShared 同样的上限：日志筛选/翻页会产生大量地址，不能无限留着。
+        if (cache.size > 32) {
+          const old = cache.keys().next().value as string;
+          cache.delete(old);
+          fetchedTick.delete(old);
+        }
         if (alive)
           setState((current) =>
             current?.url === url && current.data === data && current.error === null
