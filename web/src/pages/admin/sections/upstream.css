@@ -238,3 +238,18 @@
 .up-account__fold {
   margin: var(--sp-3) 0 var(--sp-2);
 }
+
+.share-settings {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 220px), 1fr));
+  align-items: start;
+}
+.share-settings .field {
+  max-width: none;
+  min-width: 0;
+}
+.share-settings > .switch-row,
+.share-settings > .savebar,
+.share-settings > .notice {
+  grid-column: 1 / -1;
+}

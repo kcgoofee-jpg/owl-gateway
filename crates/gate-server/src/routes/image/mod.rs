@@ -212,6 +212,35 @@ pub(super) fn on_dispatch(
                 .await
             {
                 Ok((day, _month)) => {
+                    if let Some(id) = c.snapshot().token_id
+                        && let Some(token) = _s
+                            .nai
+                            .tokens()
+                            .await
+                            .into_iter()
+                            .find(|t| t.token_id == id && t.is_share())
+                    {
+                        let fields = token.fields();
+                        let cap = fields.share_limits.as_ref().map_or(0, |s| s.daily_anlas);
+                        if !_s
+                            .db
+                            .reserve_upstream_anlas(
+                                reserved.request_id(),
+                                &id,
+                                &day,
+                                cap,
+                                fields.allow_anlas,
+                            )
+                            .await
+                            .map_err(|e| local(crate::error::InternalError(e.to_string()).into()))?
+                        {
+                            return Err(UpstreamError::local(
+                                429,
+                                "这条拼车上游的 Anlas 预算不足或已关闭，请稍后重试。",
+                                "upstream_anlas_limit",
+                            ));
+                        }
+                    }
                     c.set_settlement_day(day);
                     c.dispatch_persisted();
                     Ok(())

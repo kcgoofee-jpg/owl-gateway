@@ -171,6 +171,7 @@ impl AppState {
                     v5_daily_limit: gate_upstream::pool::V5_DAILY_LIMIT_DEFAULT,
                     allow_anlas: env.nai_token_allow_anlas.get(i).copied().unwrap_or(true),
                     image_host: None,
+                    share_limits: None,
                 })
                 .collect(),
         };

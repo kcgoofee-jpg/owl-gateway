@@ -169,6 +169,39 @@ export function tokenFormatProblem(t: string): string | null {
   return null;
 }
 
+export function shareLimitSpecs(limit: { min: number; max: number }): Record<string, FieldSpec> {
+  return {
+    ...v5LimitSpecs(limit),
+    allow_anlas: { kind: "bool", label: "允许消耗 Anlas" },
+    daily_anlas: {
+      kind: "int",
+      label: "每日 Anlas 上限",
+      min: 0,
+      max: 1000000,
+      unit: "Anlas",
+      hint: "0 为不限；每天北京时间 7 点重置，包含在途和结果未知的预留。",
+    },
+    rpm: {
+      kind: "int",
+      label: "出图 RPM",
+      min: 0,
+      max: 600,
+      unit: "次 / 分钟",
+      hint: "每把 Key 独立计算最近 60 秒的出图及图片工具请求；0 为不限。",
+    },
+    concurrency: { kind: "int", label: "出图并发", min: 1, max: 16, unit: "个" },
+    post_wait_min: { kind: "int", label: "出图后最少等待", min: 0, max: 300, unit: "秒" },
+    post_wait_max: {
+      kind: "int",
+      label: "出图后最多等待",
+      min: 0,
+      max: 300,
+      unit: "秒",
+      hint: "只作用于这条拼车上游；最少和最多均为 0 时不额外等待。",
+    },
+  };
+}
+
 export type ShareAccount = {
   token_id: string;
   position: number;
@@ -179,6 +212,12 @@ export type ShareAccount = {
   disabled: boolean;
   fails: number;
   allow_anlas: boolean;
+  daily_anlas: number;
+  anlas_used_today: number;
+  rpm: number;
+  concurrency: number;
+  post_wait_min: number;
+  post_wait_max: number;
   v5_daily_limit: number;
   v5_used: number;
   images_today: number;

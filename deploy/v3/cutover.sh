@@ -212,7 +212,7 @@ cmd_restart() {
 # A native member-policy database cannot be opened by the pre-migration gateway.
 # Check before changing tags or stopping the healthy service. Database restore is explicit.
 check_rollback_schema() {
-  local database="$LEGACY_DIR/data/nai_gate.db" schema compatible
+  local database="$LEGACY_DIR/data/nai_gate.db" schema compatible version target_version
   [[ -f $database ]] || return 0
   schema=$(python3 - "$database" <<'PYTHON'
 import sqlite3, sys
@@ -222,6 +222,11 @@ row = conn.execute("SELECT value FROM site_settings WHERE key='member_policy_v1_
 print("native" if row is not None else "legacy")
 PYTHON
   ) || die "数据库版本无法核对，未执行回滚"
+  version=$(sqlite3 "$database" 'PRAGMA user_version') || die "数据库结构版本无法核对"
+  target_version=$(docker image inspect -f '{{ index .Config.Labels "org.owl-gateway.schema-version" }}' "$IMAGE:previous") || die "回滚镜像版本无法核对"
+  if [[ $version -ge 6 && $target_version != "$version" ]]; then
+    die "当前库结构 v$version，上一版镜像不支持；必须停机保存当前数据并核对数据库恢复方案，禁止只回滚镜像"
+  fi
   if [[ $schema == native ]]; then
     compatible=$(docker image inspect -f '{{ index .Config.Labels "org.owl-gateway.member-policy-schema" }}' "$IMAGE:previous") \
       || die "回滚镜像版本无法核对，未执行回滚"

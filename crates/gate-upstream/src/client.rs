@@ -417,12 +417,14 @@ mod tests {
             v5_daily_limit: 0,
             allow_anlas: true,
             image_host: None,
+            share_limits: None,
         };
         let share = TokenSpec {
             token: "NAI-synthetic-share-0001".into(),
             v5_daily_limit: 0,
             allow_anlas: true,
             image_host: Some("https://share.example".into()),
+            share_limits: None,
         };
         let default = "https://image.novelai.net";
         let o = token(official);

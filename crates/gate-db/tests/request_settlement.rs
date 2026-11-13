@@ -440,3 +440,74 @@ async fn unknown_failure_usage_log_is_linked_by_internal_id_and_exposes_remainin
     assert_eq!(rows[0]["remaining_v5"], 1);
     assert_eq!(rows[0]["remaining_legacy"], 1);
 }
+
+#[tokio::test]
+async fn upstream_anlas_budget_serializes_reservations_and_retains_unknown_results() {
+    let dir = tempfile::tempdir().unwrap();
+    let db = Db::open(dir.path().join("gate.db")).unwrap();
+    let day = "2026-11-13";
+    for id in ["one", "two", "three"] {
+        db.reserve_request_settlement(id, id, 1, day, "2026-11", false, 3.0, 0, 0, 1.0)
+            .await
+            .unwrap();
+        db.dispatch_request_settlement(id, "abc", id, day, "2026-11", false, 3.0, 0, 0, 2.0)
+            .await
+            .unwrap();
+    }
+    let (one, two) = tokio::join!(
+        db.reserve_upstream_anlas("one", "share-a", day, 5, true),
+        db.reserve_upstream_anlas("two", "share-a", day, 5, true)
+    );
+    assert_ne!(one.unwrap(), two.unwrap());
+    let held = if db.upstream_anlas_used("share-a", day).await.unwrap() == 3.0 {
+        "one"
+    } else {
+        panic!()
+    };
+    // Both IDs can be tested idempotently: the admitted one succeeds, the other still fails.
+    let admitted = if db
+        .reserve_upstream_anlas(held, "share-a", day, 5, true)
+        .await
+        .unwrap()
+    {
+        held
+    } else {
+        "two"
+    };
+    assert!(
+        db.reserve_upstream_anlas(admitted, "share-a", day, 5, true)
+            .await
+            .unwrap()
+    );
+    assert!(
+        db.reserve_upstream_anlas("three", "share-b", day, 5, true)
+            .await
+            .unwrap()
+    );
+    assert!(
+        !db.reserve_upstream_anlas("three", "share-c", day, 5, false)
+            .await
+            .unwrap()
+    );
+    db.record_settled_failure(&NewLog::default(), admitted, true, 3.0)
+        .await
+        .unwrap();
+    db.recover_request_settlements(4.0).await.unwrap();
+    assert_eq!(db.upstream_anlas_used("share-a", day).await.unwrap(), 3.0);
+    assert!(
+        db.manually_release_unknown_request(admitted, "admin", "confirmed uncharged", 5.0)
+            .await
+            .unwrap()
+    );
+    assert_eq!(db.upstream_anlas_used("share-a", day).await.unwrap(), 0.0);
+    db.record_settled_failure(&NewLog::default(), "three", false, 6.0)
+        .await
+        .unwrap();
+    assert_eq!(db.upstream_anlas_used("share-b", day).await.unwrap(), 0.0);
+    assert_eq!(
+        db.upstream_anlas_used("share-a", "2026-11-14")
+            .await
+            .unwrap(),
+        0.0
+    );
+}

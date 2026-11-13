@@ -11,6 +11,37 @@ use serde_json::{Value, json};
 use std::io::Write;
 use std::path::Path;
 
+/// Per-share policy. Missing policy preserves the existing official pacing defaults.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(default, deny_unknown_fields)]
+pub struct ShareLimits {
+    pub daily_anlas: i64,
+    pub rpm: i64,
+    pub concurrency: usize,
+    pub post_wait_min: i64,
+    pub post_wait_max: i64,
+}
+impl Default for ShareLimits {
+    fn default() -> Self {
+        Self {
+            daily_anlas: 0,
+            rpm: 0,
+            concurrency: 1,
+            post_wait_min: 1,
+            post_wait_max: 3,
+        }
+    }
+}
+impl ShareLimits {
+    pub fn valid(&self) -> bool {
+        (0..=1000000).contains(&self.daily_anlas)
+            && (0..=600).contains(&self.rpm)
+            && (1..=16).contains(&self.concurrency)
+            && (0..=300).contains(&self.post_wait_min)
+            && (self.post_wait_min..=300).contains(&self.post_wait_max)
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Entry {
     pub token: String,
@@ -19,6 +50,8 @@ pub struct Entry {
     /// 拼车网关的 API 根地址。官方号为 `None`（走全局 `NAI_IMAGE_HOST`）。
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub image_host: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub share_limits: Option<ShareLimits>,
 }
 
 impl Entry {
@@ -27,6 +60,7 @@ impl Entry {
             token: token.into(),
             allow_anlas,
             image_host: None,
+            share_limits: None,
         }
     }
 
@@ -39,6 +73,7 @@ impl Entry {
             token: token.into(),
             allow_anlas,
             image_host: Some(image_host.into()),
+            share_limits: None,
         }
     }
 
@@ -57,11 +92,19 @@ impl Entry {
             token,
             allow_anlas: self.allow_anlas,
             image_host,
+            share_limits: self.share_limits,
         };
         entry.valid().then_some(entry)
     }
 
     pub fn valid(&self) -> bool {
+        if self
+            .share_limits
+            .as_ref()
+            .is_some_and(|s| !s.valid() || !self.is_share())
+        {
+            return false;
+        }
         match self.image_host.as_deref() {
             None => valid_official_token(&self.token),
             Some(host) => {

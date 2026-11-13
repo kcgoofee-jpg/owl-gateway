@@ -5,7 +5,7 @@ import { ApiError, sendJSON } from "../../../../lib/api";
 import { Badge, Button, Card, Dialog, Notice } from "../../../../ui";
 import { act, tick, useAdmin } from "../../data";
 import { actOrError, ConfirmDialog, LoadError, Loading, useBusy } from "../_kit";
-import { NumField, SaveBar, Sect, useForm, withTone } from "../system/forms";
+import { NumField, SaveBar, Sect, SwitchRow, useForm, withTone } from "../system/forms";
 import { RequestStats } from "./accounts";
 import {
   anlasText,
@@ -13,9 +13,9 @@ import {
   type ShareAccount,
   type SharePage,
   shareHostProblem,
+  shareLimitSpecs,
   shareTokenProblem,
   tokenState,
-  v5LimitSpecs,
 } from "./core";
 
 function ShareDialog(props: {
@@ -167,9 +167,10 @@ function ShareCard(props: {
 }) {
   const a = props.a;
   const st = tokenState(a);
-  const form = useForm(v5LimitSpecs(props.limit), a as unknown as Record<string, unknown>);
+  const form = useForm(shareLimitSpecs(props.limit), a as unknown as Record<string, unknown>);
   const [saving, setSaving] = useState(false);
   const save = async () => {
+    if (Number(form.raw("post_wait_max")) < Number(form.raw("post_wait_min"))) return;
     const ch = form.changes();
     setSaving(true);
     let ok = true;
@@ -181,6 +182,19 @@ function ShareCard(props: {
           { v5_daily_limit: ch.v5_daily_limit },
           "V5 日限已保存",
         )) !== null;
+    if (ok && Object.keys(ch).some((name) => name !== "v5_daily_limit")) {
+      const names = ["allow_anlas", "daily_anlas", "rpm", "concurrency", "post_wait_min", "post_wait_max"];
+      const settings = Object.fromEntries(
+        names.map((name) => [name, name in ch ? ch[name] : a[name as keyof ShareAccount]]),
+      );
+      ok =
+        (await act(
+          "PUT",
+          `/admin/api/share-upstreams/${encodeURIComponent(a.token_id)}/settings`,
+          settings,
+          "拼车设置已保存",
+        )) !== null;
+    }
     setSaving(false);
     if (ok) form.commit();
   };
@@ -209,8 +223,10 @@ function ShareCard(props: {
           <dd>{remainingText(a)}</dd>
         </div>
         <div>
-          <dt>允许 Anlas</dt>
-          <dd>{a.allow_anlas ? "是" : "否"}</dd>
+          <dt>今日 Anlas（含在途预留）</dt>
+          <dd>
+            {reading(a.anlas_used_today)} / {a.daily_anlas === 0 ? "不限" : reading(a.daily_anlas)}
+          </dd>
         </div>
         <div>
           <dt>今天出图</dt>
@@ -220,9 +236,27 @@ function ShareCard(props: {
         </div>
       </dl>
       {a.w1h && a.w24h ? <RequestStats a={a} /> : null}
-      <form class="token__form" {...form.formProps} onSubmit={(e) => e.preventDefault()}>
-        <NumField form={form} name="v5_daily_limit" />
-        <SaveBar form={form} onSave={save} saving={saving} />
+      <form class="token__form share-settings" {...form.formProps} onSubmit={(e) => e.preventDefault()}>
+        <NumField form={form} name="v5_daily_limit" disabled={saving} />
+        <SwitchRow
+          title="允许消耗 Anlas"
+          checked={form.raw("allow_anlas") === true}
+          onChange={(value) => form.set("allow_anlas", value)}
+          disabled={saving}
+        />
+        <NumField form={form} name="daily_anlas" disabled={saving} />
+        <NumField form={form} name="rpm" disabled={saving} />
+        <NumField form={form} name="concurrency" disabled={saving} />
+        <NumField form={form} name="post_wait_min" disabled={saving} />
+        <NumField form={form} name="post_wait_max" disabled={saving} />
+        {Number(form.raw("post_wait_max")) < Number(form.raw("post_wait_min")) && (
+          <Notice tone="danger">等待时间上限不能小于下限</Notice>
+        )}
+        <SaveBar
+          form={form}
+          onSave={save}
+          saving={saving || Number(form.raw("post_wait_max")) < Number(form.raw("post_wait_min"))}
+        />
       </form>
     </Card>
   );

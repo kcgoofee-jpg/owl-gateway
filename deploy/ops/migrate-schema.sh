@@ -91,14 +91,39 @@ v4_to_v5() {
     echo "  share_posts 已就绪"
 }
 
-MIGRATIONS=(v2_to_v3 v3_to_v4 v4_to_v5)
+v5_to_v6() {
+    python3 - "$DB" <<'PYTHON'
+import os, sqlite3, sys, tempfile
+from pathlib import Path
+path = Path(sys.argv[1])
+fd, backup = tempfile.mkstemp(prefix=path.name + ".before-v6.", suffix=".db", dir=path.parent)
+os.close(fd)
+with sqlite3.connect(path) as source, sqlite3.connect(backup) as target:
+    source.backup(target)
+print("  迁移前私有快照：" + backup)
+PYTHON
+    q "CREATE TABLE IF NOT EXISTS upstream_anlas_charges (
+        request_id TEXT NOT NULL, token_id TEXT NOT NULL, day TEXT NOT NULL,
+        amount REAL NOT NULL DEFAULT 0, spent REAL NOT NULL DEFAULT 0, PRIMARY KEY (request_id, token_id));
+        CREATE INDEX IF NOT EXISTS idx_upstream_anlas_day ON upstream_anlas_charges (token_id, day);
+        INSERT OR IGNORE INTO upstream_anlas_charges(request_id,token_id,day,amount,spent)
+        SELECT 'baseline-' || date(ts,'unixepoch','+1 hour'), token_id,
+               date(ts,'unixepoch','+1 hour'),
+               SUM(CASE WHEN status='ok' THEN anlas ELSE 0 END + unconfirmed_anlas),
+               SUM(CASE WHEN status='ok' THEN anlas ELSE 0 END)
+        FROM usage_log WHERE token_id IS NOT NULL
+        GROUP BY token_id, date(ts,'unixepoch','+1 hour')
+        HAVING SUM(CASE WHEN status='ok' THEN anlas ELSE 0 END + unconfirmed_anlas)>0;"
+}
+
+MIGRATIONS=(v2_to_v3 v3_to_v4 v4_to_v5 v5_to_v6)
 
 before=$(q "PRAGMA user_version")
 echo "库：$DB"
 echo "当前结构版本：$before"
 while :; do
     v=$(q "PRAGMA user_version")
-    if [ "$v" -ge 5 ]; then
+    if [ "$v" -ge 6 ]; then
         break
     fi
     fn="v${v}_to_v$((v + 1))"

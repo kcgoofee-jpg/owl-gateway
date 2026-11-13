@@ -304,3 +304,14 @@ CREATE TABLE IF NOT EXISTS share_posts (
 );
 CREATE INDEX IF NOT EXISTS idx_share_posts_member ON share_posts (discord_id, created_at);
 
+
+-- Per-upstream Anlas dispatch holds; retained across request-settlement pruning/restarts.
+CREATE TABLE IF NOT EXISTS upstream_anlas_charges (
+    request_id TEXT NOT NULL,
+    token_id TEXT NOT NULL,
+    day TEXT NOT NULL,
+    amount REAL NOT NULL DEFAULT 0,
+    spent REAL NOT NULL DEFAULT 0,
+    PRIMARY KEY (request_id, token_id)
+);
+CREATE INDEX IF NOT EXISTS idx_upstream_anlas_day ON upstream_anlas_charges (token_id, day);

@@ -32,6 +32,8 @@ pub struct TokenFields {
     pub kind_index: usize,
     pub v5_daily_limit: i64,
     pub allow_anlas: bool,
+    pub share_limits: Option<crate::token_store::ShareLimits>,
+    pub rpm_starts: Vec<f64>,
     pub pending_v5: i64,
     pub admin_enabled: bool,
     pub fails: i64,
@@ -152,6 +154,7 @@ pub struct TokenSpec {
     pub v5_daily_limit: i64,
     pub allow_anlas: bool,
     pub image_host: Option<String>,
+    pub share_limits: Option<crate::token_store::ShareLimits>,
 }
 
 impl From<(String, i64, bool)> for TokenSpec {
@@ -161,6 +164,7 @@ impl From<(String, i64, bool)> for TokenSpec {
             v5_daily_limit,
             allow_anlas,
             image_host: None,
+            share_limits: None,
         }
     }
 }
@@ -172,6 +176,7 @@ impl From<&crate::token_store::Entry> for TokenSpec {
             v5_daily_limit: 0,
             allow_anlas: e.allow_anlas,
             image_host: e.image_host.clone(),
+            share_limits: e.share_limits.clone(),
         }
     }
 }
@@ -195,13 +200,17 @@ impl Token {
             token: spec.token,
             image_host: spec.image_host,
             profile_index: index % headers::POOL.len(),
-            image_slots: AdjustableLimiter::new(1),
+            image_slots: AdjustableLimiter::new(
+                spec.share_limits.as_ref().map_or(1, |s| s.concurrency),
+            ),
             dispatch_lock: tokio::sync::Mutex::new(()),
             fields: Mutex::new(TokenFields {
                 position: index + 1,
                 kind_index: 1,
                 v5_daily_limit: spec.v5_daily_limit.max(0),
                 allow_anlas: spec.allow_anlas,
+                share_limits: spec.share_limits,
+                rpm_starts: Vec::new(),
                 pending_v5: 0,
                 admin_enabled: true,
                 fails: 0,
@@ -250,6 +259,15 @@ impl Token {
     }
 
     /// `admin_enabled and not disabled and now >= blocked_until`
+    pub fn set_share_limits(&self, allow_anlas: bool, limits: crate::token_store::ShareLimits) {
+        self.image_slots.resize(limits.concurrency);
+        self.with(|f| {
+            f.allow_anlas = allow_anlas;
+            f.share_limits = Some(limits);
+        });
+        self.image_slots.notify().notify_waiters();
+    }
+
     pub fn usable(&self, now: f64) -> bool {
         self.with(|f| f.admin_enabled && !f.disabled && now >= f.blocked_until)
     }
@@ -657,6 +675,7 @@ impl Pool {
                 v5_daily_limit: V5_DAILY_LIMIT_DEFAULT,
                 allow_anlas,
                 image_host,
+                share_limits: None,
             },
             pool.tokens.len(),
         );
@@ -696,6 +715,7 @@ impl Pool {
                 v5_daily_limit: of.v5_daily_limit,
                 allow_anlas: of.allow_anlas,
                 image_host: image_host.or_else(|| old.image_host.clone()),
+                share_limits: of.share_limits.clone(),
             },
             index,
         );
@@ -1166,6 +1186,7 @@ mod tests {
                 v5_daily_limit: 0,
                 allow_anlas: true,
                 image_host: None,
+                share_limits: None,
             },
             0,
         ));
@@ -1175,6 +1196,7 @@ mod tests {
                 v5_daily_limit: 0,
                 allow_anlas: false,
                 image_host: Some("https://share.example".into()),
+                share_limits: None,
             },
             1,
         ));

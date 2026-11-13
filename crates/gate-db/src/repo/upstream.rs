@@ -26,6 +26,7 @@ fn migrate_token(
         "upstream_token_settings",
         "upstream_token_enabled",
         "upstream_token_counters",
+        "upstream_anlas_charges",
     ] {
         tx.execute(&format!("DELETE FROM {table} WHERE token_id=?"), [new_id])?;
         tx.execute(
@@ -37,6 +38,34 @@ fn migrate_token(
 }
 
 impl Db {
+    /// Includes unresolved dispatches. A repeated confirmation never reserves twice.
+    pub async fn reserve_upstream_anlas(
+        &self,
+        request: &str,
+        token: &str,
+        day: &str,
+        cap: i64,
+        enabled: bool,
+    ) -> Result<bool> {
+        let (request, token, day) = (request.to_owned(), token.to_owned(), day.to_owned());
+        self.write(move |tx| {
+            let cost: f64 = tx.query_row("SELECT anlas + site_paid_hold FROM request_settlements WHERE request_id=?", [&request], |r| r.get(0))?;
+            if cost <= 0.0 { return Ok(true); }
+            if !enabled { return Ok(false); }
+            let existing: f64 = tx.query_row("SELECT COALESCE(SUM(amount),0) FROM upstream_anlas_charges WHERE request_id=? AND token_id=?", params![request,token], |r| r.get(0))?;
+            if existing >= cost { return Ok(true); }
+            let used: f64 = tx.query_row("SELECT COALESCE(SUM(amount),0) FROM upstream_anlas_charges WHERE token_id=? AND day=?", params![token,day], |r| r.get(0))?;
+            if cap > 0 && used - existing + cost > cap as f64 { return Ok(false); }
+            tx.execute("INSERT INTO upstream_anlas_charges(request_id,token_id,day,amount) VALUES(?,?,?,?) ON CONFLICT(request_id,token_id) DO UPDATE SET amount=excluded.amount", params![request,token,day,cost])?;
+            Ok(true)
+        }).await
+    }
+
+    pub async fn upstream_anlas_used(&self, token: &str, day: &str) -> Result<f64> {
+        let (token, day) = (token.to_owned(), day.to_owned());
+        self.read(move |c| c.query_row("SELECT COALESCE(SUM(amount),0) FROM upstream_anlas_charges WHERE token_id=? AND day=?", params![token,day], |r| r.get(0))).await
+    }
+
     pub async fn get_upstream_counter(&self, token_id: &str, day: &str) -> Result<UpstreamCounter> {
         let (token_id, day) = (token_id.to_string(), day.to_string());
         self.read(move |c| {

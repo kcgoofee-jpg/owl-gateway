@@ -343,6 +343,11 @@ pub(super) enum Edit {
     Remove {
         id: String,
     },
+    ShareSettings {
+        id: String,
+        allow_anlas: bool,
+        limits: token_store::ShareLimits,
+    },
 }
 
 pub(super) async fn edit_pool(state: &AppState, edit: Edit) -> Result<(), ApiError> {
@@ -366,6 +371,7 @@ async fn commit_edit(state: &AppState, edit: Edit) -> Result<(), ApiError> {
             token: t.token.clone(),
             allow_anlas: t.fields().allow_anlas,
             image_host: t.image_host.clone(),
+            share_limits: t.fields().share_limits,
         })
         .collect();
     let mut next = previous.clone();
@@ -403,6 +409,7 @@ async fn commit_edit(state: &AppState, edit: Edit) -> Result<(), ApiError> {
                 token: token.clone(),
                 allow_anlas: *allow_anlas,
                 image_host: image_host.clone(),
+                share_limits: None,
             });
         }
         Edit::Replace {
@@ -421,6 +428,18 @@ async fn commit_edit(state: &AppState, edit: Edit) -> Result<(), ApiError> {
             if let Some(host) = image_host {
                 next[i].image_host = Some(host.clone());
             }
+        }
+        Edit::ShareSettings {
+            id,
+            allow_anlas,
+            limits,
+        } => {
+            let i = position(id).ok_or_else(|| HttpError::new(404, NOT_FOUND))?;
+            if !next[i].is_share() {
+                return Err(HttpError::new(404, NOT_FOUND).into());
+            }
+            next[i].allow_anlas = *allow_anlas;
+            next[i].share_limits = Some(limits.clone());
         }
         Edit::Remove { id } => {
             if previous.len() <= 1 {
@@ -497,6 +516,21 @@ async fn commit_edit(state: &AppState, edit: Edit) -> Result<(), ApiError> {
                 .await
                 .map_err(InternalError)?;
             state.refresh_exclusive_tokens().await;
+        }
+        Edit::ShareSettings {
+            id,
+            allow_anlas,
+            limits,
+        } => {
+            if let Some(t) = state
+                .nai
+                .tokens()
+                .await
+                .into_iter()
+                .find(|t| t.token_id == id)
+            {
+                t.set_share_limits(allow_anlas, limits);
+            }
         }
         Edit::Remove { id } => {
             state.db.unbind_patron_token(&id).await?;

@@ -349,3 +349,177 @@ async fn director_and_tags_do_not_hit_share_host() {
         1
     );
 }
+
+#[tokio::test]
+async fn share_settings_are_independent_validated_and_survive_restart_and_replacement() {
+    let share = MockUpstream::start().await;
+    let e = setup(&[]).await;
+    let api = Admin::login_bare(&e.state).await;
+    for key in [SHARE_KEY, "NAI-synthetic-second-share-key"] {
+        assert_eq!(
+            api.json(
+                "POST",
+                "/share-upstreams",
+                Some(json!({"token":key,"image_host":share.url()}))
+            )
+            .await
+            .0,
+            200
+        );
+    }
+    let id = gate_upstream::headers::token_id(SHARE_KEY);
+    let settings = json!({"allow_anlas":true,"daily_anlas":25,"rpm":4,"concurrency":2,"post_wait_min":0,"post_wait_max":1});
+    let url = format!("/share-upstreams/{id}/settings");
+    for bad in [
+        json!({"allow_anlas":true}),
+        json!({"rpm":-1}),
+        json!({"concurrency":0}),
+        json!({"rpm":2.5}),
+        json!({"post_wait_min":5}),
+    ] {
+        let mut merged = settings.clone();
+        if bad.as_object().unwrap().len() == 1 && bad.get("allow_anlas").is_none() {
+            for (k, v) in bad.as_object().unwrap() {
+                merged[k] = v.clone();
+            }
+        } else {
+            merged = bad;
+        }
+        assert_eq!(api.json("PUT", &url, Some(merged)).await.0, 422);
+    }
+    assert_eq!(api.json("PUT", &url, Some(settings.clone())).await.0, 200);
+    let page = api.get_ok("/share-upstreams").await;
+    assert_eq!(page["accounts"][0]["daily_anlas"], 25);
+    assert_eq!(page["accounts"][1]["daily_anlas"], 0);
+    assert_eq!(page["accounts"][1]["allow_anlas"], false);
+    assert_eq!(e.state.nai.tokens().await[0].image_slots.limit(), 1);
+    let new_key = "NAI-synthetic-replaced-share-key";
+    assert_eq!(
+        api.json(
+            "PUT",
+            &format!("/share-upstreams/{id}"),
+            Some(json!({"token":new_key}))
+        )
+        .await
+        .0,
+        200
+    );
+    let restarted = e.restart().await;
+    let api = Admin::login_bare(&restarted).await;
+    let page = api.get_ok("/share-upstreams").await;
+    for (name, value) in settings.as_object().unwrap() {
+        assert_eq!(&page["accounts"][0][name], value, "{name}");
+    }
+    let t = restarted
+        .nai
+        .tokens()
+        .await
+        .into_iter()
+        .find(|t| t.token == new_key)
+        .unwrap();
+    assert_eq!(t.image_slots.limit(), 2);
+}
+
+async fn call(
+    state: &gate_server::AppState,
+    method: &str,
+    path: &str,
+    auth: Option<&str>,
+    body: Option<Value>,
+) -> (axum::http::StatusCode, axum::http::HeaderMap, Vec<u8>) {
+    let mut req = Call::new(method, path);
+    if let Some(token) = auth {
+        req = req.bearer(token);
+    }
+    if let Some(body) = body {
+        req = req.json(body);
+    }
+    req.send(state).await
+}
+
+#[tokio::test]
+async fn share_paid_dispatch_enforces_cap_before_sending_and_releases_known_failures() {
+    use base64::Engine;
+    let share = MockUpstream::start().await;
+    let e = setup(&[]).await;
+    add_share(&e.state, &share.url()).await;
+    policy_for(&e.state, 1, json!({"vibe":true,"daily_anlas":50})).await;
+    budgets_for(&e.state, json!({"daily_anlas":50})).await;
+    let api = Admin::login_bare(&e.state).await;
+    let official = e.state.nai.tokens().await[0].token_id.clone();
+    assert_eq!(
+        api.json(
+            "PUT",
+            &format!("/upstream-tokens/{official}/enabled"),
+            Some(json!({"enabled":false}))
+        )
+        .await
+        .0,
+        200
+    );
+    let id = gate_upstream::headers::token_id(SHARE_KEY);
+    assert_eq!(api.json("PUT",&format!("/share-upstreams/{id}/settings"),Some(json!({"allow_anlas":true,"daily_anlas":3,"rpm":0,"concurrency":2,"post_wait_min":0,"post_wait_max":0}))).await.0,200);
+    let image = image::GrayImage::from_fn(64, 64, |x, y| image::Luma([((x * 4) ^ y) as u8]));
+    let mut png = std::io::Cursor::new(Vec::new());
+    image.write_to(&mut png, image::ImageFormat::Png).unwrap();
+    let payload = json!({"image":base64::engine::general_purpose::STANDARD.encode(png.into_inner()),"model":"nai-diffusion-4-5-full","informationExtracted":0.5});
+    share.push(
+        "/ai/encode-vibe",
+        Reply::json(400, &json!({"error":"known failure"})),
+    );
+    assert_eq!(
+        call(
+            &e.state,
+            "POST",
+            "/ai/encode-vibe",
+            Some(TOKEN),
+            Some(payload.clone())
+        )
+        .await
+        .0,
+        400
+    );
+    assert_eq!(
+        e.state
+            .db
+            .upstream_anlas_used(&id, &e.state.day())
+            .await
+            .unwrap(),
+        0.0
+    );
+    share.push(
+        "/ai/encode-vibe",
+        Reply::Status {
+            status: 200,
+            headers: vec![("content-type".into(), "application/octet-stream".into())],
+            body: bytes::Bytes::from_static(b"encoded-vibe"),
+        },
+    );
+    let (status, _, body) = call(
+        &e.state,
+        "POST",
+        "/ai/encode-vibe",
+        Some(TOKEN),
+        Some(payload.clone()),
+    )
+    .await;
+    assert_eq!(status, 200, "{}", String::from_utf8_lossy(&body));
+    assert_eq!(
+        e.state
+            .db
+            .upstream_anlas_used(&id, &e.state.day())
+            .await
+            .unwrap(),
+        2.0
+    );
+    let (status, _, body) = call(
+        &e.state,
+        "POST",
+        "/ai/encode-vibe",
+        Some(TOKEN),
+        Some(payload),
+    )
+    .await;
+    assert_eq!(status, 429, "{}", String::from_utf8_lossy(&body));
+    assert_eq!(share.requests_to("/ai/encode-vibe").len(), 2);
+}

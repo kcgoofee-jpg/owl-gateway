@@ -221,6 +221,8 @@ impl Db {
                 params![now, i64::from(is_image_kind(&s.kind)), result_at, s.key_id],
             )?;
             if let Some(id) = request_id.as_deref() {
+                tx.execute("UPDATE upstream_anlas_charges SET amount=?,spent=? WHERE request_id=? AND token_id=?",
+                    params![s.anlas + s.site_paid_anlas + s.remaining_anlas, s.anlas + s.site_paid_anlas, id, s.token_id])?;
                 tx.execute("UPDATE request_settlements SET status=?,site_paid_hold=MAX(0,site_paid_hold-?),anlas=?,v5=?,legacy=?,result_json=NULL,updated_at=? WHERE request_id=? AND status='result_saved'",
                     params![if held { "uncertain" } else { "committed" }, s.site_paid_anlas, s.remaining_anlas, s.remaining_v5, s.remaining_legacy, now, id])?;
             }
@@ -298,6 +300,7 @@ impl Db {
         self.write(move |tx| {
             let n=tx.execute("UPDATE request_settlements SET status='released_manual',resolution_note=?,updated_at=? WHERE request_id=? AND status='uncertain'", params![reason,now,request_id])?;
             if n == 0 { return Ok(false); }
+            tx.execute("UPDATE upstream_anlas_charges SET amount=spent WHERE request_id=?", [&request_id])?;
             tx.execute("INSERT INTO admin_actions(ts,actor,action,target,detail,ok) VALUES(?,?,?,?,?,1)", params![now,actor,"request_settlement_release",request_id,reason])?;
             Ok(true)
         }).await
@@ -415,6 +418,7 @@ impl Db {
             if uncertain { "uncertain" } else { "released" },
         );
         self.write(move |tx| {
+            if !uncertain { tx.execute("UPDATE upstream_anlas_charges SET amount=spent WHERE request_id=?", [&id])?; }
             insert_usage_log(tx, &l, now)?;
             tx.execute("INSERT INTO usage_request_links(request_id,usage_log_id) VALUES(?,last_insert_rowid())", [&id])?;
             // 派到号之后 public rid 会改前缀。取消路径会先把预留标成 released，落账时仍要把编号写回去。

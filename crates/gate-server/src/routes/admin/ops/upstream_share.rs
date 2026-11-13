@@ -23,6 +23,10 @@ pub(super) fn router() -> Router<AppState> {
     Router::new()
         .route("/admin/api/share-upstreams", get(list).post(add))
         .route(
+            "/admin/api/share-upstreams/{token_id}/settings",
+            put(settings),
+        )
+        .route(
             "/admin/api/share-upstreams/{token_id}",
             put(replace).delete(remove),
         )
@@ -63,6 +67,12 @@ async fn list(State(state): State<AppState>, _s: AdminSession) -> ApiResult {
             "fails": fields.fails,
             "allow_anlas": fields.allow_anlas,
             "v5_daily_limit": fields.v5_daily_limit,
+            "daily_anlas": fields.share_limits.as_ref().map_or(0, |s| s.daily_anlas),
+            "rpm": fields.share_limits.as_ref().map_or(0, |s| s.rpm),
+            "concurrency": token.image_slots.limit(),
+            "post_wait_min": fields.share_limits.as_ref().map_or_else(|| state.guard.post_jitter().0 as i64, |s| s.post_wait_min),
+            "post_wait_max": fields.share_limits.as_ref().map_or_else(|| state.guard.post_jitter().1 as i64, |s| s.post_wait_max),
+            "anlas_used_today": state.db.upstream_anlas_used(&token.token_id, &day).await?,
             "v5_used": used.v5,
             "images_today": used.images,
             "w1h": extra.map(|row| row["w1h"].clone()).unwrap_or(Value::Null),
@@ -86,6 +96,49 @@ async fn list(State(state): State<AppState>, _s: AdminSession) -> ApiResult {
         },
         "accounts": accounts,
     })))
+}
+
+async fn settings(
+    State(state): State<AppState>,
+    _s: AdminSession,
+    Path(id): Path<String>,
+    req: Request,
+) -> ApiResult {
+    let (parts, body) = req.into_parts();
+    let body = read_json_body(&parts.headers, body, TOKEN_BODY_LIMIT).await?;
+    share_token(&state, &id).await?;
+    let Some(allow_anlas) = body.get("allow_anlas").and_then(Value::as_bool) else {
+        return Err(HttpError::new(422, "allow_anlas 必须是布尔值").into());
+    };
+    let mut raw = body;
+    raw.remove("allow_anlas");
+    // Require every numeric setting; no silent defaults on malformed/partial requests.
+    for key in [
+        "daily_anlas",
+        "rpm",
+        "concurrency",
+        "post_wait_min",
+        "post_wait_max",
+    ] {
+        if !raw.contains_key(key) {
+            return Err(HttpError::new(422, format!("缺少 {key}")).into());
+        }
+    }
+    let limits: token_store::ShareLimits = serde_json::from_value(Value::Object(raw))
+        .map_err(|_| HttpError::new(422, "拼车设置必须是有效整数，且不含未知字段"))?;
+    if !limits.valid() {
+        return Err(HttpError::new(422, "拼车设置超出范围，或等待时间上限小于下限").into());
+    }
+    upstream::edit_pool(
+        &state,
+        Edit::ShareSettings {
+            id,
+            allow_anlas,
+            limits,
+        },
+    )
+    .await?;
+    Ok(ok_json(&json!({"ok": true})))
 }
 
 async fn add(State(state): State<AppState>, _s: AdminSession, req: Request) -> ApiResult {

@@ -60,25 +60,41 @@ impl Scheduler {
     }
 
     /// 出完后歇的 [最少, 最多] 秒数（`最多 < 最少` 按最少）；测试环境 (0, 0)。
-    fn rest_range(&self, hooks: &dyn Hooks) -> (f64, f64) {
+    fn rest_range(&self, token: &Token, hooks: &dyn Hooks) -> (f64, f64) {
         if !self.pace {
             return (0.0, 0.0);
         }
-        let (min, max) = hooks.post_jitter();
+        let (min, max) = token
+            .with(|f| {
+                f.share_limits
+                    .as_ref()
+                    .map(|s| (s.post_wait_min as f64, s.post_wait_max as f64))
+            })
+            .unwrap_or_else(|| hooks.post_jitter());
         let lo = min.max(0.0);
         (lo, max.max(lo))
     }
 
     /// 出完后平均歇几秒。
-    fn post_mean(&self, hooks: &dyn Hooks) -> f64 {
-        let (lo, hi) = self.rest_range(hooks);
+    fn post_mean(&self, token: &Token, hooks: &dyn Hooks) -> f64 {
+        let (lo, hi) = self.rest_range(token, hooks);
         (lo + hi) / 2.0
     }
 
     /// 这个账号两次开始出图的平均间距（秒），见 [`pace::cycle`]。
     pub(crate) fn cycle(&self, token: &Token, hooks: &dyn Hooks) -> f64 {
         let gen_secs = token.with(|f| f.gen_secs);
-        pace::cycle(gen_secs, self.post_mean(hooks), token.image_slots.limit())
+        pace::cycle(
+            gen_secs,
+            self.post_mean(token, hooks),
+            token.image_slots.limit(),
+        )
+        .max(token.with(|f| {
+            f.share_limits
+                .as_ref()
+                .filter(|s| s.rpm > 0)
+                .map_or(0.0, |s| 60.0 / s.rpm as f64)
+        }))
     }
 
     /// 前面还有 `ahead` 张在等这个账号时，再排一张要多少秒才能开始（估算）：
@@ -88,9 +104,9 @@ impl Scheduler {
         let cycle = self.cycle(token, hooks);
         let (next_at, last_start, gen_secs) =
             token.with(|f| (f.image_next_at, f.last_start, f.gen_secs));
-        let mut base = (next_at - now).max(0.0);
+        let mut base = (next_at - now).max(Self::rpm_wait(token, now));
         if token.image_slots.active() >= token.image_slots.limit() && last_start > 0.0 {
-            let busy_until = last_start + gen_secs + self.post_mean(hooks);
+            let busy_until = last_start + gen_secs + self.post_mean(token, hooks);
             base = base.max(busy_until - now);
         }
         base + ahead as f64 * cycle
@@ -98,12 +114,27 @@ impl Scheduler {
 
     /// 记下开始时刻：下一张最早 = 现在（真正的「歇」在出完后由 [`Scheduler::after_request`] 定）。
     /// 调用方持 `lock`、且已经歇完。
+    fn rpm_wait(token: &Token, now: f64) -> f64 {
+        token.with(|f| {
+            f.rpm_starts.retain(|at| *at > now - 60.0);
+            let rpm = f.share_limits.as_ref().map_or(0, |s| s.rpm) as usize;
+            if rpm > 0 && f.rpm_starts.len() >= rpm {
+                (f.rpm_starts[f.rpm_starts.len() - rpm] + 60.0 - now).max(0.0)
+            } else {
+                0.0
+            }
+        })
+    }
+
     fn reserve(now: f64, token: &Token) -> Turn {
         token.with(|f| {
             let next = now;
             let prev = f.image_next_at;
             f.image_next_at = next;
             f.last_start = now;
+            if token.is_share() {
+                f.rpm_starts.push(now);
+            }
             Turn {
                 prev,
                 reserved: next,
@@ -130,7 +161,7 @@ impl Scheduler {
                 let guard = self.lock.lock().expect("scheduler");
                 let now = self.mono();
                 let first = ticket.is_none_or(|id| token.ahead_of(id, now) == 0);
-                let due = (token.with(|f| f.image_next_at) - now).max(0.0);
+                let due = (token.with(|f| f.image_next_at) - now).max(Self::rpm_wait(token, now));
                 if !first {
                     RECHECK
                 } else if due > 0.0 {
@@ -176,6 +207,7 @@ impl Scheduler {
         {
             let _guard = self.lock.lock().expect("scheduler");
             token.with(|f| {
+                f.rpm_starts.retain(|at| *at != turn.reserved);
                 if f.image_next_at == turn.reserved {
                     f.image_next_at = turn.prev;
                 }
@@ -188,7 +220,7 @@ impl Scheduler {
     /// 既拟人化（消除「上一张一结束下一张立刻开始」的贴脸节奏），也给上游并发锁留出释放的时间（下限 1 秒）。
     /// 调用方只对真正发往上游的请求调用；测试环境不歇。
     pub(crate) fn after_request(&self, token: &Token, hooks: &dyn Hooks) {
-        let (lo, hi) = self.rest_range(hooks);
+        let (lo, hi) = self.rest_range(token, hooks);
         if hi <= 0.0 {
             return;
         }
@@ -201,4 +233,53 @@ impl Scheduler {
 
 fn uniform(a: f64, b: f64) -> f64 {
     a + (b - a) * rand::random::<f64>()
+}
+
+#[cfg(test)]
+mod share_policy_tests {
+    use super::*;
+    use crate::pool::TokenSpec;
+    use crate::token_store::ShareLimits;
+
+    fn share() -> Token {
+        Token::new(
+            TokenSpec {
+                token: "NAI-synthetic-scheduler-share".into(),
+                image_host: Some("https://example.test".into()),
+                allow_anlas: true,
+                v5_daily_limit: 100,
+                share_limits: Some(ShareLimits {
+                    rpm: 2,
+                    concurrency: 3,
+                    ..Default::default()
+                }),
+            },
+            0,
+        )
+    }
+
+    #[test]
+    fn rolling_rpm_counts_starts_and_refunds_only_unsent_work() {
+        let token = share();
+        assert_eq!(token.image_slots.limit(), 3);
+        assert_eq!(Scheduler::rpm_wait(&token, 10.0), 0.0);
+        Scheduler::reserve(10.0, &token);
+        let unsent = Scheduler::reserve(15.0, &token);
+        assert_eq!(Scheduler::rpm_wait(&token, 16.0), 54.0);
+        Scheduler::new(false).refund(&token, unsent);
+        assert_eq!(Scheduler::rpm_wait(&token, 16.0), 0.0);
+        Scheduler::reserve(20.0, &token);
+        assert_eq!(Scheduler::rpm_wait(&token, 69.0), 1.0);
+        assert_eq!(Scheduler::rpm_wait(&token, 70.0), 0.0);
+        token.set_share_limits(
+            false,
+            ShareLimits {
+                rpm: 1,
+                concurrency: 1,
+                ..Default::default()
+            },
+        );
+        assert_eq!(Scheduler::rpm_wait(&token, 71.0), 9.0);
+        assert!(!token.can_pay_anlas(100.0, None));
+    }
 }
