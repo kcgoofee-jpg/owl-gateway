@@ -117,8 +117,8 @@ export type UpstreamAccount = {
   manual_cap?: { cap: number; until: number } | null;
   /** 还在生效的站付 V5 */
   paid_v5?: { max_anlas: number; spent: number; until: number } | null;
-  /** 赞助席专属捐赠账号：不进普通选号池 */
-  exclusive?: boolean;
+  /** 捐赠账号：绑定到启用赞助席的共享容量，仅来源标签，不影响选号 */
+  donated?: boolean;
 };
 
 export type UpstreamPage = {
@@ -207,8 +207,8 @@ export type ShareAccount = {
   position: number;
   token: string;
   image_host: string | null;
-  /** 赞助席专属捐赠账号：绑定到启用的赞助席，不进普通选号池。其余拼车才是朋友网关。 */
-  exclusive?: boolean;
+  /** 捐赠账号：绑定到启用赞助席的拼车号，共享入池，仅来源标签。其余拼车才是朋友网关。 */
+  donated?: boolean;
   usable: boolean;
   admin_enabled: boolean;
   disabled: boolean;

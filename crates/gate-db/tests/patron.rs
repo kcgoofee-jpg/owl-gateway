@@ -33,7 +33,7 @@ async fn patron_profiles_bind_one_enabled_token_and_overlay_member_policy() {
         .await
         .unwrap()
         .unwrap();
-    let ids = db.exclusive_token_ids().await.unwrap();
+    let ids = db.donated_token_ids().await.unwrap();
     assert!(ids.contains("token-a") && ids.contains("token-b"));
 
     let old_policy = db.member_policy(SUBJECT).await.unwrap();
@@ -55,7 +55,7 @@ async fn patron_profiles_bind_one_enabled_token_and_overlay_member_policy() {
         db.save_patron(Some(open), stale).await.unwrap(),
         Err(gate_db::repo::patron::SeatConflict::Changed)
     );
-    let ids = db.exclusive_token_ids().await.unwrap();
+    let ids = db.donated_token_ids().await.unwrap();
     assert!(!ids.contains("token-a"));
     assert!(ids.contains("token-b"));
 

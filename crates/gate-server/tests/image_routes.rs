@@ -2420,7 +2420,7 @@ async fn v5_img2img_without_paid_parameters_is_refused() {
     assert!(e.mock.requests_to("/ai/generate-image").is_empty());
 }
 
-/// A single oversized V5 image is snapped to a free preset unless the paid switch (or exclusive token) is on.
+/// A single oversized V5 image is snapped to a free preset unless the paid switch is on.
 #[tokio::test]
 async fn single_oversized_v5_is_clamped_without_the_paid_switch() {
     let e = setup(&[]).await;

@@ -10,7 +10,7 @@ vi.mock("../../data", () => ({
     data: url.includes("share-upstreams")
       ? { accounts: [{ token_id: "token-share", position: 1, token: "pk-syn…0001" }] }
       : {
-          accounts: [{ token_id: "token-donated", position: 1, token: "pst-te…0001", exclusive: false }],
+          accounts: [{ token_id: "token-donated", position: 1, token: "pst-te…0001", donated: false }],
         },
     error: null,
     loading: false,
@@ -102,7 +102,7 @@ it("binds share credentials and grants the full portal mode", async () => {
   expect(selects).toHaveLength(2);
   const tokenSelect = selects[0] as HTMLSelectElement;
   expect([...tokenSelect.options].map((o) => o.textContent)).toEqual([
-    "不绑定（全站池）",
+    "不绑定",
     "账号 1 · pst-te…0001",
     "拼车 1 · pk-syn…0001",
   ]);

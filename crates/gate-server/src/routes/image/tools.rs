@@ -90,7 +90,6 @@ pub(super) async fn tool(
             opts.official_only = operation != "upscale";
             opts.image_lane = true;
             opts.lane = lane(&state, &key, &model);
-            opts.prefer_token_id = key.bound_token_id.clone();
             opts.max_response_bytes = Some(MAX_RESPONSE_BYTES);
             opts.queue_timeout = state.limits().queue_timeout;
             let cb = Callbacks {
@@ -278,7 +277,6 @@ pub(super) async fn vibe(state: AppState, req: Request) -> Result<Response, ApiE
         opts.requires_anlas = true;
         opts.image_lane = true;
         opts.lane = lane(&state, &key, &model);
-        opts.prefer_token_id = key.bound_token_id.clone();
         opts.max_response_bytes = Some(MAX_RESPONSE_BYTES);
         opts.queue_timeout = state.limits().queue_timeout;
         let cb = Callbacks {

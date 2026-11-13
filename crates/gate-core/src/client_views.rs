@@ -39,7 +39,7 @@ pub fn subscription_payload(
     } else {
         0
     };
-    // 会跳过免费档裁剪时（高规格开关或专属 Token）才把 Anlas 余额给官方客户端。
+    // 开了高规格开关（跳过免费档裁剪）才把 Anlas 余额给官方客户端。
     let anlas_enabled = policy.paid_parameters || skip_free_clamp;
     let anlas_left = if anlas_enabled {
         let personal = (f64::from(policy.daily_anlas) - data.daily_anlas_used).max(0.0);
@@ -177,7 +177,7 @@ mod tests {
     }
 
     #[test]
-    fn exclusive_token_shows_anlas_without_the_paid_switch() {
+    fn skip_free_clamp_shows_anlas_without_the_paid_switch() {
         let mut policy = policy();
         policy.paid_parameters = false;
         let value = subscription_payload(&policy, None, 1000.0, &data(), true);

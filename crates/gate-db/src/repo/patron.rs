@@ -1,4 +1,6 @@
-//! 赞助席：指定成员的插队、自助开关和专属上游 Token。存在 `site_settings`，不进 git。
+//! 赞助席：指定成员的插队、自助开关，以及对其捐赠上游 Token 的管理（查看 / 启停 / 轮换）。
+//! 捐赠号和普通拼车号一样进全站共享池——赞助席只给插队（成员级，与 key 无关）和开关权，不独占选号。
+//! 存在 `site_settings`，不进 git。
 
 use super::conversion_error;
 use crate::{Db, DbError, Result};
@@ -16,7 +18,7 @@ pub enum SeatConflict {
 
 pub const PATRON_KEY: &str = "patron_profiles";
 
-/// 自助门户能力范围：`basic` 只看状态和改功能开关，`full` 另可启停/更换专属 Key。
+/// 自助门户能力范围：`basic` 只看状态和改功能开关，`full` 另可启停/更换捐赠 Key。
 pub const PORTAL_MODES: [&str; 2] = ["basic", "full"];
 
 fn default_true() -> bool {
@@ -161,7 +163,9 @@ impl Db {
         .await
     }
 
-    pub async fn exclusive_token_ids(&self) -> Result<HashSet<String>> {
+    /// 绑定到启用赞助席的捐赠 Token：仅用于后台「捐赠」来源标签和门户管理，不影响选号。
+    /// 捐赠号是公益容量，和普通拼车号一样进全站共享池（站长 2026-11-14）。
+    pub async fn donated_token_ids(&self) -> Result<HashSet<String>> {
         Ok(self
             .patrons()
             .await?
@@ -171,7 +175,7 @@ impl Db {
             .collect())
     }
 
-    /// 写入或更新一行赞助席。专属 Token 同一时刻只能绑给一个启用的席位。
+    /// 写入或更新一行赞助席。捐赠 Token 同一时刻只能绑给一个启用的席位。
     pub async fn save_patron(
         &self,
         expected: Option<PatronRecord>,
@@ -184,7 +188,7 @@ impl Db {
         if let Some(id) = record.bound_token_id.as_deref()
             && id.trim().is_empty()
         {
-            return Err(invalid("专属 Token 编号无效"));
+            return Err(invalid("捐赠 Token 编号无效"));
         }
         self.write(move |tx| {
             let mut store = load_store(tx).map_err(conversion_error)?;

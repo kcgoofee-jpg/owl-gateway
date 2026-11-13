@@ -356,19 +356,22 @@ export function PatronSeatButtons({ subject, patron }: { subject: string; patron
             />
             自助
           </label>
-          <label class="field-inline" title="绑定捐赠 Token 后只走那把账号；不绑则走全站池">
-            <span class="field-inline__k">专属号</span>
+          <label
+            class="field-inline"
+            title="绑定捐赠 Token 仅用于门户管理与来源标签；捐赠号和其他上游一样进全站共享池"
+          >
+            <span class="field-inline__k">捐赠号</span>
             <select
               class="select"
               value={tokenId}
               disabled={pending}
               onChange={(e) => setTokenId((e.target as HTMLSelectElement).value)}
             >
-              <option value="">不绑定（全站池）</option>
+              <option value="">不绑定</option>
               {accounts.map((a) => (
                 <option key={a.token_id} value={a.token_id}>
                   账号 {a.position} · {a.token}
-                  {a.exclusive ? " · 专属" : ""}
+                  {a.donated ? " · 捐赠" : ""}
                 </option>
               ))}
               {shareAccounts.map((a) => (
@@ -378,7 +381,7 @@ export function PatronSeatButtons({ subject, patron }: { subject: string; patron
               ))}
             </select>
           </label>
-          <label class="field-inline" title="基础：功能开关 + 用量查看；完整：另可自助启停、更换专属 Key">
+          <label class="field-inline" title="基础：功能开关 + 用量查看；完整：另可自助启停、更换捐赠 Key">
             <span class="field-inline__k">门户模式</span>
             <select
               class="select"
@@ -440,7 +443,7 @@ export function PatronSeatButtons({ subject, patron }: { subject: string; patron
           <Button
             size="sm"
             disabled={pending}
-            title="开启后默认插队，可再改专属号"
+            title="开启后默认插队，可再绑捐赠号"
             onClick={() =>
               void save({
                 enabled: true,

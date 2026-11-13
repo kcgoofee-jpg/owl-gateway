@@ -171,8 +171,8 @@ pub(super) fn on_429(state: &AppState) -> Box<dyn Fn(f64) -> BoxFuture<'static, 
     Box::new(move |retry_after| {
         let s = s.clone();
         Box::pin(async move {
-            // 被打到的号在回调前已冷却；只要通用池还有健康号就不全站暂停，后续请求自动改派。
-            if s.nai.any_general_usable().await {
+            // 被打到的号在回调前已冷却；只要池里还有健康号就不全站暂停，后续请求自动改派。
+            if s.nai.any_usable().await {
                 return;
             }
             let secs = s.limits().image_429_cooldown_seconds.max(retry_after);

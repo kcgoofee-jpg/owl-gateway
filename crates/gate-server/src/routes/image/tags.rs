@@ -124,8 +124,8 @@ async fn suggest(
         on_rate_limited: Some(Box::new(move |retry_after| {
             let s = s.clone();
             Box::pin(async move {
-                // 单号限流只冷却该号；通用池还有健康号就不全站暂停（错误由下方收尾记日志）。
-                if s.nai.any_general_usable().await {
+                // 单号限流只冷却该号；池里还有健康号就不全站暂停（错误由下方收尾记日志）。
+                if s.nai.any_usable().await {
                     return;
                 }
                 let secs = s.limits().image_429_cooldown_seconds.max(retry_after);

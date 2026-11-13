@@ -183,7 +183,7 @@ async fn me_body(state: &AppState, session: &PatronSession) -> Result<Value, Api
         .key_token_for_subject(&session.subject)
         .await?
         .unwrap_or_default();
-    let exclusive = session
+    let donated = session
         .profile
         .bound_token_id
         .as_deref()
@@ -197,18 +197,18 @@ async fn me_body(state: &AppState, session: &PatronSession) -> Result<Value, Api
         "queue_jump": session.profile.queue_jump,
         "self_service": session.profile.self_service,
         "portal_mode": session.profile.portal_mode,
-        "exclusive_account": exclusive.is_some(),
-        "account_hint": account_hint(state, exclusive.as_deref()).await,
+        "donated_account": donated.is_some(),
+        "account_hint": account_hint(state, donated.as_deref()).await,
         "key_fingerprint": if token.is_empty() { Value::Null } else { json!(mask_token(&token, 6)) },
-        "token": exclusive_token_view(state, exclusive.as_deref()).await?,
+        "token": donated_token_view(state, donated.as_deref()).await?,
         "features": feature_map(&snapshot.effective),
         "fields": gate_core::member_policy::policy_fields(),
     }))
 }
 
-/// 专属 Key 的自助视图：完整 Key 仅在捐赠者本人门户明文显示，另附启停、并发与今日用量。
-/// 网关地址仍不下发；后台列表、日志与报错继续打码。
-async fn exclusive_token_view(state: &AppState, token_id: Option<&str>) -> Result<Value, ApiError> {
+/// 捐赠 Key 的自助视图：完整 Key 仅在捐赠者本人门户明文显示，另附启停、并发与今日用量。
+/// 捐赠号是全站共享容量；网关地址仍不下发，后台列表、日志与报错继续打码。
+async fn donated_token_view(state: &AppState, token_id: Option<&str>) -> Result<Value, ApiError> {
     let Some(id) = token_id else {
         return Ok(Value::Null);
     };
@@ -250,16 +250,16 @@ async fn account_hint(state: &AppState, token_id: Option<&str>) -> Option<String
     let token = tokens.iter().find(|t| t.token_id == id)?;
     let fields = token.fields();
     if !fields.admin_enabled || fields.disabled {
-        return Some("专属账号已停用，请联系站长。".into());
+        return Some("捐赠账号已停用，请联系站长。".into());
     }
     if now < fields.blocked_until {
-        return Some("专属账号正在冷却，请稍后再试。".into());
+        return Some("捐赠账号正在冷却，请稍后再试。".into());
     }
     if now < fields.anlas_out_until {
-        return Some("专属账号额度不足，请稍后再试。".into());
+        return Some("捐赠账号额度不足，请稍后再试。".into());
     }
     if !token.usable(now) {
-        return Some("专属账号暂时不能出图，请稍后再试。".into());
+        return Some("捐赠账号暂时不能出图，请稍后再试。".into());
     }
     None
 }
@@ -375,7 +375,7 @@ async fn change_password(
     Ok(resp)
 }
 
-/// 专属 Key 自助的前提：席位开启、绑定了 Token、自助总开关打开、且门户模式为 `full`。
+/// 捐赠 Key 自助的前提：席位开启、绑定了 Token、自助总开关打开、且门户模式为 `full`。
 /// 返回绑定的 token_id。
 fn require_full_seat(session: &PatronSession) -> Result<String, ApiError> {
     if !session.profile.enabled {
@@ -388,7 +388,7 @@ fn require_full_seat(session: &PatronSession) -> Result<String, ApiError> {
         .map(str::trim)
         .filter(|s| !s.is_empty())
         .map(str::to_string)
-        .ok_or_else(|| HttpError::new(403, "此席位没有绑定专属 Key"))?;
+        .ok_or_else(|| HttpError::new(403, "此席位没有绑定捐赠 Key"))?;
     if !session.profile.self_service {
         return Err(HttpError::new(403, "此席位未开放自助管理，请联系站长").into());
     }
@@ -441,11 +441,10 @@ async fn rotate_token(
                 .save_patron(Some(record), next.clone())
                 .await?
                 .map_err(|e| HttpError::new(409, e.to_string()))?;
-            state.refresh_exclusive_tokens().await;
             session.profile = next;
         }
         None => {
-            tracing::warn!(target: "patron", "更换 Key 后席位已不存在，专属绑定未恢复");
+            tracing::warn!(target: "patron", "更换 Key 后席位已不存在，捐赠绑定未恢复");
             return Err(HttpError::new(409, "席位已变更，请联系站长重新绑定").into());
         }
     }

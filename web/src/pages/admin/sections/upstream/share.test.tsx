@@ -78,7 +78,7 @@ it("blocks invalid ranges and keeps the draft after a failed save", async () => 
   expect(root.querySelector<HTMLButtonElement>("form .savebar button")?.disabled).toBe(false);
   expect(root.textContent).toContain("有 2 项未保存");
 });
-it("separates donated (exclusive) shares from relay-platform shares by source", async () => {
+it("separates donated shares from relay-platform shares by source", async () => {
   const base = {
     position: 1,
     token: "NAI-…aaaa",
@@ -96,8 +96,8 @@ it("separates donated (exclusive) shares from relay-platform shares by source", 
   vi.mocked(useAdmin).mockReturnValue({
     data: {
       accounts: [
-        { ...base, token_id: "relay-a", exclusive: false },
-        { ...base, token_id: "donated-a", position: 3, token: "pk-C…zzzz", exclusive: true },
+        { ...base, token_id: "relay-a", donated: false },
+        { ...base, token_id: "donated-a", position: 3, token: "pk-C…zzzz", donated: true },
       ],
       fields: { v5_daily_limit: { min: 0, max: 9999 } },
       pool_size: 3,
@@ -112,13 +112,13 @@ it("separates donated (exclusive) shares from relay-platform shares by source", 
   await renderAct(() => render(<ShareUpstream source="relay" />, root));
   expect(root.textContent).toContain("拼车 1");
   expect(root.textContent).not.toContain("捐赠 3");
-  expect(root.textContent).not.toContain("赞助席专属");
+  expect(root.textContent).not.toContain("赞助席捐赠");
   expect(root.textContent).toContain("添加拼车网关");
 
-  // 捐赠页：只列出专属捐赠，标题「捐赠」+「赞助席专属」徽章，没有添加入口（捐赠来自席位绑定）。
+  // 捐赠页：只列出捐赠号，标题「捐赠」+「赞助席捐赠」徽章，没有添加入口（捐赠来自席位绑定）。
   await renderAct(() => render(<ShareUpstream source="donated" />, root));
   expect(root.textContent).toContain("捐赠 3");
-  expect(root.textContent).toContain("赞助席专属");
+  expect(root.textContent).toContain("赞助席捐赠");
   expect(root.textContent).not.toContain("拼车 1");
   expect(root.textContent).not.toContain("添加拼车网关");
 });

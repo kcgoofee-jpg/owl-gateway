@@ -947,7 +947,7 @@ async fn upstream_token_settings_endpoints() {
         ov["pool"],
         json!([{"token_id": id, "position": 1, "token": "pst-sy…oken", "usable": false, "full": false, "admin_enabled": false,
                 "disabled": false, "fails": 0, "blocked_for": 0, "last_ok": 0.0, "allow_anlas": true,
-                "image_concurrency": 1, "image_active": 0, "v5_daily_limit": 12, "v5_used": 0, "images_today": 0, "exclusive": false}])
+                "image_concurrency": 1, "image_active": 0, "v5_daily_limit": 12, "v5_used": 0, "images_today": 0, "donated": false}])
     );
     assert_eq!(
         api.text("PUT", &en, Some(json!({"enabled": true}))).await.0,

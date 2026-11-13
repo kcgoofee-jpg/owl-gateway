@@ -131,8 +131,7 @@ impl Reserved {
         let row = self.state.db.get_key(self.key.id()).await?.ok_or_else(|| {
             GateError::with_code(403, "这把 Key 已失效，未扣费。", reasons::KEY_DISABLED)
         })?;
-        let mut current = Key::load(&self.state.db, row).await?;
-        current.resolve_bound_token(&self.state.nai).await;
+        let current = Key::load(&self.state.db, row).await?;
         if current.subject() != self.key.subject() {
             return Err(GateError::with_code(
                 403,
@@ -147,7 +146,6 @@ impl Reserved {
         crate::share_lock::enforce(&self.state, &current).await?;
         if current.owner_image_full != self.key.owner_image_full
             || current.queue_jump != self.key.queue_jump
-            || current.bound_token_id != self.key.bound_token_id
         {
             return Err(GateError::with_code(
                 403,
@@ -158,8 +156,7 @@ impl Reserved {
         }
         crate::auth::require_feature(&current, self.requirements.feature)?;
         if self.requirements.v5
-            && (!current.policy.v5
-                || (!current.skip_site_budget() && crate::ops::v5_paused(&self.state.db).await?))
+            && (!current.policy.v5 || crate::ops::v5_paused(&self.state.db).await?)
         {
             return Err(GateError::with_code(
                 403,

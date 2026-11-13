@@ -13,7 +13,7 @@ import "./patron.css";
 
 type Features = Record<(typeof FEATURE_FIELDS)[number], boolean>;
 
-/** 专属 Key 的自助视图：完整 Key 仅在捐赠者本人门户明文显示；网关地址仍不下发。 */
+/** 捐赠 Key 的自助视图：完整 Key 仅在捐赠者本人门户明文显示；网关地址仍不下发。 */
 type TokenView = {
   missing?: boolean;
   fingerprint?: string;
@@ -38,7 +38,7 @@ type Me = {
   queue_jump: boolean;
   self_service: boolean;
   portal_mode: "basic" | "full";
-  exclusive_account: boolean;
+  donated_account: boolean;
   account_hint: string | null;
   key_fingerprint: string | null;
   token: TokenView | null;
@@ -150,7 +150,7 @@ function Login(props: { onOk: () => void }) {
   );
 }
 
-/** 专属 Key 分区：状态与用量人人可见；启停和换 Key 只在完整模式开放。 */
+/** 捐赠 Key 分区：状态与用量人人可见；启停和换 Key 只在完整模式开放。 */
 function TokenCard(props: { me: Me; onLogout: () => void; onReload: (me: Me) => void }) {
   const t = props.me.token;
   const [pending, setPending] = useState(false);
@@ -175,17 +175,17 @@ function TokenCard(props: { me: Me; onLogout: () => void; onReload: (me: Me) => 
   };
   if (t.missing) {
     return (
-      <section class="card pt-card" aria-label="专属 Key">
-        <h2 class="pt-h2">专属 Key</h2>
-        <Notice tone="warn">绑定的专属 Key 已不在令牌池里，请联系站长重新绑定。</Notice>
+      <section class="card pt-card" aria-label="捐赠 Key">
+        <h2 class="pt-h2">捐赠 Key</h2>
+        <Notice tone="warn">绑定的捐赠 Key 已不在令牌池里，请联系站长重新绑定。</Notice>
       </section>
     );
   }
   const blocked = t.blocked_for ?? 0;
   const keyValue = t.token ?? t.fingerprint ?? "";
   return (
-    <section class="card pt-card" aria-label="专属 Key">
-      <h2 class="pt-h2">专属 Key</h2>
+    <section class="card pt-card" aria-label="捐赠 Key">
+      <h2 class="pt-h2">捐赠 Key</h2>
       <div class="pt-status">
         {t.isolated ? (
           <Badge tone="danger">已隔离</Badge>
@@ -207,8 +207,8 @@ function TokenCard(props: { me: Me; onLogout: () => void; onReload: (me: Me) => 
       )}
       {keyValue && (
         <div class="pt-key">
-          <span class="pt-key__label">专属 Key（明文，仅你本人可见）</span>
-          <CopyField value={keyValue} label="专属 Key" wrap />
+          <span class="pt-key__label">捐赠 Key（明文，仅你本人可见）</span>
+          <CopyField value={keyValue} label="捐赠 Key" wrap />
         </div>
       )}
       <dl class="pt-kv">
@@ -258,7 +258,7 @@ function TokenCard(props: { me: Me; onLogout: () => void; onReload: (me: Me) => 
               e.preventDefault();
               void act(
                 () => sendJSON<Me>("PUT", "/patron/api/me/token/rotate", { token: newKey.trim() }),
-                "已更换专属 Key",
+                "已更换捐赠 Key",
               ).then((ok) => {
                 if (ok) setNewKey("");
               });
@@ -323,8 +323,8 @@ function Seat(props: { me: Me; onLogout: () => void; onReload: (me: Me) => void 
           <p class="pt-lead">{me.welcome}</p>
           <div class="pt-status">
             <Badge tone={me.queue_jump ? "ok" : "info"}>{me.queue_jump ? "插队已开" : "插队未开"}</Badge>
-            <Badge tone={me.exclusive_account ? "accent" : "info"}>
-              {me.exclusive_account ? "专属账号" : "走全站共用账号"}
+            <Badge tone={me.donated_account ? "accent" : "info"}>
+              {me.donated_account ? "捐赠账号" : "走全站共用账号"}
             </Badge>
           </div>
           {me.account_hint && <Notice tone="warn">{me.account_hint}</Notice>}

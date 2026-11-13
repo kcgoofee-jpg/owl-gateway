@@ -175,7 +175,6 @@ pub(super) async fn prepare(
         // 站长临时降档：V5 Full（含局部重绘）改走 Medium，放在整理参数和费用估算之前，这样价格和免费额度都按 Medium 算。
         if let Some(medium) = policy::v5_medium_of(&text(body.get("model").unwrap_or(&Value::Null)))
             && !key.owner_image_full
-            && !key.skip_site_budget()
             && crate::v5_medium::active(state).await
         {
             body["model"] = Value::String(medium.into());
@@ -226,7 +225,7 @@ pub(super) async fn prepare(
         )
     })?;
     let mut est = Est::from_cost(cost);
-    // 普通成员仍限制为免费 V5；绑定站长的完整权限允许在现有预算内支付高规格费用。
+    // 普通成员仍限制为免费 V5；站长号或高规格开关允许在现有预算内支付高规格费用。
     if tier == "v5" && est.anlas > 0.0 && !key.allows_paid_v5() {
         reject(&model, "V5 超出免费规格");
         return Err(
@@ -234,7 +233,7 @@ pub(super) async fn prepare(
         );
     }
     // Paid owner V5 outputs still count toward the personal/shared V5 limits.
-    if tier == "v5" && (key.owner_image_full || key.bound_token_id.is_some()) {
+    if tier == "v5" && key.owner_image_full {
         est.v5 = image_count;
     }
     // V4.5 免费首张占每日张数；批量其余张走 Anlas 时首张仍要记。估价 0 Anlas 的整单按张数记。

@@ -50,7 +50,7 @@ export const FEATURE_COPY: Record<(typeof FEATURE_FIELDS)[number], { label: stri
   augment: { label: "导演工具", help: "Line Art、Colorize 一类后处理。" },
   paid_parameters: {
     label: "高规格生图（大图、多步数与批量）",
-    help: "不再按免费档裁剪。没有专属账号时，大图 / 多步 / 批量走全站 Anlas / V5 池。图生图、导演工具和放大仍要单独开。",
+    help: "不再按免费档裁剪。大图 / 多步 / 批量走全站 Anlas / V5 池。图生图、导演工具和放大仍要单独开。",
   },
 };
 export const POLICY_FIELDS = [...NUMBER_FIELDS, ...FEATURE_FIELDS];
