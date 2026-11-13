@@ -407,6 +407,8 @@ async fn share_settings_are_independent_validated_and_survive_restart_and_replac
     let restarted = e.restart().await;
     let api = Admin::login_bare(&restarted).await;
     let page = api.get_ok("/share-upstreams").await;
+    assert_eq!(page["accounts"][0]["v5_daily_limit"], 9999);
+    assert_eq!(page["accounts"][1]["v5_daily_limit"], 9999);
     for (name, value) in settings.as_object().unwrap() {
         assert_eq!(&page["accounts"][0][name], value, "{name}");
     }

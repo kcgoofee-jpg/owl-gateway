@@ -153,7 +153,7 @@ impl AppState {
         ));
 
         // 上游 Token：后台接管过就以 upstream_tokens.json 为准，否则用 NAI_TOKENS。
-        // V5 日限额、启停在后台按 Token 设（存库，见 startup 的 apply_saved）；出图并发固定 1
+        // V5 日限额、启停按 Token 存库；拼车独立节奏随凭据文件恢复。
         let revision = db
             .get_setting(gate_db::repo::upstream::POOL_REVISION)
             .await?;
@@ -285,8 +285,7 @@ impl AppState {
         }
         let limits = self.db.get_upstream_token_limits().await?;
         let enabled = self.db.get_upstream_token_enabled().await?;
-        // 出图并发固定 1（NovelAI 一个账号同时只出 1 张，多了只会撞并发锁；后台并发设置 10-23 删除，
-        // 遗留的 upstream_token_image_concurrency 表 10-31 清掉，启动时 DROP）
+        // 官方账号单并发；拼车的独立并发已从凭据文件恢复。
         self.nai
             .apply_saved(
                 &limits.into_iter().collect(),

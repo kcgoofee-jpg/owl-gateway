@@ -173,7 +173,7 @@ impl From<&crate::token_store::Entry> for TokenSpec {
     fn from(e: &crate::token_store::Entry) -> Self {
         Self {
             token: e.token.clone(),
-            v5_daily_limit: 0,
+            v5_daily_limit: V5_DAILY_LIMIT_DEFAULT,
             allow_anlas: e.allow_anlas,
             image_host: e.image_host.clone(),
             share_limits: e.share_limits.clone(),
