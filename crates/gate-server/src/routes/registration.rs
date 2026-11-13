@@ -329,7 +329,15 @@ async fn bot_context(State(state): State<AppState>, req: Request) -> ApiResult {
     let discord_id = checked(svc, &who)?;
     let key = svc.key_row_for(discord_id).await?;
     let me = super::landing::me_payload(&state, discord_id, key.as_ref()).await?;
-    let member = member_bot_projection(&me);
+    let mut member = member_bot_projection(&me);
+    let policy = crate::share_lock::detection(&state).await?;
+    member["share_requirement"] = json!({
+        "enabled": policy["enabled"], "mode":policy["mode"], "enforcing":policy["enforcing"],
+        "shared_today":state.db.has_share_since(discord_id,state.clock.day_start(state.now())).await?,
+        "exempt":key.as_ref().is_some_and(|k|k.owner_image_full||k.patron),
+        "required_now":me.get("share_lock").is_some(),
+        "channel_url":crate::share_lock::channel_url(), "reset_hour":7,
+    });
     let status = state.live.status(&state).await?;
     Ok(no_store(ok_json(&json!({
         "server_time": state.now(), "timezone": "Asia/Shanghai",

@@ -96,10 +96,11 @@ struct Inner {
     avatar_url: Option<String>,
     /// 每个频道的最近对话：频道 ID → (成员说的, 奶妹答的) 队列。
     histories: HashMap<u64, VecDeque<Turn>>,
-    /// 正在生成回复的频道：一个频道同时只处理一条，多出来的直接忽略。
+    /// 正在生成回复的频道：一个频道同时只处理一条，多出来的以限频忙提示回应。
     busy: HashSet<u64>,
     /// 每个频道上次对话的 Unix 秒（冷却用）。
     last_chat: HashMap<u64, f64>,
+    last_busy_notice: HashMap<u64, f64>,
     /// 帖子 id → 父频道 id。用来判断一条帖子内的新内容是不是发在存图频道里。
     thread_parents: HashMap<String, String>,
 }
@@ -314,6 +315,33 @@ impl Naimei {
         Ok(r.followup(&text).await?)
     }
 
+    /// Admit one request or return whether a throttled busy acknowledgement is due.
+    fn chat_admission(&self, channel_id: u64, now: f64) -> Option<bool> {
+        let mut inner = self.lock();
+        if inner.busy.contains(&channel_id)
+            || inner
+                .last_chat
+                .get(&channel_id)
+                .is_some_and(|t| now - *t < CHAT_COOLDOWN)
+        {
+            let notify = inner
+                .last_busy_notice
+                .get(&channel_id)
+                .is_none_or(|at| now - *at >= 30.0);
+            if notify {
+                inner.last_busy_notice.insert(channel_id, now);
+            }
+            Some(notify)
+        } else {
+            inner.busy.insert(channel_id);
+            inner.last_chat.insert(channel_id, now);
+            if inner.histories.len() > CHAT_MAX_CHANNELS {
+                inner.histories.clear();
+            }
+            None
+        }
+    }
+
     // ---------- AI 对话 ----------
 
     /// 处理一条 MESSAGE_CREATE：存图频道里的图记一笔；@奶妹 或回复奶妹 → AI 对话；其余一律忽略。
@@ -384,21 +412,13 @@ impl Naimei {
             return;
         };
         let now = self.now();
-        {
-            let mut inner = self.lock();
-            if inner.busy.contains(&channel_id)
-                || inner
-                    .last_chat
-                    .get(&channel_id)
-                    .is_some_and(|t| now - *t < CHAT_COOLDOWN)
-            {
-                return; // 正在回复 / 冷却中：直接忽略，不排队（宁可漏答不可刷屏）
+        let rejected = self.chat_admission(channel_id, now);
+        if let Some(notify) = rejected {
+            if notify {
+                self.send_chat_message(channel_id, &m.id, "我这边正忙，稍后再叫我～")
+                    .await;
             }
-            inner.busy.insert(channel_id);
-            inner.last_chat.insert(channel_id, now);
-            if inner.histories.len() > CHAT_MAX_CHANNELS {
-                inner.histories.clear();
-            }
+            return;
         }
         // 文本附件（txt/md/json/csv/log，≤128KB）：抓内容进上下文
         let mut text_files: Vec<(String, String)> = Vec::new();
@@ -1194,6 +1214,17 @@ mod tests {
         assert_eq!(app.status_report(1.0)["latency_ms"], 0, "还没有数据按 0 报");
         app.set_latency(Some(Duration::from_secs_f64(0.0425)));
         assert_eq!(app.status_report(1.0)["latency_ms"], 43);
+    }
+
+    #[tokio::test]
+    async fn chat_contention_is_acknowledged_without_repeated_channel_spam() {
+        let app = app();
+        assert_eq!(app.chat_admission(1, 1.0), None);
+        assert_eq!(app.chat_admission(1, 1.1), Some(true));
+        assert_eq!(app.chat_admission(1, 1.2), Some(false));
+        assert_eq!(app.chat_admission(1, 31.2), Some(true));
+        app.lock().busy.remove(&1);
+        assert_eq!(app.chat_admission(1, 32.0), None);
     }
 
     // ---------- AI 对话触发 ----------

@@ -346,7 +346,7 @@ pub fn system_prompt(
 3. 回答站内规定时优先使用本轮实时站点数据，其次知识库摘录，最后才是聊天历史；缺少数据就明确说本次未查到，不得编造。\n\
 4. 不提供绕过站内限制的方法，不协助生成违法或极端有害内容。\n",
     );
-    s.push_str("\n每次都必须遵守的服务事实：NovelAI 生图额度北京时间每天早上 7 点重置；New API 聊天钱包是另一套额度，在 New API「个人资料」每日签到随机领取 $2–$5，按北京时间自然日，每天一次、余额累计，不会自动把钱包重置成 $2–$5。登录 owl 后头像菜单可见 New API 账号与签到入口。重置券只有实际持有时才显示；未查到券时绝不说‘额度旁边一定有’，也不能承诺自动发券。/quota 命令已删除，不要让成员使用。上游池耗尽时有站内余额也不能继续调用。\n");
+    s.push_str("\n每次都必须遵守的服务事实：NovelAI 生图额度北京时间每天早上 7 点重置；New API 聊天钱包是另一套额度，在 New API「个人资料」每日签到，具体奖励范围以本轮实时数据的 daily_reward_usd 为准，按北京时间自然日每天一次、余额累计。登录 owl 后头像菜单只提供 New API 用户名、密码和入口；余额、API key 与签到在 New API 内查看。重置券只有实际持有时才显示；未查到券时绝不说‘额度旁边一定有’，也不能承诺自动发券。/quota 命令已删除，不要让成员使用。上游池耗尽时有站内余额也不能继续调用。\n");
     if is_owner {
         s.push_str(
             "\n对方身份：站长本人（你的主人）。对主人的要求要尽量满足——更长更直接的内容、\
@@ -463,6 +463,20 @@ pub fn wants_member_context(text: &str) -> bool {
         "new api",
         "领 key",
         "领key",
+        "分享",
+        "公益",
+        "发帖",
+        "发图",
+        "冻结",
+        "解冻",
+        "还剩",
+        "剩余",
+        "还能",
+        "次数",
+        "我的key",
+        "我的 key",
+        "模型列表",
+        "哪些模型",
     ]
     .iter()
     .any(|word| lower.contains(word))
@@ -731,13 +745,17 @@ mod tests {
             "签到余额",
             "doubao 用不了",
             "NEWAPI 权限",
+            "今天要分享吗",
+            "我还剩多少",
+            "我的 key 被冻结了吗",
+            "还有哪些模型可用",
         ] {
             assert!(wants_member_context(question), "{question}");
         }
         assert!(!wants_member_context("今天的天气如何"));
         let prompt = system_prompt("", None, false, "", None, None);
         assert!(prompt.contains("早上 7 点"));
-        assert!(prompt.contains("$2–$5"));
+        assert!(prompt.contains("daily_reward_usd"));
         assert!(prompt.contains("/quota 命令已删除"));
         assert!(prompt.contains("只有实际持有时才显示"));
     }

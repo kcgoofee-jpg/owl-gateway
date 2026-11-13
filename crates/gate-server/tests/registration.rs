@@ -1185,6 +1185,29 @@ async fn bot_context_requires_bridge_auth_and_exposes_only_member_facts() {
     assert!(result.2["member"].get("key").is_none());
     assert!(result.2["member"].get("discord").is_none());
     assert!(result.2["site"].get("limits").is_some());
+    assert_eq!(result.2["member"]["share_requirement"]["mode"], "quota");
+    assert_eq!(
+        result.2["member"]["share_requirement"]["shared_today"],
+        false
+    );
+    e.state
+        .db
+        .record_share(
+            MEMBER,
+            "900000000000000099",
+            "900000000000000098",
+            e.state.now(),
+        )
+        .await
+        .unwrap();
+    let fresh = bridge(
+        &e,
+        "/self-register/bot/context",
+        json!({"discord_id":MEMBER,"guild_id":GUILD}),
+    )
+    .await;
+    assert_eq!(fresh.2["member"]["share_requirement"]["shared_today"], true);
+    assert!(!fresh.2.to_string().contains(SECRET));
 }
 
 #[tokio::test]

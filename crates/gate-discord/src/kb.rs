@@ -140,6 +140,13 @@ mod tests {
     }
 
     #[test]
+    fn share_modes_are_retrievable_and_menu_guidance_matches_the_actual_ui() {
+        assert!(retrieve("全员档每日分享和豁免", 2).contains("全员档"));
+        assert!(!OWL_GUIDE.contains("密码、API key、接入地址、余额和签到入口"));
+        assert!(OWL_GUIDE.contains("share_requirement"));
+    }
+
+    #[test]
     fn nailong_doc_has_only_verified_links() {
         // 10-31 起贴纸源换成 mmexile/nailong-pet（每张都人工看过内容，7 张全为真奶龙）
         assert!(
