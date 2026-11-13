@@ -2,8 +2,8 @@
  * 后台外壳：登录门、侧栏导航、路由、全局刷新节拍。
  *
  * 分区组件放在 ./sections/<id>.tsx，默认导出一个无参组件；数据用 useAdmin(url) 取，
- * 它跟着全局「刷新节拍」自动重取（SSE 推送事件时，或 SSE 不可用时页面可见每 15 秒一次）。
- * 站长规定：后台不放刷新按钮。
+ * 跨分区缓存秒显，只在手动刷新 / 写操作后重取。
+ * 站长 2026-11-14 改手动刷新：顶栏放刷新按钮，去掉 SSE / 15s 自动轮询（原「后台不放刷新按钮」规定作废）。
  */
 import { signal } from "@preact/signals";
 import {
@@ -12,6 +12,7 @@ import {
   ListTree,
   LogOut,
   Menu as MenuIcon,
+  RefreshCw,
   Server,
   SlidersHorizontal,
   Users,
@@ -23,7 +24,7 @@ import { LocationProvider, lazy, Route, Router, useLocation } from "preact-iso";
 import { ApiError, getJSON, sendJSON } from "../../lib/api";
 import { Button, cx, Field, Skeleton, toast } from "../../ui";
 import "./admin.css";
-import { authed, endSession, startTicker } from "./data";
+import { authed, busy, endSession, refresh } from "./data";
 
 /* ---------------- 分区注册表 ---------------- */
 export type SectionId = "members" | "logs" | "upstream" | "onboarding" | "limits" | "system";
@@ -224,13 +225,7 @@ function Nav() {
   );
 }
 
-function Shell(props: { children: ComponentChildren; dataLive?: boolean }) {
-  const dataLive = props.dataLive ?? true;
-  // 鉴权探针还没成功时不要开轮询 / SSE：避免后台壳在错误态里继续打接口
-  useEffect(() => {
-    if (!dataLive) return;
-    return startTicker();
-  }, [dataLive]);
+function Shell(props: { children: ComponentChildren }) {
   return (
     <div class={cx("admin", drawerOpen.value && "drawer-open")}>
       <aside class="admin-side">
@@ -279,6 +274,16 @@ function Shell(props: { children: ComponentChildren; dataLive?: boolean }) {
           </Button>
           <span class="admin-brand">🦉 猫头鹰公益站</span>
           <span class="spacer" />
+          <Button
+            variant="ghost"
+            icon
+            aria-label="刷新"
+            title="手动刷新（后台不再自动刷新）"
+            disabled={busy.value > 0}
+            onClick={() => refresh()}
+          >
+            <RefreshCw size={18} aria-hidden="true" />
+          </Button>
         </header>
         <main class="admin-content">{props.children}</main>
       </div>
@@ -323,7 +328,7 @@ export function Admin() {
   if (authed.value !== true) {
     return (
       <LocationProvider>
-        <Shell dataLive={false}>
+        <Shell>
           {probing ? (
             <main class="admin-login">
               <Skeleton w="240px" h="24px" />

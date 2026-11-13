@@ -23,13 +23,9 @@
                   "KeySquareIcon",
                   "LucideKey",
                   "LucideKeyRound",
-                  "LucideKeySquare",
-                  "RefreshCw",
-                  "RefreshCcw",
-                  "RotateCw",
-                  "RotateCcw"
+                  "LucideKeySquare"
                 ],
-                "message": "站长规定：不出现钥匙图标；后台不放刷新按钮（数据由 SSE 推送）。"
+                "message": "站长规定：不出现钥匙图标。（2026-11-14 起后台改手动刷新，刷新图标解禁。）"
               }
             }
           }

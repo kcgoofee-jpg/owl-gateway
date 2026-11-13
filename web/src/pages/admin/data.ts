@@ -1,58 +1,24 @@
 import { signal } from "@preact/signals";
 import { useEffect, useState } from "preact/hooks";
 import { ApiError, getJSON, sendJSON } from "../../lib/api";
-import { connectEvents } from "../../lib/live";
 import { toast } from "../../ui";
 
 /** 后台写入完成后，冻结的列表也要接收新的结果。 */
 export const edits = signal(0);
-/* ---------------- 全局刷新节拍 ---------------- */
-/** 每次 +1 都会让所有 useAdmin 重新取数。由 SSE 事件或可见时 15 秒定时器驱动。 */
+/* ---------------- 全局刷新节拍（手动） ---------------- */
+/** 每次 +1 都会让所有 useAdmin 重新取数。站长 2026-11-14 改手动：只由刷新按钮与写操作驱动，不再 SSE / 定时轮询。 */
 export const tick = signal(0);
-/** 用户正在编辑表单 / 打开对话框时暂停自动刷新，避免把输入冲掉。 */
+/** 用户正在编辑表单 / 打开对话框时禁用手动刷新，避免把输入冲掉。 */
 export const busy = signal(0);
 
-export function startTicker(): () => void {
-  let refreshTimer: ReturnType<typeof setTimeout> | undefined;
-  let lastRefresh = Date.now();
-  // 暂停期间（编辑 / 对话框）错过的节拍：恢复时补一次，不用等下一条推送
-  let missed = false;
-  const bump = () => {
-    if (document.hidden || busy.value > 0) {
-      missed = true;
-      return;
-    }
-    // 首次 SSE 与首屏加载经常重叠；重连、切回标签页也沿用同一个最小间隔。
-    const delay = 15_000 - (Date.now() - lastRefresh);
-    if (delay > 0) {
-      refreshTimer ??= setTimeout(() => {
-        refreshTimer = undefined;
-        bump();
-      }, delay);
-      return;
-    }
-    clearTimeout(refreshTimer);
-    refreshTimer = undefined;
-    lastRefresh = Date.now();
-    missed = false;
-    tick.value++;
-  };
-  const stopBusyWatch = busy.subscribe((n) => {
-    if (n === 0 && missed && !document.hidden) bump();
-  });
-  const stopEvents = connectEvents("/admin/api/events", bump, () => {
-    const timer = setInterval(bump, 15_000);
-    return () => clearInterval(timer);
-  });
-  const onVis = () => !document.hidden && bump();
-  document.addEventListener("visibilitychange", onVis);
-  return () => {
-    stopEvents();
-    clearTimeout(refreshTimer);
-    stopBusyWatch();
-    document.removeEventListener("visibilitychange", onVis);
-  };
+/** 手动刷新入口（后台顶栏按钮）。 */
+export function refresh(): void {
+  tick.value++;
 }
+
+/** 跨分区缓存：切 tab 先秒显上次结果，只有刷新 / 写操作（tick 变化）后才重取。 */
+const cache = new Map<string, unknown>();
+const fetchedTick = new Map<string, number>();
 
 /** 慢请求跨自动刷新复用；写操作之后必须重新请求。只保留最近 32 个地址的结果。 */
 const inflight = new Map<string, { t: number; edits: number; pending: boolean; p: Promise<unknown> }>();
@@ -78,33 +44,44 @@ export function getShared<T>(url: string, t = tick.value): Promise<T> {
   return p;
 }
 
-/** 取后台数据：url 为 null 时不取。返回 {data, error, loading}；之后跟着全局刷新节拍自动重取。 */
+/** 取后台数据：url 为 null 时不取。返回 {data, error, loading}。
+ *  切页 / 重挂载先秒显跨分区缓存；只有手动刷新或写操作（tick 变化）后才重取。 */
 export function useAdmin<T>(url: string | null): {
   data: T | null;
   error: string | null;
   loading: boolean;
 } {
-  const [state, setState] = useState<{ url: string; data: T | null; error: string | null } | null>(null);
+  const [state, setState] = useState<{ url: string; data: T | null; error: string | null } | null>(() =>
+    url && cache.has(url) ? { url, data: cache.get(url) as T, error: null } : null,
+  );
   const t = tick.value;
   useEffect(() => {
     if (!url) return;
+    // 缓存已是当前节拍的结果：秒显、不发请求（切 tab 不重取）。
+    if (cache.has(url) && fetchedTick.get(url) === t) {
+      setState((cur) =>
+        cur?.url === url && cur.error === null ? cur : { url, data: cache.get(url) as T, error: null },
+      );
+      return;
+    }
     let alive = true;
     getShared<T>(url, t)
-      .then(
-        (data) =>
-          alive &&
+      .then((data) => {
+        cache.set(url, data);
+        fetchedTick.set(url, t);
+        if (alive)
           setState((current) =>
             current?.url === url && current.data === data && current.error === null
               ? current
               : { url, data, error: null },
-          ),
-      )
+          );
+      })
       .catch((e: unknown) => {
         if (!alive) return;
         if (e instanceof ApiError && e.status === 401) endSession();
         setState((s) => ({
           url,
-          data: s?.url === url ? s.data : null,
+          data: s?.url === url ? s.data : ((cache.get(url) as T | undefined) ?? null),
           error: e instanceof Error ? e.message : String(e),
         }));
       });
@@ -161,5 +138,7 @@ export const authed = signal<boolean | null>(null);
 
 export function endSession() {
   inflight.clear();
+  cache.clear();
+  fetchedTick.clear();
   authed.value = false;
 }

@@ -114,7 +114,7 @@ export function FreshBar(props: {
         variant="primary"
         onClick={() => {
           props.onApply();
-          props.anchor?.current?.scrollIntoView({ block: "start", behavior: "smooth" });
+          props.anchor?.current?.scrollIntoView({ block: "start", behavior: "auto" });
         }}
       >
         ↑ {text}，点击查看
