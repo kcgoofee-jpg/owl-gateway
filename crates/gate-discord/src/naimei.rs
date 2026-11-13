@@ -1,13 +1,8 @@
 //! 奶妹：网关事件循环、斜杠命令分发、向网关报心跳，以及（配置了 `NAIMEI_LLM_*` 时的）
 //! 「@奶妹 / 回复奶妹」AI 对话。
 //!
-//! 与 Discord 的交互次序：
-//! - `/register /resetkey`：先 `defer()`（3 秒内确认），再去问网关，最后用跟进消息（ephemeral）回话；
-//! - 命令出错 → 打 `[bug]` 日志，并回一句「出了点问题……」（已确认过就用跟进消息，否则直接回复）；
-//! - AI 对话：成员 @奶妹 或回复奶妹的消息 → 检索知识库 → 调 LLM → 出口过滤 → 分片公开发送。
-//!   只在配置的服务器里说话；不私信、不点赞、不评论；一个频道同时只处理一条、冷却 3 秒。
-//!   存图频道里成员发的图会记给网关（新帖和帖子里后补的都算），用来解开昨天额度用满后的出图限制。
-//!   管理员命令都在网页后台，机器人里没有。
+//! Discord 核心与独立聊天 worker 分离；分享、查询和确认不依赖模型。
+//! 聊天请求持久排队，同频道串行；模型失败只影响对应聊天。
 
 use std::collections::{HashMap, HashSet, VecDeque};
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
@@ -34,29 +29,40 @@ use crate::handlers::{self, Backend, HandlerError};
 use crate::kb;
 use crate::share;
 
+#[path = "activity.rs"]
+mod activity;
+#[path = "capabilities.rs"]
+pub mod capabilities;
+#[path = "chat_queue.rs"]
+mod chat_queue;
+#[path = "core_api.rs"]
+mod core_api;
+#[path = "creator_audit.rs"]
+mod creator_audit;
+#[path = "reactions.rs"]
+mod reactions;
+#[path = "references.rs"]
+mod references;
 #[path = "share_sync.rs"]
 mod share_sync;
 
 /// 心跳间隔。
 pub const SYNC_INTERVAL: Duration = Duration::from_secs(60);
 
-/// 同一频道两次对话至少隔 3 秒（防连点刷屏）。
-const CHAT_COOLDOWN: f64 = 3.0;
 /// 「正在输入…」续发间隔（Discord 指示 ~10 秒过期）。
 const TYPING_REFRESH: Duration = Duration::from_secs(8);
 /// 流式渐进编辑的最小间隔（Discord 编辑限流 5 次/5 秒每频道，2 秒很安全）。
 const EDIT_INTERVAL: tokio::time::Duration = tokio::time::Duration::from_secs(2);
 /// 每个频道保留的最近对话轮数（作为上下文）。
 const CHAT_HISTORY_TURNS: usize = 6;
-/// 最多记住多少个频道的对话；超出就整表清空（防内存无限涨）。
-const CHAT_MAX_CHANNELS: usize = 128;
 /// Discord 单条消息长度上限（2000 字符，留了余量）。
 const DISCORD_MESSAGE_LIMIT: usize = 1900;
 /// 上游额度/并发不足时的兜底话术（不透露任何内部实现）。
 const CHAT_QUOTA: &str = "呜——我的脑子今天被大家用光光啦 (´•̥ω•̥`) 过一阵再来戳我吧～";
 /// 其他对话失败时的兜底话术。
 const CHAT_IMAGE_FAILED: &str = "这次没能读到图片。请重新上传 PNG、JPG 或 WebP（单张不超过 10MB，合计不超过 20MB），再带上问题叫我。";
-const CHAT_FAILED: &str = "呜，刚才走神了……再戳我一次试试 (´･ω･`)";
+const CHAT_FAILED: &str =
+    "聊天上游暂时不可用，本次未得到完整结果。分享检测、解锁和状态查询仍可使用。";
 
 /// 命令执行中可能出现的错误；全部会被统一接住：打日志，并回成员「出了点问题」。
 #[derive(Debug, thiserror::Error)]
@@ -96,11 +102,6 @@ struct Inner {
     avatar_url: Option<String>,
     /// 每个频道的最近对话：频道 ID → (成员说的, 奶妹答的) 队列。
     histories: HashMap<u64, VecDeque<Turn>>,
-    /// 正在生成回复的频道：一个频道同时只处理一条，多出来的以限频忙提示回应。
-    busy: HashSet<u64>,
-    /// 每个频道上次对话的 Unix 秒（冷却用）。
-    last_chat: HashMap<u64, f64>,
-    last_busy_notice: HashMap<u64, f64>,
     /// 帖子 id → 父频道 id。用来判断一条帖子内的新内容是不是发在存图频道里。
     thread_parents: HashMap<String, String>,
 }
@@ -121,6 +122,13 @@ pub struct Naimei {
     latency_ms: AtomicU64,
     inner: Mutex<Inner>,
     share_sync: Mutex<share_sync::State>,
+    chat_queue: Mutex<chat_queue::Queue>,
+    reactions: Mutex<reactions::Reactions>,
+    activity: Mutex<activity::Activity>,
+    activity_slots: tokio::sync::Semaphore,
+    query_slots: tokio::sync::Semaphore,
+    worker_connected: AtomicBool,
+    model_status: Mutex<Value>,
     forum_scan: tokio::sync::Mutex<()>,
     forum_wake: tokio::sync::Notify,
     gateway_connected: AtomicBool,
@@ -156,7 +164,16 @@ impl Naimei {
             clock,
             latency_ms: AtomicU64::new(u64::MAX),
             inner: Mutex::new(Inner::default()),
+            activity: Mutex::new(activity::Activity::default()),
+            activity_slots: tokio::sync::Semaphore::new(1),
+            query_slots: tokio::sync::Semaphore::new(8),
+            worker_connected: AtomicBool::new(false),
+            model_status: Mutex::new(Value::Null),
+            reactions: Mutex::new(reactions::Reactions::load()),
             share_sync: Mutex::new(share_sync::State::default()),
+            chat_queue: Mutex::new(chat_queue::Queue::load(
+                std::env::var_os("NAIMEI_QUEUE_FILE").map(Into::into),
+            )),
             forum_scan: tokio::sync::Mutex::new(()),
             forum_wake: tokio::sync::Notify::new(),
             gateway_connected: AtomicBool::new(false),
@@ -233,6 +250,95 @@ impl Naimei {
     }
 
     async fn handle_command(self: &Arc<Self>, it: &Interaction) {
+        let requested = it
+            .data
+            .as_ref()
+            .and_then(|d| d.name.as_deref())
+            .unwrap_or("");
+        if let Some(cap) = capabilities::CAPABILITIES.iter().find(|c| {
+            c.command == requested || (requested == "查看分享状态" && c.name == "share_status")
+        }) {
+            let r = Responder::new(self, it);
+            if it.guild_id.as_deref() != Some(&self.cfg.guild_id.to_string())
+                || it.actor().is_none()
+            {
+                let _ = r.send_message("请在本站 Discord 服务器内使用。").await;
+                return;
+            }
+            if r.defer().await.is_err() {
+                return;
+            }
+            let actor = it.actor().expect("checked").id.clone();
+            let target = it
+                .option("成员")
+                .and_then(|o| o.value.as_ref())
+                .and_then(|v| v.as_str());
+            let mut args = target.map_or(json!({}), |s| json!({"target":s}));
+            if requested == "查看分享状态" {
+                if let Some(id) = it.data.as_ref().and_then(|d| d.target_id.as_deref()) {
+                    let selected = &it.data.as_ref().expect("data").resolved["messages"][id];
+                    if selected["author"]["id"].as_str() != Some(&actor) {
+                        let _=r.followup("只能查询自己的分享记录。请对本人图片使用此菜单，或使用 /分享状态 查看本人履约状态。").await;
+                        return;
+                    }
+                    args = json!({"message_id":id});
+                } else {
+                    let _ = r
+                        .followup("未收到目标消息标识，请使用 /分享状态 查看本人状态。")
+                        .await;
+                    return;
+                }
+            }
+            let request = capabilities::ToolRequest {
+                actor,
+                channel: it.channel_id.clone().unwrap_or_default(),
+                name: cap.name.into(),
+                arguments: args,
+            };
+            let result = self.capability(request.clone()).await;
+            let text = chat::scrub(&capabilities::render(cap.name, &result));
+            if result["data"]["status"] == "pending" {
+                let app = self.clone();
+                let interaction = it.clone();
+                let name = cap.name.to_owned();
+                tokio::spawn(async move {
+                    let result = app.activity_result(request).await;
+                    for part in chat::split_for_discord(
+                        &chat::scrub(&capabilities::render(&name, &result)),
+                        1800,
+                    ) {
+                        let _ = app
+                            .api
+                            .followup(
+                                &interaction.application_id,
+                                &interaction.token,
+                                &api::followup_body(&part),
+                            )
+                            .await;
+                    }
+                });
+            }
+            for part in chat::split_for_discord(&text, 1800) {
+                let _ = r.followup(&part).await;
+            }
+            return;
+        }
+        if requested == "取消" {
+            let r = Responder::new(self, it);
+            if it.guild_id.as_deref() != Some(&self.cfg.guild_id.to_string()) {
+                let _ = r.send_message("请在本站服务器内使用。").await;
+                return;
+            }
+            let result = it.actor().map_or(Ok(0), |u| self.cancel_chat(&u.id));
+            let message = match result {
+                Ok(n) => format!(
+                    "已取消 {n} 条本地等待及回复。已派发请求保留处理占位至上游结束，无法保证撤销上游处理。"
+                ),
+                Err(e) => e.to_owned(),
+            };
+            let _ = r.send_message(&message).await;
+            return;
+        }
         let data = it.data.as_ref();
         let name = data.and_then(|d| d.name.as_deref());
         // 只认斜杠命令（type 1）；右键菜单命令我们没有注册，等同找不到命令
@@ -315,49 +421,72 @@ impl Naimei {
         Ok(r.followup(&text).await?)
     }
 
-    /// Admit one request or return whether a throttled busy acknowledgement is due.
-    fn chat_admission(&self, channel_id: u64, now: f64) -> Option<bool> {
-        let mut inner = self.lock();
-        if inner.busy.contains(&channel_id)
-            || inner
-                .last_chat
-                .get(&channel_id)
-                .is_some_and(|t| now - *t < CHAT_COOLDOWN)
-        {
-            let notify = inner
-                .last_busy_notice
-                .get(&channel_id)
-                .is_none_or(|at| now - *at >= 30.0);
-            if notify {
-                inner.last_busy_notice.insert(channel_id, now);
-            }
-            Some(notify)
-        } else {
-            inner.busy.insert(channel_id);
-            inner.last_chat.insert(channel_id, now);
-            if inner.histories.len() > CHAT_MAX_CHANNELS {
-                inner.histories.clear();
-            }
-            None
-        }
-    }
-
     // ---------- AI 对话 ----------
 
     /// 处理一条 MESSAGE_CREATE：存图频道里的图记一笔；@奶妹 或回复奶妹 → AI 对话；其余一律忽略。
     pub async fn handle_message(self: &Arc<Self>, m: MessageInfo) {
         self.record_forum_share(&m).await;
+        let should_queue = self
+            .lock()
+            .bot_id
+            .as_ref()
+            .is_some_and(|id| is_chat_trigger(&m, id))
+            && m.author.as_ref().is_some_and(|u| !u.bot)
+            && m.guild_id
+                .as_deref()
+                .is_some_and(|g| g.parse::<u64>().ok() == Some(self.cfg.guild_id));
+        if should_queue && capabilities::wants_creator_audit(&m.content) {
+            if let (Some(author), Ok(channel)) = (m.author.as_ref(), m.channel_id.parse::<u64>()) {
+                let request = capabilities::ToolRequest {
+                    actor: author.id.clone(),
+                    channel: m.channel_id.clone(),
+                    name: "creator_audit".into(),
+                    arguments: m
+                        .mentions
+                        .iter()
+                        .find(|u| !u.bot && Some(&u.id) != self.lock().bot_id.as_ref())
+                        .map_or(json!({}), |u| json!({"target":u.id})),
+                };
+                let result = self.capability(request.clone()).await;
+                self.send_chat_message(
+                    channel,
+                    &m.id,
+                    &capabilities::render("creator_audit", &result),
+                )
+                .await;
+                if result["data"]["status"] == "pending" {
+                    let app = self.clone();
+                    let id = m.id.clone();
+                    tokio::spawn(async move {
+                        let result = app.activity_result(request).await;
+                        for part in chat::split_for_discord(
+                            &chat::scrub(&capabilities::render("creator_audit", &result)),
+                            1800,
+                        ) {
+                            app.send_chat_message(channel, &id, &part).await;
+                        }
+                    });
+                }
+            }
+            return;
+        }
+        if should_queue && self.chat.is_some() {
+            self.enqueue_chat(m).await;
+        }
+    }
+
+    async fn process_chat(self: &Arc<Self>, m: MessageInfo) -> bool {
         let Some(bot_id) = self.lock().bot_id.clone() else {
-            return; // READY 之前收到的消息不带触发信息
+            return false; // READY 之前收到的消息不带触发信息
         };
         let Some(chat) = self.chat.as_ref() else {
-            return; // 未配置 NAIMEI_LLM_*，对话功能关闭
+            return false; // 未配置 NAIMEI_LLM_*，对话功能关闭
         };
         let Some(author) = m.author.as_ref() else {
-            return;
+            return false;
         };
         if author.bot || author.id == bot_id {
-            return; // 自己 / 其他机器人一律不回，防自环
+            return false; // 自己 / 其他机器人一律不回，防自环
         }
         let same_guild = m
             .guild_id
@@ -365,61 +494,23 @@ impl Naimei {
             .and_then(|g| g.parse::<u64>().ok())
             .is_some_and(|g| g == self.cfg.guild_id);
         if !same_guild {
-            return; // 只在配置的服务器里说话
+            return false; // 只在配置的服务器里说话
         }
         if !is_chat_trigger(&m, &bot_id) {
-            return;
+            return false;
         }
-        // 图片：自己的附件 + 被引用消息的附件（只收 image/*，最多 4 张）
-        let image_urls = |atts: &[events::Attachment]| -> Vec<String> {
-            atts.iter()
-                .filter(|a| {
-                    a.content_type
-                        .as_deref()
-                        .is_some_and(|t| t.starts_with("image/"))
-                })
-                .map(|a| a.url.clone())
-                .collect()
-        };
-        let mut images = image_urls(&m.attachments);
-        // 引用上下文：被回复消息的内容（和它的图）对模型可见，不然「fix it」没法修
-        let mut text = strip_mention(&m.content, &bot_id).trim().to_owned();
-        if let Some(r) = m.referenced_message.as_ref() {
-            let who = r
-                .author
-                .as_ref()
-                .map(User::display_tag)
-                .unwrap_or_else(|| "某人".into());
-            let quoted: String = r.content.trim().chars().take(600).collect();
-            if !quoted.is_empty() {
-                text = format!("[引用 {who}：{quoted}]\n{text}");
-            }
-            for url in image_urls(&r.attachments) {
-                if images.len() >= 4 {
-                    break;
-                }
-                images.push(url);
-            }
-        }
+        let (source, mut images) = self.reference_context(&m).await;
+        let mut text = format!("{}\n{}", source, strip_mention(&m.content, &bot_id).trim());
         if text.is_empty() && images.is_empty() {
-            return; // 只 @ 不说话（纯表情）不触发
+            return false; // 只 @ 不说话（纯表情）不触发
         }
         if text.is_empty() {
             text = "(看这张图)".to_owned(); // 纯图消息：给模型一个明确指令
         }
         images.truncate(4);
         let Ok(channel_id) = m.channel_id.parse::<u64>() else {
-            return;
+            return false;
         };
-        let now = self.now();
-        let rejected = self.chat_admission(channel_id, now);
-        if let Some(notify) = rejected {
-            if notify {
-                self.send_chat_message(channel_id, &m.id, "我这边正忙，稍后再叫我～")
-                    .await;
-            }
-            return;
-        }
         // 文本附件（txt/md/json/csv/log，≤128KB）：抓内容进上下文
         let mut text_files: Vec<(String, String)> = Vec::new();
         for a in m.attachments.iter().take(3) {
@@ -456,8 +547,13 @@ impl Naimei {
             author_id: &author.id,
             author_name: &author.display_tag(),
         };
-        let result = self.chat_once(chat, req).await;
-        self.lock().busy.remove(&channel_id);
+        let scoped_chat = chat.with_actor(author.id.clone(), m.channel_id.clone());
+        let result = self.chat_once(&scoped_chat, req).await;
+        let transient = result.as_ref().err().is_some_and(ChatError::transient);
+        *self
+            .model_status
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner) = json!({"at":self.now(),"state":if result.is_ok(){"success"}else{"failed"},"category":match result.as_ref().err(){Some(ChatError::Timeout)=>"timeout",Some(ChatError::Quota)=>"quota_or_rate_limit",Some(ChatError::ImageInput(_))=>"image",Some(_)=>"upstream",None=>"none"}});
         match result {
             Ok(()) => {}
             Err(ChatError::ImageInput(reason)) => {
@@ -468,12 +564,17 @@ impl Naimei {
             Err(ChatError::Quota) => {
                 self.send_chat_message(channel_id, &m.id, CHAT_QUOTA).await;
             }
+            Err(ChatError::Timeout) => {
+                info!("[chat] 对话失败：上游超时");
+                self.send_chat_message(channel_id,&m.id,"聊天上游超时，本次结果未知，未自动重发。需要时请重新 @ 我；分享检测和状态查询不受影响。").await;
+            }
             Err(e) => {
                 // 额度类失败是常态，不打 [bug]；其他失败记日志但不惊动成员
                 info!("[chat] 对话失败：{e}");
                 self.send_chat_message(channel_id, &m.id, CHAT_FAILED).await;
             }
         }
+        transient
     }
 
     /// 频道上下文：帖子首楼（若在帖子里）+ 最近几条消息。任何失败都静默降级。
@@ -489,7 +590,7 @@ impl Naimei {
                         .or_else(|| first["author"]["username"].as_str())
                         .unwrap_or("楼主");
                     let content = first["content"].as_str().unwrap_or("").trim();
-                    let cut: String = content.chars().take(400).collect();
+                    let cut: String = content.chars().take(8000).collect();
                     if !cut.is_empty() {
                         out.push_str(&format!("[帖子首楼 {who}：{cut}]\n"));
                     }
@@ -543,7 +644,12 @@ impl Naimei {
             })
             .unwrap_or_default();
         let stickers = chat::wants_stickers(req.text).then(kb::nailong);
-        let mut channel_ctx = self.channel_context(req.channel_id, req.message_id).await;
+        let mut channel_ctx = tokio::time::timeout(
+            Duration::from_secs(8),
+            self.channel_context(req.channel_id, req.message_id),
+        )
+        .await
+        .unwrap_or_else(|_| "频道背景暂时不可用，不猜测来源或规则".into());
         for (name, content) in &req.text_files {
             channel_ctx.push_str(&format!("\n成员附带的文本文件 [{name}]:\n{content}\n"));
         }
@@ -765,12 +871,16 @@ impl Naimei {
                 }
             })
         };
+        let typing_task = AbortOnDrop(typing_task);
         let started = std::time::Instant::now();
         let reply = chat
             .reply(&system, &history, chat::user_content(req.text, &req.images))
             .await;
         typing_done.store(true, Ordering::Relaxed);
-        typing_task.abort();
+        typing_task.0.abort();
+        if self.chat_cancelled(req.message_id) {
+            return Ok(());
+        }
         let record = |assistant: &str, status: &str| {
             if let Some(log) = self.chat_log.as_ref() {
                 log.record(
@@ -803,6 +913,12 @@ impl Naimei {
         };
         {
             let mut inner = self.lock();
+            if inner.histories.len() >= 128
+                && !inner.histories.contains_key(&channel_id)
+                && let Some(id) = inner.histories.keys().next().copied()
+            {
+                inner.histories.remove(&id);
+            }
             let h = inner.histories.entry(channel_id).or_default();
             h.push_back((req.text.to_owned(), answer.clone()));
             while h.len() > CHAT_HISTORY_TURNS {
@@ -890,6 +1006,17 @@ impl Naimei {
             tokio::spawn(self.clone().sync_loop());
             tokio::spawn(self.clone().forum_loop());
             tokio::spawn(self.clone().share_retry_loop());
+            tokio::spawn(self.clone().chat_queue_loop());
+            tokio::spawn(self.clone().worker_health_loop());
+            tokio::spawn(self.clone().reaction_loop());
+            if std::env::var_os("NAIMEI_WORKER_SECRET").is_some() {
+                let app = self.clone();
+                tokio::spawn(async move {
+                    if let Err(e) = core_api::run(app).await {
+                        error!("[bot] 私有查询桥接退出：{e}");
+                    }
+                });
+            }
         }
         self.forum_wake.notify_one();
         let defs = commands::definitions();
@@ -952,7 +1079,16 @@ impl Naimei {
             "latency_ms": latency,
             "ready_at": ready_at,
             "share_detection": detection,
+            "chat": self.chat_status(),
+            "reactions": self.reaction_status(),
         })
+    }
+}
+
+struct AbortOnDrop(tokio::task::JoinHandle<()>);
+impl Drop for AbortOnDrop {
+    fn drop(&mut self) {
+        self.0.abort();
     }
 }
 
@@ -1214,17 +1350,6 @@ mod tests {
         assert_eq!(app.status_report(1.0)["latency_ms"], 0, "还没有数据按 0 报");
         app.set_latency(Some(Duration::from_secs_f64(0.0425)));
         assert_eq!(app.status_report(1.0)["latency_ms"], 43);
-    }
-
-    #[tokio::test]
-    async fn chat_contention_is_acknowledged_without_repeated_channel_spam() {
-        let app = app();
-        assert_eq!(app.chat_admission(1, 1.0), None);
-        assert_eq!(app.chat_admission(1, 1.1), Some(true));
-        assert_eq!(app.chat_admission(1, 1.2), Some(false));
-        assert_eq!(app.chat_admission(1, 31.2), Some(true));
-        app.lock().busy.remove(&1);
-        assert_eq!(app.chat_admission(1, 32.0), None);
     }
 
     // ---------- AI 对话触发 ----------

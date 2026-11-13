@@ -7,11 +7,11 @@
 //!
 //! ID 一律保留 Discord 原样的十进制字符串，原样转给网关桥接。
 
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
 /// 事件里的用户对象。
-#[derive(Debug, Clone, Default, Deserialize)]
+#[derive(Debug, Clone, Default, Deserialize, Serialize)]
 pub struct User {
     pub id: String,
     #[serde(default)]
@@ -39,7 +39,7 @@ impl User {
 }
 
 /// 服务器成员（交互里附带的 `member`）。
-#[derive(Debug, Clone, Default, Deserialize)]
+#[derive(Debug, Clone, Default, Deserialize, Serialize)]
 pub struct Member {
     #[serde(default)]
     pub user: Option<User>,
@@ -48,7 +48,7 @@ pub struct Member {
 }
 
 /// 斜杠命令选项。
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, Deserialize, Serialize)]
 pub struct CommandOption {
     pub name: String,
     #[serde(default)]
@@ -56,8 +56,12 @@ pub struct CommandOption {
 }
 
 /// `INTERACTION_CREATE.data`（斜杠命令，用不到的字段留空）。
-#[derive(Debug, Clone, Default, Deserialize)]
+#[derive(Debug, Clone, Default, Deserialize, Serialize)]
 pub struct InteractionData {
+    #[serde(default)]
+    pub target_id: Option<String>,
+    #[serde(default)]
+    pub resolved: Value,
     #[serde(default)]
     pub name: Option<String>,
     #[serde(rename = "type", default)]
@@ -69,8 +73,10 @@ pub struct InteractionData {
 /// 交互类型：2 = 斜杠命令。
 pub const INTERACTION_APPLICATION_COMMAND: u8 = 2;
 
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, Deserialize, Serialize)]
 pub struct Interaction {
+    #[serde(default)]
+    pub channel_id: Option<String>,
     pub id: String,
     #[serde(default)]
     pub application_id: String,
@@ -122,7 +128,7 @@ pub struct ReadyInfo {
 }
 
 /// GUILD_CREATE / GUILD_UPDATE 里我们关心的部分（只用来在心跳里报服务器名）。
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, Deserialize, Serialize)]
 pub struct GuildInfo {
     pub id: String,
     #[serde(default)]
@@ -133,7 +139,7 @@ pub struct GuildInfo {
 }
 
 /// 消息附件（看图只关心图片类）。
-#[derive(Debug, Clone, Default, Deserialize)]
+#[derive(Debug, Clone, Default, Deserialize, Serialize)]
 pub struct Attachment {
     #[serde(default)]
     pub id: String,
@@ -146,7 +152,7 @@ pub struct Attachment {
 }
 
 /// MESSAGE_CREATE 里我们关心的部分（AI 对话的触发源；宽容解析，其余字段忽略）。
-#[derive(Debug, Clone, Default, Deserialize)]
+#[derive(Debug, Clone, Default, Deserialize, Serialize)]
 pub struct MessageInfo {
     pub id: String,
     pub channel_id: String,
@@ -165,6 +171,8 @@ pub struct MessageInfo {
     /// 回复目标消息；「回复奶妹触发对话」看它的作者是不是奶妹。
     #[serde(default)]
     pub referenced_message: Option<ReferencedMessage>,
+    #[serde(default)]
+    pub message_reference: Option<serde_json::Value>,
     /// 转发来的原消息。存图频道里「已转发」的图记在这里，不在本条的附件上。
     #[serde(default)]
     pub message_snapshots: Vec<MessageSnapshot>,
@@ -174,13 +182,13 @@ pub struct MessageInfo {
 }
 
 /// 转发快照里我们要的部分：原消息的附件和 embed。
-#[derive(Debug, Clone, Default, Deserialize)]
+#[derive(Debug, Clone, Default, Deserialize, Serialize)]
 pub struct MessageSnapshot {
     #[serde(default)]
     pub message: Option<SnapshotMessage>,
 }
 
-#[derive(Debug, Clone, Default, Deserialize)]
+#[derive(Debug, Clone, Default, Deserialize, Serialize)]
 pub struct SnapshotMessage {
     #[serde(default)]
     pub attachments: Vec<Attachment>,
@@ -189,7 +197,7 @@ pub struct SnapshotMessage {
 }
 
 /// THREAD_CREATE / THREAD_UPDATE 里我们关心的部分。
-#[derive(Debug, Clone, Default, Deserialize)]
+#[derive(Debug, Clone, Default, Deserialize, Serialize)]
 pub struct ThreadInfo {
     pub id: String,
     #[serde(default)]
@@ -206,8 +214,10 @@ pub struct ThreadInfo {
 }
 
 /// 回复目标消息：作者 + 内容 + 附件（引用的上下文和图片都要进模型）。
-#[derive(Debug, Clone, Default, Deserialize)]
+#[derive(Debug, Clone, Default, Deserialize, Serialize)]
 pub struct ReferencedMessage {
+    #[serde(default)]
+    pub id: String,
     #[serde(default)]
     pub author: Option<User>,
     #[serde(default)]

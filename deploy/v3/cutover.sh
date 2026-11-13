@@ -234,6 +234,10 @@ cmd_previous() {
   check_rollback_schema
   docker tag "$IMAGE:current" "$IMAGE:failed"
   docker tag "$IMAGE:previous" "$IMAGE:current"
+  if [[ -f $OWL_DIR/compose.previous.yml ]]; then
+    cp "$OWL_DIR/compose.yml" "$OWL_DIR/compose.failed.yml"
+    cp "$OWL_DIR/compose.previous.yml" "$OWL_DIR/compose.yml"
+  fi
   restart_container || die "上一版也起不来：看上面的日志（docker logs $GATE）"
   log "✓ 已回到上一版 3.0（坏的那版标成 owl-gate:failed）"
 }

@@ -36,13 +36,35 @@ fn command_definitions_equal_the_snapshot() {
 fn only_the_member_commands_are_registered() {
     let defs = commands::definitions();
     let names: Vec<&str> = defs.iter().map(|d| d["name"].as_str().unwrap()).collect();
-    assert_eq!(names, ["register", "resetkey"]);
+    assert_eq!(
+        names,
+        [
+            "register",
+            "resetkey",
+            "分享状态",
+            "站点状态",
+            "我的额度",
+            "上游状态",
+            "活跃度",
+            "作者足迹",
+            "奶妹状态",
+            "取消",
+            "查看分享状态"
+        ]
+    );
     for d in &defs {
         // 所有人都能用：没有权限限制；只注册斜杠命令，没有右键菜单命令
         assert!(d["default_member_permissions"].is_null(), "{d}");
-        assert_eq!(d["type"], 1);
+        assert_eq!(
+            d["type"],
+            if d["name"] == "查看分享状态" {
+                3
+            } else {
+                1
+            }
+        );
         // 成员看到的描述不提已删除的东西
-        let desc = d["description"].as_str().unwrap();
+        let desc = d["description"].as_str().unwrap_or("");
         assert!(
             !desc.contains("服务状态") && !desc.contains("管理员"),
             "{desc}"

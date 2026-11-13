@@ -12,10 +12,13 @@ export type ShareLockStatus = {
   healthy: boolean;
   bot_online: boolean;
   channel_url: string;
+  chat?: { running: number; waiting: number; circuit_open: boolean; worker_connected?: boolean };
+  reactions?: { enabled: boolean; pending: number; error: string | null };
   detection: {
     connected: boolean;
     last_complete_at: number;
     complete_day_start: number;
+    coverage_start?: number | null;
     pending: number;
     oldest_failure_at: number | null;
     error: string | null;
@@ -56,7 +59,7 @@ export function ShareLockCard() {
             onChange={(e) => void change({ mode: e.currentTarget.value === "daily" ? "daily" : "quota" })}
           >
             <option value="quota">昨日用满额度后需分享</option>
-            <option value="daily">所有非豁免成员每天需分享</option>
+            <option value="daily">所有非豁免成员需分享</option>
           </select>
         </div>
         {error && (
@@ -66,8 +69,8 @@ export function ShareLockCard() {
         )}
         <p>
           {data.mode === "daily"
-            ? "每天北京时间 07:00 重置。除站长和已开通赞助席的成员外，所有成员今天都需先分享一张图才能生图，不要求昨天用满额度。"
-            : "每天北京时间 07:00 重置。昨日用满 V4.5 或 V5 个人额度后，今天需在指定频道发一张图才能继续。站长和赞助席豁免。"}
+            ? "每天北京时间 07:00 重置。除站长和已开通赞助席的成员外，所有成员昨日或今日需分享一张图才能生图，不要求昨天用满额度。"
+            : "每天北京时间 07:00 重置。昨日用满 V4.5 或 V5 个人额度后，昨日或今日在指定频道分享即可继续，昨日已分享无需重复。站长和赞助席豁免。"}
           新帖和已有帖子补图都算。
         </p>
         <p>只暂停生图，保留 Key、登录和频道身份组；图片被确认后自动恢复。</p>
@@ -88,15 +91,28 @@ export function ShareLockCard() {
               data.detection.last_complete_at ? fullTime(data.detection.last_complete_at) : "尚未完成",
             ],
             ["待确认 / 重试", data.detection.pending],
+            [
+              "完整覆盖起点",
+              data.detection.coverage_start ? fullTime(data.detection.coverage_start) : "尚未核实昨日记录",
+            ],
+            ["聊天工作进程", data.chat?.worker_connected ? "可连接" : "不可连接 / 尚未核实"],
+            ["聊天处理 / 等待", data.chat ? `${data.chat.running} / ${data.chat.waiting}` : "未知"],
+            [
+              "聊天上游",
+              data.chat ? (data.chat.circuit_open ? "熔断冷却" : "未熔断（不代表上游必定可用）") : "未知",
+            ],
+            ["反应待发送", data.reactions?.pending ?? "未知"],
             ["最早异常", data.detection.oldest_failure_at ? fullTime(data.detection.oldest_failure_at) : "—"],
           ]}
         />
+        {data.reactions?.error && <Notice tone="warn">{data.reactions.error}</Notice>}
         {data.detection.error && <Notice tone="warn">{data.detection.error}</Notice>}
         {!data.enabled ? (
           <Notice>分享限制已关闭，检测继续运行。</Notice>
         ) : !data.enforcing ? (
           <Notice tone="warn">
-            分享检测尚未就绪或超过 5 分钟未可靠同步，现暂时放行。完成本服务日补扫并清空重试后自动恢复限制。
+            分享检测尚未就绪或超过 5
+            分钟未可靠同步，现暂时放行。完成昨日及本服务日补扫并清空重试后自动恢复限制。
           </Notice>
         ) : !data.healthy ? (
           <Notice tone="warn">

@@ -185,7 +185,7 @@ pub(super) async fn members_view(state: &AppState, filter_raw: &str) -> Result<V
         }
         Ok(Some((
             st.db.counter_map(&st.clock.day(day_start - 1.0)).await?,
-            st.db.sharing_members_since(day_start).await?,
+            st.db.sharing_members_since(day_start - 86400.0).await?,
             crate::share_lock::Mode::from_setting(detection["mode"].as_str()),
         )))
     }

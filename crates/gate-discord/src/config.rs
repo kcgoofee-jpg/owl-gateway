@@ -93,8 +93,13 @@ fn owner_ids(get: &impl Fn(&str) -> Option<String>) -> Vec<u64> {
 
 /// AI 对话配置：`NAIMEI_LLM_BASE_URL` 与 `NAIMEI_LLM_API_KEY` 都非空才开启。
 fn chat_cfg(get: &impl Fn(&str) -> Option<String>) -> Option<ChatCfg> {
-    let base_url = get("NAIMEI_LLM_BASE_URL")?;
-    let api_key = get("NAIMEI_LLM_API_KEY")?;
+    if get("NAIMEI_CHAT_ENABLED").as_deref() == Some("0") {
+        return None;
+    }
+    let remote = get("NAIMEI_CHAT_WORKER_URL");
+    let base_url = get("NAIMEI_LLM_BASE_URL").or_else(|| remote.clone())?;
+    let api_key =
+        get("NAIMEI_LLM_API_KEY").or_else(|| remote.map(|_| "worker-managed".to_owned()))?;
     if base_url.trim().is_empty() || api_key.trim().is_empty() {
         return None;
     }

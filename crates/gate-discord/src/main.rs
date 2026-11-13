@@ -18,6 +18,8 @@ struct Cli {
 enum Bot {
     /// 奶妹：领 Key / 换 Key（需要 DISCORD_BOT_TOKEN、DISCORD_GUILD_ID、REGISTRATION_BRIDGE_SECRET）
     Naimei,
+    /// Isolated model worker; no Discord credentials.
+    ChatWorker,
 }
 
 /// 致命错误后先等一会儿再退出：容器是 `restart: unless-stopped`，别让它飞快地重复登录（会被 Discord 限流）。
@@ -36,6 +38,7 @@ async fn main() -> ExitCode {
         .init();
 
     let result = match Cli::parse().bot {
+        Bot::ChatWorker => gate_discord::worker::run().await,
         Bot::Naimei => match config::NaimeiConfig::from_env() {
             Ok(cfg) => naimei::run(cfg).await,
             Err(e) => Err(e),

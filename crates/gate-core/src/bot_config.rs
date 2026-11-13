@@ -29,13 +29,15 @@ pub enum BotConfigError {
 }
 
 /// 心跳里留下的字段（白名单）；其余的键一律丢弃。
-const STATUS_FIELDS: [&str; 6] = [
+const STATUS_FIELDS: [&str; 8] = [
     "user",
     "guild",
     "latency_ms",
     "ready_at",
     "version",
     "share_detection",
+    "chat",
+    "reactions",
 ];
 
 /// `report` 的心跳部分：只留白名单字段，整体覆盖 `bot_status`。`status` 必须是对象。

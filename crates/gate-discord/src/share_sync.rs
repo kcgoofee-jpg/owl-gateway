@@ -20,6 +20,7 @@ pub(super) struct State {
     accepted: HashSet<String>,
     cursors: HashMap<String, u64>,
     day_start: f64,
+    joined: HashSet<String>,
 }
 
 struct Inflight<'a> {
@@ -47,13 +48,16 @@ impl Naimei {
         self.gateway_connected.store(connected, Ordering::Relaxed);
         if connected {
             // READY and RESUMED must reconcile edits missed during a disconnection too.
-            self.shares().cursors.clear();
+            let mut shares = self.shares();
+            shares.cursors.clear();
+            shares.joined.clear();
+            drop(shares);
             self.gateway_seen_at
                 .store(self.now() as u64, Ordering::Relaxed);
         }
     }
 
-    fn connected(&self) -> bool {
+    pub(super) fn connected(&self) -> bool {
         self.gateway_connected.load(Ordering::Relaxed)
             && self.now() - (self.gateway_seen_at.load(Ordering::Relaxed) as f64) < 120.0
     }
@@ -85,9 +89,11 @@ impl Naimei {
         if state.day_start != day {
             state.cursors.clear();
             state.accepted.clear();
-            state
-                .pending
-                .retain(|_, p| p.payload["at"].as_f64().is_some_and(|at| at >= day));
+            state.pending.retain(|_, p| {
+                p.payload["at"]
+                    .as_f64()
+                    .is_some_and(|at| at >= day - 86400.0)
+            });
             state.day_start = day;
         }
         day
@@ -111,7 +117,7 @@ impl Naimei {
         let Some(at) = share::snowflake_unix(&m.id) else {
             return true;
         };
-        if at < self.share_day() {
+        if at < self.share_day() - 86400.0 {
             return true;
         }
         let Some(parent) = self.share_parent(&m.channel_id).await else {
@@ -169,6 +175,8 @@ impl Naimei {
             ShareDelivery::Committed => {
                 state.pending.remove(id);
                 state.accepted.insert(id.to_owned());
+                drop(state);
+                self.reaction_committed(&payload);
                 true
             }
             ShareDelivery::Retry => {
@@ -221,7 +229,8 @@ impl Naimei {
     pub async fn catch_up_forum(&self) -> bool {
         let _scan = self.forum_scan.lock().await;
         let day = self.share_day();
-        let result = tokio::time::timeout(Duration::from_secs(120), self.sweep_forum(day)).await;
+        let result =
+            tokio::time::timeout(Duration::from_secs(120), self.sweep_forum(day - 86400.0)).await;
         let complete = matches!(result, Ok(Ok(())))
             && self.connected()
             && self.shares().pending.is_empty()
@@ -230,6 +239,7 @@ impl Naimei {
             let mut state = self.shares();
             state.report.last_complete_at = self.now();
             state.report.complete_day_start = day;
+            state.report.coverage_start = Some(day - 86400.0);
             state.report.error = None;
             state.report.oldest_failure_at = None;
         } else {
@@ -397,10 +407,15 @@ impl Naimei {
     }
 
     async fn join_thread(&self, thread_id: &str) {
-        if let Ok(id) = thread_id.parse()
-            && self.api.join_thread(id).await.is_err()
-        {
-            debug!("[bot] 加入分享帖子失败，将通过历史补扫核对");
+        if self.shares().joined.contains(thread_id) {
+            return;
+        }
+        if let Ok(id) = thread_id.parse() {
+            if self.api.join_thread(id).await.is_ok() {
+                self.shares().joined.insert(thread_id.to_owned());
+            } else {
+                debug!("[bot] 加入分享帖子失败，将通过历史补扫核对");
+            }
         }
     }
 }

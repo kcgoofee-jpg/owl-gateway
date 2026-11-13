@@ -1270,13 +1270,26 @@ async fn queued_v5_is_rechecked_after_subject_revocation() {
         e.state.db.get_counter(1, &e.state.day()).await.unwrap().v5,
         1
     );
-    let logs = e
-        .state
-        .db
-        .list_logs(1, 0, &gate_db::repo::usage::LogFilter::default())
-        .await
-        .unwrap();
-    assert_eq!(logs[0]["reason"], gate_core::reasons::FEATURE_OFF);
+    // Request audit writes run in a background task; wait for the specific rejection.
+    tokio::time::timeout(std::time::Duration::from_secs(3), async {
+        loop {
+            let logs = e
+                .state
+                .db
+                .list_logs(10, 0, &gate_db::repo::usage::LogFilter::default())
+                .await
+                .unwrap();
+            if logs
+                .iter()
+                .any(|l| l["reason"] == gate_core::reasons::FEATURE_OFF)
+            {
+                break;
+            }
+            tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+        }
+    })
+    .await
+    .expect("queued revocation must be recorded");
 }
 
 #[tokio::test]

@@ -22,6 +22,17 @@ pub enum ApiError {
     Body(#[from] twilight_http::response::DeserializeBodyError),
 }
 
+impl ApiError {
+    pub fn status(&self) -> Option<u16> {
+        match self {
+            Self::Http(e) => match e.kind() {
+                twilight_http::error::ErrorType::Response { status, .. } => Some(status.get()),
+                _ => None,
+            },
+            _ => None,
+        }
+    }
+}
 fn id(s: &str) -> Result<u64, ApiError> {
     s.parse().map_err(|_| ApiError::BadId(s.to_owned()))
 }
@@ -52,6 +63,28 @@ pub struct DiscordApi {
 }
 
 impl DiscordApi {
+    pub async fn read(&self, path: String) -> Result<(u16, Value), ApiError> {
+        use twilight_http::request::{Method, RequestBuilder};
+        let response = self
+            .client
+            .request::<Value>(RequestBuilder::raw(Method::Get, path).build()?)
+            .await?;
+        let status = response.status().get();
+        Ok((status, response.model().await.map_err(ApiError::Body)?))
+    }
+    pub async fn react(&self, channel: &str, message: &str) -> Result<(), ApiError> {
+        use twilight_http::request::{Method, RequestBuilder};
+        let (ch, m) = (id(channel)?, id(message)?);
+        self.send(
+            RequestBuilder::raw(
+                Method::Put,
+                format!("channels/{ch}/messages/{m}/reactions/%E2%9C%85/@me"),
+            )
+            .build(),
+        )
+        .await
+    }
+
     /// `proxy` 仅测试用：把所有 REST 请求指到本机假 Discord（`host:port`，明文 HTTP）。
     pub fn new(token: &str, proxy: Option<String>) -> Self {
         let mut builder = Client::builder().token(token.to_owned());

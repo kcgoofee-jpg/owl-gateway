@@ -151,6 +151,46 @@ def bot_context(uid):
         'server_time':int(time.time()),'timezone':'Asia/Shanghai','shared_pool_warning':'站内余额不代表上游套餐余量，模型列表代表已开放，不能单独证明上游实时生成成功'}
 
 
+def upstream_health(admin=False):
+    now = int(time.time())
+    with sqlite3.connect(f'file:{NEWAPI_DB}?mode=ro', uri=True, timeout=3) as c:
+        opened = set()
+        for models, groups in c.execute('SELECT models,"group" FROM channels WHERE status=1'):
+            if 'default' in (groups or '').split(','):
+                opened.update(filter(None, (models or '').split(',')))
+        rows = c.execute("SELECT model_name,type,created_at,use_time,content FROM logs WHERE created_at>=? AND type IN (2,5) ORDER BY id DESC LIMIT 50001", (now-3600,)).fetchall()
+    truncated = len(rows)>50000
+    rows = rows[:50000]
+    models = {}
+    for name in sorted(opened | {r[0] for r in rows if r[0]}):
+        samples = [r for r in rows if r[0]==name]
+        ok = [r for r in samples if r[1]==2]
+        failed = [r for r in samples if r[1]==5]
+        recent = [r for r in samples if r[2]>=now-900]
+        def category(text):
+            text = (text or '').lower()
+            if any(x in text for x in ['timeout','timed out','超时']): return 'timeout'
+            if any(x in text for x in ['429','rate limit','限流']): return 'rate_limited'
+            if any(x in text for x in ['401','403','unauthorized','authentication']): return 'authentication'
+            if any(x in text for x in ['quota','balance','余额','额度']): return 'quota'
+            if any(x in text for x in ['500','502','503','504']): return 'upstream_server'
+            return 'upstream_error'
+        last_ok = max((r[2] for r in ok),default=None)
+        last_fail = max((r[2] for r in failed),default=None)
+        models[name] = {'opened':name in opened,'state':('unknown' if not recent else 'recent_failures' if any(r[1]==5 for r in recent) else 'recent_success'),
+            'last_success_at':last_ok,'last_failure_at':last_fail,
+            'window_15m':{'samples':len(recent),'success':sum(r[1]==2 for r in recent),'failed':sum(r[1]==5 for r in recent)},
+            'window_60m':{'samples':len(samples),'success':len(ok),'failed':len(failed)},
+            'average_seconds_60m':round(sum(r[3] or 0 for r in ok)/len(ok),2) if ok else None,
+            'last_error_category':category(failed[0][4]) if failed else None}
+    result = {'models':models,'sampled_at':now,'expires_at':now+60,'complete':not truncated,
+        'note':'被动请求样本，不代表供应商余额或未来可用性；无样本为未知，不主动发送收费探测'}
+    if admin:
+        with sqlite3.connect(f'file:{NEWAPI_DB}?mode=ro', uri=True, timeout=3) as c:
+            result['channels']=[{'id':r[0],'status':r[1],'models':r[2],'last_test_at':r[3],'response_ms':r[4]} for r in c.execute('SELECT id,status,models,test_time,response_time FROM channels')]
+    return result
+
+
 def bridge_secret():
     for line in open('/opt/service-tools/.env'):
         if line.startswith('REGISTRATION_BRIDGE_SECRET='):
@@ -172,7 +212,7 @@ class H(BaseHTTPRequestHandler):
         self.end_headers()
         self.wfile.write(b)
     def do_POST(self):
-        if self.path != '/ai/api/context':
+        if self.path not in ('/ai/api/context','/ai/api/health'):
             return self._send(404,{'error':'not found'})
         expected=bridge_secret()
         actual=self.headers.get('Authorization','')
@@ -182,6 +222,9 @@ class H(BaseHTTPRequestHandler):
             size=int(self.headers.get('Content-Length','0'))
             if not 0 < size <= 1024: return self._send(400,{'error':'invalid body'})
             body=json.loads(self.rfile.read(size))
+            if self.path == '/ai/api/health':
+                if not isinstance(body,dict) or set(body)-{'admin'} or ('admin' in body and type(body['admin']) is not bool): return self._send(400,{'error':'invalid body'})
+                return self._send(200,upstream_health(body.get('admin',False)))
             uid=body.get('discord_id','')
             if not isinstance(uid,str) or not uid.isascii() or not uid.isdigit() or not 17 <= len(uid) <= 20:
                 return self._send(400,{'error':'invalid member'})

@@ -76,7 +76,7 @@ it("distinguishes an online bot from a broken detector and explains fail-open", 
 
 it("saves the independent daily mode and explains that quota exhaustion is not required", async () => {
   await show({ ...status(), mode: "daily" });
-  expect(root.textContent).toContain("所有成员今天都需先分享一张图");
+  expect(root.textContent).toContain("所有成员昨日或今日需分享一张图");
   vi.mocked(act).mockResolvedValue({ mode: "quota" });
   await renderAct(async () => {
     const select = root.querySelector<HTMLSelectElement>("#share-lock-mode");

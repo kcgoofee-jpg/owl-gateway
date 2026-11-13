@@ -66,6 +66,8 @@ pub async fn detection(state: &AppState) -> Result<Value, crate::error::Internal
         "bot_online": now - seen_at < gate_core::bot_config::ONLINE_WINDOW,
         "channel_url": channel_url(),
         "detection": report,
+        "chat":status["chat"],
+        "reactions":status["reactions"],
     }))
 }
 
@@ -74,9 +76,9 @@ pub const FORUM_CHANNEL_ID: &str = "1558068804934705222";
 /// 规则开始生效的服务日。当天 7:00（北京时间）起，看上一个重置日。
 const START_DAY: &str = "2026-11-13";
 
-pub const MESSAGE: &str = "昨天的 V4.5 或 V5 额度已经用完。请到 Discord「存图备份专用」发一张图（新开一帖，或在已有帖子里再补一张），发成功后会自动恢复出图。";
+pub const MESSAGE: &str = "昨天的 V4.5 或 V5 额度已经用完，且昨日和今日尚未分享。请到 Discord「存图备份专用」发一张图（新开一帖，或在已有帖子里再补一张），发成功后会自动恢复出图。";
 
-pub const DAILY_MESSAGE: &str = "今天还没有分享图片。请到 Discord「存图备份专用」发一张图（新开一帖，或在已有帖子里再补一张），确认后自动恢复生图。每天北京时间 07:00 重置。";
+pub const DAILY_MESSAGE: &str = "昨日和今日都没有分享图片。请到 Discord「存图备份专用」发一张图（新开一帖，或在已有帖子里再补一张），确认后自动恢复生图。按北京时间 07:00 划分服务日，昨日分享也有效。";
 
 fn message(mode: Mode) -> &'static str {
     match mode {
@@ -172,7 +174,11 @@ async fn lookup(state: &AppState, key: &Key) -> Result<Option<Mode>, crate::erro
         return Ok(None);
     }
     let day_start = state.clock.day_start(now);
-    if state.db.has_share_since(discord_id, day_start).await? {
+    if state
+        .db
+        .has_share_since(discord_id, day_start - 86400.0)
+        .await?
+    {
         return Ok(None);
     }
     let mode = Mode::from_setting(detection["mode"].as_str());

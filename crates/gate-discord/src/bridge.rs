@@ -34,6 +34,22 @@ pub struct Bridge {
 }
 
 impl Bridge {
+    pub async fn newapi_health(&self, site: &str, admin: bool) -> Option<Value> {
+        let response = self
+            .http
+            .post(format!("{site}/ai/api/health"))
+            .timeout(self.command_timeout)
+            .bearer_auth(&self.secret)
+            .json(&serde_json::json!({"admin":admin}))
+            .send()
+            .await
+            .ok()?;
+        if !response.status().is_success() {
+            return None;
+        }
+        response.json().await.ok()
+    }
+
     /// Only an explicit successful acknowledgement confirms a committed share.
     pub async fn report_share(&self, payload: &Value) -> ShareDelivery {
         let response = self
@@ -149,13 +165,22 @@ impl Bridge {
 
     /// Only the actual Discord message author is supplied by the event handler.
     pub async fn member_context(&self, discord_id: &str, guild_id: u64) -> Option<Value> {
+        self.member_context_message(discord_id, guild_id, None)
+            .await
+    }
+    pub async fn member_context_message(
+        &self,
+        discord_id: &str,
+        guild_id: u64,
+        message_id: Option<&str>,
+    ) -> Option<Value> {
+        let mut payload =
+            serde_json::json!({"discord_id":discord_id,"guild_id":guild_id.to_string()});
+        if let Some(id) = message_id {
+            payload["message_id"] = serde_json::json!(id);
+        }
         let result = self
-            .command(
-                "/self-register/bot/context",
-                &serde_json::json!({
-                    "discord_id": discord_id, "guild_id": guild_id.to_string(),
-                }),
-            )
+            .command("/self-register/bot/context", &payload)
             .await
             .ok()?;
         result.is_ok().then_some(result.data)

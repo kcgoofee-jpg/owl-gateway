@@ -114,10 +114,35 @@ dl=(-n nai-ops-linux-musl)
 [[ $have_image == yes ]] || dl+=(-n owl-gate-image)
 gh run download "$run_id" -R "$REPO" "${dl[@]}" -D "$tmp"
 
+# Preserve the compose contract of the healthy release as well as its image.
+remote 'if [ -f /opt/owl/compose.yml ] && docker exec owl-gate nai-gate healthcheck >/dev/null 2>&1; then
+  live=$(cat /opt/owl/live.sha)
+  case "$live" in ""|*[!0-9a-f]*) exit 1;; esac
+  [ "${#live}" -eq 40 ] || exit 1
+  mkdir -p "/opt/owl/releases/$live"
+  if [ ! -f "/opt/owl/releases/$live/compose.yml" ]; then
+    cp /opt/owl/compose.yml "/opt/owl/releases/$live/compose.yml"
+  fi
+  cp "/opt/owl/releases/$live/compose.yml" /opt/owl/compose.previous.yml
+fi' >/dev/null
 say "uploading nai-ops, cutover.sh, caddy-reload.sh, compose.yml$([[ $have_image == yes ]] || echo ', candidate image')"
 files=("$tmp/nai-ops-linux-musl/nai-ops" deploy/v3/cutover.sh deploy/v3/caddy-reload.sh deploy/v3/compose.yml)
 [[ $have_image == yes ]] || files=("$tmp/owl-gate-image/owl-gate.tar.gz" "${files[@]}")
 scp -q "${KEY[@]}" "${files[@]}" "root@$OWL_IP:/opt/owl/" 2>&1 | mask
+
+# Read-only NewAPI projection is a host service and must ship with the gateway adapters.
+scp -q "${KEY[@]}" deploy/ops/newapi-account.py "root@$OWL_IP:/opt/owl/ai_account.candidate.py" 2>&1 | mask
+remote 'set -e
+  python3 -m py_compile /opt/owl/ai_account.candidate.py
+  if ! cmp -s /opt/owl/ai_account.candidate.py /opt/welfare/ai_account.py; then
+    cp /opt/welfare/ai_account.py /opt/welfare/ai_account.py.previous
+    install -m 755 /opt/owl/ai_account.candidate.py /opt/welfare/ai_account.py
+    if ! systemctl restart owl-ai-account.service || ! systemctl is-active --quiet owl-ai-account.service; then
+      cp /opt/welfare/ai_account.py.previous /opt/welfare/ai_account.py
+      systemctl restart owl-ai-account.service
+      exit 1
+    fi
+  fi' || die "NewAPI projection update failed and was restored"
 
 # 服务器上的定时脚本（cron 和 systemd timer 调的那几个）也要跟着版本走。
 # 以前它们只存在于 /opt/owl/ops/，仓库里没有：close-stale-deliveries.sh 在线上每 5 分钟跑，
@@ -165,7 +190,7 @@ ssh "${KEY[@]}" "root@$OWL_IP" "bash -s -- $(printf %q "$DOMAIN")" < tools/deplo
   || die "post-deploy checks failed; consider: /opt/owl/cutover.sh previous"
 
 curl -fsS -m 10 "https://$DOMAIN/healthz" | grep -q '"ok":true' || die "public /healthz not ok"
-remote "printf '%s\n' $(printf %q "$sha") > /opt/owl/live.sha" >/dev/null
+remote "mkdir -p /opt/owl/releases/$(printf %q "$sha"); cp /opt/owl/compose.yml /opt/owl/releases/$(printf %q "$sha")/compose.yml; printf '%s\n' $(printf %q "$sha") > /opt/owl/live.sha" >/dev/null
 say "live: owl-gate:${sha:0:7} ($((SECONDS - start))s total)"
 say "https://github.com/$REPO/commit/$sha"
 

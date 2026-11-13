@@ -28,6 +28,24 @@ impl Db {
         .await
     }
 
+    pub async fn latest_share(&self, discord_id: &str) -> Result<Option<serde_json::Value>> {
+        use rusqlite::OptionalExtension;
+        let discord_id = discord_id.to_owned();
+        self.read(move |c| c.query_row(
+            "SELECT message_id,channel_id,created_at FROM share_posts WHERE discord_id=? ORDER BY created_at DESC LIMIT 1",
+            [discord_id], |r| Ok(serde_json::json!({"message_id":r.get::<_,String>(0)?,"channel_id":r.get::<_,String>(1)?,"created_at":r.get::<_,f64>(2)?}))).optional()).await
+    }
+
+    pub async fn selected_share(
+        &self,
+        discord_id: &str,
+        message_id: &str,
+    ) -> Result<Option<serde_json::Value>> {
+        use rusqlite::OptionalExtension;
+        let (who, id) = (discord_id.to_owned(), message_id.to_owned());
+        self.read(move |c|c.query_row("SELECT message_id,channel_id,created_at FROM share_posts WHERE discord_id=? AND message_id=?",params![who,id],|r|Ok(serde_json::json!({"message_id":r.get::<_,String>(0)?,"channel_id":r.get::<_,String>(1)?,"created_at":r.get::<_,f64>(2)?}))).optional()).await
+    }
+
     /// Batch view for the administrator's member list.
     pub async fn sharing_members_since(
         &self,

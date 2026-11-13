@@ -1,4 +1,4 @@
-# 猫头鹰公益站 3.0（Rust）：一个镜像两个进程（网关 + 奶妹）。放在服务器 /opt/owl/compose.yml，项目名 owl。
+# 猫头鹰公益站 3.0（Rust）：一个镜像三个进程（网关 + Discord 核心 + 模型 worker）。放在服务器 /opt/owl/compose.yml，项目名 owl。
 #
 # 使用 /opt/service-tools/.env（配置）、/opt/service-tools/data（库、secret_key）、Caddy 直连的固定地址 172.30.0.10（service-tools_edge 网络）。
 #
@@ -66,12 +66,14 @@ services:
       - REGISTRATION_BRIDGE_SECRET=${REGISTRATION_BRIDGE_SECRET}
       - REGISTRATION_BACKEND_URL=http://nai-gate:8000
       - SITE_URL=${SITE_URL}
-      # AI 对话（@奶妹 / 回复奶妹）：KEY 未配置时该功能整体关闭，其余不受影响。
-      # 走同网 zcode-proxy:8080（宿主机回环 8090 只给本机排障；本机 8080 另有用途）。
-      # 体验套餐 / glm-5.3-flash。New API 仍给成员聊天用，不喂奶妹。
-      - NAIMEI_LLM_BASE_URL=${NAIMEI_LLM_BASE_URL:-http://zcode-proxy:8080}
-      - NAIMEI_LLM_API_KEY=${NAIMEI_LLM_API_KEY:-}
+      - NAIMEI_CORE_BIND=0.0.0.0:8012
+      - NAIMEI_CHAT_WORKER_URL=http://naimei-chat:8011
+      - NAIMEI_WORKER_SECRET=${REGISTRATION_BRIDGE_SECRET}
       - NAIMEI_LLM_MODEL=${NAIMEI_LLM_MODEL:-glm-5.3-flash}
+      - NAIMEI_QUEUE_FILE=/app/data/chat/queue.json
+      - NAIMEI_REACTIONS=${NAIMEI_REACTIONS:-1}
+      - NAIMEI_CHAT_ENABLED=${NAIMEI_CHAT_ENABLED:-1}
+      - NAIMEI_QUERIES=${NAIMEI_QUERIES:-1}
       - NAIMEI_OWNER_IDS=${NAIMEI_OWNER_IDS:-}
       - NAIMEI_CHAT_LOG=/app/data/chat/chatlog.jsonl
       - TZ=Asia/Shanghai
@@ -81,6 +83,26 @@ services:
       - /opt/naimei-chat:/app/data/chat
     extra_hosts:
       - "host.docker.internal:host-gateway"
+    mem_limit: 256m
+    networks: [internal]
+    logging:
+      driver: journald
+      options: {tag: "{{.Name}}"}
+
+  naimei-chat:
+    image: owl-gate:current
+    container_name: owl-naimei-chat
+    restart: unless-stopped
+    entrypoint: ["/usr/local/bin/nai-bots"]
+    command: ["chat-worker"]
+    healthcheck: {disable: true}
+    environment:
+      - NAIMEI_CORE_URL=http://naimei:8012
+      - NAIMEI_WORKER_SECRET=${REGISTRATION_BRIDGE_SECRET}
+      - NAIMEI_LLM_BASE_URL=${NAIMEI_LLM_BASE_URL:-http://zcode-proxy:8080}
+      - NAIMEI_LLM_API_KEY=${NAIMEI_LLM_API_KEY:-}
+      - NAIMEI_LLM_MODEL=${NAIMEI_LLM_MODEL:-glm-5.3-flash}
+      - TZ=Asia/Shanghai
     mem_limit: 256m
     networks: [internal]
     logging:

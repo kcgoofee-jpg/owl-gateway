@@ -49,11 +49,40 @@ pub enum ChatError {
 pub struct Chat {
     cfg: ChatCfg,
     http: reqwest::Client,
+    remote: Option<(String, String)>,
+    actor: Option<crate::naimei::capabilities::ToolRequest>,
     image_slots: std::sync::Arc<tokio::sync::Semaphore>,
+}
+
+impl ChatError {
+    pub fn transient(&self) -> bool {
+        matches!(self, Self::Timeout)
+            || matches!(self,Self::Upstream(s) if s.starts_with("HTTP 5") || s.starts_with("请求没发出去"))
+    }
 }
 
 impl Chat {
     pub fn new(cfg: ChatCfg) -> Self {
+        let mut chat = Self::local(cfg);
+        if let (Ok(url), Ok(secret)) = (
+            std::env::var("NAIMEI_CHAT_WORKER_URL"),
+            std::env::var("NAIMEI_WORKER_SECRET"),
+        ) {
+            chat.remote = Some((url, secret));
+        }
+        chat
+    }
+    pub fn with_actor(&self, actor: String, channel: String) -> Self {
+        let mut c = self.clone();
+        c.actor = Some(crate::naimei::capabilities::ToolRequest {
+            actor,
+            channel,
+            name: String::new(),
+            arguments: json!({}),
+        });
+        c
+    }
+    pub fn local(cfg: ChatCfg) -> Self {
         let http = reqwest::Client::builder()
             .timeout(Duration::from_secs(150))
             .user_agent("naimei/3.0 (owl-gateway)")
@@ -62,6 +91,8 @@ impl Chat {
         Chat {
             cfg,
             http,
+            remote: None,
+            actor: None,
             image_slots: std::sync::Arc::new(tokio::sync::Semaphore::new(2)),
         }
     }
@@ -89,7 +120,7 @@ impl Chat {
 
     /// 是否走流式渐进编辑。
     pub fn stream_enabled(&self) -> bool {
-        self.cfg.stream
+        self.cfg.stream && self.remote.is_none()
     }
 
     /// 调一次对话。`system` 来自 `system_prompt`；`history` 是本频道最近几轮。
@@ -99,7 +130,44 @@ impl Chat {
         history: &[Turn],
         user: impl Into<Value>,
     ) -> Result<String, ChatError> {
-        let (user, _images) = self.prepare_user(user.into()).await?;
+        let user = user.into();
+        if let Some((url, secret)) = &self.remote {
+            let response = self
+                .http
+                .post(format!("{url}/reply"))
+                .timeout(Duration::from_secs(155))
+                .bearer_auth(secret)
+                .json(&crate::worker::Request {
+                    system: system.to_owned(),
+                    history: history.to_vec(),
+                    user,
+                    actor: self.actor.clone(),
+                })
+                .send()
+                .await
+                .map_err(|e| {
+                    if e.is_timeout() {
+                        ChatError::Timeout
+                    } else {
+                        ChatError::Upstream("请求没发出去：模型工作进程不可用".into())
+                    }
+                })?;
+            let v: Value = response
+                .json()
+                .await
+                .map_err(|_| ChatError::Upstream("模型工作进程响应无效".into()))?;
+            return match v["answer"].as_str() {
+                Some(answer) => Ok(answer.to_owned()),
+                None => Err(match v["kind"].as_str() {
+                    Some("timeout") => ChatError::Timeout,
+                    Some("quota") => ChatError::Quota,
+                    Some("image") => ChatError::ImageInput("图片处理失败"),
+                    Some("transient") => ChatError::Upstream("HTTP 503：模型暂不可用".into()),
+                    _ => ChatError::Upstream("模型上游拒绝请求".into()),
+                }),
+            };
+        }
+        let (user, _images) = self.prepare_user(user).await?;
         let body = self.request_body(system, history, user, false);
         let url = format!("{}/v1/chat/completions", self.cfg.base_url);
         let resp = self
@@ -127,6 +195,122 @@ impl Chat {
             Some(content) if !content.trim().is_empty() => Ok(content.to_owned()),
             _ => Err(classify(status, &v)),
         }
+    }
+
+    /// Model-selected read-only tools. The actor is fixed outside model arguments.
+    pub async fn reply_agent(
+        &self,
+        r: crate::worker::Request,
+        core: &str,
+        secret: &str,
+    ) -> Result<String, ChatError> {
+        let (user, _images) = self.prepare_user(r.user).await?;
+        let mut body = self.request_body(&r.system, &r.history, user, false);
+        body["tools"] = crate::naimei::capabilities::tools();
+        let mut used = 0;
+        for _ in 0..3 {
+            let mut response = self
+                .http
+                .post(format!("{}/v1/chat/completions", self.cfg.base_url))
+                .bearer_auth(&self.cfg.api_key)
+                .json(&body)
+                .send()
+                .await
+                .map_err(|e| {
+                    if e.is_timeout() {
+                        ChatError::Timeout
+                    } else {
+                        ChatError::Upstream("请求没发出去：模型连接失败".into())
+                    }
+                })?;
+            if response.status().as_u16() == 429 {
+                let wait = response
+                    .headers()
+                    .get("retry-after")
+                    .and_then(|v| v.to_str().ok())
+                    .and_then(|s| s.parse::<f64>().ok());
+                if let Some(wait) = wait.filter(|n| n.is_finite() && *n >= 0.0 && *n <= 15.0) {
+                    tokio::time::sleep(Duration::from_secs_f64(wait)).await;
+                    response = self
+                        .http
+                        .post(format!("{}/v1/chat/completions", self.cfg.base_url))
+                        .bearer_auth(&self.cfg.api_key)
+                        .json(&body)
+                        .send()
+                        .await
+                        .map_err(|_| ChatError::Upstream("请求没发出去：限流后连接失败".into()))?;
+                }
+            }
+            let status = response.status().as_u16();
+            let v: Value = response
+                .json()
+                .await
+                .map_err(|_| ChatError::Upstream("模型响应不是 JSON".into()))?;
+            if status == 400
+                && body.get("tools").is_some()
+                && v.to_string().to_lowercase().contains("tool")
+            {
+                body.as_object_mut().expect("object").remove("tools");
+                continue;
+            }
+            let message = &v["choices"][0]["message"];
+            if let Some(calls) = message["tool_calls"].as_array().filter(|a| !a.is_empty()) {
+                if calls.len() + used > 3 {
+                    return Err(ChatError::Upstream(
+                        "只读工具调用次数已达上限，请使用斜杠命令查询".into(),
+                    ));
+                }
+                body["messages"]
+                    .as_array_mut()
+                    .expect("messages")
+                    .push(message.clone());
+                for call in calls {
+                    used += 1;
+                    let mut actor = r
+                        .actor
+                        .clone()
+                        .ok_or_else(|| ChatError::Upstream("缺少真实查询身份".into()))?;
+                    actor.name = call["function"]["name"].as_str().unwrap_or("").to_owned();
+                    actor.arguments = serde_json::from_str(
+                        call["function"]["arguments"].as_str().unwrap_or("{}"),
+                    )
+                    .unwrap_or(Value::Null);
+                    let result = if crate::naimei::capabilities::CAPABILITIES
+                        .iter()
+                        .any(|c| c.name == actor.name)
+                    {
+                        self.http
+                            .post(format!("{core}/tools"))
+                            .timeout(Duration::from_secs(10))
+                            .bearer_auth(secret)
+                            .json(&actor)
+                            .send()
+                            .await
+                            .ok()
+                    } else {
+                        None
+                    };
+                    let data = match result {
+                        Some(res) => res
+                            .json::<Value>()
+                            .await
+                            .unwrap_or(json!({"error":"查询结果无效"})),
+                        None => json!({"error":"查询不可用或未授权工具，不得猜测"}),
+                    };
+                    body["messages"].as_array_mut().expect("messages").push(
+                        json!({"role":"tool","tool_call_id":call["id"],"content":data.to_string()}),
+                    );
+                }
+                continue;
+            }
+            if let Some(text) = message["content"].as_str().filter(|s| !s.trim().is_empty()) {
+                return Ok(text.to_owned());
+            }
+            return Err(classify(status, &v));
+        }
+        Err(ChatError::Upstream(
+            "查询轮次已达上限，请使用斜杠命令查看事实".into(),
+        ))
     }
 
     /// 组请求体（流式与非流式共用）；`user_content` 是字符串或多模态数组。
@@ -386,6 +570,7 @@ pub fn system_prompt(
         s.push_str(stats);
         s.push('\n');
     }
+    s.push_str(include_str!("kb/skills/author-protection.md"));
     s
 }
 

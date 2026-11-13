@@ -324,6 +324,12 @@ async fn bot_context(State(state): State<AppState>, req: Request) -> ApiResult {
     let (parts, body) = req.into_parts();
     let mut m = read_model(&parts, body).await?;
     let who = Who::read(&mut m);
+    let selected = m.string("message_id", Some(""));
+    if !selected.is_empty()
+        && (!gate_core::validation::is_decimal(&selected) || selected.parse::<u64>().is_err())
+    {
+        return Err(HttpError::new(422, "消息 ID 无效").into());
+    }
     m.finish()?;
     let svc = authorize(&state, &parts, false)?;
     let discord_id = checked(svc, &who)?;
@@ -334,6 +340,10 @@ async fn bot_context(State(state): State<AppState>, req: Request) -> ApiResult {
     member["share_requirement"] = json!({
         "enabled": policy["enabled"], "mode":policy["mode"], "enforcing":policy["enforcing"],
         "shared_today":state.db.has_share_since(discord_id,state.clock.day_start(state.now())).await?,
+        "fulfilled":state.db.has_share_since(discord_id,state.clock.day_start(state.now())-86400.0).await?,
+        "valid_since":state.clock.day_start(state.now())-86400.0,
+        "latest_share":state.db.latest_share(discord_id).await?,
+        "selected_share":if selected.is_empty(){None}else{state.db.selected_share(discord_id,&selected).await?},
         "exempt":key.as_ref().is_some_and(|k|k.owner_image_full||k.patron),
         "required_now":me.get("share_lock").is_some(),
         "channel_url":crate::share_lock::channel_url(), "reset_hour":7,

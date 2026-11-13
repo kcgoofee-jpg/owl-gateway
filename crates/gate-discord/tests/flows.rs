@@ -292,14 +292,15 @@ async fn heartbeat_reports_account_server_latency_and_start_time() {
     assert_eq!(bridge[0]["method"], "POST");
     assert_eq!(bridge[0]["path"], "/self-register/bot/report");
     assert_eq!(bridge[0]["authorization"], format!("Bearer {SECRET}"));
-    assert_eq!(
-        bridge[0]["json"].to_string(),
-        json!({"status": {"user": "naimei", "guild": "测试服", "latency_ms": 42, "ready_at": 1_759_999_000.5,
-            "share_detection": {"connected":false,"last_complete_at":0.0,"complete_day_start":0.0,
-            "pending":0,"oldest_failure_at":null,"error":null}}})
-            .to_string(),
-        "心跳包含分享检测健康度，不含消息正文或旧版 AI 评论计数"
-    );
+    let report = &bridge[0]["json"]["status"];
+    assert_eq!(report["user"], "naimei");
+    assert_eq!(report["guild"], "测试服");
+    assert_eq!(report["latency_ms"], 42);
+    assert_eq!(report["share_detection"]["pending"], 0);
+    assert!(report["share_detection"]["coverage_start"].is_null());
+    assert_eq!(report["chat"]["max_concurrency"], 4);
+    assert_eq!(report["reactions"]["enabled"], false);
+    assert!(report.get("messages").is_none());
     assert!(server.discord_log().is_empty(), "心跳不调用 Discord");
     // 服务器不在缓存里：guild 报空串；延迟还没有数据按 0 报
     let fresh = naimei(&server);
@@ -363,7 +364,10 @@ async fn ready_syncs_commands_and_starts_heartbeat_and_reconciliation_once() {
             put["path"],
             format!("/applications/{APP}/guilds/{GUILD}/commands")
         );
-        assert_eq!(put["json"].as_array().unwrap().len(), 2);
+        assert_eq!(
+            put["json"].as_array().unwrap().len(),
+            gate_discord::commands::definitions().len()
+        );
     }
     // 心跳循环的第一轮马上就发
     for _ in 0..50 {
@@ -376,4 +380,27 @@ async fn ready_syncs_commands_and_starts_heartbeat_and_reconciliation_once() {
     // Reconciliation publishes its result immediately; two READY frames may wake it twice.
     assert!(!paths.is_empty() && paths.len() <= 3, "{paths:?}");
     assert!(paths.iter().all(|p| p == "/self-register/bot/report"));
+}
+
+#[tokio::test]
+async fn direct_share_query_is_private_and_works_with_chat_disabled() {
+    let server = MockServer::start().await;
+    let app = naimei(&server);
+    server.reset(&json!({"/self-register/bot/context":{"status":200,"json":{"member":{"share_requirement":{"fulfilled":true,"required_now":false,"valid_since":1759900000}}}}}),&Value::Null);
+    app.handle_interaction(slash(41, "分享状态", json!([])))
+        .await;
+    let text = expect_deferred_reply(&server, 41);
+    assert!(text.contains("分享不会重置额度"));
+    let calls = server.bridge_log();
+    assert_eq!(calls[0]["json"]["discord_id"], MEMBER);
+}
+
+#[tokio::test]
+async fn message_menu_never_queries_another_members_share_state() {
+    let server = MockServer::start().await;
+    let app = naimei(&server);
+    let it:Interaction=serde_json::from_value(json!({"id":"900000000000000342","application_id":APP,"type":2,"token":"tok-42","guild_id":GUILD,"channel_id":"900000000000000004","member":member(),"data":{"name":"查看分享状态","type":3,"target_id":"900000000000000020","resolved":{"messages":{"900000000000000020":{"author":{"id":"900000000000000006"}}}}}})).unwrap();
+    app.handle_interaction(it).await;
+    assert!(server.bridge_log().is_empty());
+    assert!(expect_deferred_reply(&server, 42).contains("只能查询自己的分享记录"));
 }

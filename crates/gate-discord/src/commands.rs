@@ -8,16 +8,15 @@
 //! - 快照测试（`tests/commands_snapshot.rs`）把当前输出逐字符存在 `tests/snapshots/commands.json`，
 //!   改命令名 / 描述 / 选项时要同时改快照，评审时一眼能看到成员在 Discord 里看到的变化。
 //!
-//! 命令只注册到 `DISCORD_GUILD_ID` 这一个服务器（公会级），不注册全局命令；
-//! `PUT` 是整体覆盖，所以删掉的命令（管理员的 `/open /limit /ban /unban /slots /revoke`，10-23 删的成员命令
-//! `/quota` `/help`：额度看成员首页，10-26 删的 `/反馈`：反馈功能整个下线）在下一次启动同步时就从服务器里消失。
+//! 命令仅注册到指定服务器。确定性只读查询与模型工具共用能力注册表；
+//! 私密响应来自斜杠命令或消息菜单，普通消息不能自动收到 ephemeral 回复。
 
 use serde_json::{Value, json};
 use twilight_model::gateway::Intents;
 
 /// 奶妹的网关 Intents：GUILDS（服务器名）+ GUILD_MESSAGES + MESSAGE_CONTENT（@奶妹 / 回复奶妹触发对话）。
 /// MESSAGE_CONTENT 是特权 Intent，须在开发者后台勾选，否则网关以 4014 拒连（启动即失败退避重试）。
-/// 用于对话触发和分享图片检测；论坛只读并记录分享元数据，不私信、不点赞，其余纪律见 `lib.rs`。
+/// 用于对话触发和分享图片检测；论坛记录分享元数据，可在提交后添加确认反应，不私信，其余纪律见 `lib.rs`。
 pub const NAIMEI_INTENTS: Intents = Intents::GUILDS
     .union(Intents::GUILD_MESSAGES)
     .union(Intents::MESSAGE_CONTENT);
@@ -61,7 +60,7 @@ fn command(name: &str, description: &str, options: Vec<Value>) -> Value {
 
 /// 发给 `PUT /applications/{app}/guilds/{guild}/commands` 的整个数组。
 pub fn definitions() -> Vec<Value> {
-    vec![
+    let mut defs = vec![
         command(
             Command::Register.name(),
             "领取你的猫头鹰公益站 API Key",
@@ -72,7 +71,20 @@ pub fn definitions() -> Vec<Value> {
             "Key 丢了或泄露了？换一把新的（旧的立即失效）",
             vec![],
         ),
-    ]
+    ];
+    for c in crate::naimei::capabilities::CAPABILITIES {
+        let options = if matches!(c.name, "activity" | "creator_audit") {
+            vec![
+                json!({"name":"成员","description":"待查询成员；省略查本人","type":6,"required":false}),
+            ]
+        } else {
+            vec![]
+        };
+        defs.push(command(c.command, c.description, options));
+    }
+    defs.push(command("取消", "取消本人正在等待或处理的聊天", vec![]));
+    defs.push(json!({"name":"查看分享状态","type":3,"dm_permission":false}));
+    defs
 }
 
 #[cfg(test)]
@@ -82,7 +94,10 @@ mod tests {
     #[test]
     fn names_roundtrip_and_follow_definition_order() {
         let defs = definitions();
-        assert_eq!(defs.len(), Command::ALL.len());
+        assert_eq!(
+            defs.len(),
+            Command::ALL.len() + crate::naimei::capabilities::CAPABILITIES.len() + 2
+        );
         for (cmd, def) in Command::ALL.iter().zip(&defs) {
             assert_eq!(def["name"], cmd.name());
             assert_eq!(Command::from_name(cmd.name()), Some(*cmd));

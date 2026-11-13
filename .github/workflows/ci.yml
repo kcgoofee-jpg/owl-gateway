@@ -158,6 +158,8 @@ jobs:
           for f in nightly_backup.sh close-stale-deliveries.sh; do
             [ -s "deploy/v3/ops/$f" ] || { echo "::error::deploy/v3/ops/$f 缺失或为空"; exit 1; }
           done
+      - name: Verify passive NewAPI health projection
+        run: python3 tools/ci/test-newapi-health.py
       - name: Exercise safe image staging and queue wait
         run: bash tools/ci/test-cutover.sh
 

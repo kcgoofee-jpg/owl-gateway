@@ -20,5 +20,112 @@
     "default_member_permissions": null,
     "contexts": null,
     "integration_types": null
+  },
+  {
+    "name": "分享状态",
+    "description": "查询本人分享履约和限制，不重置额度",
+    "type": 1,
+    "options": [],
+    "nsfw": false,
+    "dm_permission": true,
+    "default_member_permissions": null,
+    "contexts": null,
+    "integration_types": null
+  },
+  {
+    "name": "站点状态",
+    "description": "查询实时站点排队和出图统计",
+    "type": 1,
+    "options": [],
+    "nsfw": false,
+    "dm_permission": true,
+    "default_member_permissions": null,
+    "contexts": null,
+    "integration_types": null
+  },
+  {
+    "name": "我的额度",
+    "description": "查询本人额度、钱包与签到",
+    "type": 1,
+    "options": [],
+    "nsfw": false,
+    "dm_permission": true,
+    "default_member_permissions": null,
+    "contexts": null,
+    "integration_types": null
+  },
+  {
+    "name": "上游状态",
+    "description": "查询 NewAPI 模型近期请求健康，开放不代表可用",
+    "type": 1,
+    "options": [],
+    "nsfw": false,
+    "dm_permission": true,
+    "default_member_permissions": null,
+    "contexts": null,
+    "integration_types": null
+  },
+  {
+    "name": "活跃度",
+    "description": "查询公开活动事实，不能判定作者应否分享",
+    "type": 1,
+    "options": [
+      {
+        "name": "成员",
+        "description": "待查询成员；省略查本人",
+        "type": 6,
+        "required": false
+      }
+    ],
+    "nsfw": false,
+    "dm_permission": true,
+    "default_member_permissions": null,
+    "contexts": null,
+    "integration_types": null
+  },
+  {
+    "name": "作者足迹",
+    "description": "查询作者相关的可见原生转发、回复和提及；下载者不可查询",
+    "type": 1,
+    "options": [
+      {
+        "name": "成员",
+        "description": "待查询成员；省略查本人",
+        "type": 6,
+        "required": false
+      }
+    ],
+    "nsfw": false,
+    "dm_permission": true,
+    "default_member_permissions": null,
+    "contexts": null,
+    "integration_types": null
+  },
+  {
+    "name": "奶妹状态",
+    "description": "分别查询 Discord、分享和聊天队列健康",
+    "type": 1,
+    "options": [],
+    "nsfw": false,
+    "dm_permission": true,
+    "default_member_permissions": null,
+    "contexts": null,
+    "integration_types": null
+  },
+  {
+    "name": "取消",
+    "description": "取消本人正在等待或处理的聊天",
+    "type": 1,
+    "options": [],
+    "nsfw": false,
+    "dm_permission": true,
+    "default_member_permissions": null,
+    "contexts": null,
+    "integration_types": null
+  },
+  {
+    "name": "查看分享状态",
+    "type": 3,
+    "dm_permission": false
   }
 ]

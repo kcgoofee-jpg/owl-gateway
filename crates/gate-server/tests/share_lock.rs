@@ -15,6 +15,7 @@ async fn report(state: &AppState, at: f64) {
         connected: true,
         last_complete_at: at,
         complete_day_start: state.clock.day_start(at),
+        coverage_start: Some(state.clock.day_start(at) - 86400.0),
         ..Default::default()
     };
     let response = Call::new("POST", "/self-register/bot/report")
@@ -115,8 +116,8 @@ async fn share_commit_unlocks_the_next_request_and_survives_key_rotation_and_res
         assert_eq!(r.0, 403, "{path} {:?}", r.2);
         assert!(String::from_utf8_lossy(&r.2).contains("share_lock"));
     }
-    // Yesterday's share cannot unlock today.
-    assert_eq!(share(&e.state, now - 86400.0, json!({})).await, 200);
+    // A share before the previous service day cannot unlock today.
+    assert_eq!(share(&e.state, now - 2.0 * 86400.0, json!({})).await, 200);
     assert!(share_lock::is_locked(&e.state, &key(&e.state).await).await);
     // The real bot uses mocked Discord REST and POSTs to the real gateway HTTP router.
     let discord_listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
@@ -504,7 +505,7 @@ async fn daily_mode_requires_each_non_exempt_member_to_share_even_without_previo
         share_lock::restriction(&e.state, &key(&e.state).await)
             .await
             .unwrap()
-            .contains("今天还没有分享")
+            .contains("昨日和今日都没有分享")
     );
     let error = reserved
         .prepare_dispatch("abc124", "1100000002")
@@ -517,7 +518,7 @@ async fn daily_mode_requires_each_non_exempt_member_to_share_even_without_previo
     exempt.owner_image_full = false;
     exempt.patron = true;
     assert!(!share_lock::is_locked(&e.state, &exempt).await);
-    assert_eq!(share(&e.state, now - 86400.0, json!({})).await, 200);
+    assert_eq!(share(&e.state, now - 2.0 * 86400.0, json!({})).await, 200);
     assert!(share_lock::is_locked(&e.state, &key(&e.state).await).await);
     assert_eq!(share(&e.state, now, json!({})).await, 200);
     assert!(!share_lock::is_locked(&e.state, &key(&e.state).await).await);
@@ -528,7 +529,16 @@ async fn daily_mode_requires_each_non_exempt_member_to_share_even_without_previo
     let reset = e.state.clock.day_start(now) + 86400.0;
     gate_server::time::freeze(Some(reset));
     report(&e.state, reset).await;
-    assert!(share_lock::is_locked(&e.state, &key(&e.state).await).await);
+    assert!(
+        !share_lock::is_locked(&e.state, &key(&e.state).await).await,
+        "yesterday's share remains valid after 07:00"
+    );
+    gate_server::time::freeze(Some(reset + 86400.0));
+    report(&e.state, reset + 86400.0).await;
+    assert!(
+        share_lock::is_locked(&e.state, &key(&e.state).await).await,
+        "share expires after the next service-day window"
+    );
     assert_eq!(
         admin
             .put("/ops/share-lock", json!({"enabled":false}))
@@ -541,5 +551,48 @@ async fn daily_mode_requires_each_non_exempt_member_to_share_even_without_previo
     assert_eq!(
         share_lock::detection(&restarted).await.unwrap()["mode"],
         "daily"
+    );
+}
+
+#[tokio::test]
+async fn quota_mode_accepts_yesterday_without_resetting_usage() {
+    let now = share_lock::starts_at() + 3600.0;
+    let _clock = clock(Some(now)).await;
+    let e = setup_registration(
+        "http://127.0.0.1:9",
+        &[
+            ("DISCORD_GUILD_ID", GUILD),
+            ("REGISTRATION_BRIDGE_SECRET", SECRET),
+        ],
+    )
+    .await;
+    let yesterday = e.state.clock.day(e.state.clock.day_start(now) - 1.0);
+    add_usage(&e.state.db, 1, &yesterday, 10, 0.0).await;
+    report(&e.state, now).await;
+    assert!(share_lock::is_locked(&e.state, &key(&e.state).await).await);
+    assert_eq!(share(&e.state, now - 86400.0, json!({})).await, 200);
+    assert!(!share_lock::is_locked(&e.state, &key(&e.state).await).await);
+    assert_eq!(e.state.db.get_counter(1, &yesterday).await.unwrap().v5, 10);
+    let raw = e
+        .state
+        .db
+        .get_setting(bot_config::STATUS_KEY)
+        .await
+        .unwrap()
+        .unwrap();
+    let mut report: Value = serde_json::from_str(&raw).unwrap();
+    report["share_detection"]
+        .as_object_mut()
+        .unwrap()
+        .remove("coverage_start");
+    e.state
+        .db
+        .set_setting(bot_config::STATUS_KEY, &report.to_string())
+        .await
+        .unwrap();
+    assert_eq!(
+        share_lock::detection(&e.state).await.unwrap()["enforcing"],
+        false,
+        "old reports cannot prove yesterday's coverage"
     );
 }
