@@ -274,6 +274,13 @@ impl Naimei {
                 .and_then(|o| o.value.as_ref())
                 .and_then(|v| v.as_str());
             let mut args = target.map_or(json!({}), |s| json!({"target":s}));
+            if let Some(client) = it
+                .option("客户端")
+                .and_then(|o| o.value.as_ref())
+                .and_then(|v| v.as_str())
+            {
+                args = json!({"client":client});
+            }
             if requested == "查看分享状态" {
                 if let Some(id) = it.data.as_ref().and_then(|d| d.target_id.as_deref()) {
                     let selected = &it.data.as_ref().expect("data").resolved["messages"][id];

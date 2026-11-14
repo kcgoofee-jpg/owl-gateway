@@ -186,6 +186,18 @@ impl Bridge {
         result.is_ok().then_some(result.data)
     }
 
+    /// 成员自报客户端：后端写成本人的后台标签。返回给成员看的一句话。
+    pub async fn report_client(&self, discord_id: &str, guild_id: u64, client: &str) -> Value {
+        let payload = serde_json::json!({"discord_id":discord_id,"guild_id":guild_id.to_string(),"client":client});
+        match self.command("/self-register/bot/client", &payload).await {
+            Ok(b) if b.status == 200 => {
+                serde_json::json!({"recorded":true,"client":b.data["client"],"note":"已登记给站长，站长核对后处理；登记本身不会自动解除限制"})
+            }
+            Ok(b) => serde_json::json!({"error":b.data}),
+            Err(_) => serde_json::json!({"error":"登记暂不可用"}),
+        }
+    }
+
     /// Read-only New API wallet/model facts; the endpoint returns no login credentials.
     pub async fn newapi_context(&self, site: &str, discord_id: &str) -> Option<Value> {
         if site.is_empty() {

@@ -1,4 +1,5 @@
-//! One permission-checked read-only registry for native commands and model tools.
+//! One permission-checked registry for native commands and model tools.
+//! 全部只读，唯一例外是 `report_client`：只写本人的「自报客户端」后台标签，不改额度或权限。
 use super::*;
 use serde::{Deserialize, Serialize};
 #[derive(Clone, Serialize, Deserialize)]
@@ -62,6 +63,13 @@ pub const CAPABILITIES: &[Capability] = &[
         timeout: 8,
     },
     Capability {
+        name: "report_client",
+        command: "报客户端",
+        description: "登记本人使用的生图客户端名称给站长核对（被拦截或站长要求说明客户端时用），不会自动解除限制",
+        source: "owl",
+        timeout: 8,
+    },
+    Capability {
         name: "bot_status",
         command: "奶妹状态",
         description: "查询当前生产版本、对话模型、Discord 连接和分享及聊天队列健康",
@@ -70,7 +78,7 @@ pub const CAPABILITIES: &[Capability] = &[
     },
 ];
 pub fn tools() -> Value {
-    json!(CAPABILITIES.iter().map(|c|json!({"type":"function","function":{"name":c.name,"description":c.description,"parameters":{"type":"object","properties":if matches!(c.name,"activity"|"creator_audit"){json!({"target":{"type":"string","description":"待查成员 ID；作者足迹在帖子中默认查楼主"},"before":{"type":"string","description":"仅明确指定截止日期时传 YYYY-MM-DD；默认全部可见历史"}})}else{json!({})},"additionalProperties":false}}})).collect::<Vec<_>>())
+    json!(CAPABILITIES.iter().map(|c|json!({"type":"function","function":{"name":c.name,"description":c.description,"parameters":if c.name=="report_client"{json!({"type":"object","properties":{"client":{"type":"string","description":"成员亲口说出的客户端名称，原样填写，不要猜"}},"required":["client"],"additionalProperties":false})}else{json!({"type":"object","properties":if matches!(c.name,"activity"|"creator_audit"){json!({"target":{"type":"string","description":"待查成员 ID；作者足迹在帖子中默认查楼主"},"before":{"type":"string","description":"仅明确指定截止日期时传 YYYY-MM-DD；默认全部可见历史"}})}else{json!({})},"additionalProperties":false})}}})).collect::<Vec<_>>())
 }
 impl Naimei {
     pub async fn capability(self: &Arc<Self>, r: ToolRequest) -> Value {
@@ -92,7 +100,8 @@ impl Naimei {
                     o.keys().any(|k| {
                         !((matches!(c.name, "activity" | "creator_audit")
                             && matches!(k.as_str(), "target" | "before"))
-                            || (c.name == "share_status" && k == "message_id"))
+                            || (c.name == "share_status" && k == "message_id")
+                            || (c.name == "report_client" && k == "client"))
                     })
                 }))
         {
@@ -149,6 +158,14 @@ impl Naimei {
                 v
             }
             "activity" | "creator_audit" => self.activity_query(r).await,
+            "report_client" => match r.arguments["client"].as_str().map(str::trim) {
+                Some(c) if !c.is_empty() => {
+                    self.bridge
+                        .report_client(&r.actor, self.cfg.guild_id, c)
+                        .await
+                }
+                _ => json!({"error":"请写上客户端名称"}),
+            },
             _ => json!({"error":"unknown capability"}),
         }
     }
@@ -283,6 +300,18 @@ pub fn render(name: &str, result: &Value) -> String {
             ));
         }
         return out;
+    }
+    if name == "report_client" {
+        return match data["client"].as_str() {
+            Some(c) if data["recorded"] == true => format!(
+                "已登记你的客户端：**{}**。站长核对后处理，登记本身不会自动解除限制。",
+                c.replace('`', "'")
+            ),
+            _ => format!(
+                "登记失败：{}",
+                data["error"].as_str().unwrap_or("暂不可用，请稍后再试")
+            ),
+        };
     }
     serde_json::to_string_pretty(result).unwrap_or_else(|_| "查询结果暂不可用".into())
 }

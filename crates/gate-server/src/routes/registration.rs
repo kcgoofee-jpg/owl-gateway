@@ -31,6 +31,7 @@ pub fn router() -> Router<AppState> {
         .route("/self-register/bot/stats", get(bot_stats))
         .route("/self-register/bot/context", post(bot_context))
         .route("/self-register/bot/share", post(bot_share))
+        .route("/self-register/bot/client", post(bot_client))
 }
 
 /// 桥接 / 成员页接口的请求体上限（正常请求都在几百字节）。
@@ -348,11 +349,90 @@ async fn bot_context(State(state): State<AppState>, req: Request) -> ApiResult {
         "required_now":me.get("share_lock").is_some(),
         "channel_url":crate::share_lock::channel_url(), "reset_hour":7,
     });
+    if let Some(k) = &key {
+        member["recent_failures"] = recent_failures(&state, k.id()).await?;
+    }
+    if me["today"]["daily_images"] == 0 {
+        member["v45_paused_by_owner"] = json!(true);
+    }
     let status = state.live.status(&state).await?;
     Ok(no_store(ok_json(&json!({
         "server_time": state.now(), "timezone": "Asia/Shanghai",
         "member": member, "site": status.as_ref(),
     }))))
+}
+
+/// 本人近 24 小时最后几条被拒 / 失败的原文：成员说「被风控了」时，奶妹以这里为准，不凭额度字段猜。
+async fn recent_failures(state: &AppState, key_id: i64) -> Result<Value, crate::error::ApiError> {
+    let since = state.now() - 86400.0;
+    let mut out = Vec::new();
+    for status in ["rejected", "error"] {
+        for r in state.db.member_logs(key_id, since, 0, status, 4).await? {
+            out.push(json!({
+                "at": r["ts"], "model": r["model"], "status": r["status"],
+                "reason": r["reason"], "detail": r["detail"], "client": r["client"],
+            }));
+        }
+    }
+    out.sort_by(|a, b| {
+        b["at"]
+            .as_f64()
+            .partial_cmp(&a["at"].as_f64())
+            .unwrap_or(std::cmp::Ordering::Equal)
+    });
+    Ok(json!(out))
+}
+
+/// 成员自报所用的生图客户端（`/报客户端` 或对话里让奶妹登记）：写成后台成员标签「自报客户端」，
+/// 备注带上近 24 小时实际请求的 UA，站长对照后决定是否恢复。只改本人的标签。
+async fn bot_client(State(state): State<AppState>, req: Request) -> ApiResult {
+    const CLIENT_MAX: usize = 40;
+    let (parts, body) = req.into_parts();
+    let mut m = read_model(&parts, body).await?;
+    let who = Who::read(&mut m);
+    let client = m.string("client", None);
+    m.finish()?;
+    let svc = authorize(&state, &parts, false)?;
+    let discord_id = checked(svc, &who)?;
+    let client: String = take_chars(gate_core::primitives::strip(&client), CLIENT_MAX)
+        .chars()
+        .map(|c| if c.is_control() { ' ' } else { c })
+        .collect();
+    if client.trim().is_empty() {
+        return Err(HttpError::new(422, "请写上客户端名称").into());
+    }
+    let Some(key) = svc.key_row_for(discord_id).await? else {
+        return Err(HttpError::new(404, "你还没有领取 Key").into());
+    };
+    let since = state.now() - 86400.0;
+    let mut uas: Vec<String> = Vec::new();
+    for r in state.db.member_logs(key.id(), since, 0, "", 50).await? {
+        let ua = take_chars(r["client"].as_str().unwrap_or(""), 60).to_string();
+        if !ua.is_empty() && !uas.contains(&ua) {
+            uas.push(ua);
+        }
+    }
+    let seen = if uas.is_empty() {
+        "近 24 小时无请求".to_string()
+    } else {
+        uas.into_iter().take(2).collect::<Vec<_>>().join(" / ")
+    };
+    let note = take_chars(&format!("成员自报：{client}｜实际 UA：{seen}"), 200).to_string();
+    state
+        .db
+        .upsert_key_tag(key.id(), "自报客户端", &note, "奶妹", state.now())
+        .await?;
+    crate::action_log::log_action(
+        &state.db,
+        &format!("Discord:{discord_id}"),
+        "成员自报客户端",
+        &format!("Key #{}", key.id()),
+        &client,
+        true,
+        state.now(),
+    )
+    .await;
+    Ok(ok_json(&json!({"ok": true, "client": client})))
 }
 
 fn member_bot_projection(me: &Value) -> Value {
