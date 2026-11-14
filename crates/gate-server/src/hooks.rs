@@ -171,9 +171,8 @@ impl Hooks for GateHooks {
     ) -> BoxFuture<'a, HookResult<i64>> {
         Box::pin(async move {
             self.db
-                .get_upstream_counter(token_id, day)
+                .upstream_v5_used_and_held(token_id, day)
                 .await
-                .map(|c| c.v5)
                 .map_err(boxed)
         })
     }

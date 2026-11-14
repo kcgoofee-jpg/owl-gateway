@@ -582,3 +582,36 @@ test("share settings opens as a second view inside the share dialog", async ({ p
     .click();
   await expect(page.getByRole("dialog")).toHaveCount(0);
 });
+
+test("admin operational navigation and reason cards work on desktop and mobile", async ({
+  page,
+  context,
+  browser,
+  baseURL,
+}) => {
+  await context.addCookies(await adminSession(browser, baseURL, readCreds().admin_password ?? ""));
+  for (const width of [1280, 390]) {
+    await page.setViewportSize({ width, height: 844 });
+    await page.goto("/admin");
+    await expect(page.getByRole("heading", { name: "总览", level: 1 })).toBeVisible();
+    await expect(page.getByText("待处理成员", { exact: true })).toBeVisible();
+    await page.goto("/admin/rules/members");
+    await expect(page.getByRole("heading", { name: "规则与额度", level: 1 })).toBeVisible();
+    await expect(page.getByLabel("V5 每天模式")).toBeVisible();
+    await page.goto("/admin/upstream/overview");
+    await expect(page.getByText(/结果未知待核对/).first()).toBeVisible();
+    await expect(page.getByText(/官方 #/).first()).toBeVisible();
+    await page.goto("/admin/members");
+    await page
+      .getByRole("button", { name: /展开.*的详情/ })
+      .first()
+      .click();
+    await expect(page.getByRole("heading", { name: "V5 可用条件" })).toBeVisible();
+    await expect(page.getByText("全站 V5 开关", { exact: true })).toBeVisible();
+    const dims = await page.evaluate(() => ({
+      width: document.documentElement.clientWidth,
+      content: document.documentElement.scrollWidth,
+    }));
+    expect(dims.content).toBeLessThanOrEqual(dims.width + 1);
+  }
+});

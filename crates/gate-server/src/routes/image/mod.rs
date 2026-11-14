@@ -196,9 +196,9 @@ pub(super) fn on_dispatch(
     state: &AppState,
     ctx: &ReqCtx,
     reserved: Arc<crate::admission::Reserved>,
-) -> Box<dyn Fn() -> BoxFuture<'static, Result<(), UpstreamError>> + Send + Sync> {
+) -> Box<dyn Fn(bool) -> BoxFuture<'static, Result<bool, UpstreamError>> + Send + Sync> {
     let (s, c, reserved) = (state.clone(), ctx.clone(), reserved.clone());
-    Box::new(move || {
+    Box::new(move |v5_free| {
         let (_s, c, reserved) = (s.clone(), c.clone(), reserved.clone());
         Box::pin(async move {
             if !c.claim_dispatch() {
@@ -211,18 +211,30 @@ pub(super) fn on_dispatch(
                     .into(),
                 ));
             }
+            let token_id = c.snapshot().token_id.unwrap_or_default();
+            if v5_free && token_id.is_empty() {
+                return Err(UpstreamError::local(
+                    500,
+                    "上游账号未确定，请求未发送。",
+                    "",
+                ));
+            }
             match reserved
-                .prepare_dispatch(&c.correlation_id(), &c.rid())
+                .prepare_dispatch_with_upstream(
+                    &c.correlation_id(),
+                    &c.rid(),
+                    Some((&token_id, v5_free)),
+                )
                 .await
             {
                 Ok((day, _month)) => {
-                    if let Some(id) = c.snapshot().token_id
+                    if !token_id.is_empty()
                         && let Some(token) = _s
                             .nai
                             .tokens()
                             .await
                             .into_iter()
-                            .find(|t| t.token_id == id && t.is_share())
+                            .find(|t| t.token_id == token_id && t.is_share())
                     {
                         let fields = token.fields();
                         let cap = fields.share_limits.as_ref().map_or(0, |s| s.daily_anlas);
@@ -230,7 +242,7 @@ pub(super) fn on_dispatch(
                             .db
                             .reserve_upstream_anlas(
                                 reserved.request_id(),
-                                &id,
+                                &token_id,
                                 &day,
                                 cap,
                                 fields.allow_anlas,
@@ -247,7 +259,7 @@ pub(super) fn on_dispatch(
                     }
                     c.set_settlement_day(day);
                     c.dispatch_persisted();
-                    Ok(())
+                    Ok(v5_free)
                 }
                 Err(e) => Err(local(e)),
             }

@@ -9,6 +9,7 @@ import { signal } from "@preact/signals";
 import {
   Activity,
   Gauge,
+  LayoutDashboard,
   ListTree,
   LogOut,
   Menu as MenuIcon,
@@ -27,7 +28,15 @@ import "./admin.css";
 import { authed, busy, endSession, refresh } from "./data";
 
 /* ---------------- 分区注册表 ---------------- */
-export type SectionId = "members" | "logs" | "upstream" | "onboarding" | "limits" | "system";
+export type SectionId =
+  | "overview"
+  | "members"
+  | "logs"
+  | "upstream"
+  | "rules"
+  | "onboarding"
+  | "limits"
+  | "system";
 
 type Section = {
   id: SectionId;
@@ -36,9 +45,18 @@ type Section = {
   path: string;
   icon: ComponentType<{ size?: number; "aria-hidden"?: boolean }>;
   view: ComponentType;
+  hidden?: boolean;
 };
 
 export const SECTIONS: Section[] = [
+  {
+    id: "overview",
+    label: "总览",
+    group: "日常",
+    path: "/admin/overview",
+    icon: LayoutDashboard,
+    view: lazy(() => import("./sections/overview")),
+  },
   {
     id: "members",
     label: "成员",
@@ -49,7 +67,7 @@ export const SECTIONS: Section[] = [
   },
   {
     id: "logs",
-    label: "日志",
+    label: "日志与排障",
     group: "日常",
     path: "/admin/logs",
     icon: ListTree,
@@ -57,11 +75,19 @@ export const SECTIONS: Section[] = [
   },
   {
     id: "upstream",
-    label: "上游",
+    label: "上游与调度",
     group: "监控",
     path: "/admin/upstream",
     icon: Activity,
     view: lazy(() => import("./sections/upstream")),
+  },
+  {
+    id: "rules",
+    label: "规则与额度",
+    group: "设置",
+    path: "/admin/rules",
+    icon: SlidersHorizontal,
+    view: lazy(() => import("./sections/rules")),
   },
   {
     id: "onboarding",
@@ -70,6 +96,7 @@ export const SECTIONS: Section[] = [
     path: "/admin/onboarding",
     icon: Server,
     view: lazy(() => import("./sections/onboarding")),
+    hidden: true,
   },
   {
     id: "limits",
@@ -78,6 +105,7 @@ export const SECTIONS: Section[] = [
     path: "/admin/limits",
     icon: SlidersHorizontal,
     view: lazy(() => import("./sections/limits")),
+    hidden: true,
   },
   {
     id: "system",
@@ -196,11 +224,13 @@ function SectionLoading() {
 function Nav() {
   const { path } = useLocation();
   const active = (s: Section) =>
-    path.startsWith(s.path) || (s.id === "members" && (path === "/admin" || path === "/admin/"));
+    path.startsWith(s.path) ||
+    (s.id === "overview" && (path === "/admin" || path === "/admin/")) ||
+    (s.id === "rules" && (path.startsWith("/admin/onboarding") || path.startsWith("/admin/limits")));
   let lastGroup = "";
   return (
     <nav class="admin-nav" aria-label="后台导航">
-      {SECTIONS.map((s) => {
+      {SECTIONS.filter((s) => !s.hidden).map((s) => {
         const header = s.group && s.group !== lastGroup ? s.group : "";
         lastGroup = s.group;
         const Icon = s.icon;
@@ -340,7 +370,7 @@ export function Admin() {
       </LocationProvider>
     );
   }
-  const MembersView = SECTIONS[0]?.view as ComponentType;
+  const OverviewView = SECTIONS[0]?.view as ComponentType;
   return (
     <LocationProvider>
       <Shell>
@@ -353,9 +383,8 @@ export function Admin() {
               <Route key={s.id} path={s.path} component={s.view} />,
               <Route key={`${s.id}-sub`} path={`${s.path}/*`} component={s.view} />,
             ])}
-            {/* 总览页 10-23 删除：/admin 直接是成员页 */}
-            <Route key="root" path="/admin" component={MembersView} />
-            <Route key="root-slash" path="/admin/" component={MembersView} />
+            <Route key="root" path="/admin" component={OverviewView} />
+            <Route key="root-slash" path="/admin/" component={OverviewView} />
             {/* 不认识的 /admin/*：404 视图，不再静默渲染成员页 */}
             <Route default component={NotFound} />
           </Router>

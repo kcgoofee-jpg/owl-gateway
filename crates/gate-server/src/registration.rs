@@ -330,8 +330,6 @@ pub struct RegistrationService {
     http: reqwest::Client,
     /// 与 `issue_direct` / `ban` 共用：否则在发 Key 进行中（身份组核验等网络等待）封禁，仍会发出有效 Key。
     lock: tokio::sync::Mutex<()>,
-    /// 最近 24 小时站长手动私信的发送时刻（限频用，见 `dm.rs`）。
-    dm_sent: std::sync::Mutex<std::collections::VecDeque<f64>>,
 }
 
 impl RegistrationService {
@@ -346,7 +344,6 @@ impl RegistrationService {
             api_base: env.discord_api_base.trim_end_matches('/').to_string(),
             http,
             lock: tokio::sync::Mutex::new(()),
-            dm_sent: std::sync::Mutex::new(std::collections::VecDeque::new()),
         })
     }
 

@@ -83,7 +83,7 @@ async fn failed_durable_dispatch_callback_prevents_upstream_post() {
     )
     .unwrap();
     let cb = Callbacks {
-        on_dispatch: Some(Box::new(|| {
+        on_dispatch: Some(Box::new(|_| {
             Box::pin(async {
                 Err(gate_upstream::client::UpstreamError::local(
                     500,

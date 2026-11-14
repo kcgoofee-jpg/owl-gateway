@@ -58,6 +58,38 @@ impl Db {
         legacy: i64,
         now: f64,
     ) -> Result<bool> {
+        self.dispatch_request_settlement_with_upstream(
+            request_id,
+            correlation_id,
+            rid,
+            day,
+            month,
+            is_vibe,
+            anlas,
+            v5,
+            legacy,
+            now,
+            None,
+        )
+        .await
+    }
+
+    /// Dispatch state and the selected upstream's V5 hold commit atomically before the POST.
+    #[allow(clippy::too_many_arguments)]
+    pub async fn dispatch_request_settlement_with_upstream(
+        &self,
+        request_id: &str,
+        correlation_id: &str,
+        rid: &str,
+        day: &str,
+        month: &str,
+        is_vibe: bool,
+        anlas: f64,
+        v5: i64,
+        legacy: i64,
+        now: f64,
+        upstream: Option<(&str, bool)>,
+    ) -> Result<bool> {
         let (request_id, correlation_id, rid, day, month) = (
             request_id.to_owned(),
             correlation_id.to_owned(),
@@ -65,8 +97,20 @@ impl Db {
             day.to_owned(),
             month.to_owned(),
         );
-        self.write(move |tx| Ok(tx.execute("UPDATE request_settlements SET status='dispatched',correlation_id=?,rid=?,day=?,month=?,anlas=?,v5=?,legacy=?,is_vibe=?,dispatched_at=CASE WHEN dispatched_at IS NULL THEN ? ELSE dispatched_at END,updated_at=? WHERE request_id=? AND status IN ('reserved','dispatched')",
-            params![correlation_id, rid, day, month, anlas, v5, legacy, is_vibe, now, now, request_id])? == 1)).await
+        let upstream = upstream.map(|(id, free)| (id.to_owned(), free));
+        self.write(move |tx| {
+            let n = tx.execute("UPDATE request_settlements SET status='dispatched',correlation_id=?,rid=?,day=?,month=?,anlas=?,v5=?,legacy=?,is_vibe=?,dispatched_at=CASE WHEN dispatched_at IS NULL THEN ? ELSE dispatched_at END,updated_at=? WHERE request_id=? AND status IN ('reserved','dispatched')",
+                params![correlation_id, rid, day, month, anlas, v5, legacy, is_vibe, now, now, request_id])?;
+            if n != 1 { return Ok(false); }
+            if let Some((token, free)) = &upstream {
+                if *free {
+                    tx.execute("INSERT INTO upstream_v5_reservations(request_id,token_id,day) VALUES(?,?,?) ON CONFLICT(request_id) DO UPDATE SET token_id=excluded.token_id,day=excluded.day", params![request_id,token,day])?;
+                } else {
+                    tx.execute("DELETE FROM upstream_v5_reservations WHERE request_id=?", [&request_id])?;
+                }
+            }
+            Ok(true)
+        }).await
     }
 
     #[allow(clippy::too_many_arguments)]
@@ -232,6 +276,18 @@ impl Db {
                 params![now, i64::from(is_image_kind(&s.kind)), result_at, s.key_id],
             )?;
             if let Some(id) = request_id.as_deref() {
+                // 免费 V5 的持久预留与账号确认计数在同一事务中交接，不能出现空档或重复计数。
+                let v5_hold: Option<(String,String)> = tx.query_row("SELECT token_id,day FROM upstream_v5_reservations WHERE request_id=?", [id], |r| Ok((r.get(0)?,r.get(1)?))).optional()?;
+                if let Some((token,day)) = v5_hold {
+                    if s.images > 0 {
+                        // Token 替换会迁移持久预留；在途结果仍带旧指纹，计数应归迁移后的账号。
+                        if token.is_empty() {
+                            return Err(rusqlite::Error::InvalidQuery);
+                        }
+                        tx.execute("INSERT INTO upstream_token_counters(token_id,day,v5) VALUES(?,?,1) ON CONFLICT(token_id,day) DO UPDATE SET v5=v5+1", params![token,day])?;
+                    }
+                    tx.execute("DELETE FROM upstream_v5_reservations WHERE request_id=?", [id])?;
+                }
                 tx.execute("UPDATE upstream_anlas_charges SET amount=?,spent=? WHERE request_id=? AND token_id=?",
                     params![s.anlas + s.site_paid_anlas + s.remaining_anlas, s.anlas + s.site_paid_anlas, id, s.token_id])?;
                 tx.execute("UPDATE request_settlements SET status=?,site_paid_hold=MAX(0,site_paid_hold-?),anlas=?,v5=?,legacy=?,result_json=NULL,updated_at=? WHERE request_id=? AND status='result_saved'",
@@ -405,6 +461,7 @@ impl Db {
                 "DELETE FROM usage_request_links WHERE request_id NOT IN (SELECT request_id FROM request_settlements)",
                 [],
             )?;
+            tx.execute("DELETE FROM upstream_v5_reservations WHERE request_id NOT IN (SELECT request_id FROM request_settlements)", [])?;
             Ok(n)
         })
         .await

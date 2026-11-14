@@ -5,7 +5,7 @@ import { ApiError, sendJSON } from "../../../../lib/api";
 import { Badge, Button, Card, Dialog, Notice } from "../../../../ui";
 import { act, refreshAfterWrite, useAdmin } from "../../data";
 import { actOrError, ConfirmDialog, LoadError, Loading, useBusy } from "../_kit";
-import { NumField, SaveBar, Sect, SwitchRow, useForm, withTone } from "../system/forms";
+import { NumField, SaveBar, Sect, SwitchRow, useForm, withTone, ZeroModeField } from "../system/forms";
 import { RequestStats } from "./accounts";
 import {
   anlasText,
@@ -243,6 +243,12 @@ function ShareCard(props: {
           <dt>今天出图</dt>
           <dd>
             {reading(a.images_today)} 张 · 免费 V5 {reading(a.v5_used)} / {reading(a.v5_daily_limit)}
+            {(a.v5_held ?? 0) > 0 && (
+              <span title="含已派发及结果未知的预留；历史无法归属的预留计入各账号">
+                {" "}
+                · 持久预留 {a.v5_held}
+              </span>
+            )}
           </dd>
         </div>
       </dl>
@@ -251,15 +257,15 @@ function ShareCard(props: {
         {partial && (
           <Notice tone="warn">免费 V5 日限已保存，其他拼车设置的结果未确认。请刷新核对后再重试。</Notice>
         )}
-        <NumField form={form} name="v5_daily_limit" disabled={saving} />
+        <ZeroModeField form={form} name="v5_daily_limit" zeroLabel="停用免费 V5" disabled={saving} />
         <SwitchRow
           title="允许消耗 Anlas"
           checked={form.raw("allow_anlas") === true}
           onChange={(value) => form.set("allow_anlas", value)}
           disabled={saving}
         />
-        <NumField form={form} name="daily_anlas" disabled={saving} />
-        <NumField form={form} name="rpm" disabled={saving} />
+        <ZeroModeField form={form} name="daily_anlas" zeroLabel="不限" disabled={saving} />
+        <ZeroModeField form={form} name="rpm" zeroLabel="不限" disabled={saving} />
         <NumField form={form} name="concurrency" disabled={saving} />
         <NumField form={form} name="post_wait_min" disabled={saving} />
         <NumField form={form} name="post_wait_max" disabled={saving} />

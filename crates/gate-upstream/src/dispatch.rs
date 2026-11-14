@@ -56,7 +56,7 @@ impl<H: Hooks> NaiClient<H> {
         let mut switched = false;
         while attempts < 2 + usize::from(switched) {
             attempts += 1;
-            let Some((token, ticket)) = inner
+            let picked = inner
                 .pool
                 .pick(
                     &inner.hooks,
@@ -70,8 +70,36 @@ impl<H: Hooks> NaiClient<H> {
                     arrival,
                     o.official_only,
                 )
-                .await?
-            else {
+                .await?;
+            let (token, ticket) = if let Some(picked) = picked {
+                picked
+            } else if o.v5_free
+                && o.requires_anlas
+                && let Some(resolve) = cb.resolve_v5_cost.as_ref()
+            {
+                // 混合付费批次没有免费上游时，按全部付费重新选号并复核成员预算。
+                let Some((token, ticket)) = inner
+                    .pool
+                    .pick(
+                        &inner.hooks,
+                        &inner.scheduler,
+                        true,
+                        false,
+                        o.image_lane,
+                        allowance,
+                        arrival,
+                        o.official_only,
+                    )
+                    .await?
+                else {
+                    return Err(self.unavailable(true, false).await);
+                };
+                if resolve(true, token.token_id.clone(), false).await? {
+                    return Err(self.unavailable(true, false).await);
+                }
+                o.v5_free = false;
+                (token, ticket)
+            } else {
                 return Err(self.unavailable(o.requires_anlas, o.v5_free).await);
             };
             obs.picked_token(&token);
@@ -200,10 +228,12 @@ impl<H: Hooks> NaiClient<H> {
             {
                 return Attempt::Done(Err(e));
             }
-            if let Some(on) = cb.on_dispatch.as_ref()
-                && let Err(e) = on().await
-            {
-                return Attempt::Done(Err(e));
+            if let Some(on) = cb.on_dispatch.as_ref() {
+                match on(fl.v5_free).await {
+                    Ok(true) => fl.transfer_v5().await,
+                    Ok(false) => {}
+                    Err(e) => return Attempt::Done(Err(e)),
+                }
             }
             fl.mark_sent();
             obs.sent();

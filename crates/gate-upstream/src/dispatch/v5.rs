@@ -67,7 +67,7 @@ impl<H: Hooks> NaiClient<H> {
         let arrival = Arrival::new(inner.scheduler.mono(), queue_timeout).lane(lane);
         let mut moves = 0;
         'pick: loop {
-            let Some((mut token, ticket)) = inner
+            let picked = inner
                 .pool
                 .pick(
                     hooks,
@@ -79,12 +79,40 @@ impl<H: Hooks> NaiClient<H> {
                     arrival,
                     official_only,
                 )
-                .await?
-            else {
+                .await?;
+            let mut selected_free = v5_free;
+            let (mut token, ticket) = if let Some(picked) = picked {
+                picked
+            } else if v5_free
+                && requires_anlas
+                && let Some(resolve) = cb.resolve_v5_cost.as_ref()
+            {
+                let Some((token, ticket)) = inner
+                    .pool
+                    .pick(
+                        hooks,
+                        &inner.scheduler,
+                        true,
+                        false,
+                        true,
+                        allowance,
+                        arrival,
+                        official_only,
+                    )
+                    .await?
+                else {
+                    return Err(self.unavailable(true, false).await);
+                };
+                if resolve(true, token.token_id.clone(), false).await? {
+                    return Err(self.unavailable(true, false).await);
+                }
+                selected_free = false;
+                (token, ticket)
+            } else {
                 return Err(self.unavailable(requires_anlas, v5_free).await);
             };
             obs.picked_token(&token);
-            let mut fl = InFlight::new(inner.clone(), token.clone(), v5_free, 0);
+            let mut fl = InFlight::new(inner.clone(), token.clone(), selected_free, 0);
             fl.ticket = ticket;
             // V5 计费确认：排队前一次（换号后对新账号再一次），排完队仍是免费再一次（见 request_once）
             match self
@@ -231,11 +259,15 @@ impl<H: Hooks> NaiClient<H> {
                         "",
                     ));
                 }
-                if let Some(on) = cb.on_dispatch.as_ref()
-                    && let Err(e) = on().await
-                {
-                    fl.finish().await;
-                    return Err(e);
+                if let Some(on) = cb.on_dispatch.as_ref() {
+                    match on(fl.v5_free).await {
+                        Ok(true) => fl.transfer_v5().await,
+                        Ok(false) => {}
+                        Err(e) => {
+                            fl.finish().await;
+                            return Err(e);
+                        }
+                    }
                 }
                 fl.mark_sent();
                 obs.sent();
@@ -306,7 +338,7 @@ impl<H: Hooks> NaiClient<H> {
                 obs.status(status);
                 break (resp, status);
             };
-            if status == 402 && on_402(&inner.pool, hooks, &token, v5_free, may_switch).await {
+            if status == 402 && on_402(&inner.pool, hooks, &token, fl.v5_free, may_switch).await {
                 // 402 没出图、没扣费：换一把重试
                 drop(resp);
                 fl.finish().await;

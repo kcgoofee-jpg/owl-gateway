@@ -1,7 +1,7 @@
 import { Button } from "../../../ui";
 import type { FieldSpec } from "./system/core";
 import { parseField, toRaw } from "./system/core";
-import { type Form, NumField, SwitchRow } from "./system/forms";
+import { type Form, NumField, SwitchRow, ZeroModeField } from "./system/forms";
 import "./member-rules.css";
 
 import {
@@ -110,7 +110,11 @@ export function PolicyFields({
       <div class="form-grid mr-numbers">
         {NUMBER_FIELDS.map((name) => (
           <div key={name} onInput={() => onEdit?.(name)}>
-            <NumField form={form} name={name} />
+            {name === "rpm" ? (
+              <NumField form={form} name={name} />
+            ) : (
+              <ZeroModeField form={form} name={name} zeroLabel="停用" />
+            )}
             {source(name)}
           </div>
         ))}

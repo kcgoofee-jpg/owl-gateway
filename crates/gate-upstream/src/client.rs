@@ -155,7 +155,7 @@ pub type ResolveV5<'a> = Box<
         + 'a,
 >;
 pub type OnDispatch<'a> =
-    Box<dyn Fn() -> BoxFuture<'static, Result<(), UpstreamError>> + Send + Sync + 'a>;
+    Box<dyn Fn(bool) -> BoxFuture<'static, Result<bool, UpstreamError>> + Send + Sync + 'a>;
 
 pub type BeforeDispatch<'a> =
     Box<dyn Fn() -> BoxFuture<'static, Result<(), UpstreamError>> + Send + Sync + 'a>;
@@ -170,7 +170,7 @@ pub struct Callbacks<'a> {
     pub resolve_v5_cost: Option<ResolveV5<'a>>,
     /// 真正发出前的最后检查（全站冷却）；返回 Err 则不发。
     pub before_dispatch: Option<BeforeDispatch<'a>>,
-    /// 发出非幂等请求前持久化派发状态；失败时禁止发送。
+    /// 发出前持久化派发状态；参数是是否免费 V5，返回是否已持久接管账号级预留。
     pub on_dispatch: Option<OnDispatch<'a>>,
 }
 

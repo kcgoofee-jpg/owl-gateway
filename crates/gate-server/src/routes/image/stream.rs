@@ -368,6 +368,7 @@ async fn perform_stream(
     let mut delivered = false;
     let billing = Arc::new(Mutex::new(Billing {
         est: prep.est,
+        upstream_free_v5: prep.upstream_free_v5,
         detail: prep.detail.clone(),
         site_paid: 0.0,
     }));
@@ -386,16 +387,17 @@ async fn perform_stream(
     let durable_dispatch = on_dispatch(state, ctx, reserved.clone());
     let cb = Callbacks {
         on_rate_limited: Some(on_429(state)),
-        resolve_v5_cost: (est0.v5 > 0 && est0.anlas == 0.0)
+        resolve_v5_cost: prep
+            .upstream_free_v5
             .then(|| resolve_v5(state, &prep, billing.clone(), reserved.clone())),
         before_dispatch: Some(before_dispatch(state)),
-        on_dispatch: Some(Box::new(move || {
-            let future = durable_dispatch();
+        on_dispatch: Some(Box::new(move |v5_free| {
+            let future = durable_dispatch(v5_free);
             let d = d.clone();
             Box::pin(async move {
-                future.await?;
+                let transferred = future.await?;
                 d.store(true, Ordering::SeqCst);
-                Ok(())
+                Ok(transferred)
             })
         })),
     };
@@ -413,7 +415,7 @@ async fn perform_stream(
                 &prep.body,
                 image_count,
                 est0.anlas > 0.0,
-                est0.v5 > 0 && est0.anlas == 0.0,
+                prep.upstream_free_v5,
                 super::lane(state, &prep.key, &prep.model),
                 state.limits().queue_timeout,
                 &cb,
@@ -609,6 +611,7 @@ async fn perform_stream(
     let est = billing.lock().expect("billing").est;
     let detail = billing.lock().expect("billing").detail.clone();
     let site_paid = billing.lock().expect("billing").site_paid;
+    let free_for_member = billing.lock().expect("billing").upstream_free_v5 || site_paid > 0.0;
     let was_dispatched = dispatched.load(Ordering::SeqCst);
     if !was_dispatched && completed == 0 && failure.is_none() && !local_reject {
         // 还在排队时客户端就断开了：没发到上游，不能记成「上游出错」，也不能拉低上游健康度
@@ -633,7 +636,8 @@ async fn perform_stream(
                 p.insert("n_samples".into(), json!(completed));
             }
             let settled_estimate =
-                policy::estimate_image_cost(&completed_body, true, est.v5 > 0).map(Est::from_cost);
+                policy::estimate_image_cost(&completed_body, true, free_for_member)
+                    .map(Est::from_cost);
             let mut settled = settled_estimate.clone().unwrap_or(est);
             // 站长的付费 V5 也按完成张数占个人和全站 V5 额度，与非流式路径一致。
             if key.owner_image_full && policy::is_v5_model(&model) {

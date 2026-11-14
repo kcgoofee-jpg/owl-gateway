@@ -295,12 +295,13 @@ async fn release_request_settlement(
 /// 令牌池的当前状态：Token 打码，另附当天用量。
 pub(super) async fn pool_status(state: &AppState) -> Result<Vec<Value>, ApiError> {
     let now = state.now();
+    let day = state.day();
     let donated = state.db.donated_token_ids().await?;
     let mut out = Vec::new();
     for (t, f) in state.nai.status_rows().await {
-        let c = state
+        let (c, v5_held) = state
             .db
-            .get_upstream_counter(&t.token_id, &state.day())
+            .upstream_counter_with_holds(&t.token_id, &day)
             .await?;
         // 今天出满（单号每日上限）：账号本身可用，但今天不会再接图
         let full = state
@@ -322,6 +323,7 @@ pub(super) async fn pool_status(state: &AppState) -> Result<Vec<Value>, ApiError
             "image_active": t.image_slots.active(),
             "v5_daily_limit": f.v5_daily_limit,
             "v5_used": c.v5,
+            "v5_held": v5_held,
             "images_today": c.images,
             "donated": donated.contains(&t.token_id),
         }));

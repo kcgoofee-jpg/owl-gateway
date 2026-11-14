@@ -89,6 +89,11 @@ pub struct LogFilter {
     pub kinds: Option<Vec<String>>,
     /// 空串 = 不筛。
     pub rid: String,
+    /// 上游不可逆标识；空串不筛选。
+    pub token_id: String,
+    /// UTC 秒，结束时间为开区间。
+    pub since: Option<i64>,
+    pub until: Option<i64>,
     /// 文生图模型版本（v45 / v5）；空串 = 不筛。
     pub model_version: String,
     /// 同一成员的多把 Key 一起查；空 = 不筛（与 `key_id` 同时给时两条都要满足）。
@@ -225,6 +230,18 @@ fn log_filter(f: &LogFilter) -> (String, Vec<SqlValue>) {
     if !f.rid.is_empty() {
         clauses.push("rid=?".into());
         args.push(SqlValue::Text(f.rid.clone()));
+    }
+    if !f.token_id.is_empty() {
+        clauses.push("token_id=?".into());
+        args.push(SqlValue::Text(f.token_id.clone()));
+    }
+    if let Some(since) = f.since {
+        clauses.push("ts>=?".into());
+        args.push(SqlValue::Integer(since));
+    }
+    if let Some(until) = f.until {
+        clauses.push("ts<?".into());
+        args.push(SqlValue::Integer(until));
     }
     match f.model_version.as_str() {
         "v45" => clauses.push("lower(model) LIKE '%diffusion-4-5%'".into()),

@@ -33,7 +33,7 @@ RUN cargo build --release --locked --bin nai-gate --bin nai-bots --bin nai-ops
 # ---------- 运行镜像 ----------
 FROM gcr.io/distroless/cc-debian12:nonroot
 ARG OWL_BUILD_SHA=unknown
-LABEL org.owl-gateway.schema-version="6" org.owl-gateway.member-policy-schema="1" org.opencontainers.image.revision=$OWL_BUILD_SHA
+LABEL org.owl-gateway.schema-version="7" org.owl-gateway.member-policy-schema="1" org.opencontainers.image.revision=$OWL_BUILD_SHA
 ENV OWL_BUILD_SHA=$OWL_BUILD_SHA
 # UID 10001：与 2.x 的数据目录属主一致（chown -R 10001:10001 data 只需做过一次）
 USER 10001:10001

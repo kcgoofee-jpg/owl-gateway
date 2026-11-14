@@ -242,6 +242,26 @@ async fn share_402_on_free_v5_switches_to_official() {
     assert_eq!(status, 200, "{}", String::from_utf8_lossy(&body));
     assert_eq!(share.requests_to("/ai/generate-image-stream").len(), 1);
     assert_eq!(e.mock.requests_to("/ai/generate-image-stream").len(), 1);
+    settle().await;
+    let tokens = e.state.nai.tokens().await;
+    let official = tokens.iter().find(|t| !t.is_share()).unwrap();
+    let shared = tokens.iter().find(|t| t.is_share()).unwrap();
+    assert_eq!(
+        e.state
+            .db
+            .upstream_v5_used_and_held(&official.token_id, &e.state.day())
+            .await
+            .unwrap(),
+        1
+    );
+    assert_eq!(
+        e.state
+            .db
+            .upstream_v5_used_and_held(&shared.token_id, &e.state.day())
+            .await
+            .unwrap(),
+        0
+    );
 }
 
 #[tokio::test]

@@ -42,6 +42,10 @@ case "$1" in
           printf '%s\n' "${MOCK_POLICY_SCHEMA:-}"
           exit 0
         fi
+        if [[ " $* " == *org.owl-gateway.schema-version* ]]; then
+          printf '%s\n' "${MOCK_SCHEMA_VERSION:-}"
+          exit 0
+        fi
         printf '%s\n' "$value"
         ;;
       rm)
@@ -134,8 +138,21 @@ if grep -Eq '^(tag|compose) ' "$DOCKER_CALLS"; then
 fi
 grep -Fq '禁止只回滚镜像' "$tmp/incompatible.log"
 
+# 结构升级后不能直接回到仅支持旧版库的镜像。
+sqlite3 "$LEGACY_DIR/data/nai_gate.db" 'PRAGMA user_version=7'
+export MOCK_SCHEMA_VERSION=6
+: >"$DOCKER_CALLS"
+if bash "$repo/deploy/v3/cutover.sh" previous >"$tmp/version-incompatible.log" 2>&1; then
+  echo 'older schema rollback was allowed' >&2; exit 1
+fi
+if grep -Eq '^(tag|compose) ' "$DOCKER_CALLS"; then
+  echo 'schema-incompatible rollback changed tags or containers' >&2; exit 1
+fi
+grep -Fq '当前库结构 v7' "$tmp/version-incompatible.log"
+
 # Later releases with the same native schema can use the normal previous-image path.
 export MOCK_POLICY_SCHEMA=1
+export MOCK_SCHEMA_VERSION=7
 bash "$repo/deploy/v3/cutover.sh" previous >"$tmp/compatible.log" 2>&1
 grep -Fq 'tag owl-gate:previous owl-gate:current' "$DOCKER_CALLS"
 grep -Fq 'compose ' "$DOCKER_CALLS"

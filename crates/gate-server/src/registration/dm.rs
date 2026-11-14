@@ -15,25 +15,22 @@ pub const DM_MAX_CHARS: usize = 1500;
 
 impl RegistrationService {
     /// 先占一个名额再发：失败也算用掉（Discord 那边同样计了一次请求）。
-    fn take_dm_slot(&self, now: f64) -> Result<(), String> {
-        let mut sent = self.dm_sent.lock().unwrap_or_else(|e| e.into_inner());
-        while sent.front().is_some_and(|t| now - t >= 86400.0) {
-            sent.pop_front();
+    async fn take_dm_slot(&self, now: f64) -> Result<(), String> {
+        match self
+            .db
+            .reserve_admin_dm(now, DM_PER_HOUR as i64, DM_PER_DAY as i64)
+            .await
+        {
+            Ok(0) => Ok(()),
+            Ok(1) => Err(format!("私信太频繁：每小时最多 {DM_PER_HOUR} 条，稍后再发")),
+            Ok(_) => Err(format!("今天私信已达上限 {DM_PER_DAY} 条（滚动 24 小时）")),
+            Err(_) => Err("无法读取私信限频记录，本次未发送".to_string()),
         }
-        let last_hour = sent.iter().filter(|t| now - **t < 3600.0).count();
-        if last_hour >= DM_PER_HOUR {
-            return Err(format!("私信太频繁：每小时最多 {DM_PER_HOUR} 条，稍后再发"));
-        }
-        if sent.len() >= DM_PER_DAY {
-            return Err(format!("今天私信已达上限 {DM_PER_DAY} 条（滚动 24 小时）"));
-        }
-        sent.push_back(now);
-        Ok(())
     }
 
     /// 打开与成员的私信频道并发一条纯文本。返回 Err 时是给站长看的中文原因。
     pub async fn send_dm(&self, discord_id: &str, text: &str) -> Result<(), String> {
-        self.take_dm_slot(crate::time::now())?;
+        self.take_dm_slot(crate::time::now()).await?;
         let auth = self.bot_auth();
         let open = self
             .send(
@@ -44,7 +41,7 @@ impl RegistrationService {
                 Some(&json!({"recipient_id": discord_id})),
             )
             .await
-            .map_err(|_| "连不上 Discord".to_string())?;
+            .map_err(|_| "连不上 Discord，未发送私信".to_string())?;
         let channel = open
             .json()
             .filter(|_| open.status < 400)
@@ -60,7 +57,12 @@ impl RegistrationService {
                 Some(&body),
             )
             .await
-            .map_err(|_| "连不上 Discord".to_string())?;
+            .map_err(|_| "发送结果未知：Discord 可能已收到；请先核实，不要立即重发".to_string())?;
+        if sent.status >= 500 {
+            return Err(
+                "发送结果未知：Discord 返回服务器错误，可能已收到；请先核实，不要立即重发".into(),
+            );
+        }
         if sent.status >= 400 {
             return Err(discord_reason("发送失败", &sent));
         }

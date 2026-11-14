@@ -8,6 +8,8 @@ pub(crate) struct InFlight<H: Hooks> {
     pub(crate) token: Arc<Token>,
     pub(crate) succeeded: bool,
     pub(crate) v5_free: bool,
+    /// 免费 V5 预留已移交持久账本，不再由内存守卫释放或计数。
+    pub(crate) v5_durable: bool,
     pub(crate) image_count: usize,
     pub(crate) send_started: bool,
     /// 单调时钟：发往上游的时刻（算实测出图耗时）。
@@ -42,6 +44,7 @@ impl<H: Hooks> InFlight<H> {
             token,
             succeeded: false,
             v5_free,
+            v5_durable: false,
             image_count,
             send_started: false,
             sent_at: None,
@@ -58,12 +61,22 @@ impl<H: Hooks> InFlight<H> {
         self.sent_at = Some(self.inner.scheduler.mono());
     }
 
+    pub(crate) async fn transfer_v5(&mut self) {
+        if self.v5_free && !self.v5_durable {
+            self.inner
+                .pool
+                .finish_v5_reservation(&self.inner.hooks, &self.token, false, true)
+                .await;
+            self.v5_durable = true;
+        }
+    }
+
     fn take_settle(&mut self) -> Settle {
         self.ticket = None;
         Settle {
             token: self.token.clone(),
             succeeded: self.succeeded,
-            v5_free: self.v5_free,
+            v5_free: self.v5_free && !self.v5_durable,
             image_count: self.image_count,
             send_started: self.send_started,
             sent_at: self.sent_at,

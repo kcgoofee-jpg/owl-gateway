@@ -56,7 +56,10 @@ async fn list(State(state): State<AppState>, _s: AdminSession) -> ApiResult {
     for token in shares {
         let sub = fetch_subscription(&state, &token).await;
         let fields = token.fields();
-        let used = state.db.get_upstream_counter(&token.token_id, &day).await?;
+        let (used, v5_held) = state
+            .db
+            .upstream_counter_with_holds(&token.token_id, &day)
+            .await?;
         let extra = stats_by_id.get(&token.token_id);
         accounts.push(json!({
             "token_id": token.token_id,
@@ -77,6 +80,7 @@ async fn list(State(state): State<AppState>, _s: AdminSession) -> ApiResult {
             "post_wait_max": fields.share_limits.as_ref().map_or_else(|| state.guard.post_jitter().1 as i64, |s| s.post_wait_max),
             "anlas_used_today": state.db.upstream_anlas_used(&token.token_id, &day).await?,
             "v5_used": used.v5,
+            "v5_held": v5_held,
             "images_today": used.images,
             "w1h": extra.map(|row| row["w1h"].clone()).unwrap_or(Value::Null),
             "w24h": extra.map(|row| row["w24h"].clone()).unwrap_or(Value::Null),

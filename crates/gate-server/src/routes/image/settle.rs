@@ -24,6 +24,7 @@ use std::sync::{Arc, Mutex};
 /// V5 额度确认回调用到的可变状态。
 pub(super) struct Billing {
     pub(super) est: Est,
+    pub(super) upstream_free_v5: bool,
     pub(super) detail: String,
     /// Anlas paid from the upstream account itself for this image (site-paid V5), not the member's.
     pub(super) site_paid: f64,
@@ -87,6 +88,8 @@ pub(super) fn resolve_v5(
         prep.detail.clone(),
     );
     let owner_full = prep.key.owner_image_full;
+    let paid_allowed = prep.key.allows_paid_v5();
+    let mixed_paid_batch = prep.est.anlas > 0.0;
     let owner_v5_count = prep.image_count;
     let state = state.clone();
     Box::new(move |exhausted: bool, token_id: String, can_switch: bool| {
@@ -109,7 +112,7 @@ pub(super) fn resolve_v5(
                 held
             };
             // Full owner access may pay from the same personal and shared budgets.
-            if owner_full && exhausted {
+            if exhausted && (owner_full || (paid_allowed && mixed_paid_batch)) {
                 if can_switch {
                     return Ok(true);
                 }
@@ -124,10 +127,13 @@ pub(super) fn resolve_v5(
                     policy::estimate_image_cost(&body, true, false)
                         .map_err(|e| UpstreamError::local(400, e.message().to_string(), ""))?,
                 );
-                updated.v5 = owner_v5_count;
+                if owner_full {
+                    updated.v5 = owner_v5_count;
+                }
                 reserved.update(&updated, legacy).await.map_err(local)?;
                 let mut b = billing.lock().expect("billing");
                 b.est = updated;
+                b.upstream_free_v5 = false;
                 b.detail = format!("{} {} Anlas", size_text(&body), updated.anlas as i64);
                 return Ok(false);
             }
@@ -140,6 +146,7 @@ pub(super) fn resolve_v5(
                 // The account pays from its own Anlas; the member's Anlas budget is untouched
                 let mut b = billing.lock().expect("billing");
                 b.site_paid = cost;
+                b.upstream_free_v5 = false;
                 b.detail = notes
                     .iter()
                     .cloned()
@@ -176,13 +183,18 @@ pub(super) fn resolve_v5(
             }
             let cost = policy::estimate_image_cost(&body, true, true)
                 .map_err(|e| UpstreamError::local(400, e.message().to_string(), ""))?;
-            if cost.anlas > 0 && !owner_full {
+            if cost.anlas > 0 && !paid_allowed {
                 // 超出免费规格（大图、步数多、多张、局部重绘等）的 V5 要花成员的 Anlas：同样不开放
                 return Err(UpstreamError::local(403, V5_PAID_REFUSED, reasons::PARAM));
             }
-            let updated = Est::from_cost(cost);
+            let mut updated = Est::from_cost(cost);
+            if owner_full {
+                updated.v5 = owner_v5_count;
+            }
             reserved.update(&updated, legacy).await.map_err(local)?;
-            billing.lock().expect("billing").est = updated;
+            let mut b = billing.lock().expect("billing");
+            b.est = updated;
+            b.upstream_free_v5 = true;
             Ok(false)
         })
     })
@@ -196,6 +208,7 @@ pub(super) async fn perform_generation(
 ) -> Result<Response, ApiError> {
     let billing = Arc::new(Mutex::new(Billing {
         est: prep.est,
+        upstream_free_v5: prep.upstream_free_v5,
         detail: prep.detail.clone(),
         site_paid: 0.0,
     }));
@@ -203,14 +216,15 @@ pub(super) async fn perform_generation(
     let est0 = prep.est;
     let cb = Callbacks {
         on_rate_limited: Some(on_429(state)),
-        resolve_v5_cost: (est0.v5 > 0 && est0.anlas == 0.0)
+        resolve_v5_cost: prep
+            .upstream_free_v5
             .then(|| resolve_v5(state, &prep, billing.clone(), reserved.clone())),
         before_dispatch: Some(before_dispatch(state)),
         on_dispatch: Some(on_dispatch(state, ctx, reserved.clone())),
     };
     let mut opts = RequestOpts::post("/ai/generate-image", &prep.body);
     opts.requires_anlas = est0.anlas > 0.0;
-    opts.v5_free = est0.v5 > 0 && est0.anlas == 0.0;
+    opts.v5_free = prep.upstream_free_v5;
     opts.image_count = prep.image_count as usize;
     opts.image_lane = true;
     opts.lane = super::lane(state, &key, &model);

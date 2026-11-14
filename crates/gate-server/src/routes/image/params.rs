@@ -25,6 +25,8 @@ pub(super) struct Prepared {
     pub(super) model: String,
     pub(super) image_count: i64,
     pub(super) est: Est,
+    /// 这一批是否实际使用上游免费 V5（站长的付费 V5 仍计个人 V5 额度）。
+    pub(super) upstream_free_v5: bool,
     pub(super) legacy_free_images: i64,
     pub(super) notes: Vec<String>,
     pub(super) detail: String,
@@ -224,6 +226,7 @@ pub(super) async fn prepare(
             "生图参数有误，无法计算费用，未扣费。请检查客户端中的参数设置。",
         )
     })?;
+    let upstream_free_v5 = cost.v5 > 0;
     let mut est = Est::from_cost(cost);
     // 普通成员仍限制为免费 V5；站长号或高规格开关允许在现有预算内支付高规格费用。
     if tier == "v5" && est.anlas > 0.0 && !key.allows_paid_v5() {
@@ -279,6 +282,7 @@ pub(super) async fn prepare(
         model,
         image_count,
         est,
+        upstream_free_v5,
         legacy_free_images,
         notes,
         detail,

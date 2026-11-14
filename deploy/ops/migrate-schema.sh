@@ -116,14 +116,43 @@ PYTHON
         HAVING SUM(CASE WHEN status='ok' THEN anlas ELSE 0 END + unconfirmed_anlas)>0;"
 }
 
-MIGRATIONS=(v2_to_v3 v3_to_v4 v4_to_v5 v5_to_v6)
+v6_to_v7() {
+    python3 - "$DB" <<'PYTHON'
+import os, sqlite3, sys, tempfile
+from pathlib import Path
+path = Path(sys.argv[1])
+fd, backup = tempfile.mkstemp(prefix=path.name + ".before-v7.", suffix=".db", dir=path.parent)
+os.close(fd)
+with sqlite3.connect(path) as source, sqlite3.connect(backup) as target:
+    source.backup(target)
+print("  迁移前私有快照：" + backup)
+PYTHON
+    q "BEGIN;
+       CREATE TABLE IF NOT EXISTS upstream_v5_reservations (
+           request_id TEXT PRIMARY KEY, token_id TEXT NOT NULL DEFAULT '', day TEXT NOT NULL
+       );
+       CREATE INDEX IF NOT EXISTS idx_upstream_v5_reservations ON upstream_v5_reservations (token_id, day);
+       CREATE TABLE IF NOT EXISTS admin_dm_attempts (ts REAL NOT NULL);
+       CREATE INDEX IF NOT EXISTS idx_admin_dm_attempts_ts ON admin_dm_attempts(ts);
+       INSERT INTO admin_dm_attempts(ts)
+       SELECT ts FROM admin_actions WHERE action='私信成员' AND ts > CAST(strftime('%s','now') AS REAL) - 86400;
+       INSERT OR IGNORE INTO upstream_v5_reservations(request_id,token_id,day)
+       SELECT s.request_id, COALESCE(l.token_id,''), s.day
+       FROM request_settlements s
+       LEFT JOIN usage_request_links x ON x.request_id=s.request_id
+       LEFT JOIN usage_log l ON l.id=x.usage_log_id
+       WHERE s.status IN ('uncertain','dispatched') AND s.v5>0;
+       COMMIT;"
+}
+
+MIGRATIONS=(v2_to_v3 v3_to_v4 v4_to_v5 v5_to_v6 v6_to_v7)
 
 before=$(q "PRAGMA user_version")
 echo "库：$DB"
 echo "当前结构版本：$before"
 while :; do
     v=$(q "PRAGMA user_version")
-    if [ "$v" -ge 6 ]; then
+    if [ "$v" -ge 7 ]; then
         break
     fi
     fn="v${v}_to_v$((v + 1))"

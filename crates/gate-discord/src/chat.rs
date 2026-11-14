@@ -796,13 +796,21 @@ pub fn split_for_discord(text: &str, limit: usize) -> Vec<String> {
             pieces.push(block);
         } else if fenced {
             // 超长围栏：首行是围栏声明（``` 或 ```lang），末行是 ```；内容按行硬切，每片补回围栏。
-            // 只有围栏一行（未闭合且无内容）时没有可拆的内容，跳过。
             let lines: Vec<&str> = block.trim().lines().collect();
-            let fence = lines.first().copied().unwrap_or("```").to_owned();
-            let inner = if lines.len() <= 1 {
-                String::new()
+            let first = lines.first().copied().unwrap_or("```");
+            let (fence, inner) = if first.chars().count() > limit / 2 {
+                // An oversized opening line cannot be repeated as the language marker.
+                (
+                    "```".to_string(),
+                    block.trim().trim_start_matches("```").to_string(),
+                )
             } else {
-                lines[1..lines.len() - 1].join("\n")
+                let closed = lines.len() > 1
+                    && lines
+                        .last()
+                        .is_some_and(|line| line.trim_start().starts_with("```"));
+                let end = lines.len() - usize::from(closed);
+                (first.to_string(), lines[1..end].join("\n"))
             };
             if !inner.is_empty() {
                 for piece in hard_split(&inner, limit.saturating_sub(fence.chars().count() * 2 + 8))
@@ -1184,5 +1192,20 @@ mod tests {
             let opens = part.matches("```").count();
             assert_eq!(opens % 2, 0, "围栏必须成对：{part:.80}");
         }
+    }
+
+    #[test]
+    fn long_unclosed_fence_keeps_the_last_line_and_obeys_discord_limit() {
+        let text = format!("```rust\n{}\nLAST_LINE", "x".repeat(2200));
+        let parts = split_for_discord(&text, 1900);
+        assert!(parts.iter().all(|p| p.chars().count() <= 1900));
+        assert!(parts.iter().any(|p| p.contains("LAST_LINE")));
+        let single = format!("```{}", "x".repeat(4000));
+        let parts = split_for_discord(&single, 1900);
+        assert!(parts.iter().all(|p| p.chars().count() <= 1900));
+        assert_eq!(
+            parts.iter().map(|p| p.matches('x').count()).sum::<usize>(),
+            4000
+        );
     }
 }

@@ -1085,7 +1085,7 @@ async fn delete_and_ban_uses_bound_identity_even_without_registration_service() 
 
 #[tokio::test]
 async fn manual_dm_sends_plain_text_and_is_rate_limited() {
-    let (_e, a, d) = ready_reg().await;
+    let (e, a, d) = ready_reg().await;
     let url = format!("{A}/keys/1/dm");
     let r = a.req("POST", &url, Some(json!({"text": "  "}))).await;
     assert_eq!(r.status, 422, "{}", r.text());
@@ -1115,6 +1115,8 @@ async fn manual_dm_sends_plain_text_and_is_rate_limited() {
             200
         );
     }
+    let restarted = e.restart().await;
+    let a = Admin::login(&restarted).await;
     let r = a.req("POST", &url, Some(json!({"text": "x"}))).await;
     assert_eq!(r.status, 502);
     assert!(r.text().contains("每小时最多 10 条"), "{}", r.text());

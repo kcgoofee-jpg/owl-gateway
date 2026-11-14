@@ -572,11 +572,11 @@ async fn streaming_upstream_5xx_is_unknown_and_not_retried() {
 }
 
 #[tokio::test]
-#[ignore = "existing per-upstream V5 unknown reservation is not yet durable"]
 async fn unknown_free_v5_respects_single_upstream_daily_limit() {
     let e = setup(&[]).await;
     common::policy_for(&e.state, 1, json!({"daily_v5":10,"v5":true})).await;
     let id = e.state.nai.tokens().await[0].token_id.clone();
+    e.state.db.set_upstream_token_limit(&id, 1).await.unwrap();
     assert!(e.state.nai.set_v5_daily_limit(&id, 1).await);
     e.mock
         .push("/ai/generate-image", Reply::status(500, "synthetic"));
@@ -591,7 +591,7 @@ async fn unknown_free_v5_respects_single_upstream_daily_limit() {
     settle().await;
     let second = Call::new("POST", "/ai/generate-image")
         .bearer(TOKEN)
-        .json(payload)
+        .json(payload.clone())
         .send(&e.state)
         .await;
     assert_ne!(
@@ -600,4 +600,260 @@ async fn unknown_free_v5_respects_single_upstream_daily_limit() {
         "unknown first request must keep upstream allowance reserved"
     );
     assert_eq!(e.mock.requests_to("/ai/generate-image").len(), 1);
+    let restarted = e.restart().await;
+    let third = Call::new("POST", "/ai/generate-image")
+        .bearer(TOKEN)
+        .json(payload.clone())
+        .send(&restarted)
+        .await;
+    assert_ne!(
+        third.0.as_u16(),
+        200,
+        "restart must retain the account hold"
+    );
+    let held = restarted
+        .db
+        .list_unknown_request_settlements()
+        .await
+        .unwrap();
+    assert_eq!(held.len(), 1);
+    assert!(
+        restarted
+            .db
+            .manually_release_unknown_request(
+                &held[0].request_id,
+                "test",
+                "confirmed not executed by synthetic test",
+                restarted.now()
+            )
+            .await
+            .unwrap()
+    );
+    gate_server::admission::release_reservations(&restarted, &held[0].request_id).await;
+    let fourth = Call::new("POST", "/ai/generate-image")
+        .bearer(TOKEN)
+        .json(payload)
+        .send(&restarted)
+        .await;
+    assert_eq!(fourth.0.as_u16(), 200);
+    settle().await;
+    assert_eq!(
+        restarted
+            .db
+            .upstream_v5_used_and_held(&id, &restarted.day())
+            .await
+            .unwrap(),
+        1
+    );
+}
+
+#[tokio::test]
+async fn free_v5_transfers_from_memory_to_durable_hold_without_double_counting() {
+    let e = setup(&[]).await;
+    common::policy_for(&e.state, 1, json!({"daily_v5":10,"v5":true})).await;
+    let token = e.state.nai.tokens().await.remove(0);
+    assert!(e.state.nai.set_v5_daily_limit(&token.token_id, 2).await);
+    e.mock.push(
+        "/ai/generate-image",
+        Reply::Chunks {
+            status: 200,
+            content_type: "application/zip".into(),
+            chunks: vec![(
+                std::time::Duration::from_millis(600),
+                gate_testkit::zip_of_pngs(1).into(),
+            )],
+        },
+    );
+    let state = e.state.clone();
+    let mut payload = body(1);
+    payload["model"] = json!("nai-diffusion-5-full");
+    let task = tokio::spawn(async move {
+        Call::new("POST", "/ai/generate-image")
+            .bearer(TOKEN)
+            .json(payload)
+            .send(&state)
+            .await
+            .0
+    });
+    tokio::time::timeout(std::time::Duration::from_secs(3), async {
+        loop {
+            if !e.mock.requests_to("/ai/generate-image").is_empty() {
+                break;
+            }
+            tokio::time::sleep(std::time::Duration::from_millis(5)).await;
+        }
+    })
+    .await
+    .unwrap();
+    assert_eq!(token.fields().pending_v5, 0);
+    assert_eq!(
+        e.state
+            .db
+            .upstream_v5_used_and_held(&token.token_id, &e.state.day())
+            .await
+            .unwrap(),
+        1
+    );
+    assert_eq!(task.await.unwrap().as_u16(), 200);
+    settle().await;
+    assert_eq!(
+        e.state
+            .db
+            .get_upstream_counter(&token.token_id, &e.state.day())
+            .await
+            .unwrap()
+            .v5,
+        1
+    );
+    assert_eq!(
+        e.state
+            .db
+            .upstream_v5_used_and_held(&token.token_id, &e.state.day())
+            .await
+            .unwrap(),
+        1
+    );
+}
+
+#[tokio::test]
+async fn free_v5_known_rejection_releases_the_account_hold() {
+    let e = setup(&[]).await;
+    common::policy_for(&e.state, 1, json!({"daily_v5":10,"v5":true})).await;
+    let id = e.state.nai.tokens().await[0].token_id.clone();
+    assert!(e.state.nai.set_v5_daily_limit(&id, 1).await);
+    e.mock.push(
+        "/ai/generate-image",
+        Reply::status(400, "synthetic rejection"),
+    );
+    let mut payload = body(1);
+    payload["model"] = json!("nai-diffusion-5-full");
+    let first = Call::new("POST", "/ai/generate-image")
+        .bearer(TOKEN)
+        .json(payload.clone())
+        .send(&e.state)
+        .await;
+    assert_eq!(first.0.as_u16(), 400);
+    settle().await;
+    assert_eq!(
+        e.state
+            .db
+            .upstream_v5_used_and_held(&id, &e.state.day())
+            .await
+            .unwrap(),
+        0
+    );
+    let second = Call::new("POST", "/ai/generate-image")
+        .bearer(TOKEN)
+        .json(payload)
+        .send(&e.state)
+        .await;
+    assert_eq!(second.0.as_u16(), 200);
+    settle().await;
+    assert_eq!(
+        e.state
+            .db
+            .get_upstream_counter(&id, &e.state.day())
+            .await
+            .unwrap()
+            .v5,
+        1
+    );
+    assert_eq!(
+        e.state
+            .db
+            .upstream_v5_used_and_held(&id, &e.state.day())
+            .await
+            .unwrap(),
+        1
+    );
+}
+
+#[tokio::test]
+async fn free_v5_is_not_sent_if_durable_account_hold_cannot_be_written() {
+    let e = setup(&[]).await;
+    common::policy_for(&e.state, 1, json!({"daily_v5":10,"v5":true})).await;
+    e.state.db.run_script(vec!["CREATE TRIGGER reject_v5_hold BEFORE INSERT ON upstream_v5_reservations BEGIN SELECT RAISE(ABORT, 'synthetic write failure'); END".into()]).await.unwrap();
+    let mut payload = body(1);
+    payload["model"] = json!("nai-diffusion-5-full");
+    let (status, _, _) = Call::new("POST", "/ai/generate-image")
+        .bearer(TOKEN)
+        .json(payload)
+        .send(&e.state)
+        .await;
+    assert_eq!(status.as_u16(), 500);
+    settle().await;
+    assert!(e.mock.requests_to("/ai/generate-image").is_empty());
+    assert!(e.state.budget.lock().await.reservations.is_empty());
+}
+
+#[tokio::test]
+async fn mixed_v5_batch_must_not_use_disabled_free_upstream_quota() {
+    let e = setup(&[]).await;
+    common::policy_for(&e.state, 1, json!({"paid_parameters":true,"daily_v5":10,"daily_anlas":5000,"monthly_anlas":99999,"v5":true})).await;
+    common::budgets_for(
+        &e.state,
+        json!({"daily_v5":100,"daily_anlas":5000,"monthly_anlas":99999}),
+    )
+    .await;
+    let token = e.state.nai.tokens().await.remove(0);
+    assert!(e.state.nai.set_v5_daily_limit(&token.token_id, 0).await);
+    let mut payload = body(3);
+    payload["model"] = json!("nai-diffusion-5-full");
+    let (status, _, _) = Call::new("POST", "/ai/generate-image")
+        .bearer(TOKEN)
+        .json(payload)
+        .send(&e.state)
+        .await;
+    settle().await;
+    assert_eq!(
+        status.as_u16(),
+        200,
+        "paid fallback should remain available"
+    );
+    let sent = e.mock.requests_to("/ai/generate-image");
+    assert_eq!(sent.len(), 1);
+    let full_cost = gate_core::policy::estimate_image_cost(&sent[0].json(), true, false)
+        .unwrap()
+        .anlas;
+    let counter = e.state.db.get_counter(1, &e.state.day()).await.unwrap();
+    assert_eq!(counter.anlas, full_cost as f64);
+    assert_eq!(
+        e.state
+            .db
+            .upstream_v5_used_and_held(&token.token_id, &e.state.day())
+            .await
+            .unwrap(),
+        0
+    );
+    let mut stream_body = body(3);
+    stream_body["model"] = json!("nai-diffusion-5-full");
+    let (stream_status, _, _) = Call::new("POST", "/ai/generate-image-stream")
+        .bearer(TOKEN)
+        .json(stream_body)
+        .send(&e.state)
+        .await;
+    assert_eq!(stream_status.as_u16(), 200);
+    settle().await;
+    let stream_sent = e.mock.requests_to("/ai/generate-image-stream");
+    assert_eq!(stream_sent.len(), 1);
+    let stream_cost = gate_core::policy::estimate_image_cost(&stream_sent[0].json(), true, false)
+        .unwrap()
+        .anlas;
+    assert_eq!(
+        e.state
+            .db
+            .get_counter(1, &e.state.day())
+            .await
+            .unwrap()
+            .anlas,
+        (full_cost + stream_cost) as f64
+    );
+    assert_eq!(
+        e.state
+            .db
+            .upstream_v5_used_and_held(&token.token_id, &e.state.day())
+            .await
+            .unwrap(),
+        0
+    );
 }

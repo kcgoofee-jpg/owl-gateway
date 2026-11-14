@@ -5,7 +5,7 @@ use gate_core::primitives::take_chars;
 use gate_db::Db;
 use serde_json::{Map, Value};
 
-const SECRET_FIELDS: [&str; 10] = [
+const SECRET_FIELDS: [&str; 11] = [
     "token",
     "password",
     "current",
@@ -16,6 +16,7 @@ const SECRET_FIELDS: [&str; 10] = [
     "html",
     "secret",
     "portal_password",
+    "text",
 ];
 
 /// (方法, 路由模板) → 操作名；模板不含 /admin/api 前缀。

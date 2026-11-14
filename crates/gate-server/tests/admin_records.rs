@@ -35,6 +35,30 @@ async fn usage_logs_filter_and_paginate() {
         ));
     }
     a.sql(&sql).await;
+    a.sql("UPDATE usage_log SET token_id='token-0123456789abcdef' WHERE id IN (1,2,3)")
+        .await;
+    let by_upstream = a
+        .get(&format!(
+            "{A}/logs?token_id=token-0123456789abcdef&key_id=1"
+        ))
+        .await
+        .json();
+    assert_eq!(by_upstream["total"], 2);
+    assert_eq!(by_upstream["summary"]["total"], 2);
+    assert_eq!(
+        a.get(&format!(
+            "{A}/logs?token_id=token-0123456789abcdef&since=1001&until=1003"
+        ))
+        .await
+        .json()["total"],
+        2
+    );
+    a.get(&format!("{A}/logs?since=1003&until=1003"))
+        .await
+        .assert_detail(422, "时间范围无效");
+    a.get(&format!("{A}/logs?token_id=bad"))
+        .await
+        .assert_detail(422, "上游编号无效");
     let r = a.get(&format!("{A}/logs")).await;
     assert_eq!(r.status, 200, "{}", r.text());
     let v = r.json();

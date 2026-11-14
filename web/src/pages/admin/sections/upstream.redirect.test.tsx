@@ -43,11 +43,11 @@ describe("inUpstream", () => {
 });
 
 describe("上游页的默认子页跳转", () => {
-  it("/admin/upstream 和不认识的子路径：replace 到官方账号", async () => {
+  it("/admin/upstream 和不认识的子路径：replace 到运行总览", async () => {
     await mount("/admin/upstream");
-    expect(loc.route).toHaveBeenCalledWith("/admin/upstream/official", true);
+    expect(loc.route).toHaveBeenCalledWith("/admin/upstream/overview", true);
     await mount("/admin/upstream/nope");
-    expect(loc.route).toHaveBeenCalledWith("/admin/upstream/official", true);
+    expect(loc.route).toHaveBeenCalledWith("/admin/upstream/overview", true);
   });
 
   it("已经点去别的栏目：不能再跳回上游页", async () => {

@@ -592,3 +592,70 @@ async fn retry_saved_success_commits_once_without_replacing_the_result() {
     assert_eq!(logs.len(), 1);
     assert_eq!(logs[0]["ts"], 3.0);
 }
+
+#[tokio::test]
+async fn in_flight_free_v5_follows_token_replacement_and_counts_once() {
+    let dir = tempfile::tempdir().unwrap();
+    let db = Db::open(dir.path().join("gate.db")).unwrap();
+    let key: NewKey =
+        serde_json::from_value(json!({"name":"synthetic","token":"nai-synthetic-key"})).unwrap();
+    let id = db.create_key(&key, 1.0).await.unwrap()["id"]
+        .as_i64()
+        .unwrap();
+    let day = "2026-11-14";
+    db.reserve_request_settlement("switch", "rid", id, day, "2026-11", false, 0.0, 1, 0, 1.0)
+        .await
+        .unwrap();
+    assert!(
+        db.dispatch_request_settlement_with_upstream(
+            "switch",
+            "corr",
+            "rid",
+            day,
+            "2026-11",
+            false,
+            0.0,
+            1,
+            0,
+            2.0,
+            Some(("old-token", true))
+        )
+        .await
+        .unwrap()
+    );
+    db.move_upstream_token("old-token", "new-token")
+        .await
+        .unwrap();
+    assert_eq!(
+        db.upstream_v5_used_and_held("new-token", day)
+            .await
+            .unwrap(),
+        1
+    );
+    let success = Success {
+        key_id: id,
+        key_name: "synthetic".into(),
+        kind: "image".into(),
+        day: day.into(),
+        images: 1,
+        v5: 1,
+        token_id: Some("old-token".into()),
+        ..Default::default()
+    };
+    db.record_success_settled(&success, "switch", 3.0)
+        .await
+        .unwrap();
+    db.record_success_settled(&success, "switch", 4.0)
+        .await
+        .unwrap();
+    assert_eq!(
+        db.get_upstream_counter("new-token", day).await.unwrap().v5,
+        1
+    );
+    assert_eq!(
+        db.upstream_v5_used_and_held("new-token", day)
+            .await
+            .unwrap(),
+        1
+    );
+}

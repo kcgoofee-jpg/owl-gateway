@@ -241,6 +241,14 @@ CREATE TABLE IF NOT EXISTS request_settlements (
 );
 CREATE INDEX IF NOT EXISTS idx_settlement_site_paid ON request_settlements(site_paid_token) WHERE site_paid_hold > 0;
 
+-- 免费 V5 已派发但尚未确认的账号级预留；空 token_id 表示历史请求无法确认上游。
+CREATE TABLE IF NOT EXISTS upstream_v5_reservations (
+    request_id TEXT PRIMARY KEY,
+    token_id TEXT NOT NULL DEFAULT '',
+    day TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_upstream_v5_reservations ON upstream_v5_reservations (token_id, day);
+
 -- 成员用 Discord OAuth 授权后核验到的身份组（领 Key 的门槛只认这张表）。
 CREATE TABLE IF NOT EXISTS role_verifications (
     discord_id TEXT NOT NULL, guild_id TEXT NOT NULL, role_id TEXT NOT NULL, verified_at REAL NOT NULL,
@@ -315,3 +323,7 @@ CREATE TABLE IF NOT EXISTS upstream_anlas_charges (
     PRIMARY KEY (request_id, token_id)
 );
 CREATE INDEX IF NOT EXISTS idx_upstream_anlas_day ON upstream_anlas_charges (token_id, day);
+
+-- Rolling manual Discord DM rate limit; stores attempt timestamps only.
+CREATE TABLE IF NOT EXISTS admin_dm_attempts (ts REAL NOT NULL);
+CREATE INDEX IF NOT EXISTS idx_admin_dm_attempts_ts ON admin_dm_attempts(ts);

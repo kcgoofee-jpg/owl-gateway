@@ -34,10 +34,38 @@ fn migrate_token(
             params![new_id, old_id],
         )?;
     }
+    tx.execute(
+        "UPDATE upstream_v5_reservations SET token_id=? WHERE token_id=?",
+        params![new_id, old_id],
+    )?;
     Ok(())
 }
 
 impl Db {
+    /// 已确认的账号免费 V5 消耗，加上已派发但尚未确定的持久预留。
+    pub async fn upstream_v5_used_and_held(&self, token: &str, day: &str) -> Result<i64> {
+        let (token, day) = (token.to_owned(), day.to_owned());
+        self.read(move |c| c.query_row(
+            "SELECT COALESCE((SELECT v5 FROM upstream_token_counters WHERE token_id=?1 AND day=?2),0) + \
+             (SELECT COUNT(*) FROM upstream_v5_reservations h JOIN request_settlements s ON s.request_id=h.request_id \
+              WHERE (h.token_id=?1 OR h.token_id='') AND h.day=?2 AND s.status IN ('dispatched','result_saved','uncertain'))",
+            params![token,day], |r| r.get(0))).await
+    }
+
+    /// 管理界面同一快照中读取已确认计数与持久预留。
+    pub async fn upstream_counter_with_holds(
+        &self,
+        token: &str,
+        day: &str,
+    ) -> Result<(UpstreamCounter, i64)> {
+        let (token, day) = (token.to_owned(), day.to_owned());
+        self.read(move |c| c.query_row(
+            "SELECT COALESCE((SELECT images FROM upstream_token_counters WHERE token_id=?1 AND day=?2),0), \
+                    COALESCE((SELECT v5 FROM upstream_token_counters WHERE token_id=?1 AND day=?2),0), \
+                    (SELECT COUNT(*) FROM upstream_v5_reservations h JOIN request_settlements s ON s.request_id=h.request_id \
+                     WHERE (h.token_id=?1 OR h.token_id='') AND h.day=?2 AND s.status IN ('dispatched','result_saved','uncertain'))",
+            params![token,day], |r| Ok((UpstreamCounter { images:r.get(0)?, v5:r.get(1)? },r.get(2)?)))).await
+    }
     /// Includes unresolved dispatches. A repeated confirmation never reserves twice.
     pub async fn reserve_upstream_anlas(
         &self,

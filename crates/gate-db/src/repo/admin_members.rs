@@ -64,6 +64,20 @@ pub struct TagRow {
 }
 
 impl Db {
+    /// Reserve a DM attempt atomically before contacting Discord; survives restarts.
+    pub async fn reserve_admin_dm(&self, now: f64, hour_limit: i64, day_limit: i64) -> Result<u8> {
+        self.write(move |tx| {
+            tx.execute("DELETE FROM admin_dm_attempts WHERE ts<=?", [now - 86400.0])?;
+            let (day, hour): (i64, i64) = tx.query_row(
+                "SELECT COUNT(*), COALESCE(SUM(CASE WHEN ts>? THEN 1 ELSE 0 END),0) FROM admin_dm_attempts",
+                [now - 3600.0], |r| Ok((r.get(0)?, r.get(1)?)),
+            )?;
+            if hour >= hour_limit { return Ok(1); }
+            if day >= day_limit { return Ok(2); }
+            tx.execute("INSERT INTO admin_dm_attempts(ts) VALUES(?)", [now])?;
+            Ok(0)
+        }).await
+    }
     /// 带「邀请」标签的 Key（后台 Key 列表据此标身份组）。
     pub async fn invite_key_ids(&self) -> Result<Vec<i64>> {
         self.read(|c| {

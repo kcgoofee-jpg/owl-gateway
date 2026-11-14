@@ -106,3 +106,130 @@ async fn write_then_read() {
         .unwrap();
     assert_eq!(n, 0);
 }
+
+#[tokio::test]
+async fn v6_migration_preserves_unknown_v5_and_unattributed_holds() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("v6.db");
+    drop(gate_db::Db::open(&path).unwrap());
+    let conn = Connection::open(&path).unwrap();
+    conn.execute_batch("DROP TABLE upstream_v5_reservations; DROP TABLE admin_dm_attempts; PRAGMA user_version=6; \
+      INSERT INTO request_settlements(request_id,rid,key_id,status,day,v5,updated_at) VALUES \
+      ('linked','rid1',1,'uncertain','2026-11-14',1,1), \
+      ('orphan','rid2',1,'dispatched','2026-11-14',1,1), \
+      ('saved','rid3',1,'result_saved','2026-11-14',1,1), \
+      ('released','rid4',1,'released','2026-11-14',1,1); \
+      INSERT INTO usage_log(id,ts,key_id,key_name,kind,model,status,token_id) VALUES(1,1,1,'synthetic','image','v5','error','synthetic-token'); \
+      INSERT INTO usage_request_links(request_id,usage_log_id) VALUES('linked',1); \
+      INSERT INTO admin_actions(ts,actor,action) VALUES(strftime('%s','now'),'admin','私信成员'),(1,'admin','私信成员');").unwrap();
+    drop(conn);
+    let script =
+        std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../deploy/ops/migrate-schema.sh");
+    let output = std::process::Command::new("bash")
+        .arg(&script)
+        .arg(&path)
+        .output()
+        .unwrap();
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let conn = Connection::open(&path).unwrap();
+    assert_eq!(
+        conn.query_row("SELECT COUNT(*) FROM admin_dm_attempts", [], |r| r
+            .get::<_, i64>(0))
+            .unwrap(),
+        1
+    );
+    assert_eq!(
+        conn.query_row("PRAGMA user_version", [], |r| r.get::<_, i64>(0))
+            .unwrap(),
+        7
+    );
+    let rows: Vec<(String, String)> = conn
+        .prepare("SELECT request_id,token_id FROM upstream_v5_reservations ORDER BY request_id")
+        .unwrap()
+        .query_map([], |r| Ok((r.get(0)?, r.get(1)?)))
+        .unwrap()
+        .map(Result::unwrap)
+        .collect();
+    assert_eq!(
+        rows,
+        vec![
+            ("linked".into(), "synthetic-token".into()),
+            ("orphan".into(), "".into())
+        ]
+    );
+    drop(conn);
+    let db = gate_db::Db::open(&path).unwrap();
+    assert_eq!(
+        db.upstream_v5_used_and_held("synthetic-token", "2026-11-14")
+            .await
+            .unwrap(),
+        2
+    );
+    assert_eq!(
+        db.upstream_v5_used_and_held("another-token", "2026-11-14")
+            .await
+            .unwrap(),
+        1
+    );
+    assert!(
+        db.manually_release_unknown_request("linked", "synthetic", "confirmed not executed", 3.0)
+            .await
+            .unwrap()
+    );
+    assert_eq!(
+        db.upstream_v5_used_and_held("synthetic-token", "2026-11-14")
+            .await
+            .unwrap(),
+        1
+    );
+    drop(db);
+    let backups: Vec<_> = std::fs::read_dir(dir.path())
+        .unwrap()
+        .map(Result::unwrap)
+        .filter(|e| {
+            e.file_name()
+                .to_string_lossy()
+                .starts_with("v6.db.before-v7.")
+        })
+        .collect();
+    assert_eq!(backups.len(), 1);
+    let backup = Connection::open(backups[0].path()).unwrap();
+    assert_eq!(
+        backup
+            .query_row("PRAGMA user_version", [], |r| r.get::<_, i64>(0))
+            .unwrap(),
+        6
+    );
+    assert_eq!(
+        backup
+            .query_row("SELECT COUNT(*) FROM request_settlements", [], |r| r
+                .get::<_, i64>(0))
+            .unwrap(),
+        4
+    );
+    drop(backup);
+    let second = std::process::Command::new("bash")
+        .arg(&script)
+        .arg(&path)
+        .output()
+        .unwrap();
+    assert!(
+        second.status.success(),
+        "{}",
+        String::from_utf8_lossy(&second.stderr)
+    );
+    assert_eq!(
+        Connection::open(&path)
+            .unwrap()
+            .query_row("SELECT COUNT(*) FROM upstream_v5_reservations", [], |r| r
+                .get::<_, i64>(
+                0
+            ))
+            .unwrap(),
+        2
+    );
+}

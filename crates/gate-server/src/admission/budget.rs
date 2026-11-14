@@ -128,6 +128,16 @@ impl Reserved {
         correlation_id: &str,
         rid: &str,
     ) -> Result<(String, String), ApiError> {
+        self.prepare_dispatch_with_upstream(correlation_id, rid, None)
+            .await
+    }
+
+    pub async fn prepare_dispatch_with_upstream(
+        &self,
+        correlation_id: &str,
+        rid: &str,
+        upstream: Option<(&str, bool)>,
+    ) -> Result<(String, String), ApiError> {
         let row = self
             .state
             .db
@@ -197,7 +207,7 @@ impl Reserved {
         let ok = self
             .state
             .db
-            .dispatch_request_settlement(
+            .dispatch_request_settlement_with_upstream(
                 &self.request_id,
                 correlation_id,
                 rid,
@@ -208,6 +218,7 @@ impl Reserved {
                 r.v5,
                 r.legacy,
                 self.state.now(),
+                upstream,
             )
             .await
             .map_err(|e| { tracing::error!(error = %e, request_id = %self.request_id, "request dispatch persistence failed"); InternalError("保存请求派发状态失败，未发送上游请求。".into()) })?;
