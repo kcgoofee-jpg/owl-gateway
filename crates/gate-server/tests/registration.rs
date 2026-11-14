@@ -444,7 +444,7 @@ async fn ban_revokes_the_key_and_blocks_reissue_until_unban() {
 }
 
 #[tokio::test]
-async fn issued_key_never_expires_by_default() {
+async fn issued_key_expires_in_9999_days_by_default() {
     let (e, _d) = setup_reg_with(&[], false).await;
     open_registration(&e).await;
     let r = issue(&e, MEMBER).await;
@@ -457,7 +457,10 @@ async fn issued_key_never_expires_by_default() {
         .await
         .unwrap()
         .unwrap();
-    assert!(row["expires_at"].is_null(), "{row:?}");
+    // 9999 天 = 事实上的永久；不再用 null 表示
+    let created = row["created_at"].as_f64().unwrap();
+    let expires = row["expires_at"].as_f64().unwrap();
+    assert!((expires - (created + 9999.0 * 86400.0)).abs() < 1.0, "{row:?}");
 }
 
 #[tokio::test]
@@ -619,7 +622,7 @@ async fn issue_enforces_capacity_age_hourly_cap_and_expiry_rotation() {
     );
     // 每小时领取上限
     let (e2, _d2) = setup_reg(&[]).await;
-    common::claim_for(&e2.state, json!({"max_users":0})).await;
+    common::claim_for(&e2.state, json!({"max_users":9999})).await;
     open_registration(&e2).await;
     e2.state
         .db
@@ -633,9 +636,17 @@ async fn issue_enforces_capacity_age_hourly_cap_and_expiry_rotation() {
         (limited.0, detail(&limited)),
         (403, "领取过于频繁，请稍后再试。")
     );
+    // 0 = 一张都不发（不是「不限」）
     e2.state
         .db
         .set_setting("issue_hourly_cap", "0")
+        .await
+        .unwrap();
+    assert_eq!(issue(&e2, "900000000000000103").await.0, 403);
+    // 9999 = 不限
+    e2.state
+        .db
+        .set_setting("issue_hourly_cap", "9999")
         .await
         .unwrap();
     assert_eq!(issue(&e2, "900000000000000103").await.0, 200);
@@ -1442,7 +1453,7 @@ async fn failed_role_grant_does_not_block_registration() {
 #[tokio::test]
 async fn departed_sweep_only_revokes_confirmed_departures() {
     let (e, d) = setup_reg(&[]).await;
-    common::claim_for(&e.state, json!({"max_users":0})).await;
+    common::claim_for(&e.state, json!({"max_users":9999})).await;
     open_registration(&e).await;
     let ids = [
         "900000000000000201",
@@ -1538,7 +1549,7 @@ async fn departed_sweep_only_revokes_confirmed_departures() {
 #[tokio::test]
 async fn departed_sweep_recycles_invites_using_the_same_lifecycle() {
     let (e, d) = setup_reg(&[]).await;
-    common::claim_for(&e.state, json!({"max_users":0})).await;
+    common::claim_for(&e.state, json!({"max_users":9999})).await;
     open_registration(&e).await;
     let invited = "900000000000000211";
     let regular = "900000000000000212";
@@ -2787,7 +2798,7 @@ async fn verify_login_keeps_the_earliest_join_across_two_guilds() {
 /// 机器人巡查的是本站自己的服，不是门槛服：它的进服时间不能拿来算「进服多久」，一律不记。
 async fn departed_sweep_does_not_record_the_bot_guild_join_time() {
     let (e, d) = setup_reg(&[]).await;
-    common::claim_for(&e.state, json!({"max_users":0})).await;
+    common::claim_for(&e.state, json!({"max_users":9999})).await;
     open_registration(&e).await;
     let ids = [
         "900000000000000301",

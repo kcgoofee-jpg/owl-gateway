@@ -37,3 +37,12 @@ pub mod errors;
 pub mod image_events;
 pub mod json_body;
 pub mod sse;
+
+/// 「不限」的唯一写法。**0 一律表示 0**（没有 / 不允许 / 停用），任何地方都不得再把 0
+/// 解释成「不限」「永久」「不设上限」。需要放开时填 [`UNLIMITED`]。
+pub const UNLIMITED: i64 = 9999;
+
+/// 这个值是不是「不限」。
+pub const fn is_unlimited(value: i64) -> bool {
+    value >= UNLIMITED
+}

@@ -16,9 +16,7 @@ const status = (): ShareLockStatus => ({
   detection: {
     connected: true,
     last_complete_at: 1800000000,
-    complete_day_start: 1799967600,
     pending: 0,
-    oldest_failure_at: null,
     error: null,
   },
 });
@@ -81,7 +79,7 @@ it("distinguishes an online bot from a broken detector and explains fail-open", 
 
 it("saves the independent daily mode and explains that quota exhaustion is not required", async () => {
   await show({ ...status(), mode: "daily" });
-  expect(root.textContent).toContain("所有成员昨日或今日需分享一张图");
+  expect(root.textContent).toContain("所有成员每天都要分享一张图");
   vi.mocked(adminWrite).mockResolvedValue({ ok: true, data: { mode: "quota" } });
   await renderAct(async () => {
     const select = root.querySelector<HTMLSelectElement>("#share-lock-mode");

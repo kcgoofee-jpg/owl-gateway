@@ -452,7 +452,8 @@ async fn share_settings_are_independent_validated_and_survive_restart_and_replac
     assert_eq!(api.json("PUT", &url, Some(settings.clone())).await.0, 200);
     let page = api.get_ok("/share-upstreams").await;
     assert_eq!(page["accounts"][0]["daily_anlas"], 25);
-    assert_eq!(page["accounts"][1]["daily_anlas"], 0);
+    // 没单独设置过的拼车号：默认不限（9999），不是 0
+    assert_eq!(page["accounts"][1]["daily_anlas"], 9999);
     assert_eq!(page["accounts"][1]["allow_anlas"], false);
     assert_eq!(e.state.nai.tokens().await[0].image_slots.limit(), 1);
     let new_key = "NAI-synthetic-replaced-share-key";
@@ -522,7 +523,7 @@ async fn share_paid_dispatch_enforces_cap_before_sending_and_releases_known_fail
         200
     );
     let id = gate_upstream::headers::token_id(SHARE_KEY);
-    assert_eq!(api.json("PUT",&format!("/share-upstreams/{id}/settings"),Some(json!({"allow_anlas":true,"daily_anlas":3,"rpm":0,"concurrency":2,"post_wait_min":0,"post_wait_max":0}))).await.0,200);
+    assert_eq!(api.json("PUT",&format!("/share-upstreams/{id}/settings"),Some(json!({"allow_anlas":true,"daily_anlas":3,"rpm":9999,"concurrency":2,"post_wait_min":0,"post_wait_max":0}))).await.0,200);
     let image = image::GrayImage::from_fn(64, 64, |x, y| image::Luma([((x * 4) ^ y) as u8]));
     let mut png = std::io::Cursor::new(Vec::new());
     image.write_to(&mut png, image::ImageFormat::Png).unwrap();

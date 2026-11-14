@@ -1,8 +1,0 @@
-.pwbox {
-  display: flex;
-  gap: var(--sp-2);
-}
-.pwbox .input {
-  flex: 1;
-  min-width: 0;
-}

@@ -73,13 +73,9 @@ export const num = (n: number | null | undefined): string => (n == null ? "—" 
 export const withUnit = (n: number | null | undefined, unit: string): string =>
   n == null ? "—" : `${num(n)} ${unit}`;
 
-/** 「已用 / 上限」：4, 300 →「4 / 300」；上限 <= 0 →「4 / 不限」。 */
-export function usedOf(
-  used: number | null | undefined,
-  max: number | null | undefined,
-  unlimited = "不限",
-): string {
-  return `${num(used ?? 0)} / ${max && max > 0 ? num(max) : unlimited}`;
+/** 「已用 / 上限」：4, 300 →「4 / 300」；0 就是 0（不是「不限」）。 */
+export function usedOf(used: number | null | undefined, max: number | null | undefined): string {
+  return `${num(used ?? 0)} / ${num(max ?? 0)}`;
 }
 
 /** 毫秒 → 短耗时：「4.2 秒」「12 秒」；0 / 空 →「—」。 */

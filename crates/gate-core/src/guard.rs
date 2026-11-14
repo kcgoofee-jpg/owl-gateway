@@ -52,7 +52,7 @@ pub const ACCOUNT_DAILY_CAP_DEFAULT: i64 = 2400;
 /// 每个成员最多同时排几张（`queue_per_member` 的默认值）。
 pub const QUEUE_PER_MEMBER_DEFAULT: i64 = 2;
 
-/// 所有设置（存 `site_settings` 的键是 `guard_<名称>`）；0 表示关闭该项。
+/// 所有设置（存 `site_settings` 的键是 `guard_<名称>`）；0 一律表示 0（不允许），不限填 9999。
 /// `guard_v5_priority` 已删除（11-12），库里的旧行不再读；归档 tag `archive/v5-priority-lane`。
 pub const FIELDS: [Field; 5] = [
     field(
@@ -88,12 +88,12 @@ pub const FIELDS: [Field; 5] = [
         5,
         "每个成员最多同时排几张图（正在生成的那张不算）",
     ),
-    // 只是上限：实际还会收紧到排队超时内这个账号真能开始的张数（见 queue_cap）；0 = 只按后者
+    // 只是上限：实际还会收紧到排队超时内这个账号真能开始的张数（见 queue_cap）
     field(
         "queue_per_account",
         5,
-        0,
-        100,
+        1,
+        9999,
         "每个上游账号全站最多同时排几张图",
     ),
 ];
@@ -376,15 +376,11 @@ impl GuardCore {
     // ---------- 排队（P1） ----------
 
     /// 全站排队上限（排队 + 正在生成）：每个可用账号取 min(`queue_per_account`, 排队超时内它真能开始的张数)
-    /// 再相加。`realistic` 每个可用账号一项（`gate_upstream` 的 `queue_caps`；None = 估不出 / 不限）；
-    /// 一个可用账号都没有时按一个账号算。返回 None = 不限。
+    /// 再相加。`realistic` 每个可用账号一项（`gate_upstream` 的 `queue_caps`；None = 估不出）；
+    /// 一个可用账号都没有时按一个账号算。
     pub fn queue_cap(&self, realistic: &[Option<i64>]) -> Option<i64> {
         let per = self.v("queue_per_account");
-        let one = |r: Option<i64>| match (per, r) {
-            (0, r) => r,
-            (p, Some(r)) => Some(p.min(r)),
-            (p, None) => Some(p),
-        };
+        let one = |r: Option<i64>| Some(r.map_or(per, |r| per.min(r)));
         if realistic.is_empty() {
             return one(None);
         }
@@ -668,10 +664,11 @@ mod tests {
         // 设置更小时以设置为准
         g.values.insert("queue_per_account".into(), 4);
         assert_eq!(g.queue_cap(&[Some(6), Some(3)]), Some(7));
-        // 0 = 只按估算；估算不出（测试环境间隔 0）也不限
-        g.values.insert("queue_per_account".into(), 0);
+        // 9999 = 不限：估算得出就按估算，估不出就按 9999
+        g.values.insert("queue_per_account".into(), 9999);
         assert_eq!(g.queue_cap(&[Some(6), Some(3)]), Some(9));
-        assert_eq!(g.queue_cap(&[Some(6), None]), None);
+        // 估不出的账号按 9999 算，与另一账号的 6 相加
+        assert_eq!(g.queue_cap(&[Some(6), None]), Some(10005));
     }
 
     #[test]

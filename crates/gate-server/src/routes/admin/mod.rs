@@ -3,7 +3,6 @@
 //! 登录本身无论成败都记录。
 
 mod auth;
-mod jobs;
 mod member_ops;
 mod member_rules;
 mod members;
@@ -32,7 +31,6 @@ pub fn router(state: AppState) -> Router<AppState> {
     Router::new()
         .merge(auth::router())
         .merge(ops::router())
-        .merge(jobs::router())
         .merge(members::router())
         .merge(member_rules::router())
         .merge(records::router())

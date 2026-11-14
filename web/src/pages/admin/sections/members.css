@@ -288,29 +288,18 @@
   align-content: start;
   min-width: 0;
 }
-.mb-kv {
-  display: grid;
-  grid-template-columns: max-content minmax(0, 1fr);
-  /* 每行至少一个按钮的高度并垂直居中：有按钮的行和纯文字行不再忽高忽低 */
-  grid-auto-rows: minmax(32px, auto);
+/* 详情里的「一行事实」：4～5 个短句横排，窄屏自动换行。 */
+.mb-facts,
+.mb-keyrow {
+  display: flex;
+  flex-wrap: wrap;
   align-items: center;
   gap: var(--sp-1) var(--sp-4);
   margin: 0;
   font-size: var(--fs-sm);
 }
-.mb-kv dt {
+.mb-facts > span:not(:first-child) {
   color: var(--muted);
-}
-.mb-kv dd {
-  margin: 0;
-  min-width: 0;
-  overflow-wrap: anywhere;
-}
-.mb-key {
-  display: inline-flex;
-  align-items: center;
-  flex-wrap: wrap;
-  gap: var(--sp-1);
 }
 .mb-key__v {
   font-family: var(--mono);
@@ -418,13 +407,6 @@
 @media (max-width: 860px) {
   .mb-banadd {
     grid-template-columns: minmax(0, 1fr);
-  }
-  .mb-kv {
-    grid-template-columns: minmax(0, 1fr);
-    gap: 2px;
-  }
-  .mb-kv dd {
-    margin-bottom: var(--sp-2);
   }
 }
 

@@ -6,7 +6,7 @@
 //! 更新：`UPDATE_SNAPSHOT=1 cargo test -p gate-db --test repo_snapshot`，然后审阅 `git diff`。
 
 use base64::{Engine, engine::general_purpose::STANDARD as B64};
-use gate_core::{clock::Clock, reasons::reason_label, values};
+use gate_core::{reasons::reason_label, values};
 use gate_db::repo::{
     discord::BanInfo,
     keys::NewKey,
@@ -253,7 +253,6 @@ type Out = Result<Value, DbError>;
 
 async fn call(db: &Db, c: &Case) -> Out {
     let now = c.get("now").unwrap().as_f64().unwrap();
-    let clock = Clock::new("Asia/Shanghai", 7);
     let a = |i: usize, name: &str| arg(c, i, name);
     let m = c.get("method").unwrap().as_str().unwrap();
     Ok(match m {
@@ -444,9 +443,6 @@ async fn call(db: &Db, c: &Case) -> Out {
         "day_anlas_total" => float(db.day_anlas_total(&s(a(0, "day"), "")).await?),
         "month_anlas_all" => float(db.month_anlas_all(&s(a(0, "month"), "")).await?),
         "member_usage" => int_map(db.member_usage(&s(a(0, "since_day"), "")).await?),
-        "overview" => js(&db
-            .overview(&s(a(0, "today"), ""), &str_list(c.arg(1)), now, &clock)
-            .await?),
         // ---------------- usage
         "record_success" => {
             let sc = Success {
@@ -707,7 +703,6 @@ const METHODS: &[&str] = &[
     "day_anlas_total",
     "month_anlas_all",
     "member_usage",
-    "overview",
     "record_success",
     "add_log",
     "list_logs",

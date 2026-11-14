@@ -48,34 +48,6 @@ export function usePageData<T>(url: string): { data: T | null; error: string | n
   return { data: r.data, error: r.error, pending: !r.error && r.loading };
 }
 
-/* ---------------- 分段按钮 ---------------- */
-export function Seg<T extends string>(props: {
-  label: string;
-  value: T;
-  options: Array<{ id: T; label: ComponentChildren; title?: string; disabled?: boolean }>;
-  onChange: (v: T) => void;
-  class?: string;
-}) {
-  return (
-    // biome-ignore lint/a11y/useSemanticElements: 分段按钮是一排并列按钮，用 fieldset 的默认版式不合适；role=group + aria-label 即标准写法
-    <div class={cx("xa-seg", props.class)} role="group" aria-label={props.label}>
-      {props.options.map((o) => (
-        <button
-          key={o.id}
-          type="button"
-          class="xa-seg__btn"
-          aria-pressed={o.id === props.value}
-          title={o.title}
-          disabled={o.disabled}
-          onClick={() => props.onChange(o.id)}
-        >
-          {o.label}
-        </button>
-      ))}
-    </div>
-  );
-}
-
 /* ---------------- 分页 ---------------- */
 export function Pager(props: {
   page: number;

@@ -2,51 +2,45 @@
 import { useState } from "preact/hooks";
 import { Card } from "../../../../ui";
 import { act, useAdmin } from "../../data";
-import { SwitchRow } from "./forms";
 
-type MaintenanceMode = "off" | "all" | "owner";
+type Mode = "off" | "all" | "owner";
+
+const COPY: Record<Mode, string> = {
+  off: "所有人正常使用。",
+  all: "所有人收维护响应；后台和健康检查不受影响。",
+  owner: "只有站长网页登录和绑定站长 Discord 的 Key 能出图，其他人收维护响应。",
+};
 
 export function MaintenanceCard() {
-  const { data } = useAdmin<{ maintenance: { enabled: boolean; mode?: MaintenanceMode } }>("/admin/api/ops");
+  const { data } = useAdmin<{ maintenance?: { enabled: boolean; mode?: Mode } }>("/admin/api/ops");
   const [saving, setSaving] = useState(false);
-  if (!data) return null;
-  const current: MaintenanceMode = data.maintenance.mode ?? (data.maintenance.enabled ? "all" : "off");
-  const change = async (next: MaintenanceMode) => {
+  const maintenance = data?.maintenance;
+  if (!maintenance) return null;
+  const current: Mode = maintenance.mode ?? (maintenance.enabled ? "all" : "off");
+  const change = async (next: Mode) => {
     if (saving || next === current) return;
     setSaving(true);
-    await act<{ enabled: boolean; mode?: MaintenanceMode }>(
-      "PUT",
-      "/admin/api/ops/maintenance",
-      { mode: next },
-      next === "off" ? "全站服务已恢复" : next === "all" ? "全站服务已暂停" : "维护中：只有站长账号可用",
-    );
+    await act("PUT", "/admin/api/ops/maintenance", { mode: next }, COPY[next]);
     setSaving(false);
   };
-  const options: { id: MaintenanceMode; title: string; desc: string }[] = [
-    { id: "off", title: "正常开放", desc: "所有人正常使用。" },
-    { id: "all", title: "全站暂停", desc: "所有人收维护响应；后台和健康检查不受影响。" },
-    {
-      id: "owner",
-      title: "只有站长可用",
-      desc: "站长网页登录和绑定到站长 Discord 的 Key 可以出图；其他人与其它客户端收维护响应。",
-    },
-  ];
   return (
-    <Card
-      title="全站维护"
-      sub="三档：正常开放 / 全部关闭 / 只有站长可用。后台和健康检查始终可用，已开始的请求继续完成。"
-    >
-      <div class="stack-sm">
-        {options.map((option) => (
-          <SwitchRow
-            key={option.id}
-            title={option.title}
-            desc={option.desc}
-            checked={current === option.id}
-            disabled={saving}
-            onChange={() => void change(option.id)}
-          />
-        ))}
+    <Card title="全站维护" sub="后台和健康检查始终可用，已开始的请求继续完成。">
+      <div class="field">
+        <label class="field__label" for="maintenance-mode">
+          当前状态
+        </label>
+        <select
+          id="maintenance-mode"
+          class="select"
+          value={current}
+          disabled={saving}
+          onChange={(e) => void change(e.currentTarget.value as Mode)}
+        >
+          <option value="off">正常开放</option>
+          <option value="all">全站暂停</option>
+          <option value="owner">只有站长可用</option>
+        </select>
+        <span class="field__hint">{COPY[current]}</span>
       </div>
     </Card>
   );

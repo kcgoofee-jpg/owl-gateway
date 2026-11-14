@@ -1,43 +1,5 @@
 /* 总览 / 成员 / 日志共用零件。字号只用 tokens 的阶梯，手机与桌面一致，只改布局。 */
 
-/* 分段按钮 */
-/* 外框高度 = 控件高度（2px 内边距 + 1px 边框），和同一行的输入框、下拉框等高 */
-.xa-seg {
-  display: inline-flex;
-  flex-wrap: wrap;
-  gap: 2px;
-  padding: 2px;
-  border: 1px solid var(--border);
-  border-radius: var(--radius-sm);
-  background: var(--surface-2);
-}
-.xa-seg__btn {
-  display: inline-flex;
-  align-items: center;
-  gap: 4px;
-  min-height: calc(var(--control-h) - 6px);
-  padding: 0 var(--sp-3);
-  border: 0;
-  border-radius: 4px;
-  background: none;
-  color: var(--text-2);
-  font: 600 var(--fs-sm) / 1.2 var(--font);
-  cursor: pointer;
-  white-space: nowrap;
-}
-.xa-seg__btn:hover:not(:disabled) {
-  color: var(--text);
-}
-.xa-seg__btn[aria-pressed="true"] {
-  background: var(--surface);
-  color: var(--accent-text);
-  box-shadow: var(--shadow-1);
-}
-.xa-seg__btn:disabled {
-  opacity: 0.5;
-  cursor: not-allowed;
-}
-
 /* 复选 / 单选行 */
 .xa-check {
   display: flex;

@@ -3,16 +3,16 @@
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 
-/// 每日张数 / Anlas 的上限。0 表示停用，不是不限。
-pub const DAILY_MAX: u32 = 9999;
+/// 每日张数 / Anlas 的上限。0 表示 0（停用），放开填 [`crate::UNLIMITED`]。
+pub const DAILY_MAX: u32 = crate::UNLIMITED as u32;
 /// 每月 Anlas 的上限。
 pub const MONTHLY_MAX: f64 = 99999.0;
 pub const RPM_MIN: u32 = 1;
 pub const RPM_MAX: u32 = 600;
-/// 领取名额上限。0 表示不限。
+/// 领取名额上限。0 表示不发放，[`crate::UNLIMITED`] 表示不限名额。
 pub const CLAIM_USERS_MAX: u32 = 100_000;
-/// Key 有效天数上限。0 表示永久。
-pub const CLAIM_EXPIRES_MAX: u32 = 3_650;
+/// Key 有效天数上限。0 表示立即过期，[`crate::UNLIMITED`] 表示永久。
+pub const CLAIM_EXPIRES_MAX: u32 = crate::UNLIMITED as u32;
 /// 领取身份组条数上限。
 pub const CLAIM_ROLES_MAX: usize = 6;
 
@@ -83,7 +83,7 @@ impl ClaimRules {
         Self {
             open: false,
             max_users: 10,
-            expires_days: 0,
+            expires_days: crate::UNLIMITED as u32,
             roles: vec![],
         }
     }

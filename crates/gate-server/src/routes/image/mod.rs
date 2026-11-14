@@ -237,7 +237,10 @@ pub(super) fn on_dispatch(
                             .find(|t| t.token_id == token_id && t.is_share())
                     {
                         let fields = token.fields();
-                        let cap = fields.share_limits.as_ref().map_or(0, |s| s.daily_anlas);
+                        let cap = fields
+                            .share_limits
+                            .as_ref()
+                            .map_or(gate_core::UNLIMITED, |s| s.daily_anlas);
                         if !_s
                             .db
                             .reserve_upstream_anlas(

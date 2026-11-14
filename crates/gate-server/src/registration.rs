@@ -158,7 +158,7 @@ pub struct Welcome<'a> {
     pub key: &'a str,
     /// 站点地址；结尾的 `/` 会去掉。
     pub site: &'a str,
-    /// 每人每天最多出几张 V4.5 及以下的图，0 = 不限。
+    /// 每人每天最多出几张 V4.5 及以下的图，0 = 停用。
     pub daily_images: i64,
     /// 当前有效 V4.5 额度不是显式的零限额。
     pub images_available: bool,

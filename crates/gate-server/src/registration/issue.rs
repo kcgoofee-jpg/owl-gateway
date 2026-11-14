@@ -32,7 +32,8 @@ impl RegistrationService {
         if !cfg.open {
             return denied("Key 领取暂未开放。");
         }
-        if cfg.max_users == 0 || cfg.max_users - self.count_active().await? > 0 {
+        // 0 = 一个名额也不给；9999 = 不限
+        if gate_core::is_unlimited(cfg.max_users) || cfg.max_users - self.count_active().await? > 0 {
             return Ok(cfg);
         }
         denied("领取名额已满，请稍后再试。")
@@ -129,10 +130,11 @@ impl RegistrationService {
     }
 
     /// 每小时领取 Key 总数的硬上限：把短时间的授权/领取突增抹平（2026-10-10 Discord 应用因「增长异常」被标记，
-    /// 就是网页登录上线后一小时内 ~43 人集中授权触发的）。0 = 关闭。默认 12/小时，远高于自然速率、远低于会触发风控的突增。
+    /// 就是网页登录上线后一小时内 ~43 人集中授权触发的）。0 = 一张都不发，9999 = 不限。
+    /// 默认 12/小时，远高于自然速率、远低于会触发风控的突增。
     pub async fn issue_rate_blocked(&self, now: f64) -> Result<bool, DbError> {
         let cap = crate::settings::site_f64(&self.db, &site_flags::ISSUE_HOURLY_CAP).await?;
-        if cap <= 0.0 {
+        if cap >= gate_core::UNLIMITED as f64 {
             return Ok(false);
         }
         Ok(self.db.registrations_since(now - 3600.0).await? as f64 >= cap)
@@ -222,8 +224,7 @@ impl RegistrationService {
                     name: format!("Discord:{user_id}"),
                     token: key.clone(),
                     enabled: true,
-                    expires_at: (cfg.expires_days > 0)
-                        .then(|| created + (cfg.expires_days * 86400) as f64),
+                    expires_at: Some(created + (cfg.expires_days * 86400) as f64),
                     discord_id: Some(user_id.to_string()),
                 },
                 created,
@@ -245,8 +246,7 @@ impl RegistrationService {
                 display_name: display.as_deref(),
                 avatar: avatar.as_deref(),
                 key_name: &member_label(user),
-                expires_at: (cfg.expires_days > 0)
-                    .then_some(created + cfg.expires_days as f64 * 86400.0),
+                expires_at: Some(created + cfg.expires_days as f64 * 86400.0),
                 member_role: !self.cfg.member_role_id.is_empty(),
             })
             .await;

@@ -104,7 +104,7 @@ pub static ISSUE_HOURLY_CAP: Spec = bounded(
         "每小时最多发放的新 Key",
     ),
     0,
-    500,
+    9999,
 );
 /// V5 暂停（手动开关，站长 10-23）：开着时 V5 请求在本地直接拒（402，不扣 Anlas、不发上游），
 /// 首页 / 成员页 / 客户端订阅信息都按暂停显示。
@@ -314,6 +314,10 @@ mod tests {
             parse(&MEMBER_SWEEP, &json!(" OFF "), Value::Bool(true)),
             Value::Bool(false)
         );
-        assert_eq!(get_from_raw(&ISSUE_HOURLY_CAP, Some("9999")), json!(500));
+        assert_eq!(
+            get_from_raw(&ISSUE_HOURLY_CAP, Some("100000")),
+            json!(9999),
+            "超上限按上限夹值"
+        );
     }
 }

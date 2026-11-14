@@ -2,7 +2,7 @@ import { render } from "preact";
 import { act as renderAct } from "preact/test-utils";
 import { afterEach, expect, it, vi } from "vitest";
 import { act } from "../../data";
-import { ClaimForm } from "../onboarding";
+import { ClaimForm } from "../settings";
 import type { Ops } from "./core";
 
 vi.mock("../../data", () => ({ act: vi.fn(), busy: { value: 0 }, useAdmin: vi.fn() }));

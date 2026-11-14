@@ -1,7 +1,7 @@
 /** 成员展开后的详情：席位 / 要处理 → 规则与资料 → 日常操作。今日额度只在列表进度条里。 */
 import { ExternalLink, Plus } from "lucide-preact";
 import { useEffect, useState } from "preact/hooks";
-import { dayOf, fullTime, rel } from "../../../../lib/format";
+import { dayOf, fullTime, num, rel } from "../../../../lib/format";
 import { Badge, Button, copyText, Menu, toast } from "../../../../ui";
 import { refresh, useAdmin } from "../../data";
 import {
@@ -39,6 +39,9 @@ export type DetailActions = {
   regenerate: (m: MemberRow) => void;
   remove: (m: MemberRow, ban: boolean) => void;
 };
+
+/** 额度一行：关掉的功能或 0 张都写「停用」，不再有「不限」这种歧义说法。 */
+const limitText = (on: boolean, value: number): string => (on && value > 0 ? `${num(value)} 张` : "停用");
 
 const LEVEL_TEXT = { bad: "紧急", warn: "注意", info: "提示" } as const;
 const ISSUE_BTN: Record<IssueAction["kind"], string> = {
@@ -137,147 +140,117 @@ export function MemberDetail(props: { m: MemberRow; now: number; act: DetailActi
 
       <div class="mb-cols">
         <section class="mb-sec" aria-label="有效规则">
-          <h4 class="mb-h4">有效规则</h4>
-          <dl class="mb-kv">
-            <dt>V4.5 免费图</dt>
-            <dd>{policy.image && policy.daily_images > 0 ? `${policy.daily_images} 张` : "停用"}</dd>
-            <dt>V5 每天</dt>
-            <dd>{policy.image && policy.v5 && policy.daily_v5 > 0 ? `${policy.daily_v5} 张` : "停用"}</dd>
-            <dt>Anlas 每天</dt>
-            <dd>{policy.daily_anlas > 0 ? policy.daily_anlas : "停用"}</dd>
-            <dt>Anlas 每月</dt>
-            <dd>{policy.monthly_anlas > 0 ? policy.monthly_anlas : "停用"}</dd>
-            <dt>每分钟请求</dt>
-            <dd>{policy.rpm} 次</dd>
-            <dt>功能</dt>
-            <dd>
-              <span class="mb-chips">
-                {FEATURE_FIELDS.filter((name) => policy[name]).map((name) => (
-                  <span class="xa-chip" key={name}>
-                    {policyLabel(name)}
-                  </span>
-                ))}
+          <h4 class="mb-h4">
+            有效规则
+            {exceptions > 0 && <span class="small muted"> · {exceptions} 项例外</span>}
+          </h4>
+          <p class="mb-facts">
+            <span>V4.5 {limitText(policy.image, policy.daily_images)}</span>
+            <span>V5 {limitText(policy.image && policy.v5, policy.daily_v5)}</span>
+            <span>
+              Anlas {num(policy.daily_anlas)}/天 · {num(policy.monthly_anlas)}/月
+            </span>
+            <span>RPM {policy.rpm}</span>
+          </p>
+          <p class="mb-chips">
+            {FEATURE_FIELDS.filter((name) => policy[name]).map((name) => (
+              <span class="xa-chip" key={name}>
+                {policyLabel(name)}
               </span>
-            </dd>
-            <dt>分享豁免</dt>
-            <dd>
-              {dcId ? (
-                <ShareExemptToggle subject={dcId} policy={k.policy} />
-              ) : (
-                <span class="small muted">没有绑定 Discord，走 Key 额度检查</span>
-              )}
-            </dd>
-            {exceptions > 0 && (
-              <>
-                <dt>成员例外</dt>
-                <dd class="mb-key">
-                  {exceptions} 项
-                  {!k.policy.owner_image && (
-                    <Button
-                      size="sm"
-                      variant="ghost"
-                      disabled={!dcId}
-                      title={dcId ? undefined : "没有绑定 Discord，无成员级规则可恢复"}
-                      onClick={() => act.resetRules(m)}
-                    >
-                      恢复默认
-                    </Button>
-                  )}
-                </dd>
-              </>
+            ))}
+            {dcId ? (
+              <ShareExemptToggle subject={dcId} policy={k.policy} />
+            ) : (
+              <span class="small muted">没有绑定 Discord</span>
             )}
-          </dl>
+            {exceptions > 0 && !k.policy.owner_image && (
+              <Button
+                size="sm"
+                variant="ghost"
+                disabled={!dcId}
+                title={dcId ? undefined : "没有绑定 Discord，无成员级规则可恢复"}
+                onClick={() => act.resetRules(m)}
+              >
+                恢复默认
+              </Button>
+            )}
+          </p>
         </section>
 
         <section class="mb-sec" aria-label="资料">
           <h4 class="mb-h4">资料</h4>
-          <dl class="mb-kv">
-            <dt>Discord</dt>
-            <dd>
-              {dcId ? (
-                <span class="mb-key">
-                  <span>{dc?.username ? `@${dc.username}` : dcId}</span>
-                  {profile && (
-                    <a
-                      class="btn btn--sm btn--ghost"
-                      href={profile}
-                      target="_blank"
-                      rel="noopener noreferrer"
-                      aria-label={`在 Discord 打开 ${memberLabel(m)} 的主页（新标签页）`}
-                    >
-                      打开 <ExternalLink size={12} aria-hidden="true" />
-                    </a>
-                  )}
-                  <Button
-                    size="sm"
-                    variant="ghost"
-                    onClick={async () => {
-                      const ok = await copyText(dcId);
-                      toast(ok ? "Discord ID 已复制" : "复制失败，请手动选择文字", { error: !ok });
-                    }}
-                  >
-                    复制 ID
-                  </Button>
-                </span>
-              ) : (
-                <span class="muted">待领取</span>
-              )}
-            </dd>
-            <dt>Key</dt>
-            <dd>
-              <span class="mb-key">
-                <code class="mb-key__v">{showKey ? k.token : "••••••••"}</code>
-                <Button size="sm" variant="ghost" onClick={() => setShowKey(!showKey)}>
-                  {showKey ? "隐藏" : "显示"}
-                </Button>
-                <Button
-                  size="sm"
-                  variant="ghost"
-                  aria-label={`复制 ${memberLabel(m)} 的 Key`}
-                  onClick={async () => {
-                    const ok = await copyText(k.token);
-                    toast(ok ? "Key 已复制" : "复制失败，请显示 Key 后手动复制", { error: !ok });
-                  }}
-                >
-                  复制
-                </Button>
-              </span>
-            </dd>
-            <dt>{m.discord_id ? "领取" : "创建"}</dt>
-            <dd title={fullTime(m.registered_at)}>{m.registered_at ? rel(m.registered_at, now) : "—"}</dd>
-            <dt>到期</dt>
-            <dd class="mb-key">
-              {k.expires_at ? dayOf(k.expires_at) : "永久"}
-              <Button size="sm" variant="ghost" onClick={() => act.metadata(m)}>
-                修改
+          <p class="mb-facts">
+            <span>{dcId ? (dc?.username ? `@${dc.username}` : dcId) : "待领取"}</span>
+            <span title={fullTime(m.registered_at)}>
+              {m.discord_id ? "领取" : "创建"} {m.registered_at ? rel(m.registered_at, now) : "—"}
+            </span>
+            <span>到期 {k.expires_at ? dayOf(k.expires_at) : "永久"}</span>
+          </p>
+          <p class="mb-keyrow">
+            <code class="mb-key__v">{showKey ? k.token : "••••••••"}</code>
+            <Button size="sm" variant="ghost" onClick={() => setShowKey(!showKey)}>
+              {showKey ? "隐藏" : "显示"}
+            </Button>
+            <Button
+              size="sm"
+              variant="ghost"
+              aria-label={`复制 ${memberLabel(m)} 的 Key`}
+              onClick={async () => {
+                const ok = await copyText(k.token);
+                toast(ok ? "Key 已复制" : "复制失败，请显示 Key 后手动复制", { error: !ok });
+              }}
+            >
+              复制
+            </Button>
+            {dcId && (
+              <Button
+                size="sm"
+                variant="ghost"
+                onClick={async () => {
+                  const ok = await copyText(dcId);
+                  toast(ok ? "Discord ID 已复制" : "复制失败，请手动选择文字", { error: !ok });
+                }}
+              >
+                复制 ID
               </Button>
-            </dd>
-            <dt>标签</dt>
-            <dd>
-              <span class="mb-chips">
-                {tags.map((t) => (
-                  <span
-                    class="xa-chip"
-                    key={t.tag}
-                    title={[t.note, t.by, fullTime(t.ts)].filter(Boolean).join(" · ")}
-                  >
-                    {t.tag}
-                    <button
-                      type="button"
-                      aria-label={`移除标签 ${t.tag}`}
-                      onClick={() => act.removeTag(m, t.tag)}
-                    >
-                      ×
-                    </button>
-                  </span>
-                ))}
-                <Button size="sm" variant="ghost" onClick={() => act.addTag(m)}>
-                  <Plus size={12} aria-hidden="true" />
-                  标签
-                </Button>
+            )}
+            {profile && (
+              <a
+                class="btn btn--sm btn--ghost"
+                href={profile}
+                target="_blank"
+                rel="noopener noreferrer"
+                aria-label={`在 Discord 打开 ${memberLabel(m)} 的主页（新标签页）`}
+              >
+                Discord <ExternalLink size={12} aria-hidden="true" />
+              </a>
+            )}
+            <Button size="sm" variant="ghost" onClick={() => act.metadata(m)}>
+              改到期
+            </Button>
+          </p>
+          <p class="mb-chips">
+            {tags.map((t) => (
+              <span
+                class="xa-chip"
+                key={t.tag}
+                title={[t.note, t.by, fullTime(t.ts)].filter(Boolean).join(" · ")}
+              >
+                {t.tag}
+                <button
+                  type="button"
+                  aria-label={`移除标签 ${t.tag}`}
+                  onClick={() => act.removeTag(m, t.tag)}
+                >
+                  ×
+                </button>
               </span>
-            </dd>
-          </dl>
+            ))}
+            <Button size="sm" variant="ghost" onClick={() => act.addTag(m)}>
+              <Plus size={12} aria-hidden="true" />
+              标签
+            </Button>
+          </p>
         </section>
       </div>
 

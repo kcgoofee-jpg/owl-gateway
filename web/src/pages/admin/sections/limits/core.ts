@@ -82,7 +82,7 @@ export const GUARD_COPY: Record<string, { label: string; hint: string; unit?: st
   queue_per_member: { label: "每人排队", hint: "每个成员最多同时排几张，正在生成的不算", unit: "张" },
   queue_per_account: {
     label: "账号排队",
-    hint: "每个上游账号的全站排队及生成上限，再按超时内能开始的张数收紧；0 表示不设这一上限，仍按可在超时内开始的张数计算",
+    hint: "每个上游账号的全站排队及生成上限，再按超时内能开始的张数收紧；0 = 这个账号不接图，9999 = 不限",
     unit: "张",
   },
 };
@@ -104,22 +104,3 @@ export function guardSpecs(g: Guard): Record<string, FieldSpec> {
   }
   return out;
 }
-
-/** /admin/api/quota-records：只显示 */
-/** quiet_rate：该账号自己的实测恢复（快照分账号估算；null = 数据不够） */
-export type RecordAccount = {
-  position: number;
-  v5_percent: number | null;
-  v5_recharge_per_day: number | null;
-  anlas: number | null;
-  quiet_rate: { rate: number; hours: number } | null;
-  today: { images: number; v5: number };
-  yesterday: { images: number; v5: number };
-};
-export type Records = {
-  accounts: RecordAccount[];
-  manual: {
-    account_caps: Array<{ position: number | null; cap: number; until: number }>;
-    paid_v5: Array<{ position: number | null; max_anlas: number; spent: number; until: number }>;
-  };
-};

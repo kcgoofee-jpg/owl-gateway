@@ -236,7 +236,7 @@ function ShareCard(props: {
         <div>
           <dt>今日 Anlas（含在途预留）</dt>
           <dd>
-            {reading(a.anlas_used_today)} / {a.daily_anlas === 0 ? "不限" : reading(a.daily_anlas)}
+            {reading(a.anlas_used_today)} / {reading(a.daily_anlas)}
           </dd>
         </div>
         <div>
@@ -276,17 +276,14 @@ function ShareCard(props: {
   );
 }
 
-export function ShareUpstream(props: { source?: "relay" | "donated" }) {
-  const donated = props.source === "donated";
-  const noun = donated ? "捐赠网关" : "拼车网关";
+/** 拼车网关与赞助席捐赠账号：同一个共享池、同一套操作，列表里带「捐赠」标记。 */
+export function ShareUpstream() {
   const { data, error, loading } = useAdmin<SharePage>("/admin/api/share-upstreams");
   const [dialog, setDialog] = useState<{ mode: "add" | "replace"; target?: ShareAccount } | null>(null);
   const [del, setDel] = useState<ShareAccount | null>(null);
   const [toggle, setToggle] = useState<ShareAccount | null>(null);
   const pool = data?.accounts ?? [];
-  // 捐赠 = 绑定启用赞助席的拼车号（共享入池）；拼车平台 = 其余拼车。
-  // poolSize 和「最后一把可用上游」仍按全部拼车算，不受当前页筛选影响。
-  const visible = pool.filter((a) => (a.donated === true) === donated);
+  const nounOf = (a?: ShareAccount | null) => (a?.donated ? "捐赠网关" : "拼车网关");
   const poolSize = data?.pool_size ?? pool.length;
   const lastUsable =
     toggle?.admin_enabled === true &&
@@ -298,30 +295,23 @@ export function ShareUpstream(props: { source?: "relay" | "donated" }) {
     <Sect>
       <div class="section-head">
         <p>
-          {donated
-            ? "赞助席捐赠的拼车网关：和其他上游一样进全站共享池，社区出图都会用到它，份额余量来自捐赠者钱包。捐赠者本人可自助启停、更换这把 Key，并享有插队（插队是成员级特权，与这把 Key 无关）。在成员详情开通赞助席并绑定其捐赠的拼车 Key 后出现在这里。"
-            : "把朋友的拼车网关当额外上游。份额余量来自对方钱包，不是官网电池。生图、流式、Vibe 编码和放大走拼车。标签补全和导演工具目前仍走官方号。"}
+          把朋友的拼车网关当额外上游；赞助席捐赠的 Key
+          也在这里，一起进全站共享池。份额余量来自对方钱包，不是官网电池。
         </p>
         <span class="spacer" />
-        {!donated && (
-          <Button variant="primary" onClick={() => setDialog({ mode: "add" })}>
-            <Plus size={16} aria-hidden="true" />
-            添加拼车网关
-          </Button>
-        )}
+        <Button variant="primary" onClick={() => setDialog({ mode: "add" })}>
+          <Plus size={16} aria-hidden="true" />
+          添加拼车网关
+        </Button>
       </div>
       {loading && !data && <Loading rows={2} />}
       {!data && error && <LoadError error={error} />}
-      {data && visible.length === 0 && (
-        <Notice>
-          {donated
-            ? "还没有捐赠账号。在成员详情开通赞助席并绑定其捐赠的拼车 Key。"
-            : "还没有拼车网关。官方账号在「官方账号」页，捐赠账号在「捐赠账号」页。"}
-        </Notice>
+      {data && pool.length === 0 && (
+        <Notice>还没有拼车网关。捐赠账号在成员详情开通赞助席并绑定后自动出现。</Notice>
       )}
       {data && (
         <div class="stack">
-          {visible
+          {pool
             .slice()
             .sort(
               (x, y) =>
@@ -342,11 +332,16 @@ export function ShareUpstream(props: { source?: "relay" | "donated" }) {
         </div>
       )}
       {dialog && (
-        <ShareDialog mode={dialog.mode} target={dialog.target} noun={noun} onClose={() => setDialog(null)} />
+        <ShareDialog
+          mode={dialog.mode}
+          target={dialog.target}
+          noun={nounOf(dialog.target)}
+          onClose={() => setDialog(null)}
+        />
       )}
       {del && (
         <ConfirmDialog
-          title={`删除${noun}？`}
+          title={`删除${nounOf(del)}？`}
           confirmText="删除"
           danger
           onClose={() => setDel(null)}
@@ -355,7 +350,7 @@ export function ShareUpstream(props: { source?: "relay" | "donated" }) {
               "DELETE",
               `/admin/api/share-upstreams/${encodeURIComponent(del.token_id)}`,
               undefined,
-              `已删除${noun}`,
+              `已删除${nounOf(del)}`,
             )
           }
         >
@@ -365,7 +360,7 @@ export function ShareUpstream(props: { source?: "relay" | "donated" }) {
       )}
       {toggle && (
         <ConfirmDialog
-          title={toggle.admin_enabled ? `停用这条${noun}？` : `启用这条${noun}？`}
+          title={toggle.admin_enabled ? `停用这条${nounOf(toggle)}？` : `启用这条${nounOf(toggle)}？`}
           confirmText={toggle.admin_enabled ? "停用" : "启用"}
           danger={toggle.admin_enabled}
           onClose={() => setToggle(null)}
@@ -374,7 +369,7 @@ export function ShareUpstream(props: { source?: "relay" | "donated" }) {
               "PUT",
               `/admin/api/upstream-tokens/${encodeURIComponent(toggle.token_id)}/enabled`,
               { enabled: !toggle.admin_enabled },
-              toggle.admin_enabled ? `${noun}已停用` : `${noun}已启用`,
+              toggle.admin_enabled ? `${nounOf(toggle)}已停用` : `${nounOf(toggle)}已启用`,
             )
           }
         >

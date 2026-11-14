@@ -2,7 +2,7 @@
  * 设置表单的纯函数部分（不依赖外壳，可单测）。
  *
  * 校验规则照后端 `num_int` / `num_float`（crates/gate-server/src/routes/admin）：空值、非数字、小数（整数字段）、越界一律拒绝，
- * 绝不把空值悄悄当成 0——这些字段里 0 往往代表「不限」，一次手滑就会拆掉保护。
+ * 绝不把空值悄悄当成 0——0 是「无 / 不允许」的具体值，一次手滑就会真把额度清零。
  */
 
 export type Raw = string | boolean;
@@ -85,20 +85,6 @@ export function sameRaw(spec: FieldSpec, a: Raw, b: Raw): boolean {
   return a === b;
 }
 
-/** MB / GB 文字：1536 → 「1.5 GB」 */
-export function mbText(mb: number): string {
-  if (!Number.isFinite(mb)) return "—";
-  return mb >= 1024 ? `${(mb / 1024).toFixed(1)} GB` : `${Math.round(mb)} MB`;
-}
-/** 字节 → GB / MB 文字 */
-export function bytesText(bytes: number): string {
-  if (!Number.isFinite(bytes)) return "—";
-  if (bytes >= 1024 ** 3) return `${(bytes / 1024 ** 3).toFixed(1)} GB`;
-  if (bytes >= 1024 ** 2) return `${(bytes / 1024 ** 2).toFixed(1)} MB`;
-  return `${Math.round(bytes / 1024)} KB`;
-}
-
-/** 0 = 不限 的数字显示 */
 /** 新密码规则同后端 change_password：至少 12 个字符，且不能与当前密码或示例密码相同 */
 export function passwordProblem(cur: string, next: string, again: string): string | null {
   if (!cur) return "请输入当前密码";

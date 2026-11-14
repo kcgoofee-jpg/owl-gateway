@@ -92,7 +92,7 @@ impl Scheduler {
         .max(token.with(|f| {
             f.share_limits
                 .as_ref()
-                .filter(|s| s.rpm > 0)
+                .filter(|s| s.rpm > 0 && !gate_core::is_unlimited(s.rpm))
                 .map_or(0.0, |s| 60.0 / s.rpm as f64)
         }))
     }
@@ -117,9 +117,10 @@ impl Scheduler {
     fn rpm_wait(token: &Token, now: f64) -> f64 {
         token.with(|f| {
             f.rpm_starts.retain(|at| *at > now - 60.0);
-            let rpm = f.share_limits.as_ref().map_or(0, |s| s.rpm) as usize;
-            if rpm > 0 && f.rpm_starts.len() >= rpm {
-                (f.rpm_starts[f.rpm_starts.len() - rpm] + 60.0 - now).max(0.0)
+            // 0 = 一张都不收（`Token::usable` 已经拦截，走不到这里）；9999 = 不限。
+            let rpm = f.share_limits.as_ref().map_or(0, |s| s.rpm);
+            if rpm > 0 && !gate_core::is_unlimited(rpm) && f.rpm_starts.len() >= rpm as usize {
+                (f.rpm_starts[f.rpm_starts.len() - rpm as usize] + 60.0 - now).max(0.0)
             } else {
                 0.0
             }

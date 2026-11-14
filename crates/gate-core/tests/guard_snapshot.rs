@@ -73,7 +73,7 @@ fn constants() {
         ("post_jitter_min", 1, 1, 30),
         ("post_jitter_max", 3, 1, 30),
         ("queue_per_member", 2, 1, 5),
-        ("queue_per_account", 5, 0, 100),
+        ("queue_per_account", 5, 1, 9999),
     ];
     let got: Vec<(&str, i64, i64, i64)> = FIELDS
         .iter()

@@ -53,8 +53,7 @@ vi.mock("../data", async (original) => ({
   act: write,
 }));
 
-import Limits from "./limits";
-import Onboarding from "./onboarding";
+import Settings from "./settings";
 
 let host: HTMLDivElement | null = null;
 function reset() {
@@ -88,47 +87,56 @@ function reset() {
     },
   };
   store.ops = {
+    maintenance: { enabled: false, mode: "off" },
     registration: {
       configured: true,
       active: 1,
       open: true,
       max_users: 20,
-      expires_days: 0,
+      expires_days: 9999,
       roles: [],
       fields: {
         max_users: { kind: "int", min: 0, max: 100000 },
-        expires_days: { kind: "int", min: 0, max: 3650 },
+        expires_days: { kind: "int", min: 0, max: 9999 },
         roles: { kind: "int", min: 0, max: 6 },
       },
     },
-    features: { global: { image: true }, labels: { image: "图片生成" } },
-    log_retention: { origin_keep_days: 0 },
   };
 }
-async function mount(view: "rules" | "protection") {
+async function mount() {
   host ??= document.createElement("div");
   if (!host.isConnected) document.body.append(host);
   await flush(async () => {
-    render(view === "rules" ? <Onboarding /> : <Limits />, host as HTMLDivElement);
+    render(<Settings />, host as HTMLDivElement);
     await Promise.resolve();
   });
 }
-function number(label: string): HTMLInputElement {
-  const node = [...(host?.querySelectorAll("label") ?? [])].find((element) => element.textContent === label);
+/** 按卡片标题找输入框，避免不同卡片里同名字段串味。 */
+function card(title: string): HTMLElement {
+  const found = [...(host?.querySelectorAll<HTMLElement>(".card") ?? [])].find((element) =>
+    element.querySelector(".card__title")?.textContent?.includes(title),
+  );
+  if (!found) throw new Error(`missing card ${title}`);
+  return found;
+}
+function number(cardTitle: string, label: string): HTMLInputElement {
+  const node = [...card(cardTitle).querySelectorAll("label")].find(
+    (element) => element.textContent === label,
+  );
   const input = node ? document.getElementById(node.getAttribute("for") ?? "") : null;
   if (!(input instanceof HTMLInputElement)) throw new Error(`missing ${label}`);
   return input;
 }
-async function input(label: string, value: string) {
+async function input(cardTitle: string, label: string, value: string) {
   await flush(() => {
-    const node = number(label);
+    const node = number(cardTitle, label);
     node.value = value;
     node.dispatchEvent(new Event("input", { bubbles: true }));
   });
 }
-function save() {
-  return [...(host?.querySelectorAll("button") ?? [])].find(
-    (button) => button.textContent?.trim() === "保存",
+function save(cardTitle: string) {
+  return [...card(cardTitle).querySelectorAll("button")].find((button) =>
+    button.textContent?.trim().startsWith("保存"),
   ) as HTMLButtonElement;
 }
 afterEach(() => {
@@ -137,16 +145,17 @@ afterEach(() => {
   host = null;
   write.mockClear();
 });
-describe("规则与运行保护表单", () => {
-  it("修改默认规则时刷新不覆盖草稿，保存完整数字与功能规则", async () => {
+
+describe("设置页表单", () => {
+  it("修改成员额度时刷新不覆盖草稿，保存完整数字与功能规则", async () => {
     reset();
-    await mount("rules");
-    await input("V4.5 免费图/天", "250");
+    await mount();
+    await input("成员额度", "V4.5 免费图/天", "250");
     store.rules = { ...store.rules, defaults: { ...store.rules.defaults, daily_images: 300 } };
-    await mount("rules");
-    expect(number("V4.5 免费图/天").value).toBe("250");
+    await mount();
+    expect(number("成员额度", "V4.5 免费图/天").value).toBe("250");
     await flush(async () => {
-      save().click();
+      save("成员额度").click();
       await Promise.resolve();
     });
     expect(write).toHaveBeenCalledWith(
@@ -156,28 +165,26 @@ describe("规则与运行保护表单", () => {
       expect.any(String),
     );
     expect(store.rules.defaults.daily_images).toBe(250);
-    for (const obsolete of ["自动", "继承", "号主身份", "站长身份", "兼容旧设置"])
-      expect(host?.textContent).not.toContain(obsolete);
   });
-  it("空值禁止保存，零是明确停用", async () => {
+  it("空值禁止保存，0 是明确停用", async () => {
     reset();
-    await mount("rules");
-    await input("V4.5 免费图/天", "");
-    expect(save().disabled).toBe(true);
-    await input("V4.5 免费图/天", "0");
-    expect(save().disabled).toBe(false);
+    await mount();
+    await input("成员额度", "V4.5 免费图/天", "");
+    expect(save("成员额度").disabled).toBe(true);
+    await input("成员额度", "V4.5 免费图/天", "0");
+    expect(save("成员额度").disabled).toBe(false);
     await flush(async () => {
-      save().click();
+      save("成员额度").click();
       await Promise.resolve();
     });
     expect(store.rules.defaults.daily_images).toBe(0);
   });
-  it("运行保护只提交共享预算和运行开关", async () => {
+  it("全站预算只提交预算和运行开关", async () => {
     reset();
-    await mount("protection");
-    await input("V5 全站每天", "0");
+    await mount();
+    await input("全站预算", "V5 全站每天", "0");
     await flush(async () => {
-      save().click();
+      save("全站预算").click();
       await Promise.resolve();
     });
     expect(write).toHaveBeenCalledWith(
@@ -190,7 +197,11 @@ describe("规则与运行保护表单", () => {
       },
       expect.any(String),
     );
-    expect(host?.textContent).not.toContain("V5 授权主体");
-    expect(host?.textContent).not.toContain("继承");
+  });
+  it("领取条件按 0 = 不发放给提示", async () => {
+    reset();
+    await mount();
+    expect(card("领取条件").textContent).toContain("0 = 不发放");
+    expect(card("领取条件").textContent).toContain("9999 = 永久");
   });
 });

@@ -11,7 +11,9 @@ import { addBan, addTag, call, dmMember, giveCoupon, removeBan, resetDailyQuota 
 import { scopeTextOf } from "./logic";
 import { Empty, ResetScopeChecks, useDebounced, usePageData } from "./shared";
 import type { Ban, Coupon } from "./types";
-import { isDiscordId } from "./validate";
+
+/** Discord 雪花 ID：17～20 位数字。 */
+const isDiscordId = (value: string): boolean => /^\d{17,20}$/.test(value);
 
 type DisabledKey = {
   id: number;

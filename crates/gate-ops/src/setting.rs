@@ -142,14 +142,14 @@ pub const SPECS: &[Spec] = &[
         ep: Ep::Registration,
         kind: Kind::Int,
         field: "max_users",
-        desc: "领取人数上限（0 不限）",
+        desc: "领取人数上限（0 = 不发放，9999 = 不限）",
     },
     Spec {
         name: "register_expires_days",
         ep: Ep::Registration,
         kind: Kind::Int,
         field: "expires_days",
-        desc: "Key 有效天数（0 永久）",
+        desc: "Key 有效天数（0 = 立即过期，9999 = 永久）",
     },
     Spec {
         name: "claim_roles",

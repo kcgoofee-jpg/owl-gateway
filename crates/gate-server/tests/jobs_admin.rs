@@ -1,5 +1,5 @@
-//! 定时任务：登记顺序、运行记录（库里的 `job_last`）；后台接口只剩额度记录 `quota-records`
-//! （`GET /admin/api/jobs` 随「系统」页定时任务卡片删除，`quota-algo` 随自动额度算法删除，都回 404）。
+//! 定时任务：登记顺序、运行记录（库里的 `job_last`）。
+//! 后台不再暴露定时任务/额度记录接口（`quota-records`、`jobs`、`quota-algo` 都回 404）。
 //! 内核时代的 `modules*`、`autopilot` 接口已删除（回 404）。公开仓库：全部是合成数据；上游是本地假服务。
 
 mod common;
@@ -12,19 +12,6 @@ const NOW: f64 = 1_791_950_400.0;
 const NAMES: [&str; 3] = ["upstream_snapshot", "breaker", "maintenance"];
 
 #[tokio::test]
-async fn routes_need_admin_login() {
-    let e = setup(&[]).await;
-    for (method, path) in [("GET", "/admin/api/quota-records")] {
-        let (status, _, body) = Call::new(method, path).json(json!({})).send(&e.state).await;
-        assert_eq!(status, 401, "{method} {path}");
-        assert_eq!(
-            serde_json::from_slice::<Value>(&body).unwrap(),
-            json!({"detail": "未登录或会话已过期"})
-        );
-    }
-}
-
-#[tokio::test]
 async fn the_kernel_routes_are_gone() {
     let e = setup(&[]).await;
     let api = Admin::login_bare(&e.state).await;
@@ -34,6 +21,7 @@ async fn the_kernel_routes_are_gone() {
         "/autopilot",
         "/quota-algo",
         "/jobs",
+        "/quota-records",
     ] {
         let (status, v) = api.json("GET", path, None).await;
         assert_eq!((status, v), (404, json!({"detail": "Not Found"})), "{path}");
@@ -115,27 +103,3 @@ async fn the_run_record_survives_a_restart() {
     assert!(s2.jobs.last().await.is_empty());
 }
 
-/// 额度记录：每个上游账号的 V5 电量读数、今天 / 昨天出了几张（只显示）；账号给编号不给 Token。
-#[tokio::test]
-async fn quota_records_shape() {
-    let _clock = clock(Some(NOW)).await;
-    let e = setup(&[]).await;
-    let id = e.state.nai.tokens().await[0].token_id.clone();
-    e.state
-        .db
-        .bump_upstream_image_counter(&id, &e.state.day(), 7)
-        .await
-        .unwrap();
-    let api = Admin::login_bare(&e.state).await;
-    let (status, v) = api.json("GET", "/quota-records", None).await;
-    assert_eq!(status, 200, "{v}");
-    let a = &v["accounts"][0];
-    assert_eq!(a["position"], 1);
-    assert_eq!(a["today"], json!({"images": 7, "v5": 0}));
-    assert_eq!(a["yesterday"], json!({"images": 0, "v5": 0}));
-    assert!(a.get("token_id").is_none());
-    // 实测恢复按账号给（快照没积累时为 null）；顶层聚合版已随分账号快照一起删除
-    assert_eq!(a["quiet_rate"], Value::Null);
-    assert!(v.get("quiet_rate").is_none());
-    assert_eq!(v["manual"], json!({"account_caps": [], "paid_v5": []}));
-}

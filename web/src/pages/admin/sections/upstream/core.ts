@@ -180,15 +180,15 @@ export function shareLimitSpecs(limit: { min: number; max: number }): Record<str
       min: 0,
       max: 1000000,
       unit: "Anlas",
-      hint: "0 为不限；每天北京时间 7 点重置，包含在途和结果未知的预留。",
+      hint: "0 = 一点 Anlas 也不许花；9999 = 不限。每天北京时间 7 点重置，包含在途和结果未知的预留。",
     },
     rpm: {
       kind: "int",
       label: "出图 RPM",
       min: 0,
-      max: 600,
+      max: 9999,
       unit: "次 / 分钟",
-      hint: "每把 Key 独立计算最近 60 秒的出图及图片工具请求；0 为不限。",
+      hint: "每把 Key 独立计算最近 60 秒；0 = 一张都不收（等同停用），9999 = 不限。",
     },
     concurrency: { kind: "int", label: "出图并发", min: 1, max: 16, unit: "个" },
     post_wait_min: { kind: "int", label: "出图后最少等待", min: 0, max: 300, unit: "秒" },
@@ -269,14 +269,6 @@ export const anlasText = (n: number | null | undefined): string =>
   n == null ? "—" : n.toLocaleString("zh-CN", { maximumFractionDigits: 2 });
 
 export const ageText = (days: number): string => (days < 1 ? "刚刚" : `${Math.round(days)} 天前`);
-
-export const RECON_REASONS: Record<string, string> = {
-  first: "首次记录",
-  accounts_changed: "账号已变更",
-  cycle_changed: "订阅周期已更新",
-  balance_increased: "余额已增加",
-  ledger_reset: "账本已更新",
-};
 
 /** 待核对的未知请求：上游可能已执行但结果未知，占着额度等站长核对。 */
 export type Settlement = {

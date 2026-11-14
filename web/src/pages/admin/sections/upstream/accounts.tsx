@@ -1,15 +1,12 @@
-/** Per-account official readings, ledger estimates and local request statistics. */
+/** 官方账号卡片：三个关键读数 + 一行运行统计。长篇明细统一放在「完整信息」对话框里。 */
 import { Ellipsis } from "lucide-preact";
-import type { ComponentChildren } from "preact";
 import { useState } from "preact/hooks";
 import { dayOf, fullTime, shortTime } from "../../../../lib/format";
 import { Badge, Button, Card, Menu, Meter, Notice } from "../../../../ui";
 import { act } from "../../data";
 import { NumField, SaveBar, useForm, withTone } from "../system/forms";
 import {
-  ageText,
   anlasText,
-  answer,
   duration,
   limitAgo,
   queueText,
@@ -23,70 +20,25 @@ import {
   yesterdayText,
 } from "./core";
 
-type Fact = [string, ComponentChildren];
 const accountTime = (ts: number | null | undefined): string => (ts ? `${dayOf(ts)} ${shortTime(ts)}` : "—");
-function Facts({ rows }: { rows: Fact[] }) {
+
+/** 1 小时 / 24 小时的成败一眼看完，不再铺一张 8 行 3 列的表。 */
+function windowText(w: WindowStats): string {
+  return `成功 ${reading(w.ok)} · 失败 ${reading(w.error)} · 429 ${reading(w.up_429)}`;
+}
+
+export function RequestStats({ a }: { a: Pick<UpstreamAccount, "position" | "w1h" | "w24h"> }) {
   return (
     <dl class="up-facts">
-      {rows.map(([label, value]) => (
-        <div key={label}>
-          <dt>{label}</dt>
-          <dd>{value}</dd>
-        </div>
-      ))}
+      <div>
+        <dt>1 小时</dt>
+        <dd>{windowText(a.w1h)}</dd>
+      </div>
+      <div>
+        <dt>24 小时</dt>
+        <dd>{windowText(a.w24h)}</dd>
+      </div>
     </dl>
-  );
-}
-function Block({
-  title,
-  updated,
-  children,
-}: {
-  title: string;
-  updated?: string;
-  children: ComponentChildren;
-}) {
-  return (
-    <section class="up-block" aria-label={title}>
-      <header class="up-block__head">
-        <h3>{title}</h3>
-        {updated && <time>{updated}</time>}
-      </header>
-      {children}
-    </section>
-  );
-}
-export function RequestStats({ a }: { a: Pick<UpstreamAccount, "position" | "w1h" | "w24h"> }) {
-  const rows: Array<[string, (w: WindowStats) => string]> = [
-    ["成功", (w) => reading(w.ok)],
-    ["失败", (w) => reading(w.error)],
-    ["选号后拒绝", (w) => reading(w.rejected)],
-    ["401 / 403 / 429", (w) => `${w.up_401} / ${w.up_403} / ${w.up_429}`],
-    ["耗时样本", (w) => reading(w.timing_samples)],
-    ["平均排队", (w) => duration(w.avg_wait_ms == null ? null : w.avg_wait_ms / 1000)],
-    ["P90 排队", (w) => duration(w.p90_wait_ms == null ? null : w.p90_wait_ms / 1000)],
-    ["平均生成", (w) => duration(w.avg_dur_ms == null ? null : w.avg_dur_ms / 1000)],
-  ];
-  return (
-    <table class="up-stats">
-      <caption class="sr-only">账号 {a.position} 请求统计</caption>
-      <thead>
-        <tr>
-          <th scope="col">请求统计</th>
-          <th scope="col">1 小时</th>
-          <th scope="col">24 小时</th>
-        </tr>
-      </thead>
-      <tbody>
-        {rows.map(([label, value]) => (
-          <tr key={label}>
-            <th scope="row">{label}</th>
-            <td>{value(a.w1h)}</td>
-            <td>{value(a.w24h)}</td>
-          </tr>
-        ))}
-      </tbody>
-    </table>
   );
 }
 
@@ -101,13 +53,11 @@ export function AccountCard(props: {
 }) {
   const a = props.a;
   const v = a.v5;
-  const info = a.info;
   const b = a.balance;
+  const info = a.info;
   const st = tokenState(a);
   const form = useForm(v5LimitSpecs(props.limit), a as unknown as Record<string, unknown>);
   const [saving, setSaving] = useState(false);
-  // 停用的账号默认收起明细，只留标题行和关键指标，避免一屏全是死账号的细节
-  const [open, setOpen] = useState(a.admin_enabled && !a.disabled);
   const base = `/admin/api/upstream-tokens/${encodeURIComponent(a.token_id)}`;
   const save = async () => {
     const ch = form.changes();
@@ -151,6 +101,7 @@ export function AccountCard(props: {
           ]}
         />
       </header>
+
       <div class="up-highlights">
         <div>
           <span>V5 电量</span>
@@ -180,6 +131,7 @@ export function AccountCard(props: {
           </small>
         </div>
       </div>
+
       {a.manual_cap && (
         <Notice tone="warn">
           临时每天上限 {reading(a.manual_cap.cap)} 张，到 {fullTime(a.manual_cap.until)}
@@ -191,89 +143,71 @@ export function AccountCard(props: {
           Anlas，到 {fullTime(a.paid_v5.until)}
         </Notice>
       )}
-      {!(a.admin_enabled && !a.disabled) && (
-        <button
-          type="button"
-          class="link-button up-account__fold"
-          aria-expanded={open}
-          onClick={() => setOpen((v) => !v)}
-        >
-          {open ? "收起明细" : "展开明细"}
-        </button>
+      {info?.ban_message && <Notice tone="warn">{info.ban_message}</Notice>}
+      {info?.last_error && (
+        <Notice tone="warn">
+          {info.last_error} · {fullTime(info.last_error_at)}
+        </Notice>
       )}
-      <div class="up-sections" hidden={!(a.admin_enabled && !a.disabled) && !open}>
-        <Block title="订阅与账号" updated={fullTime(info?.last_success)}>
-          <Facts
-            rows={[
-              ["订阅", answer(v?.active, "有效", "无效")],
-              ["订阅等级", reading(v?.tier)],
-              ["订阅到期", accountTime(v?.expires_at)],
-              ["宽限期", answer(v?.is_grace_period, "是", "否")],
-              ["账号类型", reading(v?.account_type)],
-              ["账号创建", accountTime(info?.account_created_at)],
-              ["封禁状态", info?.ban_status === "not_banned" ? "未封禁" : (info?.ban_status ?? "—")],
-              ["邮箱验证", answer(info?.email_verified, "已验证", "未验证")],
-              ["试用", answer(info?.trial_activated, "已启用", "未启用")],
-              ["试用操作", reading(info?.trial_actions_left)],
-              ["试用图片", reading(info?.trial_images_left)],
-              ["状态读数", info?.last_success == null ? "未查询" : info.stale ? "已陈旧" : "已更新"],
-            ]}
-          />
-          {info?.ban_message && <p class="up-message">{info.ban_message}</p>}
-          {info?.last_error && (
-            <Notice tone="warn">
-              {info.last_error} · {fullTime(info.last_error_at)}
-            </Notice>
-          )}
-        </Block>
-        <Block title="电量与恢复" updated={fullTime(v?.checked_at)}>
-          <Facts
-            rows={[
-              ["负额度", answer(v?.is_negative, "是", "否")],
-              ["Usage Boost 额外电量", reading(v?.purchased_percent, "%")],
-              ["下次恢复", duration(v?.time_until_next_percent_seconds)],
-              ["当前推算恢复", quietText(v?.current_response_recharge_per_day_estimate)],
-              ["历史推算恢复", quietText(v?.historical_sample_based_recharge_per_day_estimate)],
-              ["闲时实测恢复", quietText(a.quiet_rate?.rate)],
-              [
-                "电量读数",
-                v?.checked_at == null ? "未查询" : v.stale ? "已陈旧" : v.uncertain ? "不确定" : "已更新",
-              ],
-              ["负载占比 · 24h", reading(a.load_share_24h, "%")],
-              ["推算余额占比", reading(a.balance_share, "%")],
-            ]}
-          />
-          {v?.error && <Notice tone="warn">{v.error}</Notice>}
-        </Block>
-        <Block title="余额读数" updated={b ? ageText(b.snapshot_age_days) : "还没有快照"}>
-          <Facts
-            rows={[
-              ["Anlas 余额", anlasText(b?.balance)],
-              ["V5 剩余", reading(b?.v5_percent, "%")],
-              ["读数时刻", b ? accountTime(b.at) : "—"],
-              ["读数状态", !b ? "还没有快照" : b.stale ? "已陈旧" : "最新"],
-            ]}
-          />
-        </Block>
-        <Block title="请求与运行">
-          <RequestStats a={a} />
-          <Facts
-            rows={[
-              ["昨天出图", yesterdayText(a.yesterday?.images, a.yesterday?.v5)],
-              ["排队", queueText(a.waiting, a.queue_cap)],
-              ["出图间隔", a.cycle ? duration(a.cycle) : "—"],
-              ["最近限流", limitAgo(a.last_429)],
-              ["今天并发锁", `${reading(a.locked_today ?? 0)} 次`],
-              ["在途 / 并发", `${a.image_active} / ${a.image_concurrency}`],
-              ["连续失败", reading(a.fails)],
-              ["冷却剩余", duration(a.blocked_for)],
-              ["最近成功", fullTime(a.last_ok)],
-              ["账号可用", answer(a.usable, "是", "否")],
-              ["Anlas 消耗", a.allow_anlas ? "允许" : "禁止"],
-            ]}
-          />
-        </Block>
-      </div>
+      {v?.error && <Notice tone="warn">{v.error}</Notice>}
+
+      <dl class="up-facts">
+        <div>
+          <dt>昨天</dt>
+          <dd>{yesterdayText(a.yesterday?.images, a.yesterday?.v5)}</dd>
+        </div>
+        <div>
+          <dt>排队</dt>
+          <dd>{queueText(a.waiting, a.queue_cap)}</dd>
+        </div>
+        <div>
+          <dt>在途 / 并发</dt>
+          <dd>
+            {a.image_active} / {a.image_concurrency}
+          </dd>
+        </div>
+        <div>
+          <dt>出图间隔</dt>
+          <dd>{a.cycle ? duration(a.cycle) : "—"}</dd>
+        </div>
+        <div>
+          <dt>最近限流</dt>
+          <dd>{limitAgo(a.last_429)}</dd>
+        </div>
+        <div>
+          <dt>连续失败</dt>
+          <dd>{reading(a.fails)}</dd>
+        </div>
+        <div>
+          <dt>冷却剩余</dt>
+          <dd>{duration(a.blocked_for)}</dd>
+        </div>
+        <div>
+          <dt>最近成功</dt>
+          <dd>{a.last_ok ? accountTime(a.last_ok) : "—"}</dd>
+        </div>
+        <div>
+          <dt>Anlas</dt>
+          <dd>{a.allow_anlas ? "允许消耗" : "禁止消耗"}</dd>
+        </div>
+        <div>
+          <dt>恢复估算</dt>
+          <dd>{quietText(a.quiet_rate?.rate)}</dd>
+        </div>
+        <div>
+          <dt>余额读数</dt>
+          <dd>{b ? `${anlasText(b.balance)} · ${b.stale ? "已陈旧" : "最新"}` : "还没有快照"}</dd>
+        </div>
+        <div>
+          <dt>1 小时</dt>
+          <dd>{windowText(a.w1h)}</dd>
+        </div>
+        <div>
+          <dt>24 小时</dt>
+          <dd>{windowText(a.w24h)}</dd>
+        </div>
+      </dl>
+
       <form class="token__form" {...form.formProps} onSubmit={(e) => e.preventDefault()}>
         <NumField form={form} name="v5_daily_limit" />
         <SaveBar form={form} onSave={save} saving={saving} />

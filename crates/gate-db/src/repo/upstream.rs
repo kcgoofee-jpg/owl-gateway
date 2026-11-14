@@ -83,7 +83,7 @@ impl Db {
             let existing: f64 = tx.query_row("SELECT COALESCE(SUM(amount),0) FROM upstream_anlas_charges WHERE request_id=? AND token_id=?", params![request,token], |r| r.get(0))?;
             if existing >= cost { return Ok(true); }
             let used: f64 = tx.query_row("SELECT COALESCE(SUM(amount),0) FROM upstream_anlas_charges WHERE token_id=? AND day=?", params![token,day], |r| r.get(0))?;
-            if cap > 0 && used - existing + cost > cap as f64 { return Ok(false); }
+            if cap < gate_core::UNLIMITED && used - existing + cost > cap as f64 { return Ok(false); }
             tx.execute("INSERT INTO upstream_anlas_charges(request_id,token_id,day,amount) VALUES(?,?,?,?) ON CONFLICT(request_id,token_id) DO UPDATE SET amount=excluded.amount", params![request,token,day,cost])?;
             Ok(true)
         }).await

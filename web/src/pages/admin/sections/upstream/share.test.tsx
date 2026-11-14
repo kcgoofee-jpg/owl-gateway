@@ -108,19 +108,12 @@ it("separates donated shares from relay-platform shares by source", async () => 
   root = document.createElement("div");
   document.body.append(root);
 
-  // 拼车平台页：只列出未绑定的拼车，捐赠 Key 不挤在这里，且保留添加入口。
-  await renderAct(() => render(<ShareUpstream source="relay" />, root));
+  // 拼车与捐赠合并成一页：两类都在，靠标题和徽章区分，添加入口只有一个。
+  await renderAct(() => render(<ShareUpstream />, root));
   expect(root.textContent).toContain("拼车 1");
-  expect(root.textContent).not.toContain("捐赠 3");
-  expect(root.textContent).not.toContain("赞助席捐赠");
-  expect(root.textContent).toContain("添加拼车网关");
-
-  // 捐赠页：只列出捐赠号，标题「捐赠」+「赞助席捐赠」徽章，没有添加入口（捐赠来自席位绑定）。
-  await renderAct(() => render(<ShareUpstream source="donated" />, root));
   expect(root.textContent).toContain("捐赠 3");
   expect(root.textContent).toContain("赞助席捐赠");
-  expect(root.textContent).not.toContain("拼车 1");
-  expect(root.textContent).not.toContain("添加拼车网关");
+  expect(root.textContent).toContain("添加拼车网关");
 });
 it("keeps recently saved settings in the next full save before the server refresh", async () => {
   await show();

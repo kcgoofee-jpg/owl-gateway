@@ -32,7 +32,6 @@ const ENDPOINTS: &[(&str, &str)] = &[
     ("GET", "/actions"),
     ("POST", "/ops/reset-all-keys"),
     // 运营 / 监控
-    ("GET", "/overview"),
     ("GET", "/settings"),
     ("PUT", "/settings"),
     ("GET", "/runtime-limits"),
@@ -46,7 +45,6 @@ const ENDPOINTS: &[(&str, &str)] = &[
     ("PUT", "/share-upstreams/token-x"),
     ("DELETE", "/share-upstreams/token-x"),
     ("PUT", "/upstream-tokens/token-x/v5-limit"),
-    ("GET", "/quota-records"),
     ("PUT", "/upstream-tokens/token-x/enabled"),
     ("GET", "/ops"),
     ("GET", "/ops/debug-record"),

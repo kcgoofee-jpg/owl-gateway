@@ -118,9 +118,9 @@ pub async fn registration_settings(state: &AppState) -> Result<Option<RegSetting
     }))
 }
 
-/// 剩余名额：`max(0, max_users - 已占用)`；不限名额（max_users = 0）为 None。
+/// 剩余名额：`max(0, max_users - 已占用)`；不限名额（max_users = 9999）为 None。
 async fn slots_left(state: &AppState, cfg: &RegSettings) -> Result<Option<i64>, InternalError> {
-    if cfg.max_users == 0 {
+    if gate_core::is_unlimited(cfg.max_users) {
         return Ok(None);
     }
     let active = state.db.registered_member_count(state.now()).await?;

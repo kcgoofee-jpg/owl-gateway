@@ -1,6 +1,5 @@
 //! 后台「运营 / 监控」接口：
 //!
-//! - [`monitor`]：状态码分布、总览、运行状态、上游表现；
 //! - [`upstream`]：「上游」页的聚合读数、上游 Token 增删改、Anlas 核对与未知预留；
 //! - [`account_stats`]：每账号统计的内部实现与站付 V5 到期建议；
 //! - [`limits`]：预算、排队与冷却、账号保护；
@@ -11,7 +10,6 @@
 mod account_stats;
 mod limits;
 mod manual;
-mod monitor;
 mod onboarding;
 mod system;
 mod upstream;
@@ -51,7 +49,6 @@ pub(super) fn merge_json(row: &mut Value, extra: &Value) {
 
 pub fn router() -> Router<AppState> {
     Router::new()
-        .merge(monitor::router())
         .merge(upstream::router())
         .merge(upstream_share::router())
         .merge(upstream_information::router())

@@ -8,12 +8,10 @@
 import { signal } from "@preact/signals";
 import {
   Activity,
-  Gauge,
   ListTree,
   LogOut,
   Menu as MenuIcon,
   RefreshCw,
-  Server,
   SlidersHorizontal,
   Users,
 } from "lucide-preact";
@@ -27,67 +25,50 @@ import "./admin.css";
 import { authed, busy, endSession, refresh } from "./data";
 
 /* ---------------- 分区注册表 ---------------- */
-export type SectionId = "members" | "logs" | "upstream" | "onboarding" | "limits" | "system";
+export type SectionId = "members" | "logs" | "upstream" | "settings";
 
 type Section = {
   id: SectionId;
   label: string;
-  group: "" | "日常" | "监控" | "设置";
   path: string;
   icon: ComponentType<{ size?: number; "aria-hidden"?: boolean }>;
   view: ComponentType;
 };
 
+/** 只有四个分区：日常看的两个 + 需要改的两个。设置不再拆成三页。 */
 export const SECTIONS: Section[] = [
   {
     id: "members",
     label: "成员",
-    group: "日常",
     path: "/admin/members",
     icon: Users,
     view: lazy(() => import("./sections/members")),
   },
   {
-    id: "logs",
-    label: "日志",
-    group: "日常",
-    path: "/admin/logs",
-    icon: ListTree,
-    view: lazy(() => import("./sections/logs")),
-  },
-  {
     id: "upstream",
     label: "上游",
-    group: "监控",
     path: "/admin/upstream",
     icon: Activity,
     view: lazy(() => import("./sections/upstream")),
   },
   {
-    id: "onboarding",
-    label: "成员规则",
-    group: "设置",
-    path: "/admin/onboarding",
-    icon: Server,
-    view: lazy(() => import("./sections/onboarding")),
+    id: "logs",
+    label: "日志",
+    path: "/admin/logs",
+    icon: ListTree,
+    view: lazy(() => import("./sections/logs")),
   },
   {
-    id: "limits",
-    label: "运行保护",
-    group: "设置",
-    path: "/admin/limits",
+    id: "settings",
+    label: "设置",
+    path: "/admin/settings",
     icon: SlidersHorizontal,
-    view: lazy(() => import("./sections/limits")),
-  },
-  {
-    id: "system",
-    label: "系统",
-    group: "设置",
-    path: "/admin/system",
-    icon: Gauge,
-    view: lazy(() => import("./sections/system")),
+    view: lazy(() => import("./sections/settings")),
   },
 ];
+
+/** 旧地址（成员规则 / 运行保护 / 系统已并入设置）：进来就换到新地址，不留历史。 */
+const LEGACY_PATH = /^\/admin\/(onboarding|limits|system)(\/|$)/;
 
 function Login() {
   const [pw, setPw] = useState("");
@@ -144,6 +125,7 @@ function Login() {
  * 鉴权探针失败（断网 / 5xx / 超时）：留在后台壳里给重试，**不要**当成「没登录」回登录页。
  * 只有 401 才是真的掉登录（见 Admin() 的 catch）。
  */
+
 function AdminDataError(props: { error: string | null; onRetry: () => void }) {
   return (
     <div class="admin-fail" role="alert">
@@ -159,7 +141,17 @@ function AdminDataError(props: { error: string | null; onRetry: () => void }) {
   );
 }
 
-/** 未知的 /admin/* 路径：保留侧栏导航，不再静默渲染成员页。 */
+/** 未知的 /admin/*：旧分区地址换到设置页，其余给 404。 */
+function Fallback() {
+  const { path, route } = useLocation();
+  const legacy = LEGACY_PATH.test(path);
+  useEffect(() => {
+    if (legacy) route("/admin/settings", true);
+  }, [legacy, route]);
+  if (legacy) return <SectionLoading />;
+  return <NotFound />;
+}
+
 function NotFound() {
   const { path, route } = useLocation();
   return (
@@ -197,28 +189,23 @@ function Nav() {
   const { path } = useLocation();
   const active = (s: Section) =>
     path.startsWith(s.path) || (s.id === "members" && (path === "/admin" || path === "/admin/"));
-  let lastGroup = "";
   return (
     <nav class="admin-nav" aria-label="后台导航">
       {SECTIONS.map((s) => {
-        const header = s.group && s.group !== lastGroup ? s.group : "";
-        lastGroup = s.group;
         const Icon = s.icon;
         return (
-          <div key={s.id}>
-            {header && <div class="admin-nav__group">{header}</div>}
-            <a
-              href={s.path}
-              class={cx("admin-nav__item", active(s) && "is-active")}
-              aria-current={active(s) ? "page" : undefined}
-              onClick={() => {
-                drawerOpen.value = false;
-              }}
-            >
-              <Icon size={17} aria-hidden={true} />
-              <span>{s.label}</span>
-            </a>
-          </div>
+          <a
+            key={s.id}
+            href={s.path}
+            class={cx("admin-nav__item", active(s) && "is-active")}
+            aria-current={active(s) ? "page" : undefined}
+            onClick={() => {
+              drawerOpen.value = false;
+            }}
+          >
+            <Icon size={17} aria-hidden={true} />
+            <span>{s.label}</span>
+          </a>
         );
       })}
     </nav>
@@ -356,8 +343,8 @@ export function Admin() {
             {/* 总览页 10-23 删除：/admin 直接是成员页 */}
             <Route key="root" path="/admin" component={MembersView} />
             <Route key="root-slash" path="/admin/" component={MembersView} />
-            {/* 不认识的 /admin/*：404 视图，不再静默渲染成员页 */}
-            <Route default component={NotFound} />
+            {/* 不认识的 /admin/*：旧地址换到设置页，其余 404 */}
+            <Route default component={Fallback} />
           </Router>
         </Suspense>
       </Shell>

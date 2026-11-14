@@ -1,14 +1,5 @@
 import { describe, expect, it } from "vitest";
-import {
-  bytesText,
-  type FieldSpec,
-  mbText,
-  type NumSpec,
-  parseField,
-  passwordProblem,
-  sameRaw,
-  toRaw,
-} from "./core";
+import { type FieldSpec, type NumSpec, parseField, passwordProblem, sameRaw, toRaw } from "./core";
 
 const int: NumSpec = { kind: "int", label: "名额", min: 0, max: 1000 };
 const flt: NumSpec = { kind: "float", label: "预算", min: 0, max: 1_000_000 };
@@ -25,7 +16,7 @@ describe("parseField（规则同后端 _num：空值 / 负数 / 小数 / 越界�
     expect(parseField(int, "1001")).toEqual({ ok: false, error: "名额必须在 0～1000 之间" });
     expect(parseField(int, "1e3")).toEqual({ ok: true, value: 1000 });
   });
-  it("0 是合法的（代表不限）", () => {
+  it("0 是合法的具体值", () => {
     expect(parseField(int, "0")).toEqual({ ok: true, value: 0 });
     expect(parseField(flt, "12.5")).toEqual({ ok: true, value: 12.5 });
   });
@@ -63,15 +54,6 @@ describe("toRaw / sameRaw", () => {
     const s: NumSpec = { kind: "int", label: "间隔", min: 15, max: 120 };
     expect(sameRaw(s, "0", "0")).toBe(true);
     expect(sameRaw(s, "", "0")).toBe(false);
-  });
-});
-
-describe("显示", () => {
-  it("MB / 字节", () => {
-    expect(mbText(1536)).toBe("1.5 GB");
-    expect(mbText(512)).toBe("512 MB");
-    expect(bytesText(0)).toBe("0 KB");
-    expect(bytesText(3 * 1024 ** 2)).toBe("3.0 MB");
   });
 });
 

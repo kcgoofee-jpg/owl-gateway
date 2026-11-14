@@ -6,9 +6,9 @@
 //! [`crate::ops::registration_settings`]；后台新建 Key 的弹窗从 `/admin/api/ops` 取同一份（前端不另写默认值）。
 //! 下面只放没有数据库设置的几项。
 
-/// 自助领取的名额上限（后台「领 Key」改过的 `register_max_users` 优先；0 = 不限）。
+/// 自助领取的名额上限（后台「领 Key」改过的 `register_max_users` 优先；0 = 不发放，9999 = 不限）。
 pub const REGISTER_MAX_USERS: i64 = 10;
-/// 新领的 Key 几天后过期，0 = 不过期（后台改过的 `register_expires_days` 优先）。
-pub const REGISTER_EXPIRES_DAYS: i64 = 0;
-/// Discord 账号注册满多少天才能自助领取（防刷号抢名额）；0 = 不限。
+/// 新领的 Key 几天后过期，9999 = 永久（后台改过的 `register_expires_days` 优先）。
+pub const REGISTER_EXPIRES_DAYS: i64 = 9999;
+/// Discord 账号注册满多少天才能自助领取（防刷号抢名额）；0 = 不设门槛。
 pub const REGISTER_MIN_ACCOUNT_DAYS: i64 = 7;

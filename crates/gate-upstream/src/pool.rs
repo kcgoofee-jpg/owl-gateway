@@ -269,7 +269,13 @@ impl Token {
     }
 
     pub fn usable(&self, now: f64) -> bool {
-        self.with(|f| f.admin_enabled && !f.disabled && now >= f.blocked_until)
+        self.with(|f| {
+            f.admin_enabled
+                && !f.disabled
+                && now >= f.blocked_until
+                // 拼车号把每分钟额度设成 0 = 一张都不收（不是「不限」）
+                && f.share_limits.as_ref().is_none_or(|s| s.rpm > 0)
+        })
     }
 
     pub fn cooldown(&self) -> Cooldown {

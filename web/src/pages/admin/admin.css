@@ -24,12 +24,6 @@
   display: grid;
   gap: 2px;
 }
-.admin-nav__group {
-  margin: var(--sp-3) var(--sp-2) var(--sp-1);
-  font-size: var(--fs-xs);
-  font-weight: 600;
-  color: var(--muted);
-}
 .admin-nav__item {
   display: flex;
   align-items: center;
@@ -150,32 +144,6 @@
   color: var(--muted);
   font-size: var(--fs-sm);
 }
-.stats {
-  display: grid;
-  gap: var(--sp-4);
-  grid-template-columns: repeat(auto-fit, minmax(170px, 1fr));
-}
-.stat {
-  padding: var(--sp-5);
-  border: 0;
-  border-radius: var(--radius);
-  background: var(--surface-2);
-}
-.stat__label {
-  font-size: var(--fs-xs);
-  color: var(--muted);
-}
-.stat__value {
-  margin-top: 2px;
-  font-size: var(--fs-xl);
-  font-weight: 700;
-  font-variant-numeric: tabular-nums;
-}
-.stat__hint {
-  font-size: var(--fs-xs);
-  color: var(--muted);
-}
-
 /* 列表冻结期间攒下的新数据：吸在列表上方，点一下放进来（sections/live.tsx） */
 .xa-fresh {
   position: sticky;

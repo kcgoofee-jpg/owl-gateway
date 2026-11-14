@@ -483,7 +483,7 @@ const GUARD_FIELDS: [(&str, i64, i64, i64); 5] = [
     ("post_jitter_min", 1, 1, 30),
     ("post_jitter_max", 3, 1, 30),
     ("queue_per_member", 2, 1, 5),
-    ("queue_per_account", 5, 0, 100),
+    ("queue_per_account", 5, 1, 9999),
 ];
 
 #[tokio::test]
@@ -539,8 +539,12 @@ async fn guard_get_put() {
     let frozen = settings(&e).await;
     for (body, detail) in [
         (
-            json!({"queue_per_account": 500}),
-            format!("{label} 必须在 0～100 之间"),
+            json!({"queue_per_account": 0}),
+            format!("{label} 必须在 1～9999 之间"),
+        ),
+        (
+            json!({"queue_per_account": 10000}),
+            format!("{label} 必须在 1～9999 之间"),
         ),
         (
             json!({"queue_per_account": 1.5}),
@@ -688,7 +692,7 @@ async fn guard_accounts_show_usage_and_pacing() {
         (&a["usable"], &a["full"], &a["today"], &a["next_start_in"]),
         (&json!(true), &json!(true), &json!(2400), &Value::Null)
     );
-    assert_eq!(api.get_ok("/overview").await["pool"][0]["full"], true);
+    assert_eq!(api.get_ok("/upstream").await["accounts"][0]["full"], true);
 }
 
 // ------------------------------------------------------------------ Discord 机器人
@@ -941,13 +945,11 @@ async fn upstream_token_settings_endpoints() {
         e.state.db.get_upstream_token_enabled().await.unwrap(),
         vec![(id.clone(), false)]
     );
-    // 令牌池状态反映这些设置
-    let ov = api.get_ok("/overview").await;
+    // 上游页的账号行反映这些设置
+    let a = &api.get_ok("/upstream").await["accounts"][0];
     assert_eq!(
-        ov["pool"],
-        json!([{"token_id": id, "position": 1, "token": "pst-sy…oken", "usable": false, "full": false, "admin_enabled": false,
-                "disabled": false, "fails": 0, "blocked_for": 0, "last_ok": 0.0, "allow_anlas": true,
-                "image_concurrency": 1, "image_active": 0, "v5_daily_limit": 12, "v5_used": 0, "v5_held": 0, "images_today": 0, "donated": false}])
+        (&a["token_id"], &a["position"], &a["usable"], &a["full"], &a["admin_enabled"]),
+        (&json!(id), &json!(1), &json!(false), &json!(false), &json!(false))
     );
     assert_eq!(
         api.text("PUT", &en, Some(json!({"enabled": true}))).await.0,
@@ -1310,19 +1312,17 @@ async fn upstream_token_body_is_limited_to_4k() {
 
 // ------------------------------------------------------------------ Anlas 核对
 
-// ------------------------------------------------------------------ 总览 / 状态 / 监控
+// ------------------------------------------------------------------ 状态 / 监控
 
-/// 总览页 10-23 删除：`/overview` 只剩「上游」页用的令牌池两项；状态码分布接口删除。
+/// 总览与状态码分布接口已删除（页面和接口一起走）。
 #[tokio::test]
-async fn overview_is_only_the_token_pool() {
+async fn dashboard_routes_are_gone() {
     let e = setup(&[]).await;
     let api = Admin::login_bare(&e.state).await;
-    let v = api.get_ok("/overview").await;
-    let keys: Vec<&str> = v.as_object().unwrap().keys().map(String::as_str).collect();
-    assert_eq!(keys, ["pool", "pool_configured"]);
-    assert_eq!(v["pool_configured"], true);
-    let (status, _) = api.json("GET", "/status-codes", None).await;
-    assert_eq!(status, 404);
+    for path in ["/overview", "/status-codes", "/quota-records"] {
+        let (status, _) = api.json("GET", path, None).await;
+        assert_eq!(status, 404, "{path}");
+    }
 }
 
 /// 「系统」页只剩告警渠道；生成记录页读 audit。服务器状态卡片（磁盘 / 上游健康 / 防爆破）删了，字段跟着删。

@@ -24,8 +24,10 @@ pub struct ShareLimits {
 impl Default for ShareLimits {
     fn default() -> Self {
         Self {
-            daily_anlas: 0,
-            rpm: 0,
+            // 0 = 一点 Anlas 都不许花；不限填 9999。新建拼车号默认放开。
+            daily_anlas: gate_core::UNLIMITED,
+            // 0 = 这个号一分钟一张都不收（等同停用）；不限填 9999。
+            rpm: gate_core::UNLIMITED,
             concurrency: 1,
             post_wait_min: 1,
             post_wait_max: 3,
@@ -35,7 +37,7 @@ impl Default for ShareLimits {
 impl ShareLimits {
     pub fn valid(&self) -> bool {
         (0..=1000000).contains(&self.daily_anlas)
-            && (0..=600).contains(&self.rpm)
+            && (0..=gate_core::UNLIMITED).contains(&self.rpm)
             && (1..=16).contains(&self.concurrency)
             && (0..=300).contains(&self.post_wait_min)
             && (self.post_wait_min..=300).contains(&self.post_wait_max)

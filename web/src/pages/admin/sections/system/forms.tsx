@@ -287,30 +287,6 @@ export function SaveBar(props: { form: Form; onSave: () => unknown; saving?: boo
 }
 
 /* ---------------- 展示件 ---------------- */
-/** 「推算过程」框：把决定数字的来源摆出来，方便站长用常识检查。 */
-export function Derive(props: { title?: string; children: ComponentChildren }) {
-  return (
-    <div class="derive">
-      <div class="derive__title">{props.title ?? "推算过程"}</div>
-      <div class="derive__body">{props.children}</div>
-    </div>
-  );
-}
-
-/** 名称 / 值 列表 */
-export function Kv(props: { rows: Array<[ComponentChildren, ComponentChildren]> }) {
-  return (
-    <dl class="kv">
-      {props.rows.map(([k, v], i) => (
-        <div class="kv__row" key={i}>
-          <dt>{k}</dt>
-          <dd>{v}</dd>
-        </div>
-      ))}
-    </dl>
-  );
-}
-
 /** 给 ui 组件传可选的 tone：exactOptionalPropertyTypes 下不能直接传 undefined */
 export const withTone = <T extends string>(tone: T | undefined | false): { tone?: T } =>
   tone ? { tone } : {};

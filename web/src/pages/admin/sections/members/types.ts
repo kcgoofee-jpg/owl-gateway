@@ -63,8 +63,6 @@ export type MembersResp = {
   filter?: "all" | "attention";
   fields?: Record<string, PolicyBound>;
 };
-export type KeysResp = { keys: KeyRow[] };
-
 export type Ban = {
   discord_id: string;
   created_at: number;

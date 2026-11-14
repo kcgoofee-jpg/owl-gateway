@@ -18,10 +18,10 @@ describe("后台数字/单位/耗时/IP", () => {
     expect(withUnit(1500, "张")).toBe("1,500 张");
     expect(withUnit(null, "张")).toBe("—");
   });
-  it("已用 / 上限：上限 0 或空 = 不限", () => {
+  it("已用 / 上限：0 就是 0", () => {
     expect(usedOf(4, 300)).toBe("4 / 300");
-    expect(usedOf(4, 0)).toBe("4 / 不限");
-    expect(usedOf(null, null)).toBe("0 / 不限");
+    expect(usedOf(4, 0)).toBe("4 / 0");
+    expect(usedOf(null, null)).toBe("0 / 0");
   });
   it("毫秒 → 秒：≥10 秒取整", () => {
     expect(secondsText(4200)).toBe("4.2 秒");

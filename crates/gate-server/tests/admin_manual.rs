@@ -103,11 +103,6 @@ async fn manual_changes_are_written_with_their_record() {
     let base = e.state.guard.with(|g| g.values["account_daily_cap"]);
     assert_eq!(e.state.guard.with(|g| g.daily_cap_for(&tid, NOW)), base);
 
-    // /quota-records 的 manual 段：只列还在生效的；账号给编号不给 Token
-    let (_, q) = api.json("GET", "/quota-records", None).await;
-    assert_eq!(q["manual"]["account_caps"], json!([]));
-    assert_eq!(q["manual"]["paid_v5"][0]["position"], 1);
-    assert_eq!(q["manual"]["paid_v5"][0]["max_anlas"], 500.0);
 }
 
 #[tokio::test]

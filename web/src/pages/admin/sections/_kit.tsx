@@ -39,20 +39,6 @@ export function KindTag(props: { kind: "manual" | "auto" | "member" }) {
   );
 }
 
-export function Stat(props: {
-  label: ComponentChildren;
-  value: ComponentChildren;
-  hint?: ComponentChildren;
-}) {
-  return (
-    <div class="stat">
-      <div class="stat__label">{props.label}</div>
-      <div class="stat__value">{props.value}</div>
-      {props.hint && <div class="stat__hint">{props.hint}</div>}
-    </div>
-  );
-}
-
 export function Loading(props: { rows?: number }) {
   return (
     <div class="stack" aria-busy="true">
@@ -79,18 +65,6 @@ export function CardPending(props: {
       {props.loading ? <Loading rows={2} /> : <LoadError error={props.error ?? "没有数据"} />}
     </Card>
   );
-}
-
-/** 本地分页：先显示 page 条，底下一个「显示更多（还有 N 条）」按钮。必须在早退（加载中 / 出错）之前调用。 */
-export function useShowMore<T>(rows: T[], page = 50): { shown: T[]; more: ComponentChildren } {
-  const [limit, setLimit] = useState(page);
-  const shown = rows.slice(0, limit);
-  const more = rows.length > shown.length && (
-    <div class="lg-more">
-      <Button onClick={() => setLimit(limit + page)}>显示更多（还有 {rows.length - shown.length} 条）</Button>
-    </div>
-  );
-  return { shown, more };
 }
 
 /* ---------------- 编辑期间暂停自动刷新 ---------------- */

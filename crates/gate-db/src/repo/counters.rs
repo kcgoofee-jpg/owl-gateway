@@ -1,10 +1,8 @@
 //! 每日计数器、额度基线、全站汇总。
 
-use super::{OrderedPairs, marks};
-use crate::{Db, DbError, Result, value};
-use gate_core::{clock::Clock, primitives};
+use super::OrderedPairs;
+use crate::{Db, Result, value};
 use rusqlite::params;
-use serde::Serialize;
 use serde_json::Value;
 
 /// `get_counter` 的结果：已扣除「重置额度」基线后的当日用量（`anlas` 不会小于 0；没有记录就全是 0）。
@@ -25,48 +23,6 @@ const MONTH_ANLAS_ALL_SQL: &str =
 
 fn day_v5_total_sql() -> String {
     "SELECT COALESCE(SUM(v5),0) AS c FROM counters WHERE day=?".into()
-}
-
-#[derive(Debug, Clone, Serialize)]
-pub struct OverviewToday {
-    pub images: i64,
-    /// 成员出图：不含已删除的 Key；上面的 images 是账号真实消耗。
-    pub member_images: i64,
-    pub anlas: f64,
-    pub text_tokens: i64,
-    pub requests: i64,
-    pub v5: i64,
-    pub unconfirmed_requests: i64,
-    pub unconfirmed_anlas: f64,
-}
-
-#[derive(Debug, Clone, Serialize)]
-pub struct OverviewWeekDay {
-    pub day: String,
-    pub images: i64,
-    pub anlas: f64,
-    pub text_tokens: i64,
-    pub requests: i64,
-    pub v5: i64,
-}
-
-#[derive(Debug, Clone, Serialize)]
-pub struct OverviewMonth {
-    pub anlas: f64,
-    pub unconfirmed_requests: i64,
-    pub unconfirmed_anlas: f64,
-}
-
-/// 后台总览（键顺序固定，后台前端按它读）。
-#[derive(Debug, Clone, Serialize)]
-pub struct Overview {
-    pub today: OverviewToday,
-    pub active_members: i64,
-    pub members_total: i64,
-    pub keys_total: i64,
-    pub keys_active: i64,
-    pub week: Vec<OverviewWeekDay>,
-    pub month: OverviewMonth,
 }
 
 /// 「重置今日额度」要重置哪几项。V4.5 一定会重置；V5 和 Anlas 要明确勾选（站长 10-18：默认只重置 V4.5）。
@@ -277,143 +233,6 @@ impl Db {
             })?;
             // GROUP BY key_id 之后键已经唯一
             rows.collect()
-        })
-        .await
-    }
-
-    /// 后台总览。`today` 是服务日字符串；`week_days` 由调用方给（`state.week_days`）。
-    /// 异常统计的时间窗按 `today` 当天的**本地自然日 0 点**起算（不按 7 点重置）。
-    pub async fn overview(
-        &self,
-        today: &str,
-        week_days: &[String],
-        now: f64,
-        clock: &Clock,
-    ) -> Result<Overview> {
-        let today = today.to_string();
-        let week_days = week_days.to_vec();
-        // today 当天的本地 0 点；month 窗从当月 1 日 0 点起，两窗同止于次日 0 点
-        let date: jiff::civil::Date = today
-            .parse()
-            .map_err(|e| DbError::Invalid(format!("today 不是 YYYY-MM-DD：{e}")))?;
-        let local = |d: jiff::civil::Date| {
-            clock
-                .local_midnight(&d.to_string())
-                .ok_or_else(|| DbError::Invalid(format!("无法换算本地 0 点：{d}")))
-        };
-        let day_start = local(date)?;
-        let month_start = local(date.first_of_month())?;
-        let end = local(
-            date.tomorrow()
-                .map_err(|e| DbError::Invalid(e.to_string()))?,
-        )?;
-
-        self.read(move |c| {
-            let one_i = |sql: &str, args: &[&dyn rusqlite::ToSql]| -> rusqlite::Result<i64> {
-                c.query_row(sql, args, |r| value::i64_or(r, 0, 0))
-            };
-            let one_f = |sql: &str, args: &[&dyn rusqlite::ToSql]| -> rusqlite::Result<f64> {
-                c.query_row(sql, args, |r| value::f64_or(r, 0, 0.0))
-            };
-            let today_images = one_i("SELECT COALESCE(SUM(images),0) FROM counters WHERE day=?", &[&today])?;
-            let today_anlas = one_f(DAY_ANLAS_SQL, &[&today])?;
-            let today_tokens = one_i("SELECT COALESCE(SUM(text_tokens),0) FROM counters WHERE day=?", &[&today])?;
-            let today_requests = one_i("SELECT COALESCE(SUM(requests),0) FROM counters WHERE day=?", &[&today])?;
-            let today_v5 = one_i(&day_v5_total_sql(), &[&today])?;
-            let keys_total = one_i("SELECT COUNT(*) FROM api_keys", &[])?;
-            let keys_active = one_i(
-                "SELECT COUNT(*) FROM api_keys WHERE enabled=1 AND (expires_at IS NULL OR expires_at>?)",
-                &[&now],
-            )?;
-            let active_members = one_i(
-                "SELECT COUNT(DISTINCT c.key_id) \
-                 FROM counters AS c \
-                 JOIN api_keys AS k ON k.id = c.key_id \
-                 WHERE c.day=? AND c.requests>0",
-                &[&today],
-            )?;
-            let members_total = one_i("SELECT COUNT(*) FROM api_keys", &[])?;
-
-            let mut anomaly = Vec::new();
-            for start in [day_start, month_start] {
-                let (n, sum) = c.query_row(
-                    "SELECT COUNT(*), COALESCE(SUM(unconfirmed_anlas),0) FROM usage_log \
-                     WHERE unconfirmed_anlas>0 AND ts>=? AND ts<?",
-                    params![start, end],
-                    |r| Ok((value::i64_or(r, 0, 0)?, value::f64_or(r, 1, 0.0)?)),
-                )?;
-                anomaly.push((n, primitives::round(sum, 2)));
-            }
-
-            let sql = format!(
-                "SELECT c.day, \
-                        SUM(c.images) AS images, SUM(c.anlas) AS anlas, \
-                        SUM(c.text_tokens) AS text_tokens, SUM(c.requests) AS requests, \
-                        SUM(c.v5) AS v5 \
-                 FROM counters AS c \
-                 WHERE c.day IN ({}) GROUP BY c.day",
-                marks(week_days.len())
-            );
-            let mut stmt = c.prepare(&sql)?;
-            let mut by_day: std::collections::HashMap<String, OverviewWeekDay> = Default::default();
-            let rows = stmt.query_map(rusqlite::params_from_iter(week_days.iter()), |r| {
-                let day = value::text_or(r, "day", "")?;
-                Ok(OverviewWeekDay {
-                    day: day.clone(),
-                    images: value::i64_or(r, "images", 0)?,
-                    anlas: value::f64_or(r, "anlas", 0.0)?,
-                    text_tokens: value::i64_or(r, "text_tokens", 0)?,
-                    requests: value::i64_or(r, "requests", 0)?,
-                    v5: value::i64_or(r, "v5", 0)?,
-                })
-            })?;
-            for r in rows {
-                let r = r?;
-                by_day.insert(r.day.clone(), r);
-            }
-            let week = week_days
-                .iter()
-                .map(|d| {
-                    by_day.get(d).cloned().unwrap_or(OverviewWeekDay {
-                        day: d.clone(),
-                        images: 0,
-                        anlas: 0.0,
-                        text_tokens: 0,
-                        requests: 0,
-                        v5: 0,
-                    })
-                })
-                .collect();
-
-            let member_images = one_i(
-                "SELECT COALESCE(SUM(c.images),0) FROM counters c JOIN api_keys k ON k.id=c.key_id \
-                 WHERE c.day=?",
-                &[&today],
-            )?;
-            let month_prefix: String = primitives::take_chars(&today, 7).to_string();
-            let month_anlas = one_f(MONTH_ANLAS_ALL_SQL, &[&month_prefix])?;
-            Ok(Overview {
-                today: OverviewToday {
-                    images: today_images,
-                    member_images,
-                    anlas: primitives::round(today_anlas, 2),
-                    text_tokens: today_tokens,
-                    requests: today_requests,
-                    v5: today_v5,
-                    unconfirmed_requests: anomaly[0].0,
-                    unconfirmed_anlas: anomaly[0].1,
-                },
-                active_members,
-                members_total,
-                keys_total,
-                keys_active,
-                week,
-                month: OverviewMonth {
-                    anlas: primitives::round(month_anlas, 2),
-                    unconfirmed_requests: anomaly[1].0,
-                    unconfirmed_anlas: anomaly[1].1,
-                },
-            })
         })
         .await
     }
