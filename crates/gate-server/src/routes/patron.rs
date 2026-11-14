@@ -424,7 +424,7 @@ async fn rotate_token(
     let token = field(&body, "token");
     if !gate_upstream::token_store::valid_share_token(&token) {
         return Err(
-            HttpError::new(422, "Key 格式不对：拼车网关的 Key 应以 NAI- 或 pk- 开头").into(),
+            HttpError::new(422, "Key 格式不对：应以 NAI- 或 pk- 开头").into(),
         );
     }
     let new_id =

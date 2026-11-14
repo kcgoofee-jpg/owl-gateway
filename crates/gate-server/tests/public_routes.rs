@@ -385,7 +385,7 @@ async fn public_live_blocked_reason_and_queue() {
     assert_eq!(v["guard"]["blocked"]["manual"], false);
     assert_eq!(
         v["guard"]["blocked"]["text"],
-        "NovelAI 连续出错，全站暂停出图 300 秒，未扣费。到时自动恢复。"
+        "出图服务连续出错，全站暂停出图 300 秒，未扣费。到时自动恢复。"
     );
     assert!(
         v["guard"]["blocked"]["when"]

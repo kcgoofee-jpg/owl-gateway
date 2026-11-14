@@ -58,7 +58,7 @@ impl WireFormat {
 
 /// `ImageStreamProtocolError`
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Error)]
-#[error("NovelAI 返回的图片数据格式错误或过大，未完成的图未扣费。请稍后重试。")]
+#[error("图片数据异常或过大，未完成的图未扣费。请稍后重试。")]
 pub struct ImageStreamProtocolError;
 
 /// `encode_image_event` 的失败。

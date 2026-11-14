@@ -162,7 +162,7 @@ fn constants() {
     assert_eq!(ev::MAX_STREAM_BYTES, 134_217_728);
     assert_eq!(
         ev::ImageStreamProtocolError.to_string(),
-        "NovelAI 返回的图片数据格式错误或过大，未完成的图未扣费。请稍后重试。"
+        "图片数据异常或过大，未完成的图未扣费。请稍后重试。"
     );
     assert_eq!(WireFormat::Sse.media_type(), "text/event-stream");
     assert_eq!(WireFormat::Msgpack.media_type(), "application/x-msgpack");

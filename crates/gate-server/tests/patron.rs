@@ -680,7 +680,7 @@ async fn patron_token_self_service_auth_matrix() {
             hdrs,
         )
         .await
-        .assert_detail(422, "Key 格式不对：拼车网关的 Key 应以 NAI- 或 pk- 开头");
+        .assert_detail(422, "Key 格式不对：应以 NAI- 或 pk- 开头");
     }
 
     // 只能动自己绑的那把：另一个席位的捐赠号不受影响。

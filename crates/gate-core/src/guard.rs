@@ -336,7 +336,7 @@ impl GuardCore {
         self.breaker_until = now + if seconds > 0.0 { seconds } else { 0.0 };
         self.breaker_reason = if reason.is_empty() {
             format!(
-                "NovelAI 连续出错，全站暂停出图 {} 秒，未扣费。到时自动恢复。",
+                "出图服务连续出错，全站暂停出图 {} 秒，未扣费。到时自动恢复。",
                 primitives::int_checked(seconds)?
             )
         } else {
@@ -351,7 +351,7 @@ impl GuardCore {
         if self.breaker_until > now {
             let text = if self.breaker_reason.is_empty() {
                 format!(
-                    "NovelAI 连续出错，全站暂停出图，未扣费。约 {} 秒后自动恢复。",
+                    "出图服务连续出错，全站暂停出图，未扣费。约 {} 秒后自动恢复。",
                     (self.breaker_until - now) as i64
                 )
             } else {

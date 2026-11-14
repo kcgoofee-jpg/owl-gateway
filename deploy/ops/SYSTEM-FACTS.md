@@ -167,7 +167,7 @@
 | 一个 Discord 账号一把 Key | 重复领取会提示在网页看额度、用 `/resetkey` 换新 |
 | （填了邀请 Key 的在这里分流，直接绑定，不看下面三项） | |
 | 每小时最多发放 `issue_hourly_cap` | 码 12，线 0（不限） |
-| `register_open` 与名额 | `register_open` 线 1，关 = 「领 Key 当前已关闭」；名额 `register_max_users`（没设过 = 10；线 0 = 不限，须确认是库里的值），满了先到先得，没有候补 |
+| `register_open` 与名额 | `register_open` 线 1，关 = 「领 Key 当前已关闭」；名额 `register_max_users`（没设过 = 10；0 = 一个都不发，9999 = 不限），满了先到先得，没有候补 |
 | 可选：身份组门槛 | `register_role_guild` / `register_role_id`，线均为空（不设门槛）；机器人不在该服务器里，门槛配齐后首页「登录」（`/login`，`?verify=1` 兼容）一律用 scope `identify guilds.members.read` 授权，回调里用成员自己的授权查身份组，核验结果记在 `role_verifications` 表；没有身份组且没有 Key 的人不发会话、回首页 `/?verify=no`（Discord 查不了为 `/?verify=error`），已有 Key 的成员照常登录；`/register` 只查这张表；没配门槛时登录只要 `identify`。`/public/status` / `/public/live` 的 `registration.role_note` 仅在门槛配齐时给出名称 |
 
 新 Key 的默认值：每日 V4.5 = `register_daily_images`、每日 V5 = `register_daily_v5`（都是「额度与保护」页的手动值，见 §2）、模型范围固定含 V5（`register_image_scope` 10-23 起不再读）。
@@ -204,7 +204,7 @@
 | 键 | 类型 | 默认 | 范围 | 说明 |
 |---|---|---|---|---|
 | `member_sweep` | flag | 开 | | 退群回收：每人每天核对一次是否还在服务器，不在就删 Key |
-| `issue_hourly_cap` | int | 12 | 0–500 | 每小时最多发放的新 Key（0 = 不限） |
+| `issue_hourly_cap` | int | 12 | 0–500 | 每小时最多发放的新 Key（0 = 一张都不发，9999 = 不限） |
 | `v5_paused` | flag | 关 | | V5 暂停：开着时 V5 请求直接拒，不扣费 |
 | `maintenance_mode` | flag | 关 | | 维护模式：暂停公共网站与服务接口，后台和健康检查保留 |
 | `v5_medium_mode` | choice | off | off / on | 认不出的值（含已删除的 auto）按 off |

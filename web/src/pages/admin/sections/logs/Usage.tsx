@@ -304,13 +304,19 @@ export function Usage() {
   }, [dRid]);
 
   const memberList = members.data?.members ?? [];
-  const memberByKey = new Map<number, Member>();
-  for (const m of memberList) for (const k of m.all_key_ids ?? []) memberByKey.set(k, m);
-  const options = memberKeyOptions(memberList);
-  if (key && !options.some((o) => o.value === key))
-    options.unshift({ value: key, label: `Key ${key}`, hint: "" });
+  // 只在成员数据变化时重建：419 位成员 × 每把 Key，每帧都算会明显掉帧
+  const { memberByKey, options } = useMemo(() => {
+    const byKey = new Map<number, Member>();
+    for (const m of memberList) for (const k of m.all_key_ids ?? []) byKey.set(k, m);
+    return { memberByKey: byKey, options: memberKeyOptions(memberList) };
+  }, [members.data]);
+  // 手输 / 旧链接里的 Key 不在成员列表里时补一项（不就地改记忆化的数组）
+  const allOptions =
+    key && !options.some((o) => o.value === key)
+      ? [{ value: key, label: `Key ${key}`, hint: "" }, ...options]
+      : options;
   const memberOf = (id: number) =>
-    options.find((o) => o.value.split(",").includes(String(id)))?.value ?? String(id);
+    allOptions.find((o) => o.value.split(",").includes(String(id)))?.value ?? String(id);
 
   const qs = new URLSearchParams();
   if (key) qs.set("key_id", key);
@@ -332,7 +338,7 @@ export function Usage() {
           label="成员"
           value={key}
           allLabel="全部成员"
-          options={options}
+          options={allOptions}
           onChange={(v) => set({ key: v, page: null })}
         />
       </div>

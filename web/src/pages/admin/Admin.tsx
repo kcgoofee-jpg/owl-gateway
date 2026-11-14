@@ -22,7 +22,7 @@ import { LocationProvider, lazy, Route, Router, useLocation } from "preact-iso";
 import { ApiError, getJSON, sendJSON } from "../../lib/api";
 import { Button, cx, Field, Skeleton, toast } from "../../ui";
 import "./admin.css";
-import { authed, busy, endSession, refresh } from "./data";
+import { authed, endSession, refresh } from "./data";
 
 /* ---------------- 分区注册表 ---------------- */
 export type SectionId = "members" | "logs" | "upstream" | "settings";
@@ -265,9 +265,11 @@ function Shell(props: { children: ComponentChildren }) {
             variant="ghost"
             icon
             aria-label="刷新"
-            title="手动刷新（后台不再自动刷新）"
-            disabled={busy.value > 0}
-            onClick={() => refresh()}
+            title="刷新当前页数据（后台不自动刷新；表单里没保存的修改会保留）"
+            onClick={() => {
+              refresh();
+              toast("已刷新");
+            }}
           >
             <RefreshCw size={18} aria-hidden="true" />
           </Button>

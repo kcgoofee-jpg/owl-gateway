@@ -94,8 +94,10 @@ pub const BACKFILL: &[(&str, &str)] = &[
     // 所以 Key 暂停只认它自己的片段，不能用宽泛的「暂停」
     (BREAKER, "%NovelAI 连续出错%"),
     (BREAKER, "%上游连续出错%"),
+    (BREAKER, "%出图服务连续出错%"),
     (COOLDOWN, "%全站暂停出图约%"),
     (COOLDOWN, "%全站出图要冷却%"),
+    (COOLDOWN, "%出图通道短暂冷却%"),
     (QUIET_CAP, "%夜间安静时段%"),
     (DAILY_CAP, "%本站今天的出图总量用完了%"),
     (PACED, "%这个时段全站的出图份额用完了%"),
@@ -281,7 +283,7 @@ mod tests {
         );
         assert_eq!(
             classify(
-                "429 等 NovelAI 出图时排队超时（站点正忙，不是你的问题），没有扣费。请稍后再试"
+                "出图排队超时（站点正忙，不是你的问题），没有扣费。请稍后再试"
             ),
             QUEUE_TIMEOUT
         );
@@ -306,11 +308,11 @@ mod tests {
             QUIET_CAP
         );
         assert_eq!(
-            classify("NovelAI 连续出错，本站暂停出图，没有扣费。约 60 秒后自动恢复，请稍后再试"),
+            classify("出图服务连续出错，本站暂停出图，没有扣费。约 60 秒后自动恢复，请稍后再试"),
             BREAKER
         );
         assert_eq!(
-            classify("NovelAI 那边正在限流，全站暂停出图约 30 秒，没有扣费。请稍后再试"),
+            classify("出图服务正在限流，全站暂停出图约 30 秒，没有扣费。请稍后再试"),
             COOLDOWN
         );
         assert_eq!(
@@ -362,7 +364,7 @@ mod tests {
             QUEUE_FULL
         );
         assert_eq!(
-            classify("NovelAI 正在限流，该账号短暂冷却，未扣费。请稍后重试。"),
+            classify("当前出图通道短暂冷却，未扣费。请稍后重试。"),
             COOLDOWN
         );
         assert_eq!(classify("upstream 500（nai-diffusion-5-full）"), "");

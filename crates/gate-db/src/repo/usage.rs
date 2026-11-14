@@ -290,7 +290,7 @@ impl Db {
         .await
     }
 
-    /// 成员自己看的请求记录（首页「我的请求」）：只取这把 Key、`since` 之后、`id < before`（0 = 不限）
+    /// 成员自己看的请求记录（首页「我的请求」）：只取这把 Key、`since` 之后、`id < before`（0 = 从最新开始）
     /// 的行，`status` 空串 = 不筛。只给成员能看的列：不含 IP、客户端、上游账号。
     pub async fn member_logs(
         &self,

@@ -379,7 +379,7 @@ pub fn check_image_cooldown(state: &AppState) -> Result<(), GateError> {
     if remaining > 0 {
         return Err(GateError::with_code(
             429,
-            format!("NovelAI 正在限流，全站暂停出图约 {remaining} 秒，未扣费。请稍后重试。"),
+            format!("出图通道繁忙，全站暂停出图约 {remaining} 秒，未扣费。请稍后重试。"),
             reasons::COOLDOWN,
         )
         .retry_after(remaining as u64));

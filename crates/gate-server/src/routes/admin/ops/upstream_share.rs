@@ -52,9 +52,10 @@ async fn list(State(state): State<AppState>, _s: AdminSession) -> ApiResult {
             Some((id, row))
         })
         .collect();
+    // 各拼车网关并发问一遍份额：串行时 3 个号就能把页面拖到 9 秒以上（线上 p50=9.3s）。
+    let subs = futures::future::join_all(shares.iter().map(|t| fetch_subscription(&state, t))).await;
     let mut accounts = Vec::with_capacity(shares.len());
-    for token in shares {
-        let sub = fetch_subscription(&state, &token).await;
+    for (token, sub) in shares.into_iter().zip(subs) {
         let fields = token.fields();
         let (used, v5_held) = state
             .db
@@ -384,12 +385,12 @@ async fn fetch_subscription(state: &AppState, token: &Token) -> Map<String, Valu
     };
     let url = format!("{}/user/subscription", host.trim_end_matches('/'));
     let fetched = tokio::time::timeout(
-        Duration::from_secs(8),
+        Duration::from_secs(3),
         state.nai.get_json_with(
             &token.token,
             token.profile_index(),
             &url,
-            Duration::from_secs(8),
+            Duration::from_secs(3),
             64 * 1024,
             false,
         ),
