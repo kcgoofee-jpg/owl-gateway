@@ -54,7 +54,8 @@ test("admin login loads member management", async ({ page, context, browser, bas
   const cookies = await adminSession(browser, baseURL, readCreds().admin_password ?? "");
   await context.addCookies(cookies);
   await page.goto("/admin/members");
-  await expect(page.getByRole("heading", { level: 1, name: "成员" })).toBeVisible();
+  // 成员页不再有和导航重复的大标题：用页面自己的控件确认已渲染
+  await expect(page.getByRole("searchbox", { name: "搜索成员" })).toBeVisible();
   await expect(page.getByRole("button", { name: /展开.*的详情/ }).first()).toBeVisible();
 });
 

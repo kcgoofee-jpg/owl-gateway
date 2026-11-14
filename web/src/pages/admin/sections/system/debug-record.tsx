@@ -65,9 +65,7 @@ export function DebugRecordCard() {
           </Button>
         )}
       </div>
-      <p class="small muted">
-        服务器上已有 {data.items.length} 条记录（提示词 + 成图）。
-      </p>
+      <p class="small muted">服务器上已有 {data.items.length} 条记录（提示词 + 成图）。</p>
     </Card>
   );
 }
