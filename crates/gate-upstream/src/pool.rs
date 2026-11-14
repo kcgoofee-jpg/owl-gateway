@@ -575,11 +575,14 @@ pub(crate) struct MoveWatch {
 impl Pool {
     /// `tokens`：官方号或拼车号，见 [`TokenSpec`]。
     pub(crate) fn new(tokens: Vec<TokenSpec>) -> Self {
-        let tokens = tokens
+        let tokens: Vec<Arc<Token>> = tokens
             .into_iter()
             .enumerate()
             .map(|(i, spec)| Arc::new(Token::new(spec, i)))
             .collect();
+        // 启动时也要编号：否则每把号的 kind_index 都是 1，后台全显示「账号 1」，
+        // 请求编号前缀（account_code）也全一样，出事时分不清是哪把号。
+        renumber(&tokens);
         Self {
             state: tokio::sync::Mutex::new(PoolState { tokens, rr: 0 }),
             waiters: Arc::default(),
@@ -1183,5 +1186,24 @@ mod tests {
         assert_eq!(tokens[1].account_code(), 21);
         assert_eq!(tokens[0].fields().kind_index, 1);
         assert_eq!(tokens[1].fields().kind_index, 1);
+    }
+
+    #[tokio::test]
+    async fn new_pool_numbers_accounts_per_kind() {
+        let spec = |token: &str, host: Option<&str>| TokenSpec {
+            token: token.into(),
+            v5_daily_limit: 0,
+            allow_anlas: true,
+            image_host: host.map(str::to_string),
+            share_limits: None,
+        };
+        let pool = Pool::new(vec![
+            spec("pst-synthetic-official-a", None),
+            spec("pst-synthetic-official-b", None),
+            spec("NAI-synthetic-share-a", Some("https://share.example")),
+        ]);
+        let rows = pool.status_rows().await;
+        let codes: Vec<u8> = rows.iter().map(|(t, _)| t.account_code()).collect();
+        assert_eq!(codes, [11, 12, 21]);
     }
 }

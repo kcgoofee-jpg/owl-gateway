@@ -106,7 +106,7 @@ export function PolicyFields({
   };
   return (
     <>
-      <div class="form-section__title">额度 · 0 停用</div>
+      <div class="form-section__title">额度（0 = 停用，9999 = 不限）</div>
       <div class="form-grid mr-numbers">
         {NUMBER_FIELDS.map((name) => (
           <div key={name} onInput={() => onEdit?.(name)}>

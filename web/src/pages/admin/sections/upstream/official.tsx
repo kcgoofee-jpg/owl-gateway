@@ -2,12 +2,12 @@
 import { Plus } from "lucide-preact";
 import { useEffect, useState } from "preact/hooks";
 import { sendJSON } from "../../../../lib/api";
-import { Button, Notice, toast } from "../../../../ui";
+import { Button, Field, Notice, toast } from "../../../../ui";
 import { refreshAfterWrite, useAdmin } from "../../data";
 import { actOrError, ConfirmDialog, LoadError, Loading } from "../_kit";
 import { Sect } from "../system/forms";
 import { AccountCard } from "./accounts";
-import type { UpstreamAccount, UpstreamPage } from "./core";
+import type { Settlement, UpstreamAccount, UpstreamPage } from "./core";
 import { AccountDetails } from "./details";
 import { TokenDialog } from "./tokens";
 
@@ -54,6 +54,68 @@ function InfoRefresh({ data }: { data: UpstreamPage }) {
   );
 }
 
+/** 结果未知的请求占着额度：逐条核对后释放（确认上游没执行才退）。 */
+function Settlements({ items, csrf }: { items: Settlement[]; csrf: string }) {
+  const [target, setTarget] = useState<Settlement | null>(null);
+  const [reason, setReason] = useState("");
+  const [checked, setChecked] = useState(false);
+  if (!items.length) return null;
+  return (
+    <>
+      <Notice tone="warn">
+        {items.length} 张图上游可能已执行、结果未知，正占着额度。
+        <Button size="sm" onClick={() => setTarget(items[0] ?? null)}>
+          核对释放
+        </Button>
+      </Notice>
+      {target && (
+        <ConfirmDialog
+          title={`核对「${target.rid || target.request_id}」`}
+          confirmText="确认未执行并释放"
+          danger
+          onClose={() => setTarget(null)}
+          onConfirm={async () => {
+            if (!checked) return "请先确认这张图没有执行";
+            const text = reason.trim();
+            if (text.length < 12) return "核对说明至少 12 个字";
+            try {
+              await sendJSON(
+                "POST",
+                `/admin/api/request-settlements/${encodeURIComponent(target.request_id)}/release`,
+                { confirmed_not_executed: true, reason: text },
+                { "X-NAI-Admin-CSRF": csrf },
+              );
+            } catch (e) {
+              return e instanceof Error ? e.message : String(e);
+            }
+            toast("已释放预留");
+            refreshAfterWrite();
+            return undefined;
+          }}
+        >
+          <p>
+            释放会把预留的 {target.reserved_anlas} Anlas / {target.reserved_v5} V5
+            退回额度。只在这张图确实没执行时用。
+          </p>
+          <Field label="核对说明（12～500 字）">
+            <textarea
+              class="input"
+              rows={3}
+              maxLength={500}
+              value={reason}
+              onInput={(e) => setReason(e.currentTarget.value)}
+            />
+          </Field>
+          <label class="small">
+            <input type="checkbox" checked={checked} onChange={(e) => setChecked(e.currentTarget.checked)} />{" "}
+            我确认上游没有执行这张图
+          </label>
+        </ConfirmDialog>
+      )}
+    </>
+  );
+}
+
 export function OfficialUpstream() {
   const { data, error, loading } = useAdmin<UpstreamPage>("/admin/api/upstream");
   const [dialog, setDialog] = useState<{ mode: "add" | "replace"; target?: UpstreamAccount } | null>(null);
@@ -85,6 +147,7 @@ export function OfficialUpstream() {
       {loading && !data && <Loading rows={3} />}
       {!data && error && <LoadError error={error} />}
       {data && !data.pool_configured && <Notice tone="danger">尚未配置上游 Token。</Notice>}
+      {data && <Settlements items={data.settlements} csrf={data.csrf_token} />}
       {data && (
         <div class="stack">
           {data.accounts

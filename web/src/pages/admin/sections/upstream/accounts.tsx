@@ -127,7 +127,7 @@ export function AccountCard(props: {
           <span>今日出图</span>
           <strong>{reading(a.images_today)}</strong>
           <small>
-            免费 V5 {reading(a.v5_used)} / {reading(a.v5_daily_limit)}
+            免费 V5 {reading(a.v5_used)} / {a.v5_daily_limit >= 9999 ? "不限" : reading(a.v5_daily_limit)}
           </small>
         </div>
       </div>
@@ -166,38 +166,42 @@ export function AccountCard(props: {
             {a.image_active} / {a.image_concurrency}
           </dd>
         </div>
-        <div>
-          <dt>出图间隔</dt>
-          <dd>{a.cycle ? duration(a.cycle) : "—"}</dd>
-        </div>
-        <div>
-          <dt>最近限流</dt>
-          <dd>{limitAgo(a.last_429)}</dd>
-        </div>
-        <div>
-          <dt>连续失败</dt>
-          <dd>{reading(a.fails)}</dd>
-        </div>
-        <div>
-          <dt>冷却剩余</dt>
-          <dd>{duration(a.blocked_for)}</dd>
-        </div>
-        <div>
-          <dt>最近成功</dt>
-          <dd>{a.last_ok ? accountTime(a.last_ok) : "—"}</dd>
-        </div>
-        <div>
-          <dt>Anlas</dt>
-          <dd>{a.allow_anlas ? "允许消耗" : "禁止消耗"}</dd>
-        </div>
-        <div>
-          <dt>恢复估算</dt>
-          <dd>{quietText(a.quiet_rate?.rate)}</dd>
-        </div>
-        <div>
-          <dt>余额读数</dt>
-          <dd>{b ? `${anlasText(b.balance)} · ${b.stale ? "已陈旧" : "最新"}` : "还没有快照"}</dd>
-        </div>
+        {(a.cycle ?? 0) > 0 && (
+          <div>
+            <dt>出图间隔</dt>
+            <dd>{duration(a.cycle ?? 0)}</dd>
+          </div>
+        )}
+        {a.last_429 != null && (
+          <div>
+            <dt>最近限流</dt>
+            <dd>{limitAgo(a.last_429)}</dd>
+          </div>
+        )}
+        {a.fails > 0 && (
+          <div>
+            <dt>连续失败</dt>
+            <dd>{reading(a.fails)}</dd>
+          </div>
+        )}
+        {a.blocked_for > 0 && (
+          <div>
+            <dt>冷却剩余</dt>
+            <dd>{duration(a.blocked_for)}</dd>
+          </div>
+        )}
+        {!a.allow_anlas && (
+          <div>
+            <dt>Anlas</dt>
+            <dd>禁止消耗</dd>
+          </div>
+        )}
+        {a.quiet_rate?.rate != null && (
+          <div>
+            <dt>恢复估算</dt>
+            <dd>{quietText(a.quiet_rate.rate)}</dd>
+          </div>
+        )}
         <div>
           <dt>1 小时</dt>
           <dd>{windowText(a.w1h)}</dd>

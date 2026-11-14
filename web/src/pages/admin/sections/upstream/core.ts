@@ -128,6 +128,10 @@ export type UpstreamPage = {
   pool_size?: number;
   accounts: UpstreamAccount[];
   threshold: number;
+  /** 上游可能已执行、结果未知的请求（占着额度，需要人工核对） */
+  settlements: Settlement[];
+  /** 释放未知预留的会话 CSRF */
+  csrf_token: string;
   fields: { v5_daily_limit: { kind: "int"; min: number; max: number } };
   info_refresh: { last_attempt_at: number | null; cooldown_seconds: number; retry_after: number };
   /** 手动查官方信息（POST /admin/api/upstream/refresh-info）的会话 CSRF */
@@ -339,3 +343,18 @@ export function v5Highlight(
     images: officialV5Images(regular + extra),
   };
 }
+
+/** 待核对的未知请求：上游可能已执行但结果未知，占着额度。 */
+export type Settlement = {
+  request_id: string;
+  rid: string;
+  key_id: number;
+  status: string;
+  correlation_id: string;
+  service_day: string;
+  service_month: string;
+  reserved_anlas: number;
+  reserved_v5: number;
+  reserved_legacy: number;
+  is_vibe: boolean;
+};

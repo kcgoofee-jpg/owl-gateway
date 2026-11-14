@@ -5,7 +5,7 @@
 import { ChevronLeft, ChevronRight } from "lucide-preact";
 import type { ComponentChildren } from "preact";
 import { useEffect, useId, useState } from "preact/hooks";
-import { num, usedOf } from "../../../../lib/format";
+import { num, unlimited, usedOf } from "../../../../lib/format";
 import { Button, cx } from "../../../../ui";
 import { useAdmin } from "../../data";
 import { Avatar } from "../_kit";
@@ -196,7 +196,13 @@ export function MiniBar(props: { label: string; used: number; max: number; tone?
   const pct = props.max > 0 ? Math.min(100, (props.used / props.max) * 100) : 0;
   const full = props.max > 0 && props.used >= props.max;
   const text =
-    props.max > 0 ? usedOf(props.used, props.max) : props.used > 0 ? `${num(props.used)} · 停用` : "停用";
+    props.max <= 0
+      ? props.used > 0
+        ? `停用 · 已出 ${num(props.used)}`
+        : "停用"
+      : unlimited(props.max)
+        ? `${num(props.used)} / 不限`
+        : usedOf(props.used, props.max);
   return (
     <div class="xa-minibar">
       <span class="xa-minibar__l">{props.label}</span>

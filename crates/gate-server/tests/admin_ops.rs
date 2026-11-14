@@ -535,7 +535,7 @@ async fn guard_get_put() {
             .with(|g| !g.values.contains_key("interval_jitter"))
     );
 
-    let label = "每个上游账号全站最多同时排几张图";
+    let label = "账号排队上限";
     let frozen = settings(&e).await;
     for (body, detail) in [
         (
@@ -556,7 +556,7 @@ async fn guard_get_put() {
         ),
         (
             json!({"account_daily_cap": -1}),
-            "每个上游账号每天最多出图张数 必须在 0～9999 之间".to_string(),
+            "单号每天上限 必须在 0～9999 之间".to_string(),
         ),
     ] {
         api.fails("PUT", "/guard", Some(body), 422, &detail).await;
@@ -600,7 +600,7 @@ async fn guard_post_jitter_is_adjustable() {
         "/guard",
         Some(json!({"post_jitter_max": 31})),
         422,
-        "每张出完后最多歇几秒（小于最少时按最少） 必须在 1～30 之间",
+        "每张后歇（最多） 必须在 1～30 之间",
     )
     .await;
     // 下限 1 秒：上游并发锁比响应晚一点释放（原来写死的 SETTLE_GAP 1 秒）
@@ -609,7 +609,7 @@ async fn guard_post_jitter_is_adjustable() {
         "/guard",
         Some(json!({"post_jitter_min": 0})),
         422,
-        "每张出完后至少歇几秒（实际在最少～最多之间均匀随机） 必须在 1～30 之间",
+        "每张后歇（最少） 必须在 1～30 之间",
     )
     .await;
     // 重启后从库里读回

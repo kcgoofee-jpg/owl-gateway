@@ -14,15 +14,15 @@ describe("额度与保护：全是手动设置", () => {
     expect(specs.queue_timeout).toMatchObject({ kind: "int", label: "排队超时", min: 15, max: 300 });
     expect(Object.keys(specs)).toEqual(["queue_timeout", "image_429_cooldown_seconds"]);
   });
-  it("账号保护字段的范围取自接口，标题取短名", () => {
+  it("账号保护字段的标题和范围都取自接口，前端只补说明", () => {
     const specs = guardSpecs({
       values: { account_daily_cap: 2400 },
-      fields: { account_daily_cap: { default: 2400, min: 0, max: 20000, label: "长说明" } },
+      fields: { account_daily_cap: { default: 2400, min: 0, max: 20000, label: "单号每天上限" } },
     });
     expect(specs.account_daily_cap).toMatchObject({ kind: "int", label: "单号每天上限", min: 0, max: 20000 });
     const cap = specs.account_daily_cap;
     if (cap?.kind !== "int") throw new Error("expected int");
-    expect(cap.hint).toContain("要放开填 20000");
+    expect(cap.hint).toContain("20000 = 不限");
     expect(cap.hint).not.toContain("9999");
   });
 });
