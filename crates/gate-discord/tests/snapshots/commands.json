@@ -102,6 +102,25 @@
     "integration_types": null
   },
   {
+    "name": "报客户端",
+    "description": "登记本人使用的生图客户端名称给站长核对（被拦截或站长要求说明客户端时用），不会自动解除限制",
+    "type": 1,
+    "options": [
+      {
+        "name": "客户端",
+        "description": "你用的生图客户端名称，如 柏宝绘",
+        "type": 3,
+        "required": true,
+        "max_length": 40
+      }
+    ],
+    "nsfw": false,
+    "dm_permission": true,
+    "default_member_permissions": null,
+    "contexts": null,
+    "integration_types": null
+  },
+  {
     "name": "奶妹状态",
     "description": "查询当前生产版本、对话模型、Discord 连接和分享及聊天队列健康",
     "type": 1,

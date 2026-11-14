@@ -47,6 +47,7 @@ fn only_the_member_commands_are_registered() {
             "上游状态",
             "活跃度",
             "作者足迹",
+            "报客户端",
             "奶妹状态",
             "取消",
             "查看分享状态"

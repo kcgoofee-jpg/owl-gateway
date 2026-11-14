@@ -39,6 +39,7 @@ pub fn router() -> Router<AppState> {
             get(list_key_coupons).post(give_coupon),
         )
         .route("/admin/api/keys/{key_id}/tags", put(put_key_tag))
+        .route("/admin/api/keys/{key_id}/dm", post(dm_member))
         .route(
             "/admin/api/keys/{key_id}/tags/{tag}",
             delete(delete_key_tag),
@@ -303,6 +304,19 @@ async fn put_key_tag(
     let (_, body) = json_of(req).await?;
     Ok(ok_json(
         &member_ops::set_key_tag(&state, key_id, &body).await?,
+    ))
+}
+
+/// 站长手动私信成员。body: `{text}`
+async fn dm_member(
+    State(state): State<AppState>,
+    _s: AdminSession,
+    AdminPath(key_id): AdminPath<i64>,
+    req: Request,
+) -> R {
+    let (_, body) = json_of(req).await?;
+    Ok(ok_json(
+        &member_ops::dm_member(&state, key_id, &body).await?,
     ))
 }
 

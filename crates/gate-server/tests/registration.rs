@@ -1172,6 +1172,71 @@ async fn bot_context_requires_bridge_auth_and_exposes_only_member_facts() {
 }
 
 #[tokio::test]
+async fn bot_context_shows_recent_rejections_and_member_can_report_client() {
+    let (e, _d) = setup_reg(&[]).await;
+    open_registration(&e).await;
+    let no_key = bridge(
+        &e,
+        "/self-register/bot/client",
+        json!({"discord_id":MEMBER,"guild_id":GUILD,"client":"柏宝绘"}),
+    )
+    .await;
+    assert_eq!(no_key.0, 404);
+    assert_eq!(issue(&e, MEMBER).await.0, 200);
+    let key_id = e
+        .state
+        .db
+        .key_row_for_discord(MEMBER)
+        .await
+        .unwrap()
+        .unwrap()["id"]
+        .as_i64()
+        .unwrap();
+    let ts = e.state.now() - 60.0;
+    e.state
+        .db
+        .run_script(vec![format!(
+            "INSERT INTO usage_log (ts, key_id, key_name, kind, model, status, images, anlas, tokens, unconfirmed_anlas, detail, reason, wait_ms, dur_ms, client, up_status, rid, src) VALUES ({ts}, {key_id}, 'alice', 'image', 'nai-diffusion-4-5-full', 'rejected', 0, 0.0, 0, 0.0, '当前未分配 V4.5 额度。', 'quota', 0, 0, 'Dalvik/2.1.0', 403, 'r1', '')"
+        )])
+        .await
+        .unwrap();
+    let ctx = bridge(
+        &e,
+        "/self-register/bot/context",
+        json!({"discord_id":MEMBER,"guild_id":GUILD}),
+    )
+    .await;
+    let fails = ctx.2["member"]["recent_failures"].as_array().unwrap();
+    assert_eq!(fails.len(), 1);
+    assert_eq!(fails[0]["detail"], "当前未分配 V4.5 额度。");
+    let empty = bridge(
+        &e,
+        "/self-register/bot/client",
+        json!({"discord_id":MEMBER,"guild_id":GUILD,"client":"  "}),
+    )
+    .await;
+    assert_eq!(empty.0, 422);
+    let r = bridge(
+        &e,
+        "/self-register/bot/client",
+        json!({"discord_id":MEMBER,"guild_id":GUILD,"client":"柏宝绘"}),
+    )
+    .await;
+    assert_eq!((r.0, &r.2["client"]), (200, &json!("柏宝绘")));
+    let tags = e.state.db.key_tag_rows().await.unwrap();
+    let tag = tags.iter().find(|t| t.tag == "自报客户端").unwrap();
+    assert_eq!(tag.key_id, key_id);
+    assert!(tag.note.contains("柏宝绘") && tag.note.contains("Dalvik"));
+    assert!(
+        actions(&e)
+            .await
+            .iter()
+            .map(action_tuple)
+            .any(|a| a.1 == "成员自报客户端" && a.3 == "柏宝绘")
+    );
+}
+
+#[tokio::test]
 async fn bot_report_keeps_only_the_heartbeat() {
     let (e, _d) = setup_reg(&[]).await;
     // 机器人拉「跑图分享设置」的接口已删除（跑图分享整个删了）

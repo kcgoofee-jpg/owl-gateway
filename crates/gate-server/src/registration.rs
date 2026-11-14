@@ -5,8 +5,9 @@
 //!
 //! - 服务器 ID / 身份组 / 站点地址全部来自环境变量（`EnvConfig::registration`），这里不写死任何 ID。
 //! - Discord REST 的基地址来自 `DISCORD_API_BASE`（默认官方 v10），测试里指向本机假服务。
-//! - 机器人不私信成员：发 Key 的结果只在 /register 的临时回复里给本人看，后台「重新生成 Key」
-//!   把新 Key 展示给站长手动转交（Discord 应用曾被标记，错误码 680009）。
+//! - 机器人不自动私信成员：发 Key 的结果只在 /register 的临时回复里给本人看，后台「重新生成 Key」
+//!   把新 Key 展示给站长手动转交（Discord 应用曾被标记，错误码 680009）。唯一的私信出口是站长在后台
+//!   逐个手动发的「私信成员」（见 `dm.rs`），小批量、限频。
 //! - 后台循环不在这里起：见文件末尾的 [`registrar_jobs`]，由任务调度方安排。
 //!   每日清空自助注册（旧的 `REGISTER_RESET_AT`）已删除（线上从来没配过）。
 
@@ -314,6 +315,8 @@ impl Reply {
     }
 }
 
+mod dm;
+pub use dm::DM_MAX_CHARS;
 mod issue;
 mod profiles;
 mod roles;
@@ -327,6 +330,8 @@ pub struct RegistrationService {
     http: reqwest::Client,
     /// 与 `issue_direct` / `ban` 共用：否则在发 Key 进行中（身份组核验等网络等待）封禁，仍会发出有效 Key。
     lock: tokio::sync::Mutex<()>,
+    /// 最近 24 小时站长手动私信的发送时刻（限频用，见 `dm.rs`）。
+    dm_sent: std::sync::Mutex<std::collections::VecDeque<f64>>,
 }
 
 impl RegistrationService {
@@ -341,6 +346,7 @@ impl RegistrationService {
             api_base: env.discord_api_base.trim_end_matches('/').to_string(),
             http,
             lock: tokio::sync::Mutex::new(()),
+            dm_sent: std::sync::Mutex::new(std::collections::VecDeque::new()),
         })
     }
 

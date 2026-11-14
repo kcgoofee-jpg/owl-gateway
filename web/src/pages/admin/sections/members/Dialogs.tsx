@@ -7,7 +7,7 @@ import { Badge, Button, CopyField, Dialog, Field, Notice, Skeleton } from "../..
 import { useAdmin } from "../../data";
 import { Avatar, ConfirmDialog, TableWrap, useBusy } from "../_kit";
 import { parseField } from "../system/core";
-import { addBan, addTag, call, giveCoupon, removeBan, resetDailyQuota } from "./actions";
+import { addBan, addTag, call, dmMember, giveCoupon, removeBan, resetDailyQuota } from "./actions";
 import { scopeTextOf } from "./logic";
 import { Empty, ResetScopeChecks, useDebounced, usePageData } from "./shared";
 import type { Ban, Coupon } from "./types";
@@ -421,6 +421,44 @@ export function TagDialog(props: {
       </Field>
       <Field label="备注（选填）" hint="只有后台能看到，最多 200 字">
         <input class="input" maxLength={200} value={note} onInput={(e) => setNote(e.currentTarget.value)} />
+      </Field>
+    </FormDialog>
+  );
+}
+
+/* ---------------- 私信成员 ---------------- */
+export function DmDialog(props: {
+  keyId: number;
+  name: string;
+  onClose: () => void;
+  onDone: (text: string) => void;
+}) {
+  const [text, setText] = useState("");
+  return (
+    <FormDialog
+      title={`私信：${props.name}`}
+      submitText="发送"
+      onClose={props.onClose}
+      onSubmit={async () => {
+        const t = text.trim();
+        if (!t) return "私信内容不能为空";
+        const r = await dmMember(props.keyId, t);
+        if (!r.ok) return r.error;
+        props.onDone("私信已发送");
+        return undefined;
+      }}
+    >
+      <Field
+        label="内容"
+        hint="由奶妹发出，纯文本、不@任何人；每小时最多 10 条、每天 30 条，请只用于个别沟通"
+      >
+        <textarea
+          class="input"
+          rows={5}
+          maxLength={1500}
+          value={text}
+          onInput={(e) => setText(e.currentTarget.value)}
+        />
       </Field>
     </FormDialog>
   );

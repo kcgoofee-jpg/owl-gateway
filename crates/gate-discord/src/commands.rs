@@ -77,6 +77,10 @@ pub fn definitions() -> Vec<Value> {
             vec![
                 json!({"name":"成员","description":if c.name=="creator_audit"{"待查作者；帖子内省略为楼主，其他位置省略查本人"}else{"待查询成员；省略查本人"},"type":6,"required":false}),
             ]
+        } else if c.name == "report_client" {
+            vec![
+                json!({"name":"客户端","description":"你用的生图客户端名称，如 柏宝绘","type":3,"required":true,"max_length":40}),
+            ]
         } else {
             vec![]
         };

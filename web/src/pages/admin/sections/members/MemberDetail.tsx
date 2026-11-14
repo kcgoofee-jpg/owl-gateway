@@ -24,6 +24,7 @@ export type DetailActions = {
   metadata: (m: MemberRow) => void;
   issue: (m: MemberRow, a: IssueAction) => void;
   addTag: (m: MemberRow) => void;
+  dm: (m: MemberRow) => void;
   removeTag: (m: MemberRow, tag: string) => void;
   coupon: (m: MemberRow) => void;
   resetQuota: (m: MemberRow) => void;
@@ -284,6 +285,7 @@ export function MemberDetail(props: { m: MemberRow; now: number; act: DetailActi
             </Button>
           )}
           items={[
+            ...(dcId ? [{ label: "私信（奶妹发）", onSelect: () => act.dm(m) }] : []),
             { label: "重新生成 Key（旧的立即失效）", onSelect: () => act.regenerate(m) },
             { label: "停用", onSelect: () => act.disable(m) },
             {
