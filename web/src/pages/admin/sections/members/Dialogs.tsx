@@ -158,6 +158,9 @@ function FormDialog(props: {
             const r = await props.onSubmit();
             if (r === undefined) props.onClose();
             else setErr(r);
+          } catch (e) {
+            // 契约上 onSubmit 应自己处理错误；这里兜底，避免对话框静默失败。
+            setErr(e instanceof Error ? e.message : String(e));
           } finally {
             setPending(false);
           }
@@ -287,6 +290,7 @@ export function CouponDialog(props: {
   const [err, setErr] = useState("");
   const [list, setList] = useState<Coupon[] | null>(null);
   const [daysBound, setDaysBound] = useState<{ min: number; max: number; kind: string } | null>(null);
+  const [loadErr, setLoadErr] = useState("");
   useEffect(() => {
     getJSON<{ coupons: Coupon[]; fields: { days: { kind: string; min: number; max: number } } }>(
       `/admin/api/keys/${props.keyId}/coupons`,
@@ -295,7 +299,11 @@ export function CouponDialog(props: {
         setList(r.coupons);
         setDaysBound(r.fields.days);
       })
-      .catch(() => setList([]));
+      .catch((e: unknown) => {
+        // 读取失败不能伪装成「还没发过券」，要明确报错。
+        setLoadErr(e instanceof Error ? e.message : String(e));
+        setList([]);
+      });
   }, [props.keyId]);
   const now = Date.now() / 1000;
   return (
@@ -354,7 +362,11 @@ export function CouponDialog(props: {
       </div>
       <div>
         <h3 class="mb-h4">已发出的券</h3>
-        {list === null ? (
+        {loadErr ? (
+          <p class="xa-formerr" role="alert">
+            读取发放记录失败：{loadErr}
+          </p>
+        ) : list === null ? (
           <Skeleton h="36px" />
         ) : list.length === 0 ? (
           <p class="small muted">还没有给这位成员发过券</p>

@@ -40,14 +40,12 @@ export function useDebounced<T>(value: T, ms = 250): T {
 
 /**
  * 带「正在换页」状态的取数：url 变化时旧数据保留（不闪烁），pending 为 true 直到新数据到达。
- * 仍然跟着全局刷新节拍。
+ * 仍然跟着全局刷新节拍。缓存命中时 useAdmin 不发请求、loading 直接为 false，
+ * 所以 pending 只看 loading：按「数据对象是否变化」判断会把缓存命中永久卡在忙碌态。
  */
 export function usePageData<T>(url: string): { data: T | null; error: string | null; pending: boolean } {
   const r = useAdmin<T>(url);
-  const mark = useRef<{ url: string; data: T | null }>({ url, data: r.data });
-  if (mark.current.url !== url) mark.current = { url, data: r.data };
-  const pending = !r.error && (r.loading || r.data === mark.current.data);
-  return { data: r.data, error: r.error, pending };
+  return { data: r.data, error: r.error, pending: !r.error && r.loading };
 }
 
 /* ---------------- 分段按钮 ---------------- */

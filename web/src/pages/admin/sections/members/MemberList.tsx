@@ -25,7 +25,12 @@ function Identity(props: { m: MemberRow }) {
   const { m } = props;
   const title = memberLabel(m);
   const dc = m.discord;
-  const tag = userTags(m).find((t) => t.tag !== "邀请");
+  // 优先显示最新的「自报客户端」；否则取时间最新的非邀请标签（后端按打标签时间升序返回，
+  // 旧的 find 写法恰好取到最旧的一条，把最新的自报信息挡住）。
+  const tags = userTags(m);
+  const tag =
+    tags.find((t) => t.tag === "自报客户端") ??
+    [...tags].filter((t) => t.tag !== "邀请").sort((a, b) => (b.ts || 0) - (a.ts || 0))[0];
   return (
     <MemberIdent
       title={title}

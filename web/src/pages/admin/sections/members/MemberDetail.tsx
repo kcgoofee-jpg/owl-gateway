@@ -158,7 +158,13 @@ export function MemberDetail(props: { m: MemberRow; now: number; act: DetailActi
                 <dd class="mb-key">
                   {exceptions} 项
                   {!k.policy.owner_image && (
-                    <Button size="sm" variant="ghost" onClick={() => act.resetRules(m)}>
+                    <Button
+                      size="sm"
+                      variant="ghost"
+                      disabled={!dcId}
+                      title={dcId ? undefined : "没有绑定 Discord，无成员级规则可恢复"}
+                      onClick={() => act.resetRules(m)}
+                    >
                       恢复默认
                     </Button>
                   )}
@@ -238,7 +244,7 @@ export function MemberDetail(props: { m: MemberRow; now: number; act: DetailActi
                   <span
                     class="xa-chip"
                     key={t.tag}
-                    title={`${t.note ? `${t.note} · ` : ""}${t.by || ""} · ${fullTime(t.ts)}`}
+                    title={[t.note, t.by, fullTime(t.ts)].filter(Boolean).join(" · ")}
                   >
                     {t.tag}
                     <button
