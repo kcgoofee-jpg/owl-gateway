@@ -105,9 +105,7 @@ export function KeyDialog(props: {
         }}
       >
         {snapshot.owner_image?.enabled && (
-          <p class="small muted">
-            全部图片功能已开启；这里只修改个人额度和限速。普通测试请在成员详情点“恢复普通默认”。
-          </p>
+          <p class="small muted">站长生图权限已开；这里只改个人额度和限速。</p>
         )}
         <fieldset class="mr-edit-fields" disabled={pending}>
           <PolicyFields

@@ -159,7 +159,7 @@ export function OfficialUpstream() {
                 这是最后一把可用的上游 Token：停用后全站将无法出图，直到重新启用。
               </Notice>
             ) : (
-              <p>停用 {label(toggle)} 后，它不再接收新请求；已发出的请求继续完成。</p>
+              <p>停用 {label(toggle)} 后不再接新请求；手里在跑的图最多再等 8 秒。</p>
             )
           ) : (
             <p>启用 {label(toggle)} 后，它重新接收请求。已失效（401）的 Token 需要替换才能恢复。</p>

@@ -166,12 +166,6 @@
   gap: var(--sp-3);
   grid-template-columns: repeat(auto-fit, minmax(min(100%, 200px), 1fr));
 }
-.xa-form__sec {
-  margin: var(--sp-2) 0 calc(var(--sp-1) * -1);
-  font-size: var(--fs-sm);
-  font-weight: 650;
-  color: var(--text-2);
-}
 .xa-form__opts {
   display: grid;
   gap: var(--sp-2);
@@ -240,32 +234,6 @@
 }
 
 /* 已选成员的 chips 独占一行，不和上面的工具栏抢同排等高 */
-.xa-chips {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: var(--sp-2);
-}
-.xa-chips__lead {
-  color: var(--muted);
-  font-size: var(--fs-sm);
-}
-.xa-chips__clear {
-  all: unset;
-  cursor: pointer;
-  padding: 1px 8px;
-  border-radius: 999px;
-  color: var(--muted);
-  font-size: var(--fs-xs);
-  line-height: 20px;
-}
-.xa-chips__clear:hover {
-  color: var(--text);
-  background: var(--surface-2);
-}
-.xa-chips__clear:focus-visible {
-  outline: 2px solid var(--focus);
-}
 
 .xa-busy {
   opacity: 0.6;

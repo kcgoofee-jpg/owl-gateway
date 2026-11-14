@@ -18,6 +18,9 @@ use crate::hooks::{Allowance, Hooks};
 use crate::limiter::AdjustableLimiter;
 use crate::pace::{Arrival, fair_cmp};
 use crate::scheduler::Scheduler;
+
+/// 停用上游时等「手上在途的图」最多等这么久：后台请求不能无限挂着（状态已经先生效了）。
+pub(crate) const IDLE_WAIT_CAP: std::time::Duration = std::time::Duration::from_secs(8);
 use std::collections::{BTreeMap, HashMap};
 use std::sync::{Arc, Mutex};
 
@@ -756,18 +759,35 @@ impl Pool {
         }
     }
 
-    /// 停用 / 启用。停用会等这把 Token 手上的图跑完才返回（之后发出的请求一定能看到新状态）。
-    pub(crate) async fn set_admin_enabled(&self, token_id: &str, enabled: bool) -> bool {
+    /// 只改启停标记，不等在途请求（调用方想让「返回值」代表已彻底退出时再调 [`Self::wait_idle`]）。
+    pub(crate) async fn set_admin_enabled_now(&self, token_id: &str, enabled: bool) -> bool {
         let Some(t) = self.find(token_id).await else {
             return false;
         };
-        {
-            let _d = t.dispatch_lock.lock().await;
-            let _p = self.state.lock().await;
-            t.with(|f| f.admin_enabled = enabled);
+        let _d = t.dispatch_lock.lock().await;
+        let _p = self.state.lock().await;
+        t.with(|f| f.admin_enabled = enabled);
+        true
+    }
+
+    /// 等这把 Token 手上的图跑完；最多等 [`IDLE_WAIT_CAP`]（返回 false 表示超时，还有在途）。
+    /// 标记早在 [`Self::set_admin_enabled_now`] 就生效了：超时只是「还有旧活没跑完」，不会有新活进来。
+    pub(crate) async fn wait_idle(&self, token_id: &str) -> bool {
+        let Some(t) = self.find(token_id).await else {
+            return true;
+        };
+        tokio::time::timeout(IDLE_WAIT_CAP, t.image_slots.wait_idle())
+            .await
+            .is_ok()
+    }
+
+    /// 停用 / 启用。停用会等这把 Token 手上的图跑完才返回（最多 [`IDLE_WAIT_CAP`]）。
+    pub(crate) async fn set_admin_enabled(&self, token_id: &str, enabled: bool) -> bool {
+        if !self.set_admin_enabled_now(token_id, enabled).await {
+            return false;
         }
         if !enabled {
-            t.image_slots.wait_idle().await;
+            self.wait_idle(token_id).await;
         }
         true
     }

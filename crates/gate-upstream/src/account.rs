@@ -52,7 +52,8 @@ pub(crate) async fn verify(
         profile_index,
         token,
         &url,
-        Duration::from_secs(12),
+        // 后台点「添加/替换」时有人在等：正常网关 1 秒内就回，5 秒还没回就当连不上
+        Duration::from_secs(5),
         1 << 20,
         true,
     )

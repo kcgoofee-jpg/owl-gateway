@@ -1,7 +1,7 @@
 /** 成员展开后的详情：席位 / 要处理 → 规则与资料 → 日常操作。今日额度只在列表进度条里。 */
 import { ExternalLink, Plus } from "lucide-preact";
 import { useEffect, useState } from "preact/hooks";
-import { dayOf, fullTime, num, rel } from "../../../../lib/format";
+import { expiresText, fullTime, limitText, num, rel } from "../../../../lib/format";
 import { Badge, Button, copyText, Menu, toast } from "../../../../ui";
 import { refresh, useAdmin } from "../../data";
 import {
@@ -40,8 +40,7 @@ export type DetailActions = {
   remove: (m: MemberRow, ban: boolean) => void;
 };
 
-/** 额度一行：关掉的功能或 0 张都写「停用」，不再有「不限」这种歧义说法。 */
-const limitText = (on: boolean, value: number): string => (on && value > 0 ? `${num(value)} 张` : "停用");
+/* 额度一行：0 = 停用，9999 = 不限（见 format.limitText）。 */
 
 const LEVEL_TEXT = { bad: "紧急", warn: "注意", info: "提示" } as const;
 const ISSUE_BTN: Record<IssueAction["kind"], string> = {
@@ -184,7 +183,7 @@ export function MemberDetail(props: { m: MemberRow; now: number; act: DetailActi
             <span title={fullTime(m.registered_at)}>
               {m.discord_id ? "领取" : "创建"} {m.registered_at ? rel(m.registered_at, now) : "—"}
             </span>
-            <span>到期 {k.expires_at ? dayOf(k.expires_at) : "永久"}</span>
+            <span>到期 {expiresText(k.expires_at, now)}</span>
           </p>
           <p class="mb-keyrow">
             <code class="mb-key__v">{showKey ? k.token : "••••••••"}</code>

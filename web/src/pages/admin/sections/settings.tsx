@@ -53,7 +53,7 @@ function DefaultRules() {
     if (ok) form.commit();
   };
   return (
-    <Card title="成员额度" sub="所有成员的默认额度；个人例外在成员页单独设置。0 = 停用，9999 = 不限。">
+    <Card title="成员额度" sub="成员默认额度；个人例外在成员页。0 = 停用，9999 = 不限。">
       <form {...form.formProps} onSubmit={(event) => event.preventDefault()}>
         <PolicyFields form={form} />
         <SaveBar form={form} saving={saving} onSave={save} />
@@ -123,7 +123,7 @@ export function ClaimForm({ ops }: { ops: Ops }) {
     }
   };
   return (
-    <Card title="领取条件" sub="Discord 自助领 Key 的门槛；保存后机器人下一条命令即生效。">
+    <Card title="领取条件" sub="Discord 自助领 Key 的门槛。">
       <form
         {...form.formProps}
         onSubmit={(event) => {
@@ -247,7 +247,7 @@ function BudgetCard() {
     if (ok) form.commit();
   };
   return (
-    <Card title="全站预算" sub="0 = 停用（谁也用不了），9999 = 不限。">
+    <Card title="全站预算" sub="0 = 停用，9999 = 不限。">
       <form {...form.formProps} onSubmit={(event) => event.preventDefault()}>
         <div class="form-grid">
           {["daily_v5", "daily_anlas", "monthly_anlas"].map((name) => (
@@ -312,7 +312,7 @@ function GuardCard() {
     if (ok) form.commit();
   };
   return (
-    <Card title="账号保护与排队" sub="官方账号的出图节奏；拼车上游用自己的等待设置。">
+    <Card title="账号保护与排队" sub="官方账号的出图节奏；拼车用自己的等待设置。">
       <form {...form.formProps} onSubmit={(e) => e.preventDefault()}>
         <div class="form-grid">
           {Object.keys(specs).map((name) => (
@@ -330,7 +330,7 @@ function GuardCard() {
 export default function Settings() {
   return (
     <Sect>
-      <SectionHead title="设置" desc="每张卡片各自保存；只提交改过的字段。" />
+      <SectionHead title="设置" desc="每张卡片各自保存。" />
       <DefaultRules />
       <ClaimCard />
       <ShareLockCard />

@@ -936,9 +936,10 @@ async fn upstream_token_settings_endpoints() {
         "上游 Token 不存在",
     )
     .await;
+    // in_flight：没有在途的图时立刻返回 false
     assert_eq!(
         api.text("PUT", &en, Some(json!({"enabled": false}))).await,
-        (200, r#"{"ok":true,"enabled":false}"#.into())
+        (200, r#"{"ok":true,"enabled":false,"in_flight":false}"#.into())
     );
     assert!(!e.state.nai.tokens().await[0].fields().admin_enabled);
     assert_eq!(

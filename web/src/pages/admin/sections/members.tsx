@@ -268,10 +268,7 @@ export default function Members() {
               return undefined;
             }}
           >
-            <p>
-              <b>高危操作：</b>将失效全站所有 Key，并清空 Discord 绑定。
-            </p>
-            <p>执行后，成员需要在 Discord 输入 /register 重新领取 Key。</p>
+            <p>全站 Key 立即失效、Discord 绑定清空；成员需重新 /register。</p>
           </ConfirmDialog>
         );
       case "disable": {
@@ -290,7 +287,7 @@ export default function Members() {
               return undefined;
             }}
           >
-            <p>停用后该 Key 立即不能使用；记录和用量保留。可在成员页“更多 → 手动停用的 Key”中恢复。</p>
+            <p>停用后立即不能用；记录和用量保留，可在「更多 → 手动停用的 Key」恢复。</p>
           </ConfirmDialog>
         );
       }
@@ -316,10 +313,7 @@ export default function Members() {
               return undefined;
             }}
           >
-            <p>
-              旧 Key 将立即失效，需在客户端替换。配额、权限、有效期和历史用量保留，已受理任务继续完成。新 Key
-              会显示给你，请转交给成员。
-            </p>
+            <p>旧 Key 立即失效；配额、权限、有效期和用量保留，进行中的任务继续。新 Key 只显示这一次。</p>
           </ConfirmDialog>
         );
       }
@@ -359,17 +353,11 @@ export default function Members() {
             }}
           >
             {ban ? (
-              <p>
-                其 Key 将被删除，Discord 领取记录会被清除并摘除身份组。该 Discord
-                账号以后无法再次自助领取，此操作不可恢复。
-              </p>
+              <p>删除 Key、领取记录和身份组；该账号以后不能再领取。不可恢复。</p>
             ) : dc ? (
-              <p>
-                其 Key 将被删除，Discord 领取记录会被清除并摘除身份组。删除后该成员可以重新自助领取新的
-                Key；历史请求和用量保留。
-              </p>
+              <p>删除 Key、领取记录和身份组；之后可重新领取，历史用量保留。</p>
             ) : (
-              <p>其 Key 将被删除且不可恢复。</p>
+              <p>删除 Key，不可恢复。</p>
             )}
           </ConfirmDialog>
         );

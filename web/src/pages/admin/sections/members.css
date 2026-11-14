@@ -36,12 +36,6 @@
   min-width: 0;
 }
 /* 被拒原因：自己一行，放不下就整颗标签折行（不横向滚，切换时不左右跳） */
-.mb-reasons {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: var(--sp-2);
-}
 /* 筛选横栏：永远单行。滚的是左边标签那一段（放不下就横向滚动，不换行），「更多」和选中的回显标签钉在行尾 */
 .mb-bar {
   display: flex;
@@ -93,12 +87,6 @@
   background: var(--accent-soft);
   border-style: solid;
 }
-.mb-reasons__lead {
-  flex: none;
-  color: var(--muted);
-  font-size: var(--fs-sm);
-  white-space: nowrap;
-}
 .mb-n {
   display: inline-block;
   min-width: 18px;
@@ -117,11 +105,6 @@
   color: var(--accent-text);
 }
 /* 「更多」里选中的筛选回显成选中标签，行尾的 × 表示可关闭（再点整颗标签也取消） */
-.mb-chip .mb-x {
-  margin-right: -3px;
-  font-size: var(--fs-md);
-  line-height: 1;
-}
 .mb-n.is-hot {
   background: var(--warn-soft);
   color: var(--warn);
@@ -150,19 +133,6 @@
   padding: 0;
   margin-bottom: var(--sp-2);
 }
-.mb-feats {
-  display: grid;
-  gap: var(--sp-2);
-  min-width: 0;
-  margin: 0;
-  padding: 0 0 0 var(--sp-6);
-  border: 0;
-}
-.mb-msg {
-  font-family: var(--mono);
-  font-size: var(--fs-sm);
-  line-height: 1.5;
-}
 .mb-plain {
   list-style: none;
   margin: var(--sp-2) 0 0;
@@ -181,13 +151,6 @@
   gap: var(--sp-3);
   grid-template-columns: minmax(0, 1fr) minmax(0, 1.4fr) auto;
   align-items: end;
-}
-.mb-ask {
-  margin-bottom: var(--sp-3);
-}
-.mb-ask .notice {
-  align-items: center;
-  flex-wrap: wrap;
 }
 
 /* 成员身份格子的样式在 shared.css（.mb-ident 一组，日志页也用） */

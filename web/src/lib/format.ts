@@ -78,6 +78,23 @@ export function usedOf(used: number | null | undefined, max: number | null | und
   return `${num(used ?? 0)} / ${num(max ?? 0)}`;
 }
 
+/** 不限统一写 9999（和 `gate_core::UNLIMITED` 一致）。 */
+export const UNLIMITED = 9999;
+export const unlimited = (n: number | null | undefined): boolean => Number(n) >= UNLIMITED;
+
+/** 额度：「12 张」/「不限」（9999）/「停用」（关掉或 0）。 */
+export function limitText(on: boolean, n: number): string {
+  if (!on || !n) return "停用";
+  return unlimited(n) ? "不限" : withUnit(n, "张");
+}
+
+/** 到期：没有到期时间、或远到 20 年以后（9999 天）都写「永久」，不写 2050 年的日期。 */
+export function expiresText(ts: number | null | undefined, now = Date.now() / 1000): string {
+  if (!ts) return "永久";
+  if (ts < now) return "已过期";
+  return ts - now > 20 * 365 * 86400 ? "永久" : dayOf(ts);
+}
+
 /** 毫秒 → 短耗时：「4.2 秒」「12 秒」；0 / 空 →「—」。 */
 export function secondsText(ms: number | null | undefined): string {
   if (!ms) return "—";

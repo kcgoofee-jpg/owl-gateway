@@ -306,10 +306,14 @@ pub(crate) async fn patron_set_enabled(
     enabled: bool,
 ) -> Result<(), ApiError> {
     share_token(state, id).await?;
-    let _serial = state.token_edits.lock().await;
+    let serial = state.token_edits.lock().await;
     state.db.set_upstream_token_enabled(id, enabled).await?;
-    if !state.nai.set_admin_enabled(id, enabled).await {
+    if !state.nai.set_admin_enabled_now(id, enabled).await {
         return Err(HttpError::new(404, NOT_FOUND).into());
+    }
+    drop(serial);
+    if !enabled {
+        state.nai.wait_idle(id).await;
     }
     upstream::alert_owner(
         state,

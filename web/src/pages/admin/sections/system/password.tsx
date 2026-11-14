@@ -123,8 +123,7 @@ export default function PasswordCard() {
           </Button>
         </div>
         <p class="muted small">
-          忘记密码时，可在服务器的 .env 里设置 ADMIN_PASSWORD，并删除数据库里的 admin_password_hash
-          设置来重置。
+          忘了密码：服务器 .env 设 ADMIN_PASSWORD，删掉库里的 admin_password_hash，重启。
         </p>
       </form>
     </Card>

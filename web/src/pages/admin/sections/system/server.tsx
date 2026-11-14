@@ -7,8 +7,8 @@ type Mode = "off" | "all" | "owner";
 
 const COPY: Record<Mode, string> = {
   off: "所有人正常使用。",
-  all: "所有人收维护响应；后台和健康检查不受影响。",
-  owner: "只有站长网页登录和绑定站长 Discord 的 Key 能出图，其他人收维护响应。",
+  all: "所有人收维护响应；后台照常。",
+  owner: "只有站长（网页登录或绑定的 Discord Key）能出图，其他人收维护响应。",
 };
 
 export function MaintenanceCard() {

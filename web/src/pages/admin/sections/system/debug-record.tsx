@@ -51,10 +51,7 @@ export function DebugRecordCard() {
     if (ok) setDraft(null);
   };
   return (
-    <Card
-      title="临时调试记录"
-      sub="按 Discord 成员 ID 打开后，把该成员的提示词、参数和成图写到服务器。关掉名单即停止写入。不要长期开着。"
-    >
+    <Card title="临时调试记录" sub="只记录名单内的成员；把提示词、参数和成图写到服务器。用完就清空。">
       <Field label="记录这些成员（每行一个 Discord ID）">
         <textarea
           class="input"

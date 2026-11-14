@@ -707,16 +707,18 @@ async fn set_enabled(
     let Some(enabled) = body.get("enabled").and_then(Value::as_bool) else {
         return Err(HttpError::new(422, "enabled 必须是布尔值").into());
     };
-    let _serial = state.token_edits.lock().await;
+    let serial = state.token_edits.lock().await;
     if !exists(&state, &id).await {
         return Err(HttpError::new(404, NOT_FOUND).into());
     }
     state.db.set_upstream_token_enabled(&id, enabled).await?;
-    // 停用时会等这把 Token 手上的图跑完才返回：之后发出的请求一定能看到新状态
-    if !state.nai.set_admin_enabled(&id, enabled).await {
+    // 标记立刻生效（调度器不再派新活）；要等在途跑完的话放到锁外面，别卡住其他凭据操作
+    if !state.nai.set_admin_enabled_now(&id, enabled).await {
         return Err(HttpError::new(404, NOT_FOUND).into());
     }
-    Ok(ok_json(&json!({"ok": true, "enabled": enabled})))
+    drop(serial);
+    let in_flight = !enabled && !state.nai.wait_idle(&id).await;
+    Ok(ok_json(&json!({"ok": true, "enabled": enabled, "in_flight": in_flight})))
 }
 
 // ------------------------------------------------------------------ Anlas 核对

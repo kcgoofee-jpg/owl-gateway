@@ -44,7 +44,7 @@ export function ShareLockCard() {
   return (
     <Card
       title="分享要求"
-      sub="只暂停生图，保留 Key、登录和身份组；图片被确认后自动恢复。每天 07:00 重置。"
+      sub="只暂停生图；图片被确认后自动恢复，每天 07:00 重置。"
       actions={
         <a class="small" href={data.channel_url} target="_blank" rel="noreferrer">
           打开分享频道

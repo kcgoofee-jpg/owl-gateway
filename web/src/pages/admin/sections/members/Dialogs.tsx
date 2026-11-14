@@ -2,7 +2,7 @@
 import type { ComponentChildren } from "preact";
 import { useEffect, useId, useState } from "preact/hooks";
 import { getJSON } from "../../../../lib/api";
-import { fullTime, rel, scopeText } from "../../../../lib/format";
+import { expiresText, fullTime, rel, scopeText } from "../../../../lib/format";
 import { Badge, Button, CopyField, Dialog, Field, Notice, Skeleton } from "../../../../ui";
 import { useAdmin } from "../../data";
 import { Avatar, ConfirmDialog, TableWrap, useBusy } from "../_kit";
@@ -42,10 +42,7 @@ export function DisabledKeysDialog(props: { onClose: () => void; onChanged: (tex
         onClose={props.onClose}
         footer={<Button onClick={props.onClose}>关闭</Button>}
       >
-        <p class="small muted">
-          这里列出手动停用及历史未记录停用原因的 Key。恢复只改变启用状态；未绑定
-          Discord、已过期或受其他限制时仍无法使用。
-        </p>
+        <p class="small muted">手动停用的 Key。恢复只改启用状态，其他限制照常生效。</p>
         <Field label="搜索">
           <input
             class="input"
@@ -77,10 +74,10 @@ export function DisabledKeysDialog(props: { onClose: () => void; onChanged: (tex
                     </td>
                     <td>{key.discord_id ?? "未绑定"}</td>
                     <td>
-                      {key.disabled_reason === "admin" ? "手动停用" : "历史记录未注明"}
+                      {key.disabled_reason === "admin" ? "手动停用" : "未记录原因"}
                       {key.banned === 1 && " · 已封禁"}
                     </td>
-                    <td>{key.expires_at ? fullTime(key.expires_at) : "永久"}</td>
+                    <td>{expiresText(key.expires_at)}</td>
                     <td>
                       <Button
                         size="sm"
@@ -111,7 +108,7 @@ export function DisabledKeysDialog(props: { onClose: () => void; onChanged: (tex
             return undefined;
           }}
         >
-          <p>将恢复原 Key 的启用状态；它仍受 Discord 绑定、到期时间、成员规则和全站限制约束。</p>
+          <p>只恢复启用状态；绑定、到期、成员规则和全站限制照常生效。</p>
         </ConfirmDialog>
       )}
     </>
@@ -267,7 +264,7 @@ export function ResetQuotaDialog(props: {
         return undefined;
       }}
     >
-      <p>默认只重置今天的 V4.5 用量；V5 和 Anlas 要用的话在下面勾上。图片张数、请求数及请求日志不会删除。</p>
+      <p>默认只重置今天的 V4.5；V5 / Anlas 勾上才重置。请求日志不删。</p>
       <ResetScopeChecks value={scope} onChange={setScope} />
     </ConfirmDialog>
   );
@@ -338,9 +335,7 @@ export function CouponDialog(props: {
         return undefined;
       }}
     >
-      <p class="small muted">
-        成员在首页自己点一下，就能重置当天的额度；一张券用一次就作废。默认只重置 V4.5。
-      </p>
+      <p class="small muted">成员在首页自取，一次作废；默认只重置 V4.5。</p>
       <ResetScopeChecks value={scope} onChange={setScope} />
       <div class="xa-form__grid">
         <Field
@@ -462,10 +457,7 @@ export function DmDialog(props: {
         return undefined;
       }}
     >
-      <Field
-        label="内容"
-        hint="由奶妹发出，纯文本、不@任何人；每小时最多 10 条、每天 30 条，请只用于个别沟通"
-      >
+      <Field label="内容" hint="奶妹发送的纯文本，不 @ 任何人；每小时 10 条、每天 30 条">
         <textarea
           class="input"
           rows={5}
@@ -520,10 +512,7 @@ export function BansDialog(props: { onClose: () => void; onChanged: (text: strin
         footer={<Button onClick={props.onClose}>关闭</Button>}
       >
         <div class="xa-form">
-          <p class="small muted">
-            被拉黑的账号（闲置回收 10-23 起不再拉黑）。移出黑名单后，对方可以重新在 Discord 用 /register 领取
-            Key。
-          </p>
+          <p class="small muted">被拉黑的 Discord 账号。移出后可重新 /register 领取。</p>
           <Field label="搜索">
             <input
               class="input"

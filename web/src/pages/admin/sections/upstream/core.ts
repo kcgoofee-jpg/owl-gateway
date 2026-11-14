@@ -128,11 +128,8 @@ export type UpstreamPage = {
   pool_size?: number;
   accounts: UpstreamAccount[];
   threshold: number;
-  settlements: Settlement[];
   fields: { v5_daily_limit: { kind: "int"; min: number; max: number } };
   info_refresh: { last_attempt_at: number | null; cooldown_seconds: number; retry_after: number };
-  /** 释放未知预留用的会话 CSRF */
-  csrf_token: string;
   /** 手动查官方信息（POST /admin/api/upstream/refresh-info）的会话 CSRF */
   csrf_info: string;
 };
@@ -269,21 +266,6 @@ export const anlasText = (n: number | null | undefined): string =>
   n == null ? "—" : n.toLocaleString("zh-CN", { maximumFractionDigits: 2 });
 
 export const ageText = (days: number): string => (days < 1 ? "刚刚" : `${Math.round(days)} 天前`);
-
-/** 待核对的未知请求：上游可能已执行但结果未知，占着额度等站长核对。 */
-export type Settlement = {
-  request_id: string;
-  rid: string;
-  key_id: number;
-  correlation_id: string;
-  status: string;
-  service_day: string;
-  service_month: string;
-  reserved_anlas: number;
-  reserved_v5: number;
-  reserved_legacy: number;
-  is_vibe: boolean;
-};
 
 export const reading = (n: number | null | undefined, suffix = ""): string =>
   n == null || !Number.isFinite(n) ? "—" : `${anlasText(n)}${suffix}`;

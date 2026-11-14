@@ -85,10 +85,6 @@
   margin: 0;
 }
 @media (max-width: 760px) {
-  .up-sections {
-    grid-template-columns: minmax(0, 1fr);
-    gap: var(--sp-5);
-  }
   .up-highlights {
     gap: var(--sp-2);
   }
@@ -97,15 +93,6 @@
   }
 }
 
-.up-settlements > summary {
-  cursor: pointer;
-  font-size: var(--fs-xs);
-  color: var(--muted);
-  padding: var(--sp-2) 0;
-}
-.up-settlements > article {
-  margin-top: var(--sp-3);
-}
 .up-detail__tabs {
   min-width: 0;
   padding: 0;

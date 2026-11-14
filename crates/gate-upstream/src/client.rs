@@ -264,7 +264,20 @@ impl<H: Hooks> NaiClient<H> {
         self.inner.pool.set_v5_daily_limit(token_id, limit).await
     }
 
-    /// 停用 / 启用。停用会等这把 Token 手上的图跑完才返回（之后发出的请求一定能看到新状态）。
+    /// 只改启停标记（状态立刻生效，不等在途）。
+    pub async fn set_admin_enabled_now(&self, token_id: &str, enabled: bool) -> bool {
+        self.inner
+            .pool
+            .set_admin_enabled_now(token_id, enabled)
+            .await
+    }
+
+    /// 等这把 Token 手上的图跑完（最多 8 秒）；返回 false 表示还有在途没跑完。
+    pub async fn wait_idle(&self, token_id: &str) -> bool {
+        self.inner.pool.wait_idle(token_id).await
+    }
+
+    /// 停用 / 启用。停用会等这把 Token 手上的图跑完才返回（最多 8 秒）。
     pub async fn set_admin_enabled(&self, token_id: &str, enabled: bool) -> bool {
         self.inner.pool.set_admin_enabled(token_id, enabled).await
     }
