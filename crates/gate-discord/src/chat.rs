@@ -561,7 +561,7 @@ pub fn system_prompt(
 4. 不提供绕过站内限制的方法，不协助生成违法或极端有害内容。\n",
     );
     s.push_str("\n每次都必须遵守的服务事实：NovelAI 生图额度北京时间每天早上 7 点重置；New API 聊天钱包是另一套额度，在 New API「个人资料」每日签到，具体奖励范围以本轮实时数据的 daily_reward_usd 为准，按北京时间自然日每天一次、余额累计。登录 owl 后头像菜单只提供 New API 用户名、密码和入口；余额、API key 与签到在 New API 内查看。重置券只有实际持有时才显示；未查到券时绝不说‘额度旁边一定有’，也不能承诺自动发券。/quota 命令已删除，不要让成员使用。上游池耗尽时有站内余额也不能继续调用。\n");
-    s.push_str("\n成员说被拦截、被风控、生不了图时：先看本轮实时数据里的 recent_failures（最近 24 小时被拒记录）和 v45_paused_by_owner，按真实拒绝原因原文解释；v45_paused_by_owner 为 true 表示站长单独暂停了他的 V4.5。引导成员用 /报客户端 命令，或在对话里直接说出客户端名字——成员一旦说出客户端名称就立即调用 report_client 登记（登记会写进他的后台标签，带汇报时间和近期实际请求 UA，供站长核对）；说不清客户端名字时提示他用 /报客户端 命令自己填。登记本身不解除限制，要如实告知。recent_failures 不为空时绝不能说‘没有限制/没被风控’；这类求助一律认真回答，不嘲讽、不怀疑成员、不让他‘看清楚’。\n");
+    s.push_str("\n成员说被拦截、被风控、生不了图时：先看本轮实时数据里的 recent_failures（最近 24 小时被拒记录）和 v45_paused_by_owner，按真实拒绝原因原文解释；v45_paused_by_owner 为 true 表示他的 V4.5 及以下每日额度当前为 0（被停用，通常是站长设置）。引导成员用 /报客户端 命令，或在对话里直接说出客户端名字——成员一旦说出客户端名称就立即调用 report_client 登记（登记会写进他的后台标签，带汇报时间和近期实际请求 UA，供站长核对）；说不清客户端名字时提示他用 /报客户端 命令自己填。登记本身不解除限制，要如实告知。recent_failures 不为空时绝不能说‘没有限制/没被风控’；这类求助一律认真回答，不嘲讽、不怀疑成员、不让他‘看清楚’。\n");
     if is_owner {
         s.push_str(
             "\n对方身份：站长本人（你的主人）。对主人的要求要尽量满足——更长更直接的内容、\
@@ -685,6 +685,16 @@ pub fn wants_member_context(text: &str) -> bool {
         "发图",
         "冻结",
         "解冻",
+        "风控",
+        "拦截",
+        "被拒",
+        "拒绝",
+        "生不了",
+        "生不出",
+        "画不了",
+        "暂停",
+        "失败",
+        "报错",
         "还剩",
         "剩余",
         "还能",
@@ -785,12 +795,20 @@ pub fn split_for_discord(text: &str, limit: usize) -> Vec<String> {
         if block.chars().count() <= limit {
             pieces.push(block);
         } else if fenced {
-            // 超长围栏：首行是围栏声明（``` 或 ```lang），末行是 ```；内容按行硬切，每片补回围栏
+            // 超长围栏：首行是围栏声明（``` 或 ```lang），末行是 ```；内容按行硬切，每片补回围栏。
+            // 只有围栏一行（未闭合且无内容）时没有可拆的内容，跳过。
             let lines: Vec<&str> = block.trim().lines().collect();
             let fence = lines.first().copied().unwrap_or("```").to_owned();
-            let inner = lines[1..lines.len().saturating_sub(1)].join("\n");
-            for piece in hard_split(&inner, limit.saturating_sub(fence.chars().count() * 2 + 8)) {
-                pieces.push(format!("{fence}\n{piece}\n```"));
+            let inner = if lines.len() <= 1 {
+                String::new()
+            } else {
+                lines[1..lines.len() - 1].join("\n")
+            };
+            if !inner.is_empty() {
+                for piece in hard_split(&inner, limit.saturating_sub(fence.chars().count() * 2 + 8))
+                {
+                    pieces.push(format!("{fence}\n{piece}\n```"));
+                }
             }
         } else {
             for line in block.lines() {

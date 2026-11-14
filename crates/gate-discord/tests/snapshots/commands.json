@@ -145,6 +145,10 @@
   {
     "name": "查看分享状态",
     "type": 3,
-    "dm_permission": false
+    "dm_permission": false,
+    "nsfw": false,
+    "default_member_permissions": null,
+    "contexts": null,
+    "integration_types": null
   }
 ]

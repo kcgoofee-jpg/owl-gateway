@@ -217,6 +217,15 @@ fn resources() -> Value {
 
 pub fn render(name: &str, result: &Value) -> String {
     let data = &result["data"];
+    // 顶层 error 只来自超时分支：查询类如实说超时；report_client 是写操作，
+    // 超时可能已写库成功，不能说成「登记失败」，也劝成员别立刻重试。
+    if let Some(err) = result["error"].as_str() {
+        return if name == "report_client" {
+            "登记超时，结果未知；请等一分钟后再试，若提示已登记就不要重复提交。".into()
+        } else {
+            format!("查询超时，状态未知：{err}。")
+        };
+    }
     if data["status"] == "pending" {
         return "已接收，正在后台核对全部可见历史。完成后会返回结果；查不到或未覆盖的部分不会当作没有发生。".into();
     }
@@ -296,10 +305,17 @@ pub fn render(name: &str, result: &Value) -> String {
             }
             out.push_str(&format!(
                 "\n有 {} 条原消息因删除、权限或来源不可读而未能核实；这些不能当作零记录。",
-                data["unverified_origins"]
+                data["unverified_origins"].as_i64().unwrap_or(0)
             ));
         }
         return out;
+    }
+    // creator_audit 但没有 counts（历史核对超时 / 后端报错）：给成员可读的说明，不吐原始 JSON。
+    if name == "creator_audit" {
+        return format!(
+            "历史核对尚未完成：{}。请稍后重新查询；未完成的核对不能当作没有相关行为。",
+            data["error"].as_str().unwrap_or("后台仍在处理")
+        );
     }
     if name == "report_client" {
         return match data["client"].as_str() {

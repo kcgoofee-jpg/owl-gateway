@@ -87,7 +87,16 @@ pub fn definitions() -> Vec<Value> {
         defs.push(command(c.command, c.description, options));
     }
     defs.push(command("取消", "取消本人正在等待或处理的聊天", vec![]));
-    defs.push(json!({"name":"查看分享状态","type":3,"dm_permission":false}));
+    // 消息命令也按模块注释的纪律把可省略字段显式带上（PUT 整体覆盖，不靠 Discord 的默认值）。
+    defs.push(json!({
+        "name":"查看分享状态",
+        "type":3,
+        "dm_permission":false,
+        "nsfw":false,
+        "default_member_permissions":null,
+        "contexts":null,
+        "integration_types":null,
+    }));
     defs
 }
 

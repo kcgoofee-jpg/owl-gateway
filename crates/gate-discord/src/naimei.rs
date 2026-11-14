@@ -284,6 +284,12 @@ impl Naimei {
             if requested == "查看分享状态" {
                 if let Some(id) = it.data.as_ref().and_then(|d| d.target_id.as_deref()) {
                     let selected = &it.data.as_ref().expect("data").resolved["messages"][id];
+                    if selected["author"]["id"].as_str().is_none() {
+                        let _ = r
+                            .followup("未读取到目标消息，请重试，或使用 /分享状态 查看本人状态。")
+                            .await;
+                        return;
+                    }
                     if selected["author"]["id"].as_str() != Some(&actor) {
                         let _=r.followup("只能查询自己的分享记录。请对本人图片使用此菜单，或使用 /分享状态 查看本人履约状态。").await;
                         return;
@@ -458,7 +464,7 @@ impl Naimei {
                 self.send_chat_message(
                     channel,
                     &m.id,
-                    &capabilities::render("creator_audit", &result),
+                    &chat::scrub(&capabilities::render("creator_audit", &result)),
                 )
                 .await;
                 if result["data"]["status"] == "pending" {
@@ -753,6 +759,10 @@ impl Naimei {
         match reply {
             Ok(answer) => {
                 let answer = chat::scrub(&answer);
+                // /取消：与非流式路径一致，终稿不再发出，占位留在生成态
+                if self.chat_cancelled(req.message_id) {
+                    return Ok(());
+                }
                 {
                     let mut inner = self.lock();
                     let h = inner.histories.entry(req.channel_id).or_default();
