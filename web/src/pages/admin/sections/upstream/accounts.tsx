@@ -5,7 +5,7 @@ import { useState } from "preact/hooks";
 import { dayOf, fullTime, shortTime } from "../../../../lib/format";
 import { Badge, Button, Card, Menu, Meter, Notice } from "../../../../ui";
 import { act } from "../../data";
-import { SaveBar, useForm, withTone, ZeroModeField } from "../system/forms";
+import { NumField, SaveBar, useForm, withTone } from "../system/forms";
 import {
   ageText,
   anlasText,
@@ -177,12 +177,6 @@ export function AccountCard(props: {
           <strong>{reading(a.images_today)}</strong>
           <small>
             免费 V5 {reading(a.v5_used)} / {reading(a.v5_daily_limit)}
-            {(a.v5_held ?? 0) > 0 && (
-              <span title="含已派发及结果未知的预留；历史无法归属的预留计入各账号">
-                {" "}
-                · 持久预留 {a.v5_held}
-              </span>
-            )}
           </small>
         </div>
       </div>
@@ -281,7 +275,7 @@ export function AccountCard(props: {
         </Block>
       </div>
       <form class="token__form" {...form.formProps} onSubmit={(e) => e.preventDefault()}>
-        <ZeroModeField form={form} name="v5_daily_limit" zeroLabel="停用免费 V5" />
+        <NumField form={form} name="v5_daily_limit" />
         <SaveBar form={form} onSave={save} saving={saving} />
       </form>
     </Card>

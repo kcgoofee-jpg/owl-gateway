@@ -87,7 +87,6 @@ export type UpstreamAccount = {
   image_active: number;
   v5_daily_limit: number;
   v5_used: number;
-  v5_held?: number;
   images_today: number;
   /** 本站观测：请求窗口与负载占比 */
   w1h: WindowStats;
@@ -224,7 +223,6 @@ export type ShareAccount = {
   post_wait_max: number;
   v5_daily_limit: number;
   v5_used: number;
-  v5_held?: number;
   images_today: number;
   w1h: WindowStats;
   w24h: WindowStats;

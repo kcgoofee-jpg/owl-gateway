@@ -198,32 +198,6 @@ export function NumField(props: {
   );
 }
 
-/** 零值模式必须由字段调用方明确指定，保持现有 API 的数字语义。 */
-export function ZeroModeField(props: { form: Form; name: string; zeroLabel: string; disabled?: boolean }) {
-  const raw = String(props.form.raw(props.name));
-  const zero = raw.trim() !== "" && Number(raw) === 0;
-  const spec = props.form.specs[props.name];
-  if (spec?.kind !== "int" && spec?.kind !== "float") return null;
-  return (
-    <div>
-      <label class="small">
-        {spec.label}模式{" "}
-        <select
-          class="input"
-          value={zero ? "zero" : "value"}
-          disabled={props.disabled}
-          onChange={(event) => props.form.set(props.name, event.currentTarget.value === "zero" ? "0" : "")}
-        >
-          <option value="zero">{props.zeroLabel}</option>
-          <option value="value">指定数值</option>
-        </select>
-      </label>
-      {!zero && <NumField {...props} />}
-      {zero && spec.hint && <p class="small muted">{spec.hint}</p>}
-    </div>
-  );
-}
-
 export function TextField(props: { form: Form; name: string; inputMode?: "numeric" | "text" }) {
   const id = useId();
   const spec = props.form.specs[props.name];

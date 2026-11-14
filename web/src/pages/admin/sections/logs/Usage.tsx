@@ -11,7 +11,6 @@ import { FreshBar, useFrozenList, useScrolledPast } from "../live";
 import { memberHref, memberKeyOptions, memberLabel } from "../members/logic";
 import { Empty, MemberIdent, NARROW, Pager, useDebounced, useMedia, usePageData } from "../members/shared";
 import type { Member } from "../members/types";
-import type { SharePage, UpstreamPage } from "../upstream/core";
 import {
   deliveryLabel,
   issueExplain,
@@ -28,13 +27,6 @@ import { uaLabel } from "./ua";
 
 const SIZES = [20, 50, 100];
 const COLS = 8;
-const beijingDay = (s: string): number | null => {
-  if (!/^\d{4}-\d{2}-\d{2}$/.test(s)) return null;
-  const ms = Date.parse(`${s}T00:00:00+08:00`);
-  return Number.isFinite(ms) && new Date(ms + 8 * 3600000).toISOString().slice(0, 10) === s
-    ? ms / 1000
-    : null;
-};
 type Filter = (patch: Record<string, string | null>) => void;
 
 function ChipBar(props: {
@@ -267,8 +259,6 @@ export function Usage() {
   const { query, set } = useQueryState();
   const narrow = useMedia(NARROW);
   const members = useAdmin<{ members: Member[] }>("/admin/api/members");
-  const official = useAdmin<UpstreamPage>("/admin/api/upstream");
-  const shared = useAdmin<SharePage>("/admin/api/share-upstreams");
   const catalog = useAdmin<{
     features: Array<{ id: string; label: string }>;
     kinds?: Record<string, string>;
@@ -281,9 +271,6 @@ export function Usage() {
   const page = intParam(query.page, 1);
   const per = intParam(query.per, 20, SIZES);
   const key = /^\d+(,\d+)*$/.test(query.key ?? "") ? (query.key as string) : "";
-  const tokenId = /^token-[0-9a-f]{16}$/.test(query.upstream ?? "") ? (query.upstream as string) : "";
-  const fromDay = beijingDay(query.from ?? "");
-  const toDay = beijingDay(query.to ?? "");
   const requestedFeature =
     query.feature === "image" && (query.model_version === "v45" || query.model_version === "v5")
       ? `image_${query.model_version}`
@@ -329,9 +316,6 @@ export function Usage() {
 
   const qs = new URLSearchParams();
   if (key) qs.set("key_id", key);
-  if (tokenId) qs.set("token_id", tokenId);
-  if (fromDay != null) qs.set("since", String(fromDay));
-  if (toDay != null) qs.set("until", String(toDay + 86400));
   if (rid) qs.set("rid", rid);
   if (feature) qs.set("feature", feature);
   if (modelVersion) qs.set("model_version", modelVersion);
@@ -354,31 +338,6 @@ export function Usage() {
           onChange={(v) => set({ key: v, page: null })}
         />
       </div>
-      <label class="field-inline">
-        <span class="field-inline__k">上游</span>
-        <select
-          class="select"
-          value={tokenId}
-          onChange={(e) => set({ upstream: e.currentTarget.value, page: null })}
-        >
-          <option value="">全部上游</option>
-          {[
-            ...(official.data?.accounts ?? []).map((a) => ({ id: a.token_id, label: `官方 #${a.position}` })),
-            ...(shared.data?.accounts ?? []).map((a) => ({
-              id: a.token_id,
-              label: `${a.donated ? "捐赠" : "拼车"} #${a.position}`,
-            })),
-          ].map((a) => (
-            <option value={a.id} key={a.id}>
-              {a.label}
-            </option>
-          ))}
-          {tokenId &&
-            ![...(official.data?.accounts ?? []), ...(shared.data?.accounts ?? [])].some(
-              (a) => a.token_id === tokenId,
-            ) && <option value={tokenId}>历史或未读取的上游</option>}
-        </select>
-      </label>
       <label class="field-inline">
         <span class="field-inline__k">功能</span>
         <select
@@ -407,24 +366,6 @@ export function Usage() {
           placeholder="编号前 16 位"
           value={ridInput}
           onInput={(e) => setRidInput(e.currentTarget.value)}
-        />
-      </label>
-      <label class="field-inline">
-        <span class="field-inline__k">从（北京时间）</span>
-        <input
-          class="input"
-          type="date"
-          value={query.from ?? ""}
-          onChange={(e) => set({ from: e.currentTarget.value || null, page: null })}
-        />
-      </label>
-      <label class="field-inline">
-        <span class="field-inline__k">至（含当天）</span>
-        <input
-          class="input"
-          type="date"
-          value={query.to ?? ""}
-          onChange={(e) => set({ to: e.currentTarget.value || null, page: null })}
         />
       </label>
     </div>

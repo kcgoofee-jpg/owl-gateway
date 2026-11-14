@@ -100,10 +100,6 @@ async fn share_commit_unlocks_the_next_request_and_survives_key_rotation_and_res
         member_admin.get_ok("/members").await["members"][0]["share_locked"],
         true
     );
-    assert_eq!(
-        member_admin.get_ok("/members").await["members"][0]["share_check"],
-        "locked"
-    );
 
     for path in [
         "/ai/generate-image",
@@ -163,10 +159,6 @@ async fn share_commit_unlocks_the_next_request_and_survives_key_rotation_and_res
     assert_eq!(share(&e.state, now, json!({})).await, 200);
     assert!(!share_lock::is_locked(&e.state, &key(&e.state).await).await);
     assert!(member_view(&e.state).await.get("share_lock").is_none());
-    assert_eq!(
-        member_admin.get_ok("/members").await["members"][0]["share_check"],
-        "not_locked"
-    );
     assert!(
         member_admin.get_ok("/members").await["members"][0]
             .get("share_locked")

@@ -42,9 +42,7 @@ it("preserves a saved switch when a second field is saved before refresh", async
   });
   await renderAct(async () => {});
   expect(root.querySelector('[role="switch"]')?.getAttribute("aria-checked")).toBe("false");
-  const label = [...root.querySelectorAll("label")].find(
-    (el) => el.htmlFor && el.textContent?.includes("名额上限"),
-  );
+  const label = [...root.querySelectorAll("label")].find((el) => el.textContent?.includes("名额上限"));
   const input = root.querySelector<HTMLInputElement>(`#${label?.htmlFor}`);
   await renderAct(() => {
     if (input) {

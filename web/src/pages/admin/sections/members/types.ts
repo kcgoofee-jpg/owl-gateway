@@ -14,8 +14,6 @@ export type Member = {
   name: string;
   enabled: boolean;
   share_locked?: boolean;
-  /** 首把 Key 的分享检查结果；缺失或 unknown 不能当作放行。 */
-  share_check?: "unknown" | "not_enforcing" | "locked" | "not_locked";
   discord_id: string | null;
   discord: Discord | null;
   created_at: number;

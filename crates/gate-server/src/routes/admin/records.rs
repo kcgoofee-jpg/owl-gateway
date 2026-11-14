@@ -75,24 +75,6 @@ async fn logs(State(state): State<AppState>, _s: AdminSession, q: AdminQuery) ->
     let feature = q.get("feature").map(str::to_string);
     let model_version = q.text("model_version").to_string();
     let rid = q.text("rid").to_string();
-    let token_id = q.text("token_id").to_string();
-    let since = q.opt_int("since")?;
-    let until = q.opt_int("until")?;
-    if since.is_some_and(|v| v < 0)
-        || until.is_some_and(|v| v < 0)
-        || matches!((since, until), (Some(a), Some(b)) if a >= b)
-    {
-        return Err(http(422, "时间范围无效"));
-    }
-    if !token_id.is_empty()
-        && (token_id.len() != 22
-            || !token_id.starts_with("token-")
-            || !token_id[6..]
-                .bytes()
-                .all(|b| b.is_ascii_hexdigit() && !b.is_ascii_uppercase()))
-    {
-        return Err(http(422, "上游编号无效"));
-    }
     let status = primitives::strip(q.text("status")).to_string();
     let reason = primitives::strip(q.text("reason")).to_string();
     let error = primitives::strip(q.text("error")).to_string();
@@ -153,9 +135,6 @@ async fn logs(State(state): State<AppState>, _s: AdminSession, q: AdminQuery) ->
         key_id,
         kinds,
         rid,
-        token_id,
-        since,
-        until,
         model_version,
         key_ids,
         status: String::new(),
@@ -207,22 +186,11 @@ async fn logs(State(state): State<AppState>, _s: AdminSession, q: AdminQuery) ->
         .collect();
     let reason_counts: Vec<Value> = reason_rows
         .into_iter()
-        .filter(|(_, n)| *n > 0)
+        .filter(|(code, n)| !code.is_empty() && *n > 0)
         .map(|(code, n)| {
-            let (code, label) = if code.is_empty() {
-                ("__no_reason".to_string(), "未记录原因".to_string())
-            } else {
-                let label = gate_core::reasons::reason_label(&code, "");
-                let label = if label == "其他" {
-                    format!("未识别原因（{code}）")
-                } else {
-                    label
-                };
-                (code, label)
-            };
             json!({
                 "code": code,
-                "label": label,
+                "label": gate_core::reasons::reason_label(&code, ""),
                 "count": n,
             })
         })

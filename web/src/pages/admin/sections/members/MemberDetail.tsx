@@ -4,7 +4,6 @@ import { useEffect, useState } from "preact/hooks";
 import { dayOf, fullTime, rel } from "../../../../lib/format";
 import { Badge, Button, copyText, Menu, toast } from "../../../../ui";
 import { refresh, useAdmin } from "../../data";
-import type { Settings } from "../limits/core";
 import {
   exceptionCount,
   FEATURE_FIELDS,
@@ -79,86 +78,12 @@ function IssueList(props: { m: MemberRow; issues: Issue[]; act: DetailActions })
   );
 }
 
-/** 仅呈现可验证的条件；未取到或无法从聚合数据确定的状态明确标未知。 */
-export function Availability({
-  m,
-  k,
-  now,
-  readAt,
-}: {
-  m: MemberRow;
-  k: KeyRow;
-  now: number;
-  readAt: number | undefined;
-}) {
-  const settings = useAdmin<Settings>("/admin/api/settings");
-  const policy = k.policy.effective;
-  return (
-    <section class="mb-sec" aria-label="V5 可用条件">
-      <h4 class="mb-h4">V5 可用条件</h4>
-      <p class="small muted">
-        以下是各项条件，不代表一次具体请求一定成功；Key 详情
-        {readAt ? `读取于 ${fullTime(readAt)}` : "读取时间未知"}
-        ，其他数据来自后台最近一次读取。点击顶部刷新可重新读取。
-      </p>
-      <dl class="mb-kv">
-        <dt>Key 状态</dt>
-        <dd>
-          {!k.enabled
-            ? "已停用"
-            : k.expires_at && k.expires_at < now
-              ? "已过期"
-              : "已启用且未过期；其他限制仍需检查"}
-        </dd>
-        <dt>临时暂停</dt>
-        <dd>
-          {m.paused_until && m.paused_until > now ? `暂停至 ${fullTime(m.paused_until)}` : "当前没有临时暂停"}
-        </dd>
-        <dt>个人 V5 规则</dt>
-        <dd>{policy.image && policy.v5 && policy.daily_v5 > 0 ? `每天 ${policy.daily_v5} 张` : "停用"}</dd>
-        <dt>今日 V5 已用</dt>
-        <dd>{k.used?.v5 == null ? "未知" : `${k.used.v5} 张（当前 Key 的已确认用量，不含结果未知预留）`}</dd>
-        <dt>分享要求</dt>
-        <dd>
-          {
-            {
-              locked: "当前待分享",
-              not_locked: "当前未被分享要求拦截",
-              not_enforcing: "分享检查当前未执行",
-              unknown: "未知；分享检查数据读取失败",
-            }[m.share_check ?? "unknown"]
-          }
-        </dd>
-        <dt>全站 V5 开关</dt>
-        <dd>
-          {settings.error
-            ? "未知（设置读取失败）"
-            : settings.data
-              ? settings.data.v5_paused
-                ? "已暂停"
-                : "未暂停；仍需检查全站预算"
-              : "未知（设置尚未读取）"}
-        </dd>
-        <dt>可用上游</dt>
-        <dd>未知；取决于请求、上游实时状态和排队保护</dd>
-      </dl>
-      <p>
-        <a href="/admin/rules/members">成员规则与分享要求</a> ·{" "}
-        <a href="/admin/rules/budget">全站预算与运行保护</a> ·{" "}
-        <a href="/admin/upstream/overview">上游运行总览</a> · <a href={memberLogsHref(m)}>查看该成员请求</a>
-      </p>
-    </section>
-  );
-}
-
 export function MemberDetail(props: { m: MemberRow; now: number; act: DetailActions }) {
   const { m, now, act } = props;
   const [showKey, setShowKey] = useState(false);
   // Key 详情（凭据 / 累计用量 / 生效策略）按需取：列表首屏不再整包拉全部 Key。
   // 成员对象里的 key_count==0 时不必请求。
-  const detail = useAdmin<{ key: KeyRow; read_at?: number }>(
-    m.key_count > 0 ? `/admin/api/keys/${m.id}` : null,
-  );
+  const detail = useAdmin<{ key: KeyRow }>(m.key_count > 0 ? `/admin/api/keys/${m.id}` : null);
   const k = m.k ?? detail.data?.key;
   const verdict = memberVerdict(m, now);
   const dc = m.discord;
@@ -209,7 +134,6 @@ export function MemberDetail(props: { m: MemberRow; now: number; act: DetailActi
       )}
       {dcId && <PatronSeatButtons subject={dcId} patron={k.policy.patron} />}
       {issues.length > 0 && <IssueList m={m} issues={issues} act={act} />}
-      <Availability m={m} k={k} now={now} readAt={detail.data?.read_at} />
 
       <div class="mb-cols">
         <section class="mb-sec" aria-label="有效规则">

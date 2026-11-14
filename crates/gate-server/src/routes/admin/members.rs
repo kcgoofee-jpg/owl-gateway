@@ -175,7 +175,7 @@ async fn get_key(
         return Err(http(404, NO_KEY));
     };
     Ok(ok_json(
-        &json!({ "key": full_key_json(&state, &row, key_id).await?, "read_at": state.now() }),
+        &json!({ "key": full_key_json(&state, &row, key_id).await? }),
     ))
 }
 

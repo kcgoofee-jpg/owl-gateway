@@ -10,7 +10,7 @@ import {
   runtimeSpecs,
   type Settings,
 } from "./limits/core";
-import { NumField, SaveBar, Sect, SelectField, SwitchRow, useForm, ZeroModeField } from "./system/forms";
+import { NumField, SaveBar, Sect, SelectField, SwitchRow, useForm } from "./system/forms";
 
 function BudgetCard() {
   const query = useAdmin<Settings>("/admin/api/settings");
@@ -91,7 +91,7 @@ function BudgetCard() {
       <form {...form.formProps} onSubmit={(event) => event.preventDefault()}>
         <div class="form-grid">
           {["daily_v5", "daily_anlas", "monthly_anlas"].map((name) => (
-            <ZeroModeField key={name} form={form} name={name} zeroLabel="停用" />
+            <NumField key={name} form={form} name={name} />
           ))}
         </div>
         <SwitchRow
@@ -179,18 +179,9 @@ function GuardCard() {
             <div class="form-grid">
               {group.names
                 .filter((n) => n in specs)
-                .map((n) =>
-                  n === "account_daily_cap" || n === "queue_per_account" ? (
-                    <ZeroModeField
-                      key={n}
-                      form={form}
-                      name={n}
-                      zeroLabel={n === "account_daily_cap" ? "当天停用" : "不设此上限"}
-                    />
-                  ) : (
-                    <NumField key={n} form={form} name={n} />
-                  ),
-                )}
+                .map((n) => (
+                  <NumField key={n} form={form} name={n} />
+                ))}
             </div>
           </div>
         ))}

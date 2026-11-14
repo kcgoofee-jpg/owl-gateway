@@ -11,7 +11,7 @@ import {
 } from "./member-policy";
 import { claimBody, type Ops, type RoleRule, validRole } from "./onboarding/core";
 import { ShareLockCard } from "./share-lock";
-import { SaveBar, Sect, SwitchRow, useForm, ZeroModeField } from "./system/forms";
+import { NumField, SaveBar, Sect, SwitchRow, useForm } from "./system/forms";
 
 function DefaultRules() {
   const query = useAdmin<{ defaults: MemberPolicy; fields: Record<string, PolicyBound> }>(
@@ -110,8 +110,8 @@ export function ClaimForm({ ops }: { ops: Ops }) {
       >
         <SwitchRow title="开放领取" checked={open} onChange={(value) => change(roles, value)} />
         <div class="form-grid">
-          <ZeroModeField form={form} name="max_users" zeroLabel="不限人数" />
-          <ZeroModeField form={form} name="expires_days" zeroLabel="永久有效" />
+          <NumField form={form} name="max_users" />
+          <NumField form={form} name="expires_days" />
         </div>
         <div class="form-section">
           <div class="form-section__title">符合任一身份组</div>

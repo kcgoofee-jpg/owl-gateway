@@ -189,7 +189,8 @@ pub(super) async fn members_view(state: &AppState, filter_raw: &str) -> Result<V
             crate::share_lock::Mode::from_setting(detection["mode"].as_str()),
         )))
     }
-    .await;
+    .await
+    .unwrap_or(None);
     let mut out: Vec<Obj> = Vec::new();
     for row in st.db.list_keys().await? {
         let id = row.get("id").and_then(Value::as_i64).unwrap_or(0);
@@ -206,8 +207,6 @@ pub(super) async fn members_view(state: &AppState, filter_raw: &str) -> Result<V
         let policy = policies.for_subject(row.get("discord_id").and_then(Value::as_str))?;
         let share_locked = share_inputs
             .as_ref()
-            .ok()
-            .and_then(Option::as_ref)
             .is_some_and(|(counters, shared, mode)| {
                 let Some(subject) = row
                     .get("discord_id")
@@ -239,17 +238,6 @@ pub(super) async fn members_view(state: &AppState, filter_raw: &str) -> Result<V
         put("id", jget(&row, "id"));
         put("name", jget(&row, "name"));
         put("enabled", json!(jflag(&row, "enabled")));
-        // 与当前行的 Key 绑定；同一成员多把 Key 合并时保留首行的结果。
-        // 检测数据读取失败不能当作未被限制。
-        put(
-            "share_check",
-            json!(match &share_inputs {
-                Err(_) => "unknown",
-                Ok(None) => "not_enforcing",
-                Ok(Some(_)) if share_locked => "locked",
-                Ok(Some(_)) => "not_locked",
-            }),
-        );
         if share_locked {
             put("share_locked", json!(true));
         }

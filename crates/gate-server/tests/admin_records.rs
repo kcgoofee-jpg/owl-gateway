@@ -35,30 +35,6 @@ async fn usage_logs_filter_and_paginate() {
         ));
     }
     a.sql(&sql).await;
-    a.sql("UPDATE usage_log SET token_id='token-0123456789abcdef' WHERE id IN (1,2,3)")
-        .await;
-    let by_upstream = a
-        .get(&format!(
-            "{A}/logs?token_id=token-0123456789abcdef&key_id=1"
-        ))
-        .await
-        .json();
-    assert_eq!(by_upstream["total"], 2);
-    assert_eq!(by_upstream["summary"]["total"], 2);
-    assert_eq!(
-        a.get(&format!(
-            "{A}/logs?token_id=token-0123456789abcdef&since=1001&until=1003"
-        ))
-        .await
-        .json()["total"],
-        2
-    );
-    a.get(&format!("{A}/logs?since=1003&until=1003"))
-        .await
-        .assert_detail(422, "时间范围无效");
-    a.get(&format!("{A}/logs?token_id=bad"))
-        .await
-        .assert_detail(422, "上游编号无效");
     let r = a.get(&format!("{A}/logs")).await;
     assert_eq!(r.status, 200, "{}", r.text());
     let v = r.json();
@@ -467,23 +443,4 @@ async fn reset_all_keys_disables_everyone_including_invites() {
         && t == "全部 Key"
         && d == "已失效 4 把 Key 并清空 Discord 绑定"
         && *ok));
-}
-
-#[tokio::test]
-async fn unrecognized_and_missing_rejection_reasons_remain_distinct_and_filterable() {
-    let (_e, a) = ready().await;
-    a.sql("INSERT INTO usage_log(ts,key_id,key_name,kind,model,status,reason) VALUES (1,1,'k','image','m','rejected','odd_one'),(2,1,'k','image','m','rejected','odd_two'),(3,1,'k','image','m','rejected','');").await;
-    let v = a.get(&format!("{A}/logs")).await.json();
-    let chips = v["reason_counts"].as_array().unwrap();
-    assert!(chips.contains(&json!({"code":"odd_one","label":"未识别原因（odd_one）","count":1})));
-    assert!(chips.contains(&json!({"code":"odd_two","label":"未识别原因（odd_two）","count":1})));
-    assert!(chips.contains(&json!({"code":"__no_reason","label":"未记录原因","count":1})));
-    for reason in ["odd_one", "odd_two", "__no_reason"] {
-        assert_eq!(
-            a.get(&format!("{A}/logs?status=rejected&reason={reason}"))
-                .await
-                .json()["total"],
-            1
-        );
-    }
 }
