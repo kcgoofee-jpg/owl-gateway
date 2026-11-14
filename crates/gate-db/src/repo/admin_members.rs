@@ -108,6 +108,28 @@ impl Db {
         .await
     }
 
+    /// 一把 Key 的指定标签；没有返回 None。
+    pub async fn key_tag(&self, key_id: i64, tag: &str) -> Result<Option<TagRow>> {
+        let tag = tag.to_string();
+        self.read(move |c| {
+            c.query_row(
+                "SELECT key_id, tag, note, by, ts FROM key_tags WHERE key_id=? AND tag=?",
+                params![key_id, tag],
+                |r| {
+                    Ok(TagRow {
+                        key_id: value::i64_or(r, 0, 0)?,
+                        tag: value::text_or(r, 1, "")?,
+                        note: value::text_or(r, 2, "")?,
+                        by: value::text_or(r, 3, "")?,
+                        ts: value::f64_or(r, 4, 0.0)?,
+                    })
+                },
+            )
+            .optional()
+        })
+        .await
+    }
+
     /// 管理员手动给 Key 绑定 / 换绑 Discord：一个 Discord 账号只能绑一把 Key；
     /// 这把 Key 已有绑定就改成新账号（保留领取时间），没有就新建一条。头像 / Key 名见 [`BindProfile`]。
     pub async fn bind_discord(

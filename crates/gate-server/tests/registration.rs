@@ -1227,6 +1227,24 @@ async fn bot_context_shows_recent_rejections_and_member_can_report_client() {
     let tag = tags.iter().find(|t| t.tag == "自报客户端").unwrap();
     assert_eq!(tag.key_id, key_id);
     assert!(tag.note.contains("柏宝绘") && tag.note.contains("Dalvik"));
+    // 二次汇报：新条目带时间戳放在最前，旧条目保留在备注里，方便站长核对。
+    let r2 = bridge(
+        &e,
+        "/self-register/bot/client",
+        json!({"discord_id":MEMBER,"guild_id":GUILD,"client":"NovelAI 官网"}),
+    )
+    .await;
+    assert_eq!(r2.0, 200);
+    let tag = e
+        .state
+        .db
+        .key_tag(key_id, "自报客户端")
+        .await
+        .unwrap()
+        .unwrap();
+    assert!(tag.note.contains("NovelAI 官网"));
+    assert!(tag.note.contains("柏宝绘"));
+    assert!(tag.note.starts_with(char::is_numeric) && tag.note.contains('；'));
     assert!(
         actions(&e)
             .await

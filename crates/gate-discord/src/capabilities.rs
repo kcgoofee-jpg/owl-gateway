@@ -304,7 +304,7 @@ pub fn render(name: &str, result: &Value) -> String {
     if name == "report_client" {
         return match data["client"].as_str() {
             Some(c) if data["recorded"] == true => format!(
-                "已登记你的客户端：**{}**。站长核对后处理，登记本身不会自动解除限制。",
+                "已登记你的客户端：**{}**（连汇报时间和近期实际请求记录一起写进后台标签，站长核对后处理；登记本身不会自动解除限制）。",
                 c.replace('`', "'")
             ),
             _ => format!(

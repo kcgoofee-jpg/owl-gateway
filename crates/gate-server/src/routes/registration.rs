@@ -384,7 +384,8 @@ async fn recent_failures(state: &AppState, key_id: i64) -> Result<Value, crate::
 }
 
 /// 成员自报所用的生图客户端（`/报客户端` 或对话里让奶妹登记）：写成后台成员标签「自报客户端」，
-/// 备注带上近 24 小时实际请求的 UA，站长对照后决定是否恢复。只改本人的标签。
+/// 备注按时间累加（最新在前），每条带上汇报时间和近 24 小时实际请求的 UA，站长对照后决定是否恢复。
+/// 只改本人的标签。
 async fn bot_client(State(state): State<AppState>, req: Request) -> ApiResult {
     const CLIENT_MAX: usize = 40;
     let (parts, body) = req.into_parts();
@@ -417,7 +418,14 @@ async fn bot_client(State(state): State<AppState>, req: Request) -> ApiResult {
     } else {
         uas.into_iter().take(2).collect::<Vec<_>>().join(" / ")
     };
-    let note = take_chars(&format!("成员自报：{client}｜实际 UA：{seen}"), 200).to_string();
+    let stamp = state.clock.format(state.now(), "%m-%d %H:%M");
+    let entry = format!("{stamp} 自报：{client}｜UA：{seen}");
+    let note = match state.db.key_tag(key.id(), "自报客户端").await? {
+        Some(old) if !old.note.trim().is_empty() => {
+            take_chars(&format!("{entry}；{}", old.note.trim()), 200).to_string()
+        }
+        _ => entry,
+    };
     state
         .db
         .upsert_key_tag(key.id(), "自报客户端", &note, "奶妹", state.now())
