@@ -260,7 +260,9 @@ fn log_filter(f: &LogFilter) -> (String, Vec<SqlValue>) {
         clauses.push("status=?".into());
         args.push(SqlValue::Text(f.status.clone()));
     }
-    if !f.reason.is_empty() {
+    if f.reason == "__no_reason" {
+        clauses.push("(reason IS NULL OR reason='')".into());
+    } else if !f.reason.is_empty() {
         clauses.push("reason=?".into());
         args.push(SqlValue::Text(f.reason.clone()));
     }

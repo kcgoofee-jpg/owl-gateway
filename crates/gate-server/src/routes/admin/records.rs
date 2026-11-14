@@ -207,11 +207,22 @@ async fn logs(State(state): State<AppState>, _s: AdminSession, q: AdminQuery) ->
         .collect();
     let reason_counts: Vec<Value> = reason_rows
         .into_iter()
-        .filter(|(code, n)| !code.is_empty() && *n > 0)
+        .filter(|(_, n)| *n > 0)
         .map(|(code, n)| {
+            let (code, label) = if code.is_empty() {
+                ("__no_reason".to_string(), "未记录原因".to_string())
+            } else {
+                let label = gate_core::reasons::reason_label(&code, "");
+                let label = if label == "其他" {
+                    format!("未识别原因（{code}）")
+                } else {
+                    label
+                };
+                (code, label)
+            };
             json!({
                 "code": code,
-                "label": gate_core::reasons::reason_label(&code, ""),
+                "label": label,
                 "count": n,
             })
         })

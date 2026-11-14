@@ -211,18 +211,49 @@ async fn public_tokenizer(
 async fn subscription(state: &AppState, key: &Key) -> Result<Value, InternalError> {
     let (day, month) = (state.day(), state.month());
     let shared = state.db.shared_budgets().await?;
+    // Match admission's accounting: keep the budget lock while reading counters so a
+    // reservation cannot disappear before its confirmed usage becomes visible.
+    let budget = state.budget.lock().await;
+    let own_day: Vec<_> = budget
+        .reservations
+        .values()
+        .filter(|r| r.key_id == key.id() && r.day == day)
+        .collect();
+    let own_month: Vec<_> = budget
+        .reservations
+        .values()
+        .filter(|r| r.key_id == key.id() && r.month == month)
+        .collect();
+    let all_day: Vec<_> = budget
+        .reservations
+        .values()
+        .filter(|r| r.day == day)
+        .collect();
+    let all_month: Vec<_> = budget
+        .reservations
+        .values()
+        .filter(|r| r.month == month)
+        .collect();
     let day_counter = state.db.get_counter(key.id(), &day).await?;
     let data = gate_core::client_views::SubscriptionData {
-        month_anlas_used: state.db.month_anlas(key.id(), &month).await?,
-        daily_anlas_used: day_counter.anlas,
+        month_anlas_used: state.db.month_anlas(key.id(), &month).await?
+            + own_month.iter().map(|r| r.anlas).sum::<f64>(),
+        daily_anlas_used: day_counter.anlas + own_day.iter().map(|r| r.anlas).sum::<f64>(),
         global_anlas_limit: f64::from(shared.daily_anlas),
-        global_anlas_total: state.db.day_anlas_total(&day).await?,
-        daily_v5_used: day_counter.v5,
+        global_anlas_total: state.db.day_anlas_total(&day).await?
+            + all_day.iter().map(|r| r.anlas).sum::<f64>(),
+        global_monthly_anlas_limit: shared.monthly_anlas,
+        global_monthly_anlas_total: state.db.month_anlas_all(&month).await?
+            + all_month.iter().map(|r| r.anlas).sum::<f64>(),
+        daily_v5_used: day_counter.v5 + own_day.iter().map(|r| r.v5).sum::<i64>(),
         global_v5_limit: shared.daily_v5,
-        global_v5_total: state.db.day_v5_total(&day).await?,
+        global_v5_total: state.db.day_v5_total(&day).await?
+            + all_day.iter().map(|r| r.v5).sum::<i64>(),
         v5_paused: crate::ops::v5_paused(&state.db).await?,
-        daily_legacy_used: day_counter.legacy_free_images,
+        daily_legacy_used: day_counter.legacy_free_images
+            + own_day.iter().map(|r| r.legacy).sum::<i64>(),
     };
+    drop(budget);
     let mut view = gate_core::client_views::subscription_payload(
         &key.policy,
         key.expires_at(),
@@ -232,7 +263,7 @@ async fn subscription(state: &AppState, key: &Key) -> Result<Value, InternalErro
     );
     view["naiGate"]["ownerImageFull"] = json!(key.owner_image_full);
     view["naiGate"]["remaining"] = json!({
-        "v45Images": (i64::from(key.policy.daily_images) - day_counter.legacy_free_images).max(0),
+        "v45Images": (i64::from(key.policy.daily_images) - data.daily_legacy_used).max(0),
         "v5Images": view["naiGate"]["v5LeftToday"],
         "anlas": view["naiGate"]["anlasLeft"]
     });

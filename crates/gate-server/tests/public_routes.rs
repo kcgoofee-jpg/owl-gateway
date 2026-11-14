@@ -762,6 +762,45 @@ async fn subscription_enables_anlas_when_paid_parameters_are_on() {
 }
 
 #[tokio::test]
+async fn subscription_includes_active_and_unknown_quota_holds() {
+    let e = setup(&[]).await;
+    common::policy_for(&e.state, 1, json!({"paid_parameters": true})).await;
+    let (_, before) = get_with_auth(&e.state, "/user/subscription", TOKEN).await;
+    let before = json_of(&before);
+    e.state.budget.lock().await.reservations.insert(
+        42,
+        gate_server::state::Reservation {
+            request_id: "synthetic-unknown".into(),
+            active: false,
+            key_id: 1,
+            day: e.state.day(),
+            month: e.state.month(),
+            anlas: 2.0,
+            v5: 1,
+            legacy: 1,
+            is_vibe: false,
+        },
+    );
+    let (_, after) = get_with_auth(&e.state, "/user/subscription", TOKEN).await;
+    let after = json_of(&after);
+    assert_eq!(
+        after["naiGate"]["v5LeftToday"].as_i64().unwrap(),
+        before["naiGate"]["v5LeftToday"].as_i64().unwrap() - 1
+    );
+    assert_eq!(
+        after["naiGate"]["anlasLeft"].as_i64().unwrap(),
+        before["naiGate"]["anlasLeft"].as_i64().unwrap() - 2
+    );
+    assert_eq!(
+        after["naiGate"]["remaining"]["v45Images"].as_i64().unwrap(),
+        before["naiGate"]["remaining"]["v45Images"]
+            .as_i64()
+            .unwrap()
+            - 1
+    );
+}
+
+#[tokio::test]
 async fn user_information_uses_key_expiry() {
     let e = setup(&[]).await;
     let fields = json!({"expires_at": 1_900_000_000.9});

@@ -10,6 +10,8 @@ pub struct SubscriptionData {
     /// 全站今天的 Anlas 池上限和已用量：工作台显示的余额要和个人剩余取较小值。
     pub global_anlas_limit: f64,
     pub global_anlas_total: f64,
+    pub global_monthly_anlas_limit: f64,
+    pub global_monthly_anlas_total: f64,
     pub daily_v5_used: i64,
     pub global_v5_limit: u32,
     pub global_v5_total: i64,
@@ -44,7 +46,14 @@ pub fn subscription_payload(
     let anlas_left = if anlas_enabled {
         let personal = (f64::from(policy.daily_anlas) - data.daily_anlas_used).max(0.0);
         let site = (data.global_anlas_limit - data.global_anlas_total).max(0.0);
-        personal.min(site).trunc() as i64
+        let personal_month = (policy.monthly_anlas - data.month_anlas_used).max(0.0);
+        let site_month =
+            (data.global_monthly_anlas_limit - data.global_monthly_anlas_total).max(0.0);
+        personal
+            .min(site)
+            .min(personal_month)
+            .min(site_month)
+            .trunc() as i64
     } else {
         0
     };
@@ -102,6 +111,8 @@ mod tests {
             daily_anlas_used: 8.0,
             global_anlas_limit: 300.0,
             global_anlas_total: 100.0,
+            global_monthly_anlas_limit: 1000.0,
+            global_monthly_anlas_total: 100.0,
             daily_v5_used: 2,
             global_v5_limit: 150,
             global_v5_total: 147,
@@ -146,6 +157,22 @@ mod tests {
         };
         let value = subscription_payload(&policy(), None, 0.0, &data, false);
         assert_eq!(value["naiGate"]["anlasLeft"], 0);
+    }
+
+    #[test]
+    fn monthly_member_and_site_budgets_also_limit_the_visible_anlas() {
+        let mut policy = policy();
+        policy.monthly_anlas = 22.0;
+        let value = subscription_payload(&policy, None, 0.0, &data(), false);
+        assert_eq!(value["naiGate"]["anlasLeft"], 2);
+        policy.monthly_anlas = 100.0;
+        let data = SubscriptionData {
+            global_monthly_anlas_limit: 101.0,
+            global_monthly_anlas_total: 100.0,
+            ..data()
+        };
+        let value = subscription_payload(&policy, None, 0.0, &data, false);
+        assert_eq!(value["naiGate"]["anlasLeft"], 1);
     }
 
     #[test]

@@ -80,24 +80,44 @@ function IssueList(props: { m: MemberRow; issues: Issue[]; act: DetailActions })
 }
 
 /** 仅呈现可验证的条件；未取到或无法从聚合数据确定的状态明确标未知。 */
-function Availability({ m, k }: { m: MemberRow; k: KeyRow }) {
+export function Availability({
+  m,
+  k,
+  now,
+  readAt,
+}: {
+  m: MemberRow;
+  k: KeyRow;
+  now: number;
+  readAt: number | undefined;
+}) {
   const settings = useAdmin<Settings>("/admin/api/settings");
   const policy = k.policy.effective;
   return (
     <section class="mb-sec" aria-label="V5 可用条件">
       <h4 class="mb-h4">V5 可用条件</h4>
       <p class="small muted">
-        以下是各项条件，不代表一次具体请求一定成功；数据为后台最近一次读取，点击顶部刷新可重新读取。
+        以下是各项条件，不代表一次具体请求一定成功；Key 详情
+        {readAt ? `读取于 ${fullTime(readAt)}` : "读取时间未知"}
+        ，其他数据来自后台最近一次读取。点击顶部刷新可重新读取。
       </p>
       <dl class="mb-kv">
         <dt>Key 状态</dt>
-        <dd>{k.enabled ? "已启用；其他限制仍需检查" : "已停用"}</dd>
+        <dd>
+          {!k.enabled
+            ? "已停用"
+            : k.expires_at && k.expires_at < now
+              ? "已过期"
+              : "已启用且未过期；其他限制仍需检查"}
+        </dd>
+        <dt>临时暂停</dt>
+        <dd>
+          {m.paused_until && m.paused_until > now ? `暂停至 ${fullTime(m.paused_until)}` : "当前没有临时暂停"}
+        </dd>
         <dt>个人 V5 规则</dt>
         <dd>{policy.image && policy.v5 && policy.daily_v5 > 0 ? `每天 ${policy.daily_v5} 张` : "停用"}</dd>
         <dt>今日 V5 已用</dt>
-        <dd>
-          {m.today.v5} 张{m.key_count > 1 ? "（该成员多把 Key 的汇总，不是单 Key 用量）" : ""}
-        </dd>
+        <dd>{k.used?.v5 == null ? "未知" : `${k.used.v5} 张（当前 Key 的已确认用量，不含结果未知预留）`}</dd>
         <dt>分享要求</dt>
         <dd>
           {
@@ -136,7 +156,9 @@ export function MemberDetail(props: { m: MemberRow; now: number; act: DetailActi
   const [showKey, setShowKey] = useState(false);
   // Key 详情（凭据 / 累计用量 / 生效策略）按需取：列表首屏不再整包拉全部 Key。
   // 成员对象里的 key_count==0 时不必请求。
-  const detail = useAdmin<{ key: KeyRow }>(m.key_count > 0 ? `/admin/api/keys/${m.id}` : null);
+  const detail = useAdmin<{ key: KeyRow; read_at?: number }>(
+    m.key_count > 0 ? `/admin/api/keys/${m.id}` : null,
+  );
   const k = m.k ?? detail.data?.key;
   const verdict = memberVerdict(m, now);
   const dc = m.discord;
@@ -187,7 +209,7 @@ export function MemberDetail(props: { m: MemberRow; now: number; act: DetailActi
       )}
       {dcId && <PatronSeatButtons subject={dcId} patron={k.policy.patron} />}
       {issues.length > 0 && <IssueList m={m} issues={issues} act={act} />}
-      <Availability m={m} k={k} />
+      <Availability m={m} k={k} now={now} readAt={detail.data?.read_at} />
 
       <div class="mb-cols">
         <section class="mb-sec" aria-label="有效规则">

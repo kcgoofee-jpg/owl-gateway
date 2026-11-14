@@ -468,3 +468,22 @@ async fn reset_all_keys_disables_everyone_including_invites() {
         && d == "已失效 4 把 Key 并清空 Discord 绑定"
         && *ok));
 }
+
+#[tokio::test]
+async fn unrecognized_and_missing_rejection_reasons_remain_distinct_and_filterable() {
+    let (_e, a) = ready().await;
+    a.sql("INSERT INTO usage_log(ts,key_id,key_name,kind,model,status,reason) VALUES (1,1,'k','image','m','rejected','odd_one'),(2,1,'k','image','m','rejected','odd_two'),(3,1,'k','image','m','rejected','');").await;
+    let v = a.get(&format!("{A}/logs")).await.json();
+    let chips = v["reason_counts"].as_array().unwrap();
+    assert!(chips.contains(&json!({"code":"odd_one","label":"未识别原因（odd_one）","count":1})));
+    assert!(chips.contains(&json!({"code":"odd_two","label":"未识别原因（odd_two）","count":1})));
+    assert!(chips.contains(&json!({"code":"__no_reason","label":"未记录原因","count":1})));
+    for reason in ["odd_one", "odd_two", "__no_reason"] {
+        assert_eq!(
+            a.get(&format!("{A}/logs?status=rejected&reason={reason}"))
+                .await
+                .json()["total"],
+            1
+        );
+    }
+}

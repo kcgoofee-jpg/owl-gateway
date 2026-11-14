@@ -210,6 +210,19 @@ async fn credential_metadata_is_strict_and_does_not_change_policy() {
 }
 
 #[tokio::test]
+async fn key_detail_includes_its_own_counter_and_read_time() {
+    let (e, a) = ready().await;
+    let day = e.state.day();
+    a.sql(&format!(
+        "INSERT INTO counters(key_id,day,v5) VALUES(1,'{day}',3)"
+    ))
+    .await;
+    let v = a.get(&format!("{A}/keys/1")).await.json();
+    assert_eq!(v["key"]["used"]["v5"], 3);
+    assert!((v["read_at"].as_f64().unwrap() - e.state.now()).abs() < 5.0);
+}
+
+#[tokio::test]
 async fn removed_manual_creation_binding_and_role_routes_are_unavailable() {
     let (_e, a, d) = ready_reg().await;
     for path in ["/keys", "/keys/1/role", "/keys/1/bind-discord"] {
