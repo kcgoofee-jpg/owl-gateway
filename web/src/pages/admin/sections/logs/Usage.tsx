@@ -25,7 +25,6 @@ import { intParam, useQueryState } from "./query";
 import type { CountChip, LogSummary, LogsResp, UsageLog } from "./types";
 import { uaLabel } from "./ua";
 
-const SIZES = [20, 50, 100];
 const COLS = 8;
 type Filter = (patch: Record<string, string | null>) => void;
 
@@ -103,10 +102,10 @@ function Status(props: { l: UsageLog; onFilter: Filter }) {
 function Timing(props: { l: UsageLog }) {
   const t = timing(props.l.wait_ms, props.l.dur_ms);
   if (!t.gen && !t.wait) return <span class="muted">—</span>;
+  const total = (props.l.wait_ms ?? 0) + (props.l.dur_ms ?? 0);
   return (
-    <span class="lg-timing" title="生成：上游处理时间；等：排队 + 冷却">
-      {t.gen && <span class="nowrap">生成 {t.gen}</span>}
-      {t.wait && <span class="nowrap muted">等 {t.wait}</span>}
+    <span class="nowrap tabular" title={`生成 ${t.gen || "—"} · 排队 ${t.wait || "—"}`}>
+      {total >= 1000 ? `${(total / 1000).toFixed(1)} 秒` : `${total} 毫秒`}
     </span>
   );
 }
@@ -115,13 +114,13 @@ function Cost(props: { l: UsageLog }) {
   const { l } = props;
   const parts = [
     l.images ? <span class="nowrap">{withUnit(l.images, "张")}</span> : null,
-    l.anlas ? <span class="nowrap">{+Number(l.anlas).toFixed(2)} Anlas</span> : null,
+    l.anlas ? <span class="nowrap">{+Number(l.anlas).toFixed(1)} A</span> : null,
     l.unconfirmed_anlas > 0 ? (
-      <Badge tone="warn" title="失败请求可能产生的费用，实际扣款尚未确认">
-        ≈ {l.unconfirmed_anlas}
-      </Badge>
+      <span class="nowrap" title="失败请求可能产生的费用，尚未确认">
+        ≈ {l.unconfirmed_anlas} A
+      </span>
     ) : null,
-    l.tokens ? <span class="nowrap">{num(l.tokens)} tokens</span> : null,
+    l.tokens ? <span class="nowrap">{num(l.tokens)} tok</span> : null,
   ].filter(Boolean);
   if (!parts.length) return <span class="muted">—</span>;
   return <span class="lg-cost">{parts}</span>;
@@ -268,7 +267,7 @@ export function Usage() {
   const [open, setOpen] = useState<Set<number>>(new Set());
 
   const page = intParam(query.page, 1);
-  const per = intParam(query.per, 20, SIZES);
+  const per = 100;
   const key = /^\d+(,\d+)*$/.test(query.key ?? "") ? (query.key as string) : "";
   const requestedFeature =
     query.feature === "image" && (query.model_version === "v45" || query.model_version === "v5")
@@ -518,9 +517,7 @@ export function Usage() {
               pages={data.pages}
               total={data.total}
               perPage={data.per_page}
-              sizes={SIZES}
               onPage={(p) => set({ page: p === 1 ? null : String(p) })}
-              onSize={(n) => set({ per: n === 20 ? null : String(n), page: null })}
             />
           </div>
         </>

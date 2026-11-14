@@ -60,7 +60,8 @@ export function Actions() {
   const page = intParam(query.page, 1);
   const actor = actorFilter(query.actor);
   const kind = query.action ?? "";
-  const qs = new URLSearchParams({ page: String(page) });
+  // 每页固定 100（和请求日志一致，不再提供条数选项）
+  const qs = new URLSearchParams({ page: String(page), per_page: "100" });
   if (actor) qs.set("actor", actor);
   if (kind) qs.set("action", kind);
   const { data, error, pending } = usePageData<ActionsResp>(`/admin/api/actions?${qs}`);

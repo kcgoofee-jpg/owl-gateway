@@ -239,9 +239,9 @@ a.lg-who:hover .mb-name__t {
 .lg-timing,
 .lg-cost {
   display: inline-flex;
-  flex-direction: column;
-  gap: 2px;
-  align-items: flex-start;
+  gap: 6px;
+  align-items: baseline;
+  white-space: nowrap;
 }
 
 /* 操作日志：「手动 / 自动」标签和操作者排一行，标签不单独换行 */
