@@ -518,6 +518,39 @@ async fn daily_mode_requires_each_non_exempt_member_to_share_even_without_previo
     exempt.owner_image_full = false;
     exempt.patron = true;
     assert!(!share_lock::is_locked(&e.state, &exempt).await);
+    // 成员级分享豁免：写入成员例外后不再拦截，后台徽章同步消失；关掉后恢复。
+    let subject = key(&e.state).await.subject().to_string();
+    assert_eq!(
+        admin
+            .put(
+                &format!("/members/{subject}/rules"),
+                json!({"share_exempt": true})
+            )
+            .await
+            .status,
+        200
+    );
+    assert!(
+        !share_lock::is_locked(&e.state, &key(&e.state).await).await,
+        "share_exempt override unlocks the member"
+    );
+    assert!(
+        admin.get_ok("/members").await["members"][0]
+            .get("share_locked")
+            .is_none(),
+        "admin badge follows the exemption"
+    );
+    assert_eq!(
+        admin
+            .put(
+                &format!("/members/{subject}/rules"),
+                json!({"share_exempt": false})
+            )
+            .await
+            .status,
+        200
+    );
+    assert!(share_lock::is_locked(&e.state, &key(&e.state).await).await);
     assert_eq!(share(&e.state, now - 2.0 * 86400.0, json!({})).await, 200);
     assert!(share_lock::is_locked(&e.state, &key(&e.state).await).await);
     assert_eq!(share(&e.state, now, json!({})).await, 200);

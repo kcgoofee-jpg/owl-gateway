@@ -227,7 +227,8 @@ pub(super) async fn members_view(state: &AppState, filter_raw: &str) -> Result<V
                     },
                     shared.contains(subject),
                     policy.owner_image.as_ref().is_some_and(|p| p.enabled)
-                        || policy.patron.as_ref().is_some_and(|p| p.enabled),
+                        || policy.patron.as_ref().is_some_and(|p| p.enabled)
+                        || policy.effective.share_exempt,
                 )
             });
         let mut m = Obj::new();

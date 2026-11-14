@@ -4,7 +4,14 @@ import { useEffect, useState } from "preact/hooks";
 import { dayOf, fullTime, rel } from "../../../../lib/format";
 import { Badge, Button, copyText, Menu, toast } from "../../../../ui";
 import { refresh, useAdmin } from "../../data";
-import { exceptionCount, FEATURE_FIELDS, type PatronView, policyLabel } from "../member-policy";
+import {
+  exceptionCount,
+  FEATURE_FIELDS,
+  mergeOverrides,
+  type PatronView,
+  type PolicySnapshot,
+  policyLabel,
+} from "../member-policy";
 import type { SharePage, UpstreamPage } from "../upstream/core";
 import { call } from "./actions";
 import {
@@ -151,6 +158,14 @@ export function MemberDetail(props: { m: MemberRow; now: number; act: DetailActi
                   </span>
                 ))}
               </span>
+            </dd>
+            <dt>分享豁免</dt>
+            <dd>
+              {dcId ? (
+                <ShareExemptToggle subject={dcId} policy={k.policy} />
+              ) : (
+                <span class="small muted">没有绑定 Discord，走 Key 额度检查</span>
+              )}
             </dd>
             {exceptions > 0 && (
               <>
@@ -306,6 +321,32 @@ export function MemberDetail(props: { m: MemberRow; now: number; act: DetailActi
         />
       </div>
     </div>
+  );
+}
+
+/** 成员级「分享豁免」快速开关：写进成员例外的 share_exempt，与例外表单、网关检查同一份状态。 */
+function ShareExemptToggle({ subject, policy }: { subject: string; policy: PolicySnapshot }) {
+  const [pending, setPending] = useState(false);
+  const enabled = policy.effective.share_exempt === true;
+  const toggle = async () => {
+    if (pending) return;
+    setPending(true);
+    const overrides = mergeOverrides(
+      policy.defaults,
+      policy.overrides,
+      { share_exempt: !enabled },
+      new Set(),
+    );
+    const r = await call("PUT", `/admin/api/members/${encodeURIComponent(subject)}/rules`, overrides);
+    setPending(false);
+    if (!r.ok) toast(r.error, { error: true });
+    else toast(enabled ? "已恢复分享要求检查" : "已豁免该成员的分享要求");
+  };
+  return (
+    <label class="mb-patron__jump" title="跳过「先分享再用图」检查；额度、封禁与其他限制不受影响">
+      <input type="checkbox" checked={enabled} disabled={pending} onChange={toggle} />
+      豁免
+    </label>
   );
 }
 

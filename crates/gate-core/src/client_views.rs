@@ -93,6 +93,7 @@ mod tests {
             augment: false,
             img2img: false,
             paid_parameters: true,
+            share_exempt: false,
         }
     }
     fn data() -> SubscriptionData {

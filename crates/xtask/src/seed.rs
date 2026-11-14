@@ -104,6 +104,7 @@ pub async fn seed(db: &Db, clock: &Clock, now: f64) -> Result<Seeded> {
         augment: false,
         img2img: false,
         paid_parameters: false,
+        share_exempt: false,
     })
     .await?;
     db.set_shared_budgets(&gate_core::member_policy::SharedBudgets {

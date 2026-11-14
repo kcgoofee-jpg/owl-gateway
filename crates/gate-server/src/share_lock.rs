@@ -157,7 +157,8 @@ pub async fn enforce(state: &AppState, key: &Key) -> Result<(), ApiError> {
 
 async fn lookup(state: &AppState, key: &Key) -> Result<Option<Mode>, crate::error::InternalError> {
     let now = state.now();
-    if now < starts_at() || key.owner_image_full || key.patron {
+    // 豁免三类：站长完整生图号、已开通赞助席、站长逐个成员设置的分享豁免（成员例外）。
+    if now < starts_at() || key.owner_image_full || key.patron || key.policy.share_exempt {
         return Ok(None);
     }
     let detection = detection(state).await?;

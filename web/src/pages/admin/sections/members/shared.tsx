@@ -4,7 +4,7 @@
  */
 import { ChevronLeft, ChevronRight } from "lucide-preact";
 import type { ComponentChildren } from "preact";
-import { useEffect, useId, useRef, useState } from "preact/hooks";
+import { useEffect, useId, useState } from "preact/hooks";
 import { num, usedOf } from "../../../../lib/format";
 import { Button, cx } from "../../../../ui";
 import { useAdmin } from "../../data";

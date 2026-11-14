@@ -20,6 +20,7 @@ fn defaults() -> MemberPolicy {
         augment: false,
         img2img: false,
         paid_parameters: false,
+        share_exempt: false,
     }
 }
 

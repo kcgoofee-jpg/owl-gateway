@@ -22,6 +22,7 @@ const defaults: MemberPolicy = {
   upscale: false,
   augment: false,
   paid_parameters: false,
+  share_exempt: false,
 };
 const fields: Record<string, PolicyBound> = Object.fromEntries(
   Object.entries(defaults).map(([k, v]) => [

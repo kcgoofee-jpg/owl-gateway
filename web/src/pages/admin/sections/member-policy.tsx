@@ -32,6 +32,7 @@ const POLICY_LABELS: Record<keyof MemberPolicy, { label: string; unit?: string }
   upscale: FEATURE_COPY.upscale,
   augment: FEATURE_COPY.augment,
   paid_parameters: FEATURE_COPY.paid_parameters,
+  share_exempt: FEATURE_COPY.share_exempt,
 };
 
 export const policyLabel = (name: keyof MemberPolicy): string => POLICY_LABELS[name].label;

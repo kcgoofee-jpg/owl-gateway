@@ -48,6 +48,7 @@ function mk(p: Partial<Member> = {}): Member {
         upscale: false,
         augment: false,
         paid_parameters: false,
+        share_exempt: false,
       },
       overrides: {},
       effective: {
@@ -64,6 +65,7 @@ function mk(p: Partial<Member> = {}): Member {
         upscale: false,
         augment: false,
         paid_parameters: false,
+        share_exempt: false,
       },
     },
     today: { images: 0, legacy_free_images: 0, v5: 0, anlas: 0, requests: 0 },

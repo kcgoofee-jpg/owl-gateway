@@ -345,7 +345,7 @@ async fn bot_context(State(state): State<AppState>, req: Request) -> ApiResult {
         "valid_since":state.clock.day_start(state.now())-86400.0,
         "latest_share":state.db.latest_share(discord_id).await?,
         "selected_share":if selected.is_empty(){None}else{state.db.selected_share(discord_id,&selected).await?},
-        "exempt":key.as_ref().is_some_and(|k|k.owner_image_full||k.patron),
+        "exempt":key.as_ref().is_some_and(|k|k.owner_image_full||k.patron||k.policy.share_exempt),
         "required_now":me.get("share_lock").is_some(),
         "channel_url":crate::share_lock::channel_url(), "reset_hour":7,
     });

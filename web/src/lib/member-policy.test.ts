@@ -15,6 +15,7 @@ const defaults: MemberPolicy = {
   augment: false,
   img2img: false,
   paid_parameters: false,
+  share_exempt: false,
 };
 describe("成员字段例外", () => {
   it("同值清空，零和 false 保留为明确例外", () => {

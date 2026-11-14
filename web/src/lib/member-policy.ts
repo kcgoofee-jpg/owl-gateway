@@ -12,6 +12,7 @@ export type MemberPolicy = {
   augment: boolean;
   img2img: boolean;
   paid_parameters: boolean;
+  share_exempt: boolean;
 };
 export type MemberOverrides = { [K in keyof MemberPolicy]?: MemberPolicy[K] | null };
 export type PatronView = {
@@ -39,6 +40,7 @@ export const FEATURE_FIELDS = [
   "upscale",
   "augment",
   "paid_parameters",
+  "share_exempt",
 ] as const;
 export const FEATURE_COPY: Record<(typeof FEATURE_FIELDS)[number], { label: string; help: string }> = {
   image: { label: "图片生成", help: "关闭后这把 Key 不能出图。" },
@@ -51,6 +53,10 @@ export const FEATURE_COPY: Record<(typeof FEATURE_FIELDS)[number], { label: stri
   paid_parameters: {
     label: "高规格生图（大图、多步数与批量）",
     help: "不再按免费档裁剪。大图 / 多步 / 批量走全站 Anlas / V5 池。图生图、导演工具和放大仍要单独开。",
+  },
+  share_exempt: {
+    label: "分享豁免",
+    help: "跳过「先分享再用图」检查；额度、封禁与其他限制不受影响。",
   },
 };
 export const POLICY_FIELDS = [...NUMBER_FIELDS, ...FEATURE_FIELDS];

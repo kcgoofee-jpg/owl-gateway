@@ -50,6 +50,7 @@ pub fn policy_fields() -> Value {
         "upscale": {"kind": "bool"},
         "augment": {"kind": "bool"},
         "paid_parameters": {"kind": "bool"},
+        "share_exempt": {"kind": "bool"},
     })
 }
 
@@ -156,6 +157,9 @@ pub struct MemberPolicy {
     pub augment: bool,
     pub img2img: bool,
     pub paid_parameters: bool,
+    /// 分享豁免：站长逐个成员设置，跳过「先分享再用图」检查（站长生图号与赞助席另有独立豁免）。
+    #[serde(default)]
+    pub share_exempt: bool,
 }
 
 /// PUT 完整替换例外；省略或 null 都表示使用默认值。
@@ -175,6 +179,7 @@ pub struct MemberOverrides {
     pub augment: Option<bool>,
     pub img2img: Option<bool>,
     pub paid_parameters: Option<bool>,
+    pub share_exempt: Option<bool>,
 }
 
 impl MemberPolicy {
@@ -193,6 +198,7 @@ impl MemberPolicy {
             augment: false,
             img2img: false,
             paid_parameters: false,
+            share_exempt: false,
         }
     }
 
@@ -240,6 +246,7 @@ impl MemberPolicy {
             augment: overrides.augment.unwrap_or(self.augment),
             img2img: overrides.img2img.unwrap_or(self.img2img),
             paid_parameters: overrides.paid_parameters.unwrap_or(self.paid_parameters),
+            share_exempt: overrides.share_exempt.unwrap_or(self.share_exempt),
         };
         resolved.validate()?;
         Ok(resolved)
@@ -264,6 +271,7 @@ impl MemberPolicy {
             augment: changed(self.augment, configured.augment),
             img2img: changed(self.img2img, configured.img2img),
             paid_parameters: changed(self.paid_parameters, configured.paid_parameters),
+            share_exempt: changed(self.share_exempt, configured.share_exempt),
         }
     }
 }
@@ -288,6 +296,7 @@ mod tests {
             augment: false,
             img2img: false,
             paid_parameters: false,
+            share_exempt: false,
         }
     }
 
