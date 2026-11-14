@@ -939,7 +939,10 @@ async fn upstream_token_settings_endpoints() {
     // in_flight：没有在途的图时立刻返回 false
     assert_eq!(
         api.text("PUT", &en, Some(json!({"enabled": false}))).await,
-        (200, r#"{"ok":true,"enabled":false,"in_flight":false}"#.into())
+        (
+            200,
+            r#"{"ok":true,"enabled":false,"in_flight":false}"#.into()
+        )
     );
     assert!(!e.state.nai.tokens().await[0].fields().admin_enabled);
     assert_eq!(
@@ -949,8 +952,20 @@ async fn upstream_token_settings_endpoints() {
     // 上游页的账号行反映这些设置
     let a = &api.get_ok("/upstream").await["accounts"][0];
     assert_eq!(
-        (&a["token_id"], &a["position"], &a["usable"], &a["full"], &a["admin_enabled"]),
-        (&json!(id), &json!(1), &json!(false), &json!(false), &json!(false))
+        (
+            &a["token_id"],
+            &a["position"],
+            &a["usable"],
+            &a["full"],
+            &a["admin_enabled"]
+        ),
+        (
+            &json!(id),
+            &json!(1),
+            &json!(false),
+            &json!(false),
+            &json!(false)
+        )
     );
     assert_eq!(
         api.text("PUT", &en, Some(json!({"enabled": true}))).await.0,

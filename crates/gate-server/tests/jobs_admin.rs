@@ -102,4 +102,3 @@ async fn the_run_record_survives_a_restart() {
     s2.jobs.load(&s2.db).await.unwrap();
     assert!(s2.jobs.last().await.is_empty());
 }
-

@@ -33,7 +33,8 @@ impl RegistrationService {
             return denied("Key 领取暂未开放。");
         }
         // 0 = 一个名额也不给；9999 = 不限
-        if gate_core::is_unlimited(cfg.max_users) || cfg.max_users - self.count_active().await? > 0 {
+        if gate_core::is_unlimited(cfg.max_users) || cfg.max_users - self.count_active().await? > 0
+        {
             return Ok(cfg);
         }
         denied("领取名额已满，请稍后再试。")

@@ -718,7 +718,9 @@ async fn set_enabled(
     }
     drop(serial);
     let in_flight = !enabled && !state.nai.wait_idle(&id).await;
-    Ok(ok_json(&json!({"ok": true, "enabled": enabled, "in_flight": in_flight})))
+    Ok(ok_json(
+        &json!({"ok": true, "enabled": enabled, "in_flight": in_flight}),
+    ))
 }
 
 // ------------------------------------------------------------------ Anlas 核对

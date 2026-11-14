@@ -423,9 +423,7 @@ async fn rotate_token(
     let body = read_json_body(&parts.headers, body, BODY_LIMIT).await?;
     let token = field(&body, "token");
     if !gate_upstream::token_store::valid_share_token(&token) {
-        return Err(
-            HttpError::new(422, "Key 格式不对：应以 NAI- 或 pk- 开头").into(),
-        );
+        return Err(HttpError::new(422, "Key 格式不对：应以 NAI- 或 pk- 开头").into());
     }
     let new_id =
         crate::routes::admin::ops::upstream_share::patron_replace_token(&state, &old_id, &token)

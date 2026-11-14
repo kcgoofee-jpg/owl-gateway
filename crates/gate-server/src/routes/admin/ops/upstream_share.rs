@@ -53,7 +53,8 @@ async fn list(State(state): State<AppState>, _s: AdminSession) -> ApiResult {
         })
         .collect();
     // 各拼车网关并发问一遍份额：串行时 3 个号就能把页面拖到 9 秒以上（线上 p50=9.3s）。
-    let subs = futures::future::join_all(shares.iter().map(|t| fetch_subscription(&state, t))).await;
+    let subs =
+        futures::future::join_all(shares.iter().map(|t| fetch_subscription(&state, t))).await;
     let mut accounts = Vec::with_capacity(shares.len());
     for (token, sub) in shares.into_iter().zip(subs) {
         let fields = token.fields();

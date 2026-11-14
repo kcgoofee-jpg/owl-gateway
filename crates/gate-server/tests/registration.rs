@@ -460,7 +460,10 @@ async fn issued_key_expires_in_9999_days_by_default() {
     // 9999 天 = 事实上的永久；不再用 null 表示
     let created = row["created_at"].as_f64().unwrap();
     let expires = row["expires_at"].as_f64().unwrap();
-    assert!((expires - (created + 9999.0 * 86400.0)).abs() < 1.0, "{row:?}");
+    assert!(
+        (expires - (created + 9999.0 * 86400.0)).abs() < 1.0,
+        "{row:?}"
+    );
 }
 
 #[tokio::test]

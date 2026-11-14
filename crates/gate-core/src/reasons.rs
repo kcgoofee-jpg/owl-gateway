@@ -282,9 +282,7 @@ mod tests {
             PARAM
         );
         assert_eq!(
-            classify(
-                "出图排队超时（站点正忙，不是你的问题），没有扣费。请稍后再试"
-            ),
+            classify("出图排队超时（站点正忙，不是你的问题），没有扣费。请稍后再试"),
             QUEUE_TIMEOUT
         );
         assert_eq!(classify("未列入本站图片模型白名单"), FEATURE_OFF);

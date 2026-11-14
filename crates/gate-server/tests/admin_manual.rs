@@ -102,7 +102,6 @@ async fn manual_changes_are_written_with_their_record() {
     assert_eq!((s, v["after"].clone()), (200, Value::Null));
     let base = e.state.guard.with(|g| g.values["account_daily_cap"]);
     assert_eq!(e.state.guard.with(|g| g.daily_cap_for(&tid, NOW)), base);
-
 }
 
 #[tokio::test]
