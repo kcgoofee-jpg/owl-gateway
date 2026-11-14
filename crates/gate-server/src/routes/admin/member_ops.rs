@@ -185,6 +185,41 @@ pub(super) async fn set_key_tag(
     Ok(json!({"ok": true, "tag": tag}))
 }
 
+/// 站长手动私信成员（小批量、限频，见 `registration/dm.rs`）。body: `{text}`
+pub(super) async fn dm_member(
+    state: &AppState,
+    key_id: i64,
+    body: &JsonObject,
+) -> Result<Value, ApiError> {
+    use crate::registration::DM_MAX_CHARS;
+    let text = primitives::strip(&pstr(body, "text")).to_string();
+    if text.is_empty() {
+        return Err(http(422, "私信内容不能为空"));
+    }
+    if primitives::len_chars(&text) > DM_MAX_CHARS {
+        return Err(http(422, format!("私信最长 {DM_MAX_CHARS} 字")));
+    }
+    let row = load_key(state, key_id)
+        .await?
+        .ok_or_else(|| http(404, NO_KEY))?;
+    let Some(reg) = state.registration.clone() else {
+        return Err(http(409, "没有配置 Discord 机器人，无法私信"));
+    };
+    let discord_id = match state.db.registration_for_key(key_id).await? {
+        Some(r) => Some(r.discord_id),
+        None => row
+            .get("discord_id")
+            .and_then(Value::as_str)
+            .map(str::to_string),
+    }
+    .filter(|id| gate_core::member_policy::is_discord_id(id))
+    .ok_or_else(|| http(422, "该 Key 没有绑定 Discord，无法私信"))?;
+    reg.send_dm(&discord_id, &text)
+        .await
+        .map_err(|why| http(502, why))?;
+    Ok(json!({"ok": true, "discord_id": discord_id}))
+}
+
 /// 误判解除暂停（风险分、证据在 3.0 已随防分享一起删除，只剩 Key 暂停闸门）。
 pub(super) async fn clear_pause(state: &AppState, key_id: i64) -> Result<Value, ApiError> {
     state.pauses.remove(key_id);

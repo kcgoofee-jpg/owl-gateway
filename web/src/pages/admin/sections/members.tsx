@@ -26,6 +26,7 @@ import {
   CouponDialog,
   CredentialDialog,
   DisabledKeysDialog,
+  DmDialog,
   KeyRevealDialog,
   ResetQuotaDialog,
   TagDialog,
@@ -55,7 +56,7 @@ type Dlg =
   | { t: "edit"; id: number }
   | { t: "reveal"; title: string; intro: string; token: string }
   | {
-      t: "metadata" | "coupon" | "tag" | "disable" | "regen" | "reset" | "delete" | "ban";
+      t: "metadata" | "coupon" | "tag" | "dm" | "disable" | "regen" | "reset" | "delete" | "ban";
       id: number;
     }
   | { t: "bans" | "resetAll" | "disabled" };
@@ -185,6 +186,7 @@ export default function Members() {
       }
     },
     addTag: (m) => setDlg({ t: "tag", id: m.id }),
+    dm: (m) => setDlg({ t: "dm", id: m.id }),
     removeTag: (m, tag) => quick(removeTag(m.id, tag), `已移除：${tag}`),
     coupon: (m) => setDlg({ t: "coupon", id: m.id }),
     resetQuota: (m) => setDlg({ t: "reset", id: m.id }),
@@ -241,6 +243,11 @@ export default function Members() {
         if (!target) return null;
         return (
           <TagDialog keyId={target.id} name={memberLabel(target)} onClose={close} onDone={(t) => toast(t)} />
+        );
+      case "dm":
+        if (!target) return null;
+        return (
+          <DmDialog keyId={target.id} name={memberLabel(target)} onClose={close} onDone={(t) => toast(t)} />
         );
       case "bans":
         return <BansDialog onClose={close} onChanged={(t) => toast(t)} />;

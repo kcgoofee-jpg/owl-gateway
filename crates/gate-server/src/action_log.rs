@@ -33,6 +33,7 @@ pub const ADMIN_ACTIONS: &[(&str, &str, &str)] = &[
     ),
     ("DELETE", "/keys/{key_id}", "删除 Key"),
     ("PUT", "/keys/{key_id}/tags", "成员标签"),
+    ("POST", "/keys/{key_id}/dm", "私信成员"),
     ("POST", "/keys/{key_id}/coupons", "发重置券"),
     ("DELETE", "/keys/{key_id}/tags/{tag}", "移除成员标签"),
     ("PUT", "/runtime-limits", "修改排队与冷却"),

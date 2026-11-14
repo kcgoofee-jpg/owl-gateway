@@ -36,6 +36,8 @@ export const addTag = (id: number, tag: string, note: string) =>
   call("PUT", `${A}/keys/${id}/tags`, { tag, note });
 export const removeTag = (id: number, tag: string) =>
   call("DELETE", `${A}/keys/${id}/tags/${encodeURIComponent(tag)}`);
+/** 站长手动私信（奶妹发，小批量限频：每小时 10 条、每天 30 条） */
+export const dmMember = (id: number, text: string) => call("POST", `${A}/keys/${id}/dm`, { text });
 export const clearShare = (id: number) => call("POST", `${A}/keys/${id}/share-clear`);
 
 export const giveCoupon = (id: number, days: number, note: string, scope: ResetScope) =>

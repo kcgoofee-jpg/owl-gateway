@@ -19,7 +19,7 @@ async fn ready_reg() -> (Env, Admin, MockDiscord) {
     (e, a, d)
 }
 
-/// 机器人不私信成员：假 Discord 上不能出现「开私信频道」或「发消息」的请求。
+/// 机器人不自动私信成员：假 Discord 上不能出现「开私信频道」或「发消息」的请求（站长手动私信另有用例）。
 fn assert_no_dm(d: &MockDiscord) {
     let dm: Vec<_> = d
         .calls()
@@ -1081,4 +1081,41 @@ async fn delete_and_ban_uses_bound_identity_even_without_registration_service() 
             .unwrap()
             .is_some()
     );
+}
+
+#[tokio::test]
+async fn manual_dm_sends_plain_text_and_is_rate_limited() {
+    let (_e, a, d) = ready_reg().await;
+    let url = format!("{A}/keys/1/dm");
+    let r = a.req("POST", &url, Some(json!({"text": "  "}))).await;
+    assert_eq!(r.status, 422, "{}", r.text());
+    assert_no_dm(&d);
+
+    let r = a
+        .req("POST", &url, Some(json!({"text": "你好 @everyone"})))
+        .await;
+    assert_eq!(r.status, 200, "{}", r.text());
+    let calls = d.calls();
+    let open = calls
+        .iter()
+        .find(|c| c[1] == "/users/@me/channels")
+        .unwrap();
+    assert_eq!(open[2]["recipient_id"], "900000000000000001");
+    let msg = calls
+        .iter()
+        .find(|c| c[1] == "/channels/dm-1/messages")
+        .unwrap();
+    assert_eq!(msg[2]["content"], "你好 @everyone");
+    assert_eq!(msg[2]["allowed_mentions"], json!({"parse": []}));
+    assert!(a.actions().await.iter().any(|(act, ..)| act == "私信成员"));
+
+    for _ in 1..10 {
+        assert_eq!(
+            a.req("POST", &url, Some(json!({"text": "x"}))).await.status,
+            200
+        );
+    }
+    let r = a.req("POST", &url, Some(json!({"text": "x"}))).await;
+    assert_eq!(r.status, 502);
+    assert!(r.text().contains("每小时最多 10 条"), "{}", r.text());
 }
