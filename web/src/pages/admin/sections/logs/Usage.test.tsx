@@ -142,20 +142,29 @@ afterEach(() => {
 });
 
 describe("请求日志页", () => {
-  it("用芯片聚合错误，行上写清原因，名字跳到成员", async () => {
+  const chips = () => [...document.querySelectorAll(".lg-chips .lg-chip")].map((el) => el.textContent);
+
+  it("默认只给结果芯片，进入错误才展开上游错误分类；行上写清原因，名字跳到成员", async () => {
     host = document.createElement("div");
     document.body.append(host);
     await act(() => {
       render(<Usage />, host as HTMLElement);
     });
+    // 行上直接写清原因，不用展开
     expect(host.textContent).toContain("出图通道接不了");
     expect(host.textContent).toContain("参数不被接受");
     expect(host.textContent).toContain("未知字段：foo。");
-    expect(host.textContent).not.toContain("错误上游 503");
     const member = host.querySelector("a.lg-who") as HTMLAnchorElement | null;
     expect(member?.getAttribute("href")).toBe("/admin/members?open=12");
-    const chips = [...host.querySelectorAll(".lg-chips .lg-chip")].map((el) => el.textContent);
-    expect(chips.some((t) => t?.includes("错误"))).toBe(true);
-    expect(chips.some((t) => t?.includes("出图通道接不了"))).toBe(true);
+    // 默认视图只有「结果」一排；错误分类要点进「错误」才出现
+    expect(chips().some((t) => t?.includes("错误"))).toBe(true);
+    expect(chips().some((t) => t?.includes("出图通道接不了"))).toBe(false);
+
+    render(null, host);
+    loc.query = { status: "error" };
+    await act(() => {
+      render(<Usage />, host as HTMLElement);
+    });
+    expect(chips().some((t) => t?.includes("出图通道接不了"))).toBe(true);
   });
 });

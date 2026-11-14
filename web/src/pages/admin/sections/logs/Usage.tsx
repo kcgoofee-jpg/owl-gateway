@@ -9,7 +9,7 @@ import { LoadError, TableWrap } from "../_kit";
 import { asFeatures, type Feature, logFeatures } from "../features";
 import { FreshBar, useFrozenList, useScrolledPast } from "../live";
 import { memberHref, memberKeyOptions, memberLabel } from "../members/logic";
-import { Empty, MemberIdent, NARROW, Pager, useDebounced, useMedia, usePageData } from "../members/shared";
+import { Empty, MemberIdent, Pager, useDebounced, usePageData } from "../members/shared";
 import type { Member } from "../members/types";
 import {
   deliveryLabel,
@@ -257,7 +257,6 @@ const STATUS_CHIPS: Array<{ id: keyof LogSummary | ""; label: string; tone?: "wa
 
 export function Usage() {
   const { query, set } = useQueryState();
-  const narrow = useMedia(NARROW);
   const members = useAdmin<{ members: Member[] }>("/admin/api/members");
   const catalog = useAdmin<{
     features: Array<{ id: string; label: string }>;
@@ -390,23 +389,18 @@ export function Usage() {
   });
   const rows = live.rows ?? [];
   const summary = data?.summary;
-  const reasonChips = data?.reason_counts ?? [];
-  const errorChips = data?.error_counts ?? [];
-  const showReasons = reasonChips.length > 0 && (status === "" || status === "rejected");
-  const showErrors = errorChips.length > 0 && (status === "" || status === "error");
+  // 只看已选结果下的细分（拒绝原因 / 上游错误），没选就不占地方
+  const sub: CountChip[] =
+    status === "rejected"
+      ? (data?.reason_counts ?? [])
+      : status === "error"
+        ? (data?.error_counts ?? [])
+        : [];
+  const subActive = status === "rejected" ? reason : error;
 
   return (
     <div class="stack">
-      <div class="lg-bar">
-        {narrow ? (
-          <details class="lg-filters">
-            <summary class="btn">筛选</summary>
-            {filters}
-          </details>
-        ) : (
-          filters
-        )}
-      </div>
+      <div class="lg-bar">{filters}</div>
 
       {loadError && !data ? (
         <LoadError error={loadError} />
@@ -434,43 +428,21 @@ export function Usage() {
               }))}
             />
           )}
-          {showReasons && (
+          {sub.length > 0 && (
             <ChipBar
-              label="拒绝原因"
-              active={reason}
+              label={status === "rejected" ? "拒绝原因" : "上游错误"}
+              active={subActive}
               onToggle={(id) =>
                 set({
-                  status: "rejected",
-                  reason: id && id !== reason ? id : null,
-                  error: null,
+                  [status === "rejected" ? "reason" : "error"]: id && id !== subActive ? id : null,
                   page: null,
                 })
               }
-              items={reasonChips.map((c: CountChip) => ({
+              items={sub.map((c) => ({
                 id: c.code,
                 label: c.label,
                 count: c.count,
-                tone: "warn" as const,
-              }))}
-            />
-          )}
-          {showErrors && (
-            <ChipBar
-              label="上游错误"
-              active={error}
-              onToggle={(id) =>
-                set({
-                  status: "error",
-                  error: id && id !== error ? id : null,
-                  reason: null,
-                  page: null,
-                })
-              }
-              items={errorChips.map((c: CountChip) => ({
-                id: c.code,
-                label: c.label,
-                count: c.count,
-                tone: "danger" as const,
+                tone: status === "rejected" ? ("warn" as const) : ("danger" as const),
               }))}
             />
           )}
@@ -478,36 +450,6 @@ export function Usage() {
             <FreshBar fresh={live.fresh} changed={live.changed} onApply={live.apply} anchor={top} />
             {rows.length === 0 ? (
               <Empty title="暂无记录" />
-            ) : narrow ? (
-              <ul class="lg-cards" aria-label="请求日志">
-                {rows.map((l) => (
-                  <li key={l.id} class="lg-card">
-                    <div class="lg-card__top">
-                      <span class="small muted">{fullTime(l.ts)}</span>
-                      <Status l={l} onFilter={set} />
-                    </div>
-                    <div class="lg-card__meta">
-                      <Who l={l} memberByKey={memberByKey} />
-                      <What l={l} features={features} kinds={kinds} />
-                    </div>
-                    <div class="lg-card__meta small">
-                      <Timing l={l} />
-                      <Cost l={l} />
-                    </div>
-                    <div class="lg-card__meta small">
-                      <Client l={l} />
-                    </div>
-                    <details
-                      class="lg-card__more"
-                      open={open.has(l.id)}
-                      onToggle={(e) => setRowOpen(l.id, e.currentTarget.open)}
-                    >
-                      <summary class="small">详情</summary>
-                      <More l={l} memberByKey={memberByKey} memberOf={memberOf} onFilter={set} />
-                    </details>
-                  </li>
-                ))}
-              </ul>
             ) : (
               <TableWrap label="请求日志">
                 <table class="table lg-table">

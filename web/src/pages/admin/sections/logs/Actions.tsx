@@ -4,7 +4,7 @@ import { fullTime } from "../../../../lib/format";
 import { Badge, cx, Skeleton } from "../../../../ui";
 import { KindTag, LoadError, TableWrap } from "../_kit";
 import { FreshBar, useFrozenList, useScrolledPast } from "../live";
-import { Empty, NARROW, Pager, useMedia, usePageData } from "../members/shared";
+import { Empty, Pager, usePageData } from "../members/shared";
 import { ACTOR_FILTERS, actionKindGroups, actionLabel, actorFilter } from "./actionNames";
 import { intParam, useQueryState } from "./query";
 import type { ActionRow, ActionsResp } from "./types";
@@ -56,7 +56,7 @@ function ActionDetail({ value }: { value: string }) {
 
 export function Actions() {
   const { query, set } = useQueryState();
-  const narrow = useMedia(NARROW);
+
   const page = intParam(query.page, 1);
   const actor = actorFilter(query.actor);
   const kind = query.action ?? "";
@@ -122,31 +122,6 @@ export function Actions() {
           <FreshBar fresh={live.fresh} changed={live.changed} onApply={live.apply} anchor={top} />
           {rows.length === 0 ? (
             <Empty title="暂无记录" />
-          ) : narrow ? (
-            <ul class="lg-cards" aria-label="操作日志">
-              {rows.map((a) => (
-                <li key={a.id} class="lg-card">
-                  <div class="lg-card__top">
-                    <span class="small muted">{fullTime(a.ts)}</span>
-                    <Result a={a} />
-                  </div>
-                  <div>
-                    <b>{actionLabel(a.action)}</b>
-                  </div>
-                  <div class="small muted">
-                    <Actor a={a} />
-                  </div>
-                  <div class="small" title={a.target}>
-                    {targetText(a)}
-                  </div>
-                  {a.detail && (
-                    <div class="small muted">
-                      <ActionDetail value={a.detail} />
-                    </div>
-                  )}
-                </li>
-              ))}
-            </ul>
           ) : (
             <TableWrap label="操作日志">
               <table class="table lg-table">
