@@ -511,3 +511,84 @@ async fn upstream_anlas_budget_serializes_reservations_and_retains_unknown_resul
         0.0
     );
 }
+
+#[tokio::test]
+async fn retry_saved_success_commits_once_without_replacing_the_result() {
+    let dir = tempfile::tempdir().unwrap();
+    let db = Db::open(dir.path().join("gate.db")).unwrap();
+    let key: NewKey =
+        serde_json::from_value(json!({"name":"synthetic", "token":"nai-synthetic-retry-key"}))
+            .unwrap();
+    let id = db.create_key(&key, 1.0).await.unwrap()["id"]
+        .as_i64()
+        .unwrap();
+    db.reserve_request_settlement(
+        "retry",
+        "rid",
+        id,
+        "2026-10-25",
+        "2026-10",
+        false,
+        0.0,
+        0,
+        1,
+        1.0,
+    )
+    .await
+    .unwrap();
+    db.dispatch_request_settlement(
+        "retry",
+        "correlation",
+        "rid",
+        "2026-10-25",
+        "2026-10",
+        false,
+        0.0,
+        0,
+        1,
+        2.0,
+    )
+    .await
+    .unwrap();
+    let success = Success {
+        key_id: id,
+        key_name: "synthetic".into(),
+        kind: "image".into(),
+        day: "2026-10-25".into(),
+        images: 1,
+        legacy_free_images: 1,
+        ..Default::default()
+    };
+    db.run_script(vec!["CREATE TRIGGER reject_retry BEFORE INSERT ON usage_log BEGIN SELECT RAISE(ABORT, 'injected failure'); END".into()]).await.unwrap();
+    assert!(
+        db.record_success_settled(&success, "retry", 3.0)
+            .await
+            .is_err()
+    );
+    db.run_script(vec!["DROP TRIGGER reject_retry".into()])
+        .await
+        .unwrap();
+    let mut different = success.clone();
+    different.images = 2;
+    assert!(
+        db.record_success_settled(&different, "retry", 4.0)
+            .await
+            .is_err()
+    );
+    assert!(
+        db.commit_saved_request_result("retry", &serde_json::to_string(&different).unwrap(), 4.0)
+            .await
+            .is_err()
+    );
+    db.record_success_settled(&success, "retry", 5.0)
+        .await
+        .unwrap();
+    db.record_success_settled(&success, "retry", 6.0)
+        .await
+        .unwrap();
+    let counter = db.get_counter(id, "2026-10-25").await.unwrap();
+    assert_eq!(counter.images, 1);
+    let logs = db.member_logs(id, 0.0, 0, "", 10).await.unwrap();
+    assert_eq!(logs.len(), 1);
+    assert_eq!(logs[0]["ts"], 3.0);
+}

@@ -157,7 +157,7 @@ pub async fn authenticate(state: &AppState, parts: &Parts, passive: bool) -> Res
         }
         return Err(GateError::with_code(401, "未收到 API Key。请在客户端中填入本站发放的 Key。开发者参考：放在 Authorization: Bearer 请求头中", reasons::KEY_INVALID).into());
     }
-    let Some(row) = state.db.get_key_by_token(&token).await? else {
+    let Some(row) = state.db.get_key_by_token_for_auth(&token).await? else {
         // 被拦截的 IP 只拦「无效 Key」；持有有效 Key 的成员（如同一出口 IP 的其他人）不受影响。
         if wait > 0 {
             return Err(too_many().into());

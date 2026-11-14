@@ -60,6 +60,17 @@ impl Db {
         .await
     }
 
+    /// 凭据鉴权需要在同一次读取中核对身份是否已封禁。
+    pub async fn get_key_for_auth(&self, key_id: i64) -> Result<Option<Value>> {
+        self.read(move |c| {
+            c.query_row(
+                "SELECT api_keys.*, EXISTS(SELECT 1 FROM discord_bans WHERE discord_id=api_keys.discord_id) AS subject_banned FROM api_keys WHERE id=?",
+                [key_id],
+                value::row_json,
+            ).optional()
+        }).await
+    }
+
     pub async fn key_token_for_subject(&self, subject: &str) -> Result<Option<String>> {
         let subject = subject.to_string();
         self.read(move |c| {
@@ -84,6 +95,17 @@ impl Db {
             .optional()
         })
         .await
+    }
+
+    pub async fn get_key_by_token_for_auth(&self, token: &str) -> Result<Option<Value>> {
+        let token = token.to_string();
+        self.read(move |c| {
+            c.query_row(
+                "SELECT api_keys.*, EXISTS(SELECT 1 FROM discord_bans WHERE discord_id=api_keys.discord_id) AS subject_banned FROM api_keys WHERE token=?",
+                [&token],
+                value::row_json,
+            ).optional()
+        }).await
     }
 
     /// 换 token 但保留 id（在途请求、用量和限速仍归属于它）。token 撞了 UNIQUE 约束时返回 Err。
@@ -162,7 +184,7 @@ impl Db {
         &self,
         key_id: i64,
         fields: &serde_json::Map<String, Value>,
-    ) -> Result<()> {
+    ) -> Result<bool> {
         let mut sets = Vec::new();
         let mut vals: Vec<SqlValue> = Vec::new();
         for (k, v) in fields {
@@ -177,7 +199,7 @@ impl Db {
             }
         }
         if sets.is_empty() {
-            return Ok(());
+            return Ok(true);
         }
         // 改启用状态时一并记停用原因（3.0 新增）：启用就清掉；停用时调用方可传 `disabled_reason`，不传按站长手动停用
         if let Some(v) = fields.get("enabled") {
@@ -193,12 +215,23 @@ impl Db {
             }
         }
         vals.push(SqlValue::Integer(key_id));
-        let sql = format!("UPDATE api_keys SET {} WHERE id=?", sets.join(", "));
-        self.write(move |tx| {
-            tx.execute(&sql, rusqlite::params_from_iter(vals.iter()))?;
-            Ok(())
-        })
-        .await
+        // 全站重置后的旧凭据必须重新领取；检查与写入须在同一事务中，防止与重置竞态。
+        let status_guard = if fields.contains_key("enabled") {
+            " AND (enabled != 0 OR disabled_reason IS NULL OR disabled_reason = 'admin')"
+        } else {
+            ""
+        };
+        let ban_guard = if fields.get("enabled").is_some_and(values::enabled) {
+            " AND NOT EXISTS (SELECT 1 FROM discord_bans WHERE discord_id=api_keys.discord_id)"
+        } else {
+            ""
+        };
+        let sql = format!(
+            "UPDATE api_keys SET {} WHERE id=?{status_guard}{ban_guard}",
+            sets.join(", ")
+        );
+        self.write(move |tx| Ok(tx.execute(&sql, rusqlite::params_from_iter(vals.iter()))? == 1))
+            .await
     }
 
     /// 删 Key：触发器把 V5 标记归档进墓碑表并清掉当日额度基线；
@@ -219,6 +252,18 @@ impl Db {
             stmt.query_map([], value::row_json)?.collect()
         })
         .await
+    }
+
+    /// 可恢复的手动停用凭据；不读取 token，也不包含全站重置失效的 Key。
+    pub async fn list_manually_disabled_keys(&self) -> Result<Vec<Value>> {
+        self.read(|c| {
+            let mut stmt = c.prepare(
+                "SELECT id, name, discord_id, disabled_reason, created_at, expires_at, last_used_at, \
+                 EXISTS(SELECT 1 FROM discord_bans WHERE discord_id=api_keys.discord_id) AS banned FROM api_keys \
+                 WHERE enabled=0 AND (disabled_reason IS NULL OR disabled_reason=?) ORDER BY id DESC",
+            )?;
+            stmt.query_map([gate_core::key_status::ADMIN], value::row_json)?.collect()
+        }).await
     }
 
     pub async fn touch_key(&self, key_id: i64, now: f64) -> Result<()> {

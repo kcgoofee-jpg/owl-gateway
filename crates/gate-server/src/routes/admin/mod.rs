@@ -170,6 +170,15 @@ async fn audited(State(state): State<AppState>, req: Request, next: Next) -> Res
         );
     let who = actor(&state, &parts);
     let uri = parts.uri.clone();
+    if path == "/keys/{key_id}" && method == "DELETE" {
+        let ban = axum::extract::Query::<Vec<(String, String)>>::try_from_uri(&uri)
+            .ok()
+            .and_then(|q| q.0.into_iter().rev().find(|(k, _)| k == "ban"))
+            .map(|(_, v)| v);
+        if ban.as_deref() == Some("true") {
+            action = "删除 Key 并永久禁止领取".into();
+        }
+    }
     let resp = next.run(Request::from_parts(parts, body)).await;
     if !authed {
         return resp;
@@ -212,15 +221,6 @@ async fn audited(State(state): State<AppState>, req: Request, next: Next) -> Res
             .filter(|v| gate_core::values::enabled(v))
             .map(gate_core::validation::text)
             .unwrap_or_default();
-    }
-    if path == "/keys/{key_id}" && method == "DELETE" {
-        let ban = axum::extract::Query::<Vec<(String, String)>>::try_from_uri(&uri)
-            .ok()
-            .and_then(|q| q.0.into_iter().rev().find(|(k, _)| k == "ban"))
-            .map(|(_, v)| v);
-        if ban.as_deref() == Some("true") {
-            action = "删除 Key 并永久禁止领取".into();
-        }
     }
     let detail = if is_login {
         String::new()

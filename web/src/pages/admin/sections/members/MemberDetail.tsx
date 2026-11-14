@@ -3,7 +3,7 @@ import { ExternalLink, Plus } from "lucide-preact";
 import { useEffect, useState } from "preact/hooks";
 import { dayOf, fullTime, rel } from "../../../../lib/format";
 import { Badge, Button, copyText, Menu, toast } from "../../../../ui";
-import { useAdmin } from "../../data";
+import { refresh, useAdmin } from "../../data";
 import { exceptionCount, FEATURE_FIELDS, type PatronView, policyLabel } from "../member-policy";
 import type { SharePage, UpstreamPage } from "../upstream/core";
 import { call } from "./actions";
@@ -72,8 +72,9 @@ function IssueList(props: { m: MemberRow; issues: Issue[]; act: DetailActions })
 
 export function MemberDetail(props: { m: MemberRow; now: number; act: DetailActions }) {
   const { m, now, act } = props;
+  const [showKey, setShowKey] = useState(false);
   // Key 详情（凭据 / 累计用量 / 生效策略）按需取：列表首屏不再整包拉全部 Key。
-  // useAdmin 跟着全局刷新节拍自动重取；成员对象里的 key_count==0 时不必请求。
+  // 成员对象里的 key_count==0 时不必请求。
   const detail = useAdmin<{ key: KeyRow }>(m.key_count > 0 ? `/admin/api/keys/${m.id}` : null);
   const k = m.k ?? detail.data?.key;
   const verdict = memberVerdict(m, now);
@@ -87,7 +88,22 @@ export function MemberDetail(props: { m: MemberRow; now: number; act: DetailActi
     return (
       <div class="mb-detail">
         <p class="mb-verdict">{verdict.title}</p>
-        <p class="small muted">这把 Key 的详细信息读取失败，稍后会自动重试。</p>
+        {m.key_count === 0 ? (
+          <p class="small muted">该成员没有 Key。</p>
+        ) : detail.loading ? (
+          <p class="small muted" role="status">
+            正在读取 Key 详情…
+          </p>
+        ) : (
+          <div>
+            <p class="small muted" role="alert">
+              Key 详情读取失败，请重试。
+            </p>
+            <Button size="sm" onClick={refresh}>
+              重试
+            </Button>
+          </div>
+        )}
       </div>
     );
   }
@@ -122,7 +138,7 @@ export function MemberDetail(props: { m: MemberRow; now: number; act: DetailActi
             <dt>Anlas 每天</dt>
             <dd>{policy.daily_anlas > 0 ? policy.daily_anlas : "停用"}</dd>
             <dt>Anlas 每月</dt>
-            <dd>{policy.monthly_anlas}</dd>
+            <dd>{policy.monthly_anlas > 0 ? policy.monthly_anlas : "停用"}</dd>
             <dt>每分钟请求</dt>
             <dd>{policy.rpm} 次</dd>
             <dt>功能</dt>
@@ -188,14 +204,17 @@ export function MemberDetail(props: { m: MemberRow; now: number; act: DetailActi
             <dt>Key</dt>
             <dd>
               <span class="mb-key">
-                <code class="mb-key__v">{k.token}</code>
+                <code class="mb-key__v">{showKey ? k.token : "••••••••"}</code>
+                <Button size="sm" variant="ghost" onClick={() => setShowKey(!showKey)}>
+                  {showKey ? "隐藏" : "显示"}
+                </Button>
                 <Button
                   size="sm"
                   variant="ghost"
                   aria-label={`复制 ${memberLabel(m)} 的 Key`}
                   onClick={async () => {
                     const ok = await copyText(k.token);
-                    toast(ok ? "Key 已复制" : "复制失败，请手动选中复制", { error: !ok });
+                    toast(ok ? "Key 已复制" : "复制失败，请显示 Key 后手动复制", { error: !ok });
                   }}
                 >
                   复制

@@ -10,21 +10,33 @@ type Out = ReturnType<typeof useFrozenList<Row>>;
 let host: HTMLElement | null = null;
 let out: Out | null = null;
 
-function Probe(props: { rows: Row[] | null; frozen: boolean; k: string; pending: boolean }) {
+function Probe(props: {
+  rows: Row[] | null;
+  frozen: boolean;
+  k: string;
+  pending: boolean;
+  revision?: unknown;
+}) {
   out = useFrozenList(props.rows, (r) => r.id, {
     frozen: props.frozen,
     key: props.k,
     pending: props.pending,
+    revision: props.revision,
   });
   return null;
 }
 
-function show(rows: Row[] | null, frozen: boolean, k = "a", pending = false) {
+function show(rows: Row[] | null, frozen: boolean, k = "a", pending = false, revision?: unknown) {
   if (!host) {
     host = document.createElement("div");
     document.body.append(host);
   }
-  act(() => render(<Probe rows={rows} frozen={frozen} k={k} pending={pending} />, host as HTMLElement));
+  act(() =>
+    render(
+      <Probe rows={rows} frozen={frozen} k={k} pending={pending} revision={revision} />,
+      host as HTMLElement,
+    ),
+  );
   return out as Out;
 }
 
@@ -111,5 +123,19 @@ describe("useFrozenList（看的时候冻结）", () => {
     o = show([{ id: 7, v: "n" }, ...after], true);
     expect(ids(o)).toEqual([3]);
     expect(o.fresh).toBe(1);
+  });
+
+  it("计算出的新数组不应被误认为写入后的服务端结果", () => {
+    const before = {};
+    const after = {};
+    show(first, true, "a", false, before);
+    act(() => {
+      edits.value++;
+    });
+    show([...first], true, "a", false, before);
+    show([...first], true, "a", false, before);
+    const updated = [{ id: 3, v: "c" }];
+    expect(ids(show(updated, true, "a", false, after))).toEqual([3]);
+    expect(ids(show([{ id: 8, v: "new" }, ...updated], true, "a", false, {}))).toEqual([3]);
   });
 });

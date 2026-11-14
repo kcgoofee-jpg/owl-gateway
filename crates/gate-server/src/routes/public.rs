@@ -468,7 +468,7 @@ async fn user_login(State(state): State<AppState>, req: Request) -> ApiResult {
         .ok_or_else(|| {
             crate::error::GateError::with_code(400, "缺少 Key", gate_core::reasons::PARAM)
         })?;
-    let Some(row) = state.db.get_key_by_token(&token).await? else {
+    let Some(row) = state.db.get_key_by_token_for_auth(&token).await? else {
         return Err(crate::error::GateError::with_code(
             401,
             "API Key 无效。请检查客户端中的 Key 是否完整，或在 Discord 用 /resetkey 重新获取。",
@@ -476,7 +476,8 @@ async fn user_login(State(state): State<AppState>, req: Request) -> ApiResult {
         )
         .into());
     };
-    if row["enabled"].as_i64().unwrap_or(1) != 1 {
+    if row["enabled"].as_i64().unwrap_or(1) != 1 || row["subject_banned"].as_i64().unwrap_or(0) != 0
+    {
         return Err(crate::error::GateError::with_code(
             403,
             "这个 Key 已停用。",

@@ -43,7 +43,7 @@ function DefaultRules() {
     </Card>
   );
 }
-function ClaimForm({ ops }: { ops: Ops }) {
+export function ClaimForm({ ops }: { ops: Ops }) {
   const server = ops.registration;
   const record = useMemo(() => ({ ...server }), [server]);
   const bounds = server.fields;
@@ -66,18 +66,21 @@ function ClaimForm({ ops }: { ops: Ops }) {
     },
     record,
   );
-  const [draft, setDraft] = useState<{ base: Ops["registration"]; roles: RoleRule[]; open: boolean } | null>(
-    null,
-  );
+  const [draft, setDraft] = useState<{ roles: RoleRule[]; open: boolean } | null>(null);
+  const [confirmed, setConfirmed] = useState<{
+    base: Ops["registration"];
+    roles: RoleRule[];
+    open: boolean;
+  } | null>(null);
   const [saving, setSaving] = useState(false);
-  const roles = draft?.roles ?? server.roles;
-  const open = draft?.open ?? server.open;
-  const change = (roles: RoleRule[], openValue = open) =>
-    setDraft({ base: draft?.base ?? server, roles, open: openValue });
+  const baseline = confirmed?.base === server ? confirmed : server;
+  const roles = draft?.roles ?? baseline.roles;
+  const open = draft?.open ?? baseline.open;
+  const change = (roles: RoleRule[], openValue = open) => setDraft({ roles, open: openValue });
   const dirty =
     form.dirty ||
     (draft !== null &&
-      JSON.stringify({ roles, open }) !== JSON.stringify({ roles: server.roles, open: server.open }));
+      JSON.stringify({ roles, open }) !== JSON.stringify({ roles: baseline.roles, open: baseline.open }));
   useBusy(dirty);
   const valid =
     form.valid &&
@@ -85,12 +88,15 @@ function ClaimForm({ ops }: { ops: Ops }) {
     new Set(roles.map((role) => `${role.guild}/${role.role}`)).size === roles.length;
   const save = async () => {
     setSaving(true);
-    const body = { ...claimBody(server), ...form.changes(), open, roles };
+    const body = { ...claimBody(server), ...form.values(), open, roles };
     const ok = await act("PUT", "/admin/api/ops/registration", body, "领取条件已保存");
     setSaving(false);
     if (ok) {
       form.commit();
-      setDraft(null);
+      setConfirmed({ base: server, roles, open });
+      setDraft((current) =>
+        current && JSON.stringify(current) === JSON.stringify({ roles, open }) ? null : current,
+      );
     }
   };
   return (

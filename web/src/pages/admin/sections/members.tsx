@@ -25,6 +25,7 @@ import {
   BansDialog,
   CouponDialog,
   CredentialDialog,
+  DisabledKeysDialog,
   KeyRevealDialog,
   ResetQuotaDialog,
   TagDialog,
@@ -57,7 +58,7 @@ type Dlg =
       t: "metadata" | "coupon" | "tag" | "disable" | "regen" | "reset" | "delete" | "ban";
       id: number;
     }
-  | { t: "bans" | "resetAll" };
+  | { t: "bans" | "resetAll" | "disabled" };
 
 const PAGE = 60;
 
@@ -127,6 +128,7 @@ export default function Members() {
   const live = useFrozenList(list, (m) => m.id, {
     frozen: scrolled || open.size > 0 || dlg !== null,
     key: `${activeId}|${search}|${sort}|${dir}|${opened?.id ?? ""}`,
+    revision: mem.data,
   });
   const frozenList = live.rows ?? list;
   const shown = (() => {
@@ -242,6 +244,8 @@ export default function Members() {
         );
       case "bans":
         return <BansDialog onClose={close} onChanged={(t) => toast(t)} />;
+      case "disabled":
+        return <DisabledKeysDialog onClose={close} onChanged={(t) => toast(t)} />;
       case "resetAll":
         return (
           <ConfirmDialog
@@ -279,7 +283,7 @@ export default function Members() {
               return undefined;
             }}
           >
-            <p>停用后其 Key 立即不能使用，成员列表里不再显示；记录和用量保留，记录在操作日志里。</p>
+            <p>停用后该 Key 立即不能使用；记录和用量保留。可在成员页“更多 → 手动停用的 Key”中恢复。</p>
           </ConfirmDialog>
         );
       }
@@ -381,6 +385,7 @@ export default function Members() {
                 </Button>
               )}
               items={[
+                { label: "手动停用的 Key", onSelect: () => setDlg({ t: "disabled" }) },
                 { label: `封禁黑名单（${bans.data?.total ?? 0}）`, onSelect: () => setDlg({ t: "bans" }) },
                 { label: "全站重置 Key…", onSelect: () => setDlg({ t: "resetAll" }), danger: true },
               ]}

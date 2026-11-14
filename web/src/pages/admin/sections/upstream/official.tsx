@@ -3,7 +3,7 @@ import { Plus } from "lucide-preact";
 import { useEffect, useState } from "preact/hooks";
 import { sendJSON } from "../../../../lib/api";
 import { Button, Notice, toast } from "../../../../ui";
-import { tick, useAdmin } from "../../data";
+import { refreshAfterWrite, useAdmin } from "../../data";
 import { actOrError, ConfirmDialog, LoadError, Loading } from "../_kit";
 import { Sect } from "../system/forms";
 import { AccountCard } from "./accounts";
@@ -44,7 +44,7 @@ function InfoRefresh({ data }: { data: UpstreamPage }) {
       toast(e instanceof Error ? e.message : String(e), { error: true });
     } finally {
       setRunning(false);
-      tick.value++;
+      refreshAfterWrite();
     }
   };
   return (
@@ -74,7 +74,7 @@ export function OfficialUpstream() {
   return (
     <Sect>
       <div class="section-head">
-        <p>手动查询同时刷新账号状态和电量，间隔 5 分钟。页面自动刷新只更新网关读数。</p>
+        <p>查询官方信息会刷新账号状态和电量，间隔 5 分钟。后台刷新按钮只更新网关读数。</p>
         <span class="spacer" />
         {data && <InfoRefresh data={data} />}
         <Button variant="primary" onClick={() => setDialog({ mode: "add" })}>

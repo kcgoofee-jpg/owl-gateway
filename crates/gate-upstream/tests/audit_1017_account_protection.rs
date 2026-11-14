@@ -163,6 +163,7 @@ async fn image_post_does_not_follow_redirects() {
         .await
         .unwrap_err();
     assert_eq!(e.status, 502);
+    assert!(e.billing_uncertain);
     assert_eq!(
         up.requests_to("/ai/generate-image").len(),
         1,

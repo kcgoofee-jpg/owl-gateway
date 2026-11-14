@@ -24,6 +24,7 @@ mod view;
 pub fn router() -> Router<AppState> {
     Router::new()
         .route("/admin/api/keys", get(list_keys))
+        .route("/admin/api/keys/disabled", get(list_disabled_keys))
         .route(
             "/admin/api/keys/{key_id}",
             get(get_key).patch(patch_key).delete(delete_key),
@@ -154,6 +155,12 @@ pub(super) async fn full_key_json(
 
 async fn list_keys(State(state): State<AppState>, _s: AdminSession) -> R {
     Ok(ok_json(&member_ops::list_keys_with_counters(&state).await?))
+}
+
+async fn list_disabled_keys(State(state): State<AppState>, _s: AdminSession) -> R {
+    Ok(ok_json(
+        &json!({"keys": state.db.list_manually_disabled_keys().await?}),
+    ))
 }
 
 /// 单把 Key 的完整详情（含凭据与累计用量）：成员详情展开时按需取，

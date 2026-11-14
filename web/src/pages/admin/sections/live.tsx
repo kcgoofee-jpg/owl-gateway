@@ -18,7 +18,7 @@ type Snap<T> = {
   /** 记快照时的写操作次数 */
   edits: number;
   /** 写操作之后还没换掉的那份旧数据（等它被新数据替换才算「操作结果到了」） */
-  stale?: T[];
+  stale?: unknown;
 };
 
 /**
@@ -28,11 +28,15 @@ type Snap<T> = {
 export function useFrozenList<T>(
   latest: T[] | null | undefined,
   idOf: (row: T) => string | number,
-  opts: { frozen: boolean; key: string; pending?: boolean },
+  opts: { frozen: boolean; key: string; pending?: boolean; revision?: unknown },
 ): { rows: T[] | null; fresh: number; changed: boolean; apply: () => void } {
   const snap = useRef<Snap<T> | null>(null);
   const [, force] = useState(0);
   const e = edits.value;
+  const revision = opts.revision ?? latest;
+  const previous = useRef({ revision, edits: e });
+  const before = previous.current;
+  previous.current = { revision, edits: e };
   const none = { fresh: 0, changed: false, apply: () => {} };
   if (!latest) return { rows: snap.current?.rows ?? null, ...none };
   const s = snap.current;
@@ -49,8 +53,8 @@ export function useFrozenList<T>(
   }
   if (s.edits !== e) {
     // 自己刚做了操作：等这份旧数据被换掉（操作结果到了），再整份放进来
-    s.stale ??= latest;
-    if (latest !== s.stale) take();
+    s.stale ??= before.edits !== e ? before.revision : revision;
+    if (revision !== s.stale) take();
     return { rows: latest, ...none };
   }
   // 冻结：顺序和条目照旧，数值换成最新的；新冒出来的只计数

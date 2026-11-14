@@ -3,7 +3,7 @@ import { Plus } from "lucide-preact";
 import { useId, useState } from "preact/hooks";
 import { ApiError, sendJSON } from "../../../../lib/api";
 import { Badge, Button, Card, Dialog, Notice } from "../../../../ui";
-import { act, tick, useAdmin } from "../../data";
+import { act, refreshAfterWrite, useAdmin } from "../../data";
 import { actOrError, ConfirmDialog, LoadError, Loading, useBusy } from "../_kit";
 import { NumField, SaveBar, Sect, SwitchRow, useForm, withTone } from "../system/forms";
 import { RequestStats } from "./accounts";
@@ -57,7 +57,7 @@ function ShareDialog(props: {
           ? { token: token.trim(), image_host: host.trim(), allow_anlas: anlas }
           : { token: token.trim(), image_host: host.trim() },
       );
-      tick.value++;
+      refreshAfterWrite();
       setBusyNow(false);
       props.onClose();
     } catch (e) {
@@ -172,13 +172,16 @@ function ShareCard(props: {
   const st = tokenState(a);
   const form = useForm(shareLimitSpecs(props.limit), a as unknown as Record<string, unknown>);
   const [saving, setSaving] = useState(false);
+  const [partial, setPartial] = useState(false);
   const save = async () => {
     if (Number(form.raw("post_wait_max")) < Number(form.raw("post_wait_min"))) return;
     const ch = form.changes();
     setSaving(true);
+    setPartial(false);
     let ok = true;
+    let v5Saved = false;
     if ("v5_daily_limit" in ch)
-      ok =
+      v5Saved = ok =
         (await act(
           "PUT",
           `/admin/api/upstream-tokens/${encodeURIComponent(a.token_id)}/v5-limit`,
@@ -187,8 +190,9 @@ function ShareCard(props: {
         )) !== null;
     if (ok && Object.keys(ch).some((name) => name !== "v5_daily_limit")) {
       const names = ["allow_anlas", "daily_anlas", "rpm", "concurrency", "post_wait_min", "post_wait_max"];
+      const values = form.values();
       const settings = Object.fromEntries(
-        names.map((name) => [name, name in ch ? ch[name] : a[name as keyof ShareAccount]]),
+        names.map((name) => [name, values[name] ?? a[name as keyof ShareAccount]]),
       );
       ok =
         (await act(
@@ -198,6 +202,7 @@ function ShareCard(props: {
           "拼车设置已保存",
         )) !== null;
     }
+    if (!ok && v5Saved) setPartial(true);
     setSaving(false);
     if (ok) form.commit();
   };
@@ -243,6 +248,9 @@ function ShareCard(props: {
       </dl>
       {a.w1h && a.w24h ? <RequestStats a={a} /> : null}
       <form class="token__form share-settings" {...form.formProps} onSubmit={(e) => e.preventDefault()}>
+        {partial && (
+          <Notice tone="warn">免费 V5 日限已保存，其他拼车设置的结果未确认。请刷新核对后再重试。</Notice>
+        )}
         <NumField form={form} name="v5_daily_limit" disabled={saving} />
         <SwitchRow
           title="允许消耗 Anlas"

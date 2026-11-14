@@ -4,6 +4,7 @@ import { useEffect, useId, useState } from "preact/hooks";
 import { getJSON } from "../../../../lib/api";
 import { fullTime, rel, scopeText } from "../../../../lib/format";
 import { Badge, Button, CopyField, Dialog, Field, Notice, Skeleton } from "../../../../ui";
+import { useAdmin } from "../../data";
 import { Avatar, ConfirmDialog, TableWrap, useBusy } from "../_kit";
 import { parseField } from "../system/core";
 import { addBan, addTag, call, giveCoupon, removeBan, resetDailyQuota } from "./actions";
@@ -11,6 +12,109 @@ import { scopeTextOf } from "./logic";
 import { Empty, ResetScopeChecks, useDebounced, usePageData } from "./shared";
 import type { Ban, Coupon } from "./types";
 import { isDiscordId } from "./validate";
+
+type DisabledKey = {
+  id: number;
+  name: string;
+  discord_id: string | null;
+  disabled_reason: string | null;
+  banned: number;
+  expires_at: number | null;
+};
+
+export function DisabledKeysDialog(props: { onClose: () => void; onChanged: (text: string) => void }) {
+  const query = useAdmin<{ keys: DisabledKey[] }>("/admin/api/keys/disabled");
+  const [selected, setSelected] = useState<DisabledKey | null>(null);
+  const [search, setSearch] = useState("");
+  const term = search.trim().toLowerCase();
+  const keys = (query.data?.keys ?? []).filter((key) =>
+    [key.name, key.discord_id ?? "", String(key.id)].some((value) => value.toLowerCase().includes(term)),
+  );
+  useBusy();
+  return (
+    <>
+      <Dialog
+        open
+        wide
+        title="手动停用的 Key"
+        onClose={props.onClose}
+        footer={<Button onClick={props.onClose}>关闭</Button>}
+      >
+        <p class="small muted">
+          这里列出手动停用及历史未记录停用原因的 Key。恢复只改变启用状态；未绑定
+          Discord、已过期或受其他限制时仍无法使用。
+        </p>
+        <Field label="搜索">
+          <input
+            class="input"
+            type="search"
+            placeholder="名称、Discord ID 或 Key 编号"
+            value={search}
+            onInput={(event) => setSearch(event.currentTarget.value)}
+          />
+        </Field>
+        {query.loading && <p role="status">正在读取…</p>}
+        {query.error && <Notice tone="danger">读取失败：{query.error}</Notice>}
+        {query.data && (
+          <TableWrap label="手动停用的 Key">
+            <table class="table">
+              <thead>
+                <tr>
+                  <th scope="col">名称</th>
+                  <th scope="col">Discord ID</th>
+                  <th scope="col">停用原因</th>
+                  <th scope="col">到期</th>
+                  <th scope="col">操作</th>
+                </tr>
+              </thead>
+              <tbody>
+                {keys.map((key) => (
+                  <tr key={key.id}>
+                    <td>
+                      {key.name} · Key #{key.id}
+                    </td>
+                    <td>{key.discord_id ?? "未绑定"}</td>
+                    <td>
+                      {key.disabled_reason === "admin" ? "手动停用" : "历史记录未注明"}
+                      {key.banned === 1 && " · 已封禁"}
+                    </td>
+                    <td>{key.expires_at ? fullTime(key.expires_at) : "永久"}</td>
+                    <td>
+                      <Button
+                        size="sm"
+                        disabled={key.banned === 1}
+                        title={key.banned === 1 ? "请先移出封禁黑名单" : undefined}
+                        onClick={() => setSelected(key)}
+                      >
+                        恢复
+                      </Button>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+            {keys.length === 0 && <Empty title={term ? "没有匹配的 Key" : "没有手动停用的 Key"} />}
+          </TableWrap>
+        )}
+      </Dialog>
+      {selected && (
+        <ConfirmDialog
+          title={`恢复「${selected.name}」的 Key #${selected.id}`}
+          confirmText="恢复"
+          onClose={() => setSelected(null)}
+          onConfirm={async () => {
+            const result = await call("PATCH", `/admin/api/keys/${selected.id}`, { enabled: true });
+            if (!result.ok) return result.error;
+            props.onChanged(`已恢复「${selected.name}」的 Key`);
+            return undefined;
+          }}
+        >
+          <p>将恢复原 Key 的启用状态；它仍受 Discord 绑定、到期时间、成员规则和全站限制约束。</p>
+        </ConfirmDialog>
+      )}
+    </>
+  );
+}
 
 /* ---------------- 通用：带表单的对话框 ---------------- */
 function FormDialog(props: {

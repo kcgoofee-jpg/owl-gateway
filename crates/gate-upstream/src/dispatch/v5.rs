@@ -246,7 +246,11 @@ impl<H: Hooks> NaiClient<H> {
                         fl.finish().await;
                         return Err(UpstreamError::uncertain(
                             502,
-                            "出图时与 NovelAI 的连接中断，未扣费。请稍后手动重试。给客户端作者：请勿自动重试",
+                            if uncertain {
+                                "出图连接中断，执行结果未知；请先核对请求记录，不要自动重试。"
+                            } else {
+                                "未能连接上游，请求未执行、未扣费。请稍后重试。"
+                            },
                             uncertain,
                         ));
                     }
@@ -322,10 +326,17 @@ impl<H: Hooks> NaiClient<H> {
                 } else {
                     502
                 };
+                let uncertain = status >= 500 || (300..400).contains(&status);
                 Some(UpstreamError::uncertain(
                     s,
-                    format!("NovelAI 未完成出图，未扣费。请稍后重试。状态码 {s}。"),
-                    status >= 500,
+                    if uncertain {
+                        format!(
+                            "上游响应异常（{s}），执行结果未知；请先核对请求记录，不要自动重试。"
+                        )
+                    } else {
+                        format!("NovelAI 未完成出图，未扣费。请稍后重试。状态码 {s}。")
+                    },
+                    uncertain,
                 ))
             } else {
                 None

@@ -24,6 +24,8 @@ export type Form = {
   valid: boolean;
   /** 已改且合法的字段 → 解析后的值（只提交这些） */
   changes: () => Record<string, number | string | boolean>;
+  /** 当前表单值，包括刚保存但服务器刷新尚未返回的值。 */
+  values: () => Record<string, number | string | boolean>;
   /** 保存成功后调用：在下一次从服务端取到新数据之前，先把改动当作已保存的值显示 */
   commit: () => void;
   reset: () => void;
@@ -91,11 +93,27 @@ export function useForm(specs: Record<string, FieldSpec>, server: Record<string,
       }
       return out;
     },
+    values: () => {
+      const out: Record<string, number | string | boolean> = {};
+      for (const n of names) {
+        const p = parseField(specs[n] as FieldSpec, raw(n));
+        if (p.ok) out[n] = p.value;
+      }
+      return out;
+    },
     commit: () => {
       const vals: Record<string, Raw> = {};
       for (const n of dirtyNames) vals[n] = raw(n);
       setOverlay({ base: server, vals: { ...(overlay.base === server ? overlay.vals : {}), ...vals } });
-      setDraft({});
+      // 保存期间允许继续编辑；只清除提交时的原值，保留后来输入的内容。
+      setDraft((current) => {
+        const next = { ...current };
+        for (const n of dirtyNames) {
+          const spec = specs[n];
+          if (spec && n in next && sameRaw(spec, next[n] as Raw, vals[n] as Raw)) delete next[n];
+        }
+        return next;
+      });
     },
     reset: () => setDraft({}),
     formProps: {

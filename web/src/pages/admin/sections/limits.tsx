@@ -1,5 +1,5 @@
 import { useMemo, useState } from "preact/hooks";
-import { Card } from "../../../ui";
+import { Card, Notice } from "../../../ui";
 import { act, useAdmin } from "../data";
 import { CardPending, SectionHead } from "./_kit";
 import {
@@ -67,7 +67,7 @@ function BudgetCard() {
   if (!query.data || !server || !fields)
     return <CardPending title="全站预算（0 停用）" loading={query.loading} error={query.error} />;
   const save = async () => {
-    const value = { ...server, ...form.changes() };
+    const value = { ...server, ...form.values() };
     setSaving(true);
     const ok = await act(
       "PUT",
@@ -135,6 +135,7 @@ function GuardCard() {
   );
   const form = useForm(specs, server);
   const [saving, setSaving] = useState(false);
+  const [partial, setPartial] = useState(false);
   if (!guard.data || !runtime.data)
     return (
       <CardPending
@@ -149,11 +150,15 @@ function GuardCard() {
     const g: Record<string, unknown> = {};
     for (const [k, v] of Object.entries(ch)) (RUNTIME_NAMES.includes(k) ? run : g)[k] = v;
     setSaving(true);
+    setPartial(false);
     let ok = true;
+    let runtimeSaved = false;
     if (Object.keys(run).length)
-      ok = (await act("PUT", "/admin/api/runtime-limits", run, "运行限制已保存并生效")) !== null && ok;
+      runtimeSaved = ok =
+        (await act("PUT", "/admin/api/runtime-limits", run, "运行限制已保存并生效")) !== null;
     if (ok && Object.keys(g).length)
       ok = (await act("PUT", "/admin/api/guard", g, "账号保护已保存，立即生效")) !== null;
+    if (!ok && runtimeSaved) setPartial(true);
     setSaving(false);
     if (ok) form.commit();
   };
@@ -163,6 +168,11 @@ function GuardCard() {
   return (
     <Card title="账号保护与节奏">
       <form {...form.formProps} onSubmit={(e) => e.preventDefault()}>
+        {partial && (
+          <Notice tone="warn">
+            排队超时和冷却设置已保存，账号保护设置的结果未确认。请刷新核对后再重试。
+          </Notice>
+        )}
         {GUARD_GROUPS.map((group) => (
           <div class="form-section" key={group.title}>
             <div class="form-section__title">{group.title}</div>

@@ -1,3 +1,9 @@
+.mr-edit-fields {
+  border: 0;
+  margin: 0;
+  padding: 0;
+  min-width: 0;
+}
 .mr-source {
   display: flex;
   align-items: center;

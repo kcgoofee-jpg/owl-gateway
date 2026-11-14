@@ -569,6 +569,7 @@ async fn perform_stream(
     let gate_err = match outcome {
         Ok(Ok(())) => None,
         Ok(Err(StreamFail::Upstream(status, message, uncertain))) => {
+            let uncertain = uncertain || (billing_uncertain && dispatched.load(Ordering::SeqCst));
             billing_uncertain |= uncertain;
             // 上游 error 事件的原话只进日志，不转发给客户端（可能含上游内部信息）
             failure = Some(if tracker.error_detail().is_empty() {
@@ -579,7 +580,11 @@ async fn perform_stream(
             sink.error(
                 GateError::with_code(
                     status,
-                    message,
+                    if uncertain {
+                        "上游流式请求未完整结束，未完成图片的执行结果未知。请先查看“我的请求”，不要自动重试。".to_string()
+                    } else {
+                        message
+                    },
                     if uncertain {
                         "execution_unknown"
                     } else {
@@ -587,6 +592,7 @@ async fn perform_stream(
                     },
                 )
                 .uncertain(uncertain)
+                .retryable(!uncertain)
                 .from_upstream(true),
             )
             .await;
@@ -626,31 +632,42 @@ async fn perform_stream(
             {
                 p.insert("n_samples".into(), json!(completed));
             }
-            let settled = policy::estimate_image_cost(&completed_body, true, est.v5 > 0)
-                .map(Est::from_cost)
-                .unwrap_or(est);
+            let settled_estimate =
+                policy::estimate_image_cost(&completed_body, true, est.v5 > 0).map(Est::from_cost);
+            let mut settled = settled_estimate.clone().unwrap_or(est);
+            // 站长的付费 V5 也按完成张数占个人和全站 V5 额度，与非流式路径一致。
+            if key.owner_image_full && policy::is_v5_model(&model) {
+                settled.v5 = completed;
+            }
             settled_anlas = settled.anlas;
             let remaining_images = (image_count - completed).max(0);
-            let mut remaining_body = prep.body.clone();
-            if let Some(p) = remaining_body
-                .get_mut("parameters")
-                .and_then(Value::as_object_mut)
-            {
-                p.insert("n_samples".into(), json!(remaining_images));
-            }
             let remaining = if billing_uncertain && remaining_images > 0 {
-                policy::estimate_image_cost(&remaining_body, true, est.v5 > 0)
-                    .map(Est::from_cost)
-                    .unwrap_or_default()
+                // 首张免费只能用于整批一次。用整批预算减去已确认部分，避免再次给未知部分减免。
+                Est {
+                    anlas: settled_estimate
+                        .as_ref()
+                        .map_or(est.anlas, |s| (est.anlas - s.anlas).max(0.0)),
+                    v5: if key.owner_image_full && policy::is_v5_model(&model) {
+                        (est.v5 - completed).max(0)
+                    } else {
+                        est.v5
+                    },
+                    is_vibe: est.is_vibe,
+                }
             } else {
                 Est::default()
+            };
+            let remaining_legacy = if billing_uncertain && remaining_images > 0 {
+                prep.legacy_free_images
+            } else {
+                0
             };
             let suffix = if completed < image_count {
                 format!("; 完成 {completed}/{image_count}")
             } else {
                 String::new()
             };
-            state
+            let recorded = state
                 .settle_record(
                     ctx,
                     &key,
@@ -667,30 +684,14 @@ async fn perform_stream(
                     .execution_unknown(
                         billing_uncertain && remaining_images > 0,
                         remaining.anlas,
-                        remaining
-                            .v5
-                            .max(if est.v5 > 0 { remaining_images } else { 0 }),
-                        if prep.legacy_free_images > 0 {
-                            remaining_images
-                        } else {
-                            0
-                        },
+                        remaining.v5,
+                        remaining_legacy,
                     ),
                 )
                 .await;
-            if billing_uncertain && remaining_images > 0 {
+            if recorded && billing_uncertain && remaining_images > 0 {
                 reserved
-                    .set_remaining_budget(
-                        remaining.anlas,
-                        remaining
-                            .v5
-                            .max(if est.v5 > 0 { remaining_images } else { 0 }),
-                        if prep.legacy_free_images > 0 {
-                            remaining_images
-                        } else {
-                            0
-                        },
-                    )
+                    .set_remaining_budget(remaining.anlas, remaining.v5, remaining_legacy)
                     .await;
             }
         }

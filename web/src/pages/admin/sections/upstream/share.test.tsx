@@ -122,3 +122,22 @@ it("separates donated shares from relay-platform shares by source", async () => 
   expect(root.textContent).not.toContain("拼车 1");
   expect(root.textContent).not.toContain("添加拼车网关");
 });
+it("keeps recently saved settings in the next full save before the server refresh", async () => {
+  await show();
+  await fill("出图 RPM", "8");
+  await renderAct(async () => root.querySelector<HTMLButtonElement>("form .savebar button")?.click());
+  await renderAct(async () => {});
+  await fill("出图并发", "2");
+  await renderAct(async () => root.querySelector<HTMLButtonElement>("form .savebar button")?.click());
+  expect(vi.mocked(act).mock.calls[1]?.[2]).toMatchObject({ rpm: 8, concurrency: 2 });
+});
+it("reports a partially saved two-request update", async () => {
+  await show();
+  await fill("免费 V5 日限", "90");
+  await fill("出图 RPM", "8");
+  vi.mocked(act).mockResolvedValueOnce({ ok: true }).mockResolvedValueOnce(null);
+  await renderAct(async () => root.querySelector<HTMLButtonElement>("form .savebar button")?.click());
+  await renderAct(async () => {});
+  expect(root.textContent).toContain("免费 V5 日限已保存");
+  expect(root.textContent).toContain("其他拼车设置的结果未确认");
+});

@@ -75,14 +75,14 @@ export const GUARD_COPY: Record<string, { label: string; hint: string; unit?: st
   },
   post_jitter_min: {
     label: "每张出完后歇（最少）",
-    hint: "这个账号每张出完后歇 N～M 秒（随机）再接下一张；至少 1 秒",
+    hint: "官方账号每张出完后歇 N～M 秒（随机）；拼车上游使用各自的等待设置。至少 1 秒",
     unit: "秒",
   },
   post_jitter_max: { label: "每张出完后歇（最多）", hint: "小于最少时按最少", unit: "秒" },
-  queue_per_member: { label: "每人排队", hint: "每个成员最多同时排几张", unit: "张" },
+  queue_per_member: { label: "每人排队", hint: "每个成员最多同时排几张，正在生成的不算", unit: "张" },
   queue_per_account: {
     label: "账号排队",
-    hint: "每个上游账号最多同时排几张；全站上限 = 这个数 × 可用账号数，再按排队超时内能开始的张数收紧",
+    hint: "每个上游账号的全站排队及生成上限，再按超时内能开始的张数收紧；0 表示不设这一上限，仍按可在超时内开始的张数计算",
     unit: "张",
   },
 };

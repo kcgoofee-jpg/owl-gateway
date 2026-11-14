@@ -216,11 +216,6 @@ async fn image_tool_upstream_5xx_marks_unknown_in_body_and_settlement() {
         "/ai/upscale",
         Reply::json(500, &json!({"message":"temporary upstream error"})),
     );
-    // 派发层对 image lane 的干净 5xx 会先结算再原账号重试一次：第二次仍 500 才透传 502
-    e.mock.push(
-        "/ai/upscale",
-        Reply::json(500, &json!({"message":"temporary upstream error"})),
-    );
 
     let (status, _, body) = call(
         &e.state,
@@ -236,6 +231,7 @@ async fn image_tool_upstream_5xx_marks_unknown_in_body_and_settlement() {
     assert_eq!(response["error"]["execution_unknown"], true);
     assert_eq!(response["error"]["retryable"], false);
     assert!(response["message"].as_str().unwrap().contains("结果未知"));
+    assert_eq!(e.mock.requests_to("/ai/upscale").len(), 1);
     let row = logs(&e.state)
         .await
         .into_iter()
@@ -1467,14 +1463,23 @@ async fn disabled_key_message_depends_on_reason() {
         err_message(&body)
     );
 
-    // 重新启用：原因清掉；站长手动停用：另一种说明
+    // 全站重置的凭据不能重新启用；之后用合成数据模拟一把新 Key 测试手动停用。
     let on = json!({"enabled": true});
+    assert!(
+        !e.state
+            .db
+            .update_key(1, on.as_object().unwrap())
+            .await
+            .unwrap()
+    );
+    assert_eq!(reason(e.state.clone()).await, "site_reset");
     e.state
         .db
-        .update_key(1, on.as_object().unwrap())
+        .run_script(vec![
+            "UPDATE api_keys SET enabled=1,disabled_reason=NULL WHERE id=1".into(),
+        ])
         .await
         .unwrap();
-    assert_eq!(reason(e.state.clone()).await, Value::Null);
     let off = json!({"enabled": false});
     e.state
         .db

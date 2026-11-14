@@ -81,8 +81,12 @@ async function request<T>(method: string, url: string, body?: unknown, init?: Re
     return (await parse(res)) as T;
   } catch (e) {
     if (e instanceof ApiError) throw e;
-    // abort / 网络错误：给用户一句可读的，而不是裸的 "The operation was aborted"
-    throw new ApiError(0, `请求超时或网络中断（${REQUEST_TIMEOUT_MS / 1000} 秒），请稍后再试。`);
+    // 写请求可能已被服务端处理，不能暗示用户安全重发。
+    const message =
+      method === "GET"
+        ? `请求超时或网络中断（${REQUEST_TIMEOUT_MS / 1000} 秒），请稍后再试。`
+        : "请求超时或网络中断，操作可能已经生效；请先刷新检查结果，再决定是否重试。";
+    throw new ApiError(0, message);
   } finally {
     clearTimeout(timer);
   }

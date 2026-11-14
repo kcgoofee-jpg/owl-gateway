@@ -2,11 +2,11 @@ import { useId, useMemo, useState } from "preact/hooks";
 import { Button, Dialog, Notice } from "../../../../ui";
 import { useBusy } from "../_kit";
 import {
-  overridesOf,
+  type MemberPolicy,
+  mergeOverrides,
   POLICY_FIELDS,
   type PolicyBound,
   PolicyFields,
-  policyFromForm,
   policySpecs,
 } from "../member-policy";
 import { toRaw } from "../system/core";
@@ -29,7 +29,9 @@ export function KeyDialog(props: {
   const id = useId();
   const [pending, setPending] = useState(false);
   const [error, setError] = useState("");
-  const close = useCloseGuard(form.dirty, props.onClose);
+  const [resetFields, setResetFields] = useState<Set<keyof MemberPolicy>>(new Set());
+  const dirty = form.dirty || [...resetFields].some((name) => snapshot.overrides[name] != null);
+  const close = useCloseGuard(dirty, props.onClose);
   useBusy();
   const subject = props.target.discord_id ?? props.target.discord?.id;
   const reset = () => {
@@ -37,16 +39,16 @@ export function KeyDialog(props: {
       const spec = specs[name];
       if (spec) form.set(name, toRaw(spec, snapshot.defaults[name]));
     }
+    setResetFields(new Set(POLICY_FIELDS));
   };
   const save = async () => {
     if (!subject || !form.valid || pending) return;
     setPending(true);
     setError("");
-    const effective = policyFromForm(snapshot.effective, form);
     const result = await call(
       "PUT",
       `/admin/api/members/${encodeURIComponent(subject)}/rules`,
-      overridesOf(snapshot.defaults, effective),
+      mergeOverrides(snapshot.defaults, snapshot.overrides, form.changes(), resetFields),
     );
     setPending(false);
     if (result.ok) props.onSaved("成员规则已保存");
@@ -58,17 +60,25 @@ export function KeyDialog(props: {
       open
       wide
       title={`${memberLabel(props.target)} · 成员例外`}
-      onClose={close.tryClose}
+      onClose={() => {
+        if (!pending) close.tryClose();
+      }}
       footer={
         <>
-          {!snapshot.owner_image && <Button onClick={reset}>全部恢复默认</Button>}
+          {!snapshot.owner_image && (
+            <Button onClick={reset} disabled={pending}>
+              全部恢复默认
+            </Button>
+          )}
           <span class="spacer" />
-          <Button onClick={close.tryClose}>取消</Button>
+          <Button onClick={close.tryClose} disabled={pending}>
+            取消
+          </Button>
           <Button
             type="submit"
             form={id}
             variant="primary"
-            disabled={!subject || !form.dirty || !form.valid || pending}
+            disabled={!subject || !dirty || !form.valid || pending}
           >
             {pending ? "保存中…" : "保存"}
           </Button>
@@ -99,11 +109,23 @@ export function KeyDialog(props: {
             全部图片功能已开启；这里只修改个人额度和限速。普通测试请在成员详情点“恢复普通默认”。
           </p>
         )}
-        <PolicyFields
-          form={form}
-          defaults={snapshot.defaults}
-          fullImage={snapshot.owner_image?.enabled === true}
-        />
+        <fieldset class="mr-edit-fields" disabled={pending}>
+          <PolicyFields
+            form={form}
+            defaults={snapshot.defaults}
+            overrides={snapshot.overrides}
+            resetFields={resetFields}
+            onReset={(name) => setResetFields((prev) => new Set([...prev, name]))}
+            onEdit={(name) =>
+              setResetFields((prev) => {
+                const next = new Set(prev);
+                next.delete(name);
+                return next;
+              })
+            }
+            fullImage={snapshot.owner_image?.enabled === true}
+          />
+        </fieldset>
         {error && (
           <p class="xa-formerr" role="alert">
             {error}

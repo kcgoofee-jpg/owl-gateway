@@ -16,9 +16,16 @@ export function refresh(): void {
   tick.value++;
 }
 
+/** 写入或服务端状态变更后，不能复用变更之前仍在途的读取。 */
+export function refreshAfterWrite(): void {
+  edits.value++;
+  tick.value++;
+}
+
 /** 跨分区缓存：切 tab 先秒显上次结果，只有刷新 / 写操作（tick 变化）后才重取。 */
 const cache = new Map<string, unknown>();
 const fetchedTick = new Map<string, number>();
+let sessionGeneration = 0;
 
 /** 慢请求跨自动刷新复用；写操作之后必须重新请求。只保留最近 32 个地址的结果。 */
 const inflight = new Map<string, { t: number; edits: number; pending: boolean; p: Promise<unknown> }>();
@@ -51,8 +58,11 @@ export function useAdmin<T>(url: string | null): {
   error: string | null;
   loading: boolean;
 } {
-  const [state, setState] = useState<{ url: string; data: T | null; error: string | null } | null>(() =>
-    url && cache.has(url) ? { url, data: cache.get(url) as T, error: null } : null,
+  const [state, setState] = useState<{ url: string; data: T | null; error: string | null; t: number } | null>(
+    () =>
+      url && cache.has(url)
+        ? { url, data: cache.get(url) as T, error: null, t: fetchedTick.get(url) ?? -1 }
+        : null,
   );
   const t = tick.value;
   useEffect(() => {
@@ -60,13 +70,18 @@ export function useAdmin<T>(url: string | null): {
     // 缓存已是当前节拍的结果：秒显、不发请求（切 tab 不重取）。
     if (cache.has(url) && fetchedTick.get(url) === t) {
       setState((cur) =>
-        cur?.url === url && cur.error === null ? cur : { url, data: cache.get(url) as T, error: null },
+        cur?.url === url && cur.error === null && cur.t === t
+          ? cur
+          : { url, data: cache.get(url) as T, error: null, t },
       );
       return;
     }
     let alive = true;
+    const generation = sessionGeneration;
     getShared<T>(url, t)
       .then((data) => {
+        // 旧请求可能在更新后的请求之后才完成，不能让它覆盖新缓存。
+        if (!alive || generation !== sessionGeneration) return;
         cache.set(url, data);
         fetchedTick.set(url, t);
         // 与 getShared 同样的上限：日志筛选/翻页会产生大量地址，不能无限留着。
@@ -75,20 +90,20 @@ export function useAdmin<T>(url: string | null): {
           cache.delete(old);
           fetchedTick.delete(old);
         }
-        if (alive)
-          setState((current) =>
-            current?.url === url && current.data === data && current.error === null
-              ? current
-              : { url, data, error: null },
-          );
+        setState((current) =>
+          current?.url === url && current.data === data && current.error === null && current.t === t
+            ? current
+            : { url, data, error: null, t },
+        );
       })
       .catch((e: unknown) => {
-        if (!alive) return;
+        if (!alive || generation !== sessionGeneration) return;
         if (e instanceof ApiError && e.status === 401) endSession();
         setState((s) => ({
           url,
           data: s?.url === url ? s.data : ((cache.get(url) as T | undefined) ?? null),
           error: e instanceof Error ? e.message : String(e),
+          t,
         }));
       });
     return () => {
@@ -96,6 +111,7 @@ export function useAdmin<T>(url: string | null): {
     };
   }, [url, t]);
   if (!state || state.url !== url) return { data: null, error: null, loading: !!url };
+  if (state.t !== t && !state.data) return { data: null, error: null, loading: !!url };
   return { data: state.data, error: state.error, loading: false };
 }
 
@@ -117,8 +133,7 @@ export async function adminWrite<T = unknown>(
   try {
     const data = await sendJSON<T>(method, url, body, options?.headers);
     if (notify === "toast" && okText) toast(okText);
-    edits.value++;
-    tick.value++;
+    refreshAfterWrite();
     return { ok: true, data };
   } catch (e) {
     if (e instanceof ApiError && e.status === 401) endSession();
@@ -143,6 +158,7 @@ export async function act<T = unknown>(
 export const authed = signal<boolean | null>(null);
 
 export function endSession() {
+  sessionGeneration++;
   inflight.clear();
   cache.clear();
   fetchedTick.clear();

@@ -60,6 +60,24 @@ export function overridesOf(defaults: MemberPolicy, effective: MemberPolicy): Me
     POLICY_FIELDS.map((name) => [name, effective[name] === defaults[name] ? null : effective[name]]),
   );
 }
+/** 只改动用户编辑或明确恢复的字段，保留其余已设置的例外。 */
+export function mergeOverrides(
+  defaults: MemberPolicy,
+  existing: MemberOverrides,
+  changes: Record<string, number | string | boolean>,
+  reset: ReadonlySet<keyof MemberPolicy>,
+): MemberOverrides {
+  const result: MemberOverrides = { ...existing };
+  for (const name of POLICY_FIELDS) {
+    if (name in changes) {
+      const value = changes[name];
+      Object.assign(result, { [name]: value === defaults[name] ? null : value });
+    } else if (reset.has(name)) {
+      Object.assign(result, { [name]: null });
+    }
+  }
+  return result;
+}
 export function exceptionCount(overrides: MemberOverrides): number {
   return Object.values(overrides).filter((value) => value != null).length;
 }

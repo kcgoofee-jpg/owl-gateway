@@ -139,18 +139,24 @@ impl Db {
         {
             // A prior commit is idempotent; all other states are an invalid transition.
             let id = request_id.to_owned();
-            let status: Option<String> = self
+            let stored: Option<(String, Option<String>)> = self
                 .read(move |c| {
                     c.query_row(
-                        "SELECT status FROM request_settlements WHERE request_id=?",
+                        "SELECT status, result_json FROM request_settlements WHERE request_id=?",
                         [id],
-                        |r| r.get(0),
+                        |r| Ok((r.get(0)?, r.get(1)?)),
                     )
                     .optional()
                 })
                 .await?;
-            if status.as_deref() == Some("committed") {
-                return Ok(());
+            match stored {
+                Some((status, _)) if status == "committed" => return Ok(()),
+                Some((status, Some(saved))) if status == "result_saved" && saved == payload => {
+                    return self
+                        .commit_saved_request_result(request_id, &saved, now)
+                        .await;
+                }
+                _ => {}
             }
             return Err(crate::DbError::Invalid(
                 "request result is not dispatchable".into(),
@@ -168,12 +174,17 @@ impl Db {
     ) -> Result<()> {
         let s = s.clone();
         let request_id = request_id.map(str::to_owned);
+        let expected = request_id
+            .as_ref()
+            .map(|_| serde_json::to_string(&s))
+            .transpose()
+            .map_err(|e| crate::DbError::Invalid(e.to_string()))?;
         self.write(move |tx| {
             let held = s.remaining_anlas > 0.0 || s.remaining_v5 > 0 || s.remaining_legacy > 0;
             if let Some(id) = request_id.as_deref() {
-                let status: String = tx.query_row("SELECT status FROM request_settlements WHERE request_id=?", [id], |r| r.get(0))?;
+                let (status, stored): (String, Option<String>) = tx.query_row("SELECT status, result_json FROM request_settlements WHERE request_id=?", [id], |r| Ok((r.get(0)?, r.get(1)?)))?;
                 if status == "committed" { return Ok(()); }
-                if status != "result_saved" { return Err(rusqlite::Error::InvalidQuery); }
+                if status != "result_saved" || stored != expected { return Err(rusqlite::Error::InvalidQuery); }
             }
             tx.execute(
                 INSERT_LOG,

@@ -128,9 +128,14 @@ impl Reserved {
         correlation_id: &str,
         rid: &str,
     ) -> Result<(String, String), ApiError> {
-        let row = self.state.db.get_key(self.key.id()).await?.ok_or_else(|| {
-            GateError::with_code(403, "这把 Key 已失效，未扣费。", reasons::KEY_DISABLED)
-        })?;
+        let row = self
+            .state
+            .db
+            .get_key_for_auth(self.key.id())
+            .await?
+            .ok_or_else(|| {
+                GateError::with_code(403, "这把 Key 已失效，未扣费。", reasons::KEY_DISABLED)
+            })?;
         let current = Key::load(&self.state.db, row).await?;
         if current.subject() != self.key.subject() {
             return Err(GateError::with_code(

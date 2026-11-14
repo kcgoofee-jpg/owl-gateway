@@ -13,6 +13,8 @@ struct Credential {
     expires_at: Option<f64>,
     discord_id: Option<String>,
     disabled_reason: Option<String>,
+    #[serde(default)]
+    subject_banned: i64,
 }
 
 #[derive(Clone)]
@@ -82,7 +84,7 @@ impl Key {
         self.credential.discord_id.as_deref().unwrap_or("")
     }
     pub fn enabled(&self) -> bool {
-        self.credential.enabled == 1
+        self.credential.enabled == 1 && self.credential.subject_banned == 0
     }
     pub fn disabled_reason(&self) -> Option<&str> {
         self.credential.disabled_reason.as_deref()

@@ -374,12 +374,18 @@ async fn delete_key_without_registration_service() {
     a.delete(&format!("{A}/keys/1?ban=zz"))
         .await
         .assert_detail(422, "ban 必须是布尔值");
-    // 直接删（带标签一起清），ban 参数被忽略
+    // 没有可封禁身份时不能把普通删除报告为封禁成功。
     let k2 = mk_key(&e.state, "待删", "nai-t-2").await;
     a.put(&format!("{A}/keys/{k2}/tags"), json!({"tag": "x"}))
         .await;
-    let r = a.delete(&format!("{A}/keys/{k2}?ban=true")).await;
-    assert_eq!(r.json(), json!({"ok": true}));
+    a.delete(&format!("{A}/keys/{k2}?ban=true"))
+        .await
+        .assert_detail(422, "该 Key 没有可封禁的 Discord 身份；请使用删除操作。");
+    assert!(e.state.db.get_key(k2).await.unwrap().is_some());
+    assert_eq!(
+        a.delete(&format!("{A}/keys/{k2}")).await.json(),
+        json!({"ok": true})
+    );
     assert!(e.state.db.get_key(k2).await.unwrap().is_none());
     assert!(
         query(
@@ -394,11 +400,13 @@ async fn delete_key_without_registration_service() {
             .await
             .is_empty()
     );
-    // ?ban=true 的删除，操作名换成「删除 Key 并永久禁止领取」（没有注册服务时 ban 其实没生效，旧版如此）
+    // 失败操作不能记为成功封禁。
     let acts = a.actions().await;
     assert!(
         acts.iter()
-            .any(|(act, t, ..)| act == "删除 Key 并永久禁止领取" && t == &format!("Key #{k2} 待删")),
+            .any(|(act, t, _, ok)| act == "删除 Key 并永久禁止领取"
+                && t == &format!("Key #{k2} 待删")
+                && !ok),
         "{acts:?}"
     );
     let k3 = mk_key(&e.state, "丙", "nai-t-3").await;
@@ -846,4 +854,231 @@ async fn oversized_ids_are_rejected_with_422() {
         "非法 id 不能记成成功：{acts:?}"
     );
     drop(e);
+}
+
+#[tokio::test]
+async fn disabled_key_list_and_restore_respect_site_reset() {
+    let (e, a) = ready().await;
+    assert_eq!(
+        send(
+            &e.state,
+            "GET",
+            &format!("{A}/keys/disabled"),
+            None,
+            None,
+            &[]
+        )
+        .await
+        .status,
+        401
+    );
+    let other = mk_key(&e.state, "synthetic-reset", "nai-synthetic-reset").await;
+    assert_eq!(
+        a.patch(&format!("{A}/keys/1"), json!({"enabled":false}))
+            .await
+            .status,
+        200
+    );
+    a.sql(&format!(
+        "UPDATE api_keys SET enabled=0, disabled_reason='site_reset' WHERE id={other}"
+    ))
+    .await;
+    let list = a.get(&format!("{A}/keys/disabled")).await;
+    assert_eq!(list.status, 200);
+    let keys = list.json()["keys"].as_array().unwrap().clone();
+    assert_eq!(keys.len(), 1);
+    assert_eq!(keys[0]["id"], 1);
+    assert!(keys[0].get("token").is_none());
+    assert_eq!(keys[0]["banned"], 0);
+    assert_eq!(
+        a.patch(&format!("{A}/keys/{other}"), json!({"enabled":true}))
+            .await
+            .status,
+        409
+    );
+    assert_eq!(
+        a.patch(&format!("{A}/keys/{other}"), json!({"enabled":false}))
+            .await
+            .status,
+        409
+    );
+    assert_eq!(
+        e.state.db.get_key(other).await.unwrap().unwrap()["disabled_reason"],
+        "site_reset"
+    );
+    a.sql(&format!(
+        "INSERT INTO discord_bans(discord_id, created_at) VALUES('{}', 1)",
+        common::SUBJECT
+    ))
+    .await;
+    assert_eq!(
+        a.get(&format!("{A}/keys/disabled")).await.json()["keys"][0]["banned"],
+        1
+    );
+    assert_eq!(
+        a.patch(&format!("{A}/keys/1"), json!({"enabled":true}))
+            .await
+            .status,
+        409
+    );
+    assert_eq!(e.state.db.get_key(1).await.unwrap().unwrap()["enabled"], 0);
+    a.sql("DELETE FROM discord_bans").await;
+    assert_eq!(
+        a.patch(&format!("{A}/keys/1"), json!({"enabled":true}))
+            .await
+            .status,
+        200
+    );
+    assert_eq!(
+        a.get(&format!("{A}/keys/disabled")).await.json()["keys"]
+            .as_array()
+            .unwrap()
+            .len(),
+        0
+    );
+}
+
+#[tokio::test]
+async fn concurrent_site_reset_and_restore_cannot_revive_old_key() {
+    let (e, a) = ready().await;
+    for _ in 0..20 {
+        a.sql("UPDATE api_keys SET enabled=0, disabled_reason='admin' WHERE id=1")
+            .await;
+        let fields = json!({"enabled":true});
+        let (restore, reset) = tokio::join!(
+            e.state.db.update_key(1, fields.as_object().unwrap()),
+            e.state.db.reset_all_keys()
+        );
+        restore.unwrap();
+        reset.unwrap();
+        let row = e.state.db.get_key(1).await.unwrap().unwrap();
+        assert_eq!(row["enabled"], 0);
+        assert_eq!(row["disabled_reason"], "site_reset");
+    }
+}
+
+#[tokio::test]
+async fn ban_disables_other_active_keys_for_same_identity() {
+    let (e, a, _d) = ready_reg().await;
+    let active = mk_key(&e.state, "synthetic-active", "nai-synthetic-active").await;
+    let reset = mk_key(&e.state, "synthetic-reset", "nai-synthetic-reset-extra").await;
+    let subject = "900000000000000012";
+    a.sql(&format!("UPDATE api_keys SET discord_id='{subject}' WHERE id IN ({active}, {reset}); \
+        UPDATE api_keys SET enabled=0,disabled_reason='site_reset' WHERE id={reset}; \
+        INSERT INTO discord_registrations(discord_id,key_id,created_at) VALUES('{subject}',{active},1.0);")).await;
+    let orphan = mk_key(&e.state, "synthetic-orphan", "nai-synthetic-orphan").await;
+    a.sql(&format!(
+        "UPDATE api_keys SET discord_id='{subject}' WHERE id={orphan}"
+    ))
+    .await;
+    assert_eq!(
+        a.post(&format!("{A}/bans"), json!({"discord_id": subject}))
+            .await
+            .status,
+        200
+    );
+    assert!(e.state.db.get_key(active).await.unwrap().is_none());
+    let orphan_row = e.state.db.get_key(orphan).await.unwrap().unwrap();
+    assert_eq!(orphan_row["enabled"], 0);
+    assert_eq!(orphan_row["disabled_reason"], "banned");
+    assert_eq!(
+        e.state.db.get_key(reset).await.unwrap().unwrap()["disabled_reason"],
+        "site_reset"
+    );
+    let (status, _, _) = common::Call::new("GET", "/v1/me")
+        .bearer("nai-synthetic-orphan")
+        .send(&e.state)
+        .await;
+    assert_eq!(status.as_u16(), 403);
+    assert_eq!(a.delete(&format!("{A}/bans/{subject}")).await.status, 200);
+    assert_eq!(
+        a.patch(&format!("{A}/keys/{orphan}"), json!({"enabled":true}))
+            .await
+            .status,
+        409
+    );
+}
+
+#[tokio::test]
+async fn existing_ban_blocks_an_enabled_legacy_key_without_changing_it() {
+    let (e, a) = ready().await;
+    a.sql(&format!(
+        "INSERT INTO discord_bans(discord_id, created_at) VALUES('{}', 1)",
+        common::SUBJECT
+    ))
+    .await;
+    assert_eq!(e.state.db.get_key(1).await.unwrap().unwrap()["enabled"], 1);
+    let (status, _, _) = common::Call::new("GET", "/v1/me")
+        .bearer(TOKEN)
+        .send(&e.state)
+        .await;
+    assert_eq!(status.as_u16(), 403);
+    let (status, _, _) = common::Call::new("POST", "/user/login")
+        .json(json!({"key": TOKEN}))
+        .send(&e.state)
+        .await;
+    assert_eq!(status.as_u16(), 403);
+    let row = e.state.db.get_key_for_auth(1).await.unwrap().unwrap();
+    let key = gate_server::key::Key::load(&e.state.db, row).await.unwrap();
+    assert!(gate_server::auth::key_status_error(&key, e.state.now()).is_some());
+}
+
+#[tokio::test]
+async fn queued_legacy_key_is_checked_again_against_ban_before_dispatch() {
+    use gate_server::{
+        admission::{DispatchRequirements, Est, reserve_image_budget},
+        key::Key,
+        reqctx::ReqCtx,
+    };
+    let (e, a) = ready().await;
+    let key = Key::load(
+        &e.state.db,
+        e.state.db.get_key_for_auth(1).await.unwrap().unwrap(),
+    )
+    .await
+    .unwrap();
+    let reserved = reserve_image_budget(
+        &e.state,
+        &ReqCtx::new(),
+        &key,
+        &Est::default(),
+        1,
+        DispatchRequirements::feature("image"),
+    )
+    .await
+    .unwrap();
+    a.sql(&format!(
+        "INSERT INTO discord_bans(discord_id, created_at) VALUES('{}', 1)",
+        common::SUBJECT
+    ))
+    .await;
+    let error = reserved
+        .prepare_dispatch("abc123", "1100000001")
+        .await
+        .unwrap_err();
+    assert!(matches!(error, gate_server::error::ApiError::Gate(ref g) if g.code == "key_disabled"));
+    assert!(e.mock.requests_to("/ai/generate-image").is_empty());
+}
+
+#[tokio::test]
+async fn delete_and_ban_uses_bound_identity_even_without_registration_service() {
+    let (e, a) = ready().await;
+    let id = mk_key(&e.state, "synthetic-orphan", "nai-synthetic-ban-orphan").await;
+    let subject = "900000000000000012";
+    a.sql(&format!(
+        "UPDATE api_keys SET discord_id='{subject}' WHERE id={id}"
+    ))
+    .await;
+    let response = a.delete(&format!("{A}/keys/{id}?ban=true")).await;
+    assert_eq!(response.status, 200);
+    assert_eq!(response.json()["banned"], true);
+    assert!(e.state.db.get_key(id).await.unwrap().is_none());
+    assert!(
+        e.state
+            .db
+            .discord_ban_reason(subject)
+            .await
+            .unwrap()
+            .is_some()
+    );
 }

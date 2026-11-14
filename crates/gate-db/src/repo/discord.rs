@@ -69,6 +69,12 @@ impl Db {
                     info.banned_by
                 ],
             )?;
+            // 封禁身份与停用其所有仍启用的 Key 一起提交，包含没有领取记录的历史 Key。
+            // 保留已停用 Key 原因，尤其不能把全站重置的旧凭据改成可恢复状态。
+            tx.execute(
+                "UPDATE api_keys SET enabled=0, disabled_reason=? WHERE discord_id=? AND enabled != 0",
+                params![gate_core::key_status::BANNED, discord_id],
+            )?;
             Ok(())
         })
         .await

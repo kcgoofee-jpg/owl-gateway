@@ -9,8 +9,7 @@
 //! 取消安全用 Drop 守卫实现：请求 future 在任何点被丢弃，V5 预留、计数、出图后静默、排队票、
 //! 没用上的出图间隔与并发槽都会照常结算（旧版用 `asyncio.shield` + `CancelScope(shield=True)` 达到同样效果）。
 //!
-//! 上游明确的 5xx 响应（收到了 5xx 状态码；传输故障与「结果不明」不在此列）在结算完成后
-//! 于同一账号上不占排队位重发一次：官方对 5xx 不扣费，线上占比 0.15%，同 Key 几分钟内可重试成功。
+//! 出图与图片工具是非幂等请求；上游 5xx 不能证明未执行，不自动重发。
 
 use crate::client::{Callbacks, Inner, NaiClient, RequestOpts, ResolveV5, UpResponse};
 use crate::error::{Transport, UpstreamError};
@@ -81,34 +80,9 @@ impl<H: Hooks> NaiClient<H> {
             let outcome = self
                 .request_once(&mut o, cb, allowance, obs, &mut fl, !switched)
                 .await;
-            let last_token = fl.token.clone();
             fl.finish().await;
             match outcome {
-                Attempt::Done(r) => {
-                    // 上游明确的 5xx 响应（非传输故障、非并发锁、非 401→502）：settle 已完成（未扣费），
-                    // 在同一账号上不占排队位重发一次（acquire 无票 = 只等出图间隔）。
-                    // 只试一次，重试的结果（无论成败）直接返回；重试路径要求换号 / V5 异常时保守返回原始 5xx。
-                    if o.image_lane && r.as_ref().is_ok_and(|resp| resp.status >= 500) {
-                        obs.picked_token(&last_token);
-                        tracing::warn!(
-                            target: "upstream",
-                            token_id = %last_token.token_id,
-                            status = r.as_ref().unwrap().status,
-                            "上游 5xx：已结算（未扣费），在同一账号上不占排队位重发一次"
-                        );
-                        let mut fl2 =
-                            InFlight::new(inner.clone(), last_token, o.v5_free, o.image_count);
-                        let outcome2 = self
-                            .request_once(&mut o, cb, allowance, obs, &mut fl2, !switched)
-                            .await;
-                        fl2.finish().await;
-                        return match outcome2 {
-                            Attempt::Done(r2) => r2,
-                            Attempt::Retry | Attempt::SwitchV5 => r,
-                        };
-                    }
-                    return r;
-                }
+                Attempt::Done(r) => return r,
                 Attempt::Retry => continue,
                 Attempt::SwitchV5 => {
                     switched = true;
@@ -273,7 +247,11 @@ impl<H: Hooks> NaiClient<H> {
                                 o.image_lane && (status == 200 || status == 201 || status >= 500);
                             Ok(Err(UpstreamError::uncertain(
                                 502,
-                                "NovelAI 返回的结果过大，未扣费。请缩小图片后重试。",
+                                if uncertain {
+                                    "上游结果过大，执行结果未知；请先核对请求记录，不要自动重试。"
+                                } else {
+                                    "上游返回的内容过大，请稍后重试。"
+                                },
                                 uncertain,
                             )))
                         }
@@ -356,9 +334,10 @@ impl<H: Hooks> NaiClient<H> {
         if o.image_lane && (300..400).contains(&resp.status) {
             // 图片车道已禁止自动跟随重定向（见上面的 redirect::Policy::none）；
             // 明确报错而不是把 3xx 当成正常响应交给调用方。
-            return Attempt::Done(Err(UpstreamError::new(
+            return Attempt::Done(Err(UpstreamError::uncertain(
                 502,
-                "NovelAI 返回异常跳转，请求未重发，未扣费。请稍后重试。",
+                "上游返回异常跳转，执行结果未知；请先核对请求记录，不要自动重试。",
+                true,
             )));
         }
         if (resp.status == 200 || resp.status == 201)
@@ -369,7 +348,7 @@ impl<H: Hooks> NaiClient<H> {
         {
             return Attempt::Done(Err(UpstreamError::uncertain(
                 502,
-                "NovelAI 返回的图片不完整或无效，未扣费。请稍后重试。",
+                "上游返回的图片不完整或无效，执行结果未知；请先核对请求记录，不要自动重试。",
                 true,
             )));
         }

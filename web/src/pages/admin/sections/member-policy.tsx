@@ -7,6 +7,7 @@ import "./member-rules.css";
 import {
   FEATURE_COPY,
   FEATURE_FIELDS,
+  type MemberOverrides,
   type MemberPolicy,
   NUMBER_FIELDS,
   POLICY_FIELDS,
@@ -56,23 +57,33 @@ export function policySpecs(fields: Record<string, PolicyBound>): Record<keyof M
   return out;
 }
 export function policyFromForm(base: MemberPolicy, form: Form): MemberPolicy {
-  return { ...base, ...form.changes() } as MemberPolicy;
+  return { ...base, ...form.values() } as MemberPolicy;
 }
 export function PolicyFields({
   form,
   defaults,
   fullImage = false,
+  overrides,
+  resetFields,
+  onReset,
+  onEdit,
 }: {
   form: Form;
   defaults?: MemberPolicy;
   fullImage?: boolean;
+  overrides?: MemberOverrides;
+  resetFields?: ReadonlySet<keyof MemberPolicy>;
+  onReset?: (name: keyof MemberPolicy) => void;
+  onEdit?: (name: keyof MemberPolicy) => void;
 }) {
   const source = (name: keyof MemberPolicy) => {
     if (!defaults) return null;
     const spec = form.specs[name];
     if (!spec) return null;
     const parsed = parseField(spec, form.raw(name));
-    const exception = !parsed.ok || parsed.value !== defaults[name];
+    const exception = form.isDirty(name)
+      ? !parsed.ok || parsed.value !== defaults[name]
+      : !resetFields?.has(name) && overrides?.[name] != null;
     return (
       <div class="mr-source">
         <span>{exception ? "例外" : "默认"}</span>
@@ -81,7 +92,10 @@ export function PolicyFields({
             size="sm"
             variant="ghost"
             aria-label={`恢复${spec.label}默认`}
-            onClick={() => form.set(name, toRaw(spec, defaults[name]))}
+            onClick={() => {
+              form.set(name, toRaw(spec, defaults[name]));
+              onReset?.(name);
+            }}
           >
             恢复默认
           </Button>
@@ -94,7 +108,7 @@ export function PolicyFields({
       <div class="form-section__title">额度 · 0 停用</div>
       <div class="form-grid mr-numbers">
         {NUMBER_FIELDS.map((name) => (
-          <div key={name}>
+          <div key={name} onInput={() => onEdit?.(name)}>
             <NumField form={form} name={name} />
             {source(name)}
           </div>
@@ -109,7 +123,10 @@ export function PolicyFields({
               <SwitchRow
                 title={policyLabel(name)}
                 checked={form.raw(name) === true}
-                onChange={(value) => form.set(name, value)}
+                onChange={(value) => {
+                  onEdit?.(name);
+                  form.set(name, value);
+                }}
               />
             )}
             {!fullImage && source(name)}

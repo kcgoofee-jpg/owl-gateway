@@ -1,7 +1,7 @@
 import { useState } from "preact/hooks";
 import { fullTime } from "../../../lib/format";
 import { Badge, Card, Notice } from "../../../ui";
-import { act, useAdmin } from "../data";
+import { adminWrite, useAdmin } from "../data";
 import { CardPending } from "./_kit";
 import { Kv, SwitchRow } from "./system/forms";
 
@@ -40,8 +40,10 @@ export function ShareLockCard() {
   const change = async (changes: { enabled: boolean } | { mode: "quota" | "daily" }) => {
     setSaving(true);
     setError("");
-    const result = await act("PUT", "/admin/api/ops/share-lock", changes, "分享限制已保存");
-    if (result === null) setError("保存失败，请重试；开关仍按已保存的设置执行。");
+    const result = await adminWrite("PUT", "/admin/api/ops/share-lock", changes, {
+      okText: "分享限制已保存",
+    });
+    if (!result.ok) setError(result.error);
     setSaving(false);
   };
   return (

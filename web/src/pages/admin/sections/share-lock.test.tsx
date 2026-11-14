@@ -1,10 +1,10 @@
 import { render } from "preact";
 import { act as renderAct } from "preact/test-utils";
 import { afterEach, expect, it, vi } from "vitest";
-import { act, useAdmin } from "../data";
+import { adminWrite, useAdmin } from "../data";
 import { ShareLockCard, type ShareLockStatus } from "./share-lock";
 
-vi.mock("../data", () => ({ act: vi.fn(), useAdmin: vi.fn() }));
+vi.mock("../data", () => ({ adminWrite: vi.fn(), useAdmin: vi.fn() }));
 let root: HTMLDivElement;
 const status = (): ShareLockStatus => ({
   enabled: true,
@@ -37,11 +37,16 @@ async function show(data: ShareLockStatus) {
 }
 it("persists the switch through the API and renders the confirmed server state", async () => {
   await show(status());
-  vi.mocked(act).mockResolvedValue({ enabled: false });
+  vi.mocked(adminWrite).mockResolvedValue({ ok: true, data: { enabled: false } });
   await renderAct(async () => {
     root.querySelector<HTMLButtonElement>('[role="switch"]')?.click();
   });
-  expect(act).toHaveBeenCalledWith("PUT", "/admin/api/ops/share-lock", { enabled: false }, "分享限制已保存");
+  expect(adminWrite).toHaveBeenCalledWith(
+    "PUT",
+    "/admin/api/ops/share-lock",
+    { enabled: false },
+    { okText: "分享限制已保存" },
+  );
   vi.mocked(useAdmin).mockReturnValue({
     data: { ...status(), enabled: false, enforcing: false },
     loading: false,
@@ -53,11 +58,11 @@ it("persists the switch through the API and renders the confirmed server state",
 });
 it("retains the saved switch value and allows retry on failure", async () => {
   await show(status());
-  vi.mocked(act).mockResolvedValue(null);
+  vi.mocked(adminWrite).mockResolvedValue({ ok: false, error: "请求超时，操作可能已经生效" });
   await renderAct(async () => {
     root.querySelector<HTMLButtonElement>('[role="switch"]')?.click();
   });
-  expect(root.querySelector('[role="alert"]')?.textContent).toContain("保存失败");
+  expect(root.querySelector('[role="alert"]')?.textContent).toContain("操作可能已经生效");
   expect(root.querySelector('[role="switch"]')?.getAttribute("aria-checked")).toBe("true");
   expect(root.querySelector<HTMLButtonElement>('[role="switch"]')?.disabled).toBe(false);
 });
@@ -77,12 +82,17 @@ it("distinguishes an online bot from a broken detector and explains fail-open", 
 it("saves the independent daily mode and explains that quota exhaustion is not required", async () => {
   await show({ ...status(), mode: "daily" });
   expect(root.textContent).toContain("所有成员昨日或今日需分享一张图");
-  vi.mocked(act).mockResolvedValue({ mode: "quota" });
+  vi.mocked(adminWrite).mockResolvedValue({ ok: true, data: { mode: "quota" } });
   await renderAct(async () => {
     const select = root.querySelector<HTMLSelectElement>("#share-lock-mode");
     if (!select) throw new Error("mode selector missing");
     select.value = "quota";
     select.dispatchEvent(new Event("change", { bubbles: true }));
   });
-  expect(act).toHaveBeenCalledWith("PUT", "/admin/api/ops/share-lock", { mode: "quota" }, "分享限制已保存");
+  expect(adminWrite).toHaveBeenCalledWith(
+    "PUT",
+    "/admin/api/ops/share-lock",
+    { mode: "quota" },
+    { okText: "分享限制已保存" },
+  );
 });

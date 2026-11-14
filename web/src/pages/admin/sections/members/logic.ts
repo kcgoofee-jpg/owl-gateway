@@ -154,8 +154,12 @@ export function memberStatus(m: Member, now: number): StatusBadge | null {
         .join("、"),
     };
   }
-  if (m.policy.effective.daily_images > 0 && m.today.legacy_free_images >= m.policy.effective.daily_images)
-    return { tone: undefined, text: "额度用完" };
+  if (
+    m.policy.effective.image &&
+    m.policy.effective.daily_images > 0 &&
+    m.today.legacy_free_images >= m.policy.effective.daily_images
+  )
+    return { tone: undefined, text: "V4.5 额度用完" };
   if (m.registered_at && now - m.registered_at < DAY) return { tone: "info", text: "新加入" };
   if (!m.first_image_at) return { tone: undefined, text: "还没出过图" };
   return null;

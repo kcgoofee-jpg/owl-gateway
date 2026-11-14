@@ -6,6 +6,8 @@
 pub const SITE_RESET: &str = "site_reset";
 /// 站长在后台手动停用的（没写原因时也按这个处理）。
 pub const ADMIN: &str = "admin";
+/// 身份被加入黑名单时停用的历史 Key。
+pub const BANNED: &str = "banned";
 
 /// 停用的 Key 被拿来请求时的 403 说明。
 pub fn disabled_message(reason: Option<&str>) -> &'static str {

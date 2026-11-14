@@ -96,9 +96,9 @@ pub(super) async fn delete_member_key(
     ban: bool,
     reason: &str,
 ) -> Result<Value, ApiError> {
-    if load_key(state, key_id).await?.is_none() {
-        return Err(http(404, NO_KEY));
-    }
+    let row = load_key(state, key_id)
+        .await?
+        .ok_or_else(|| http(404, NO_KEY))?;
     let registrar = state.registration.clone();
     let discord_id = match &registrar {
         Some(_) => state
@@ -108,13 +108,39 @@ pub(super) async fn delete_member_key(
             .map(|r| r.discord_id),
         None => None,
     };
-    if let (Some(reg), Some(discord_id)) = (registrar, discord_id) {
-        if ban {
-            reg.ban(&discord_id, reason, "站长").await?;
+    if ban {
+        let subject = discord_id.or_else(|| {
+            row.get("discord_id")
+                .and_then(Value::as_str)
+                .map(str::to_string)
+        });
+        let subject = subject
+            .filter(|id| gate_core::member_policy::is_discord_id(id))
+            .ok_or_else(|| http(422, "该 Key 没有可封禁的 Discord 身份；请使用删除操作。"))?;
+        if let Some(reg) = registrar {
+            reg.ban(&subject, reason, "站长").await?;
         } else {
-            reg.revoke(&discord_id, true).await?;
+            state
+                .db
+                .ban_discord(
+                    &subject,
+                    &gate_db::repo::discord::BanInfo {
+                        reason: reason.to_string(),
+                        banned_by: "站长".into(),
+                        ..Default::default()
+                    },
+                    state.now(),
+                )
+                .await?;
+            state.db.revoke_registration(&subject).await?;
         }
-        return Ok(json!({"ok": true, "discord_id": discord_id, "banned": ban}));
+        // 目标可能是没有领取记录的旧 Key；封禁已先停用同身份的所有凭据。
+        state.db.delete_key(key_id).await?;
+        return Ok(json!({"ok": true, "discord_id": subject, "banned": true}));
+    }
+    if let (Some(reg), Some(discord_id)) = (registrar, discord_id) {
+        reg.revoke(&discord_id, true).await?;
+        return Ok(json!({"ok": true, "discord_id": discord_id, "banned": false}));
     }
     state.db.delete_key(key_id).await?;
     Ok(json!({"ok": true}))
@@ -241,7 +267,12 @@ pub(super) async fn patch_key(
         }
         fields.insert(name, value);
     }
-    state.db.update_key(key_id, &fields).await?;
+    if !state.db.update_key(key_id, &fields).await? {
+        return Err(http(
+            409,
+            "无法修改 Key 启用状态；请检查停用原因和封禁状态。",
+        ));
+    }
     let row = load_key(state, key_id)
         .await?
         .ok_or_else(|| http(404, NO_KEY))?;

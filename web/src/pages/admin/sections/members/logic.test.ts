@@ -149,7 +149,11 @@ describe("memberVerdict / memberStatus", () => {
   });
   it("V5 图片不消耗 V4.5 免费图额度", () => {
     const member = mk({ today: { images: 125, legacy_free_images: 25, v5: 100, anlas: 0, requests: 125 } });
-    expect(memberStatus(member, NOW)?.text).not.toBe("额度用完");
+    expect(memberStatus(member, NOW)?.text).not.toBe("V4.5 额度用完");
+  });
+  it("用完 V4.5 时只标明该项，不暗示 V5 和 Anlas 都已用完", () => {
+    const member = mk({ today: { images: 100, legacy_free_images: 100, v5: 0, anlas: 0, requests: 100 } });
+    expect(memberStatus(member, NOW)?.text).toBe("V4.5 额度用完");
   });
   it("正常成员没有状态徽标", () => {
     expect(memberStatus(mk(), NOW)).toBeNull();

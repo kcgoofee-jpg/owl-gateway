@@ -138,8 +138,7 @@ async fn only_produced_images_count_toward_the_account_today() {
                 .await
         }
     };
-    // 上游 500：没出图（自动重试会再打一次，两个都是 500 → 透传，仍不计账）
-    up.push("/ai/generate-image", Reply::status(500, "boom"));
+    // 上游 500：没有确认完成的图片，透传且不重发。
     up.push("/ai/generate-image", Reply::status(500, "boom"));
     let _ = send(Callbacks::default()).await;
     // 返回 200 但不是图：校验不过，按没出图
@@ -1048,7 +1047,7 @@ async fn compressed_msgpack_stream_is_not_buffered() {
     }
 }
 
-/// 记录 picked 序列（验证 5xx 重试留在同一账号）。
+/// 记录 picked 序列。
 struct PickLog(Mutex<Vec<String>>);
 impl Observer for PickLog {
     fn picked(&self, token_id: &str) {
@@ -1057,7 +1056,7 @@ impl Observer for PickLog {
 }
 
 #[tokio::test]
-async fn upstream_5xx_retries_once_on_the_same_account_and_charges_once() {
+async fn upstream_5xx_does_not_retry_a_non_idempotent_image_request() {
     let up = MockUpstream::start().await;
     let hooks = TestHooks::default();
     let c = NaiClient::new(
@@ -1079,7 +1078,7 @@ async fn upstream_5xx_retries_once_on_the_same_account_and_charges_once() {
             .unwrap_or(0)
     };
     let body = image_body(1);
-    // 第一次 500、同账号重发 200：最终 200，只记 1 张，两次都在同一账号上
+    // 即使后面排了 200，也不得将结果不明的出图请求重发。
     up.push("/ai/generate-image", Reply::status(500, "boom"));
     up.push(
         "/ai/generate-image",
@@ -1099,18 +1098,19 @@ async fn upstream_5xx_retries_once_on_the_same_account_and_charges_once() {
         }
     };
     let resp = send(picks.clone(), body.clone()).await.unwrap();
-    assert_eq!(resp.status, 200);
-    assert_eq!(images(), 1, "重试成功只记 1 张、扣 1 次费");
+    assert_eq!(resp.status, 500);
+    assert_eq!(images(), 0);
     let log = picks.0.lock().unwrap();
-    assert_eq!(log.len(), 2, "picked 两次（原始 + 同账号重试）：{log:?}");
+    assert_eq!(log.len(), 1, "上游只应选择一次：{log:?}");
     assert!(
         log.iter().all(|t| t == &tid),
-        "重试必须留在同一账号：{log:?}"
+        "请求应使用选中的账号：{log:?}"
     );
+    assert_eq!(up.requests_to("/ai/generate-image").len(), 1);
 }
 
 #[tokio::test]
-async fn upstream_5xx_twice_is_returned_without_endless_retry() {
+async fn upstream_5xx_is_returned_without_retry() {
     let up = MockUpstream::start().await;
     let hooks = TestHooks::default();
     let c = NaiClient::new(
@@ -1131,7 +1131,7 @@ async fn upstream_5xx_twice_is_returned_without_endless_retry() {
             .unwrap_or(0)
     };
     let body = image_body(1);
-    // 连续两次 500：重发一次后把 500 透传给调用方，不记账、不无限重试
+    // 第二个响应不得被消费。
     up.push("/ai/generate-image", Reply::status(500, "boom"));
     up.push("/ai/generate-image", Reply::status(500, "boom again"));
     let (c, url) = (c.clone(), up.url());
@@ -1150,4 +1150,5 @@ async fn upstream_5xx_twice_is_returned_without_endless_retry() {
     let resp = send(body).await.unwrap();
     assert_eq!(resp.status, 500);
     assert_eq!(images(), 0, "失败不计账");
+    assert_eq!(up.requests_to("/ai/generate-image").len(), 1);
 }

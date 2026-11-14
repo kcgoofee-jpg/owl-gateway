@@ -2,7 +2,7 @@
 import { useId, useState } from "preact/hooks";
 import { ApiError, sendJSON } from "../../../../lib/api";
 import { Button, Dialog, toast } from "../../../../ui";
-import { tick } from "../../data";
+import { refreshAfterWrite } from "../../data";
 import { useBusy } from "../_kit";
 import { tokenFormatProblem, type UpstreamAccount } from "./core";
 
@@ -42,7 +42,7 @@ export function TokenDialog(props: {
         add ? { token: token.trim(), allow_anlas: anlas } : { token: token.trim() },
       );
       toast(`验证通过（订阅等级 ${r.tier}），${add ? "已加入令牌池" : "已替换"}`);
-      tick.value++;
+      refreshAfterWrite();
       setBusyNow(false);
       setToken("");
       props.onClose();

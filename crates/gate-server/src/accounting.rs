@@ -116,12 +116,12 @@ impl AppState {
     }
 
     /// 写一条用量日志（后台任务）；成功请求额外计入每日配额。返回任务句柄。
-    pub fn record(&self, ctx: &ReqCtx, key: &Key, e: Entry) -> tokio::task::JoinHandle<()> {
+    pub fn record(&self, ctx: &ReqCtx, key: &Key, e: Entry) -> tokio::task::JoinHandle<bool> {
         self.record_identity(ctx, key.id(), key.name(), e)
     }
 
     /// Record an authenticated request without retaining its `Key` in a background task.
-    pub fn record_context(&self, ctx: &ReqCtx, e: Entry) -> Option<tokio::task::JoinHandle<()>> {
+    pub fn record_context(&self, ctx: &ReqCtx, e: Entry) -> Option<tokio::task::JoinHandle<bool>> {
         let (key_id, key_name) = ctx.key()?;
         Some(self.record_identity(ctx, key_id, &key_name, e))
     }
@@ -132,7 +132,7 @@ impl AppState {
         key_id: i64,
         key_name: &str,
         mut e: Entry,
-    ) -> tokio::task::JoinHandle<()> {
+    ) -> tokio::task::JoinHandle<bool> {
         let key_name = key_name.to_owned();
         ctx.mark_logged();
         // 万一有拒绝路径没带原因码：按说明文字当场归类（只管 status='rejected'）。
@@ -175,10 +175,22 @@ impl AppState {
                     site_paid_anlas: e.site_paid_anlas,
                 };
                 if ctx.has_settlement_reservation() {
-                    state
+                    let mut result = state
                         .db
                         .record_success_settled(&success, &ctx.internal_id(), now)
-                        .await
+                        .await;
+                    // 只重试本地幂等落账，绝不重发上游请求。持久化的原始结果和时间保持不变。
+                    for delay_ms in [250, 750] {
+                        if result.is_ok() {
+                            break;
+                        }
+                        tokio::time::sleep(std::time::Duration::from_millis(delay_ms)).await;
+                        result = state
+                            .db
+                            .record_success_settled(&success, &ctx.internal_id(), now)
+                            .await;
+                    }
+                    result
                 } else {
                     state.db.record_success(&success, now).await
                 }
@@ -217,6 +229,7 @@ impl AppState {
                     state.db.add_log(&failure, now).await
                 }
             };
+            let recorded = res.is_ok();
             if let Err(err) = res {
                 tracing::error!("request accounting failed");
                 // 「成员拿到了图但账没落库」的唯一线索：带上定位信息
@@ -232,12 +245,13 @@ impl AppState {
                     ..Default::default()
                 });
             }
+            recorded
         })
     }
 
     /// 成功的那笔账在释放额度预留 / 并发槽之前写完；调用方被取消也不会中断写入。
-    pub async fn settle_record(&self, ctx: &ReqCtx, key: &Key, e: Entry) {
-        let _ = self.record(ctx, key, e).await;
+    pub async fn settle_record(&self, ctx: &ReqCtx, key: &Key, e: Entry) -> bool {
+        self.record(ctx, key, e).await.unwrap_or(false)
     }
 }
 

@@ -55,7 +55,7 @@ impl Db {
     /// `key_row_for(discord_id)`：领到的 Key 行；没领过 / Key 已删为 None。
     pub async fn key_row_for_discord(&self, discord_id: &str) -> Result<Option<serde_json::Value>> {
         match self.registration_key_id(discord_id).await? {
-            Some(id) => self.get_key(id).await,
+            Some(id) => self.get_key_for_auth(id).await,
             None => Ok(None),
         }
     }

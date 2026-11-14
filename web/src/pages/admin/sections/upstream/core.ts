@@ -156,6 +156,7 @@ export function v5LimitSpecs(field: { min: number; max: number }): Record<string
       min: field.min,
       max: field.max,
       unit: "张",
+      hint: "0 表示此上游不使用免费 V5；不影响允许的付费请求。",
     },
   };
 }

@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { exceptionCount, type MemberPolicy, overridesOf } from "./member-policy";
+import { exceptionCount, type MemberPolicy, mergeOverrides, overridesOf } from "./member-policy";
 
 const defaults: MemberPolicy = {
   daily_images: 100,
@@ -28,5 +28,17 @@ describe("成员字段例外", () => {
   it("恢复默认提交空值，不固定旧默认值", () => {
     expect(exceptionCount(overridesOf(defaults, defaults))).toBe(0);
     expect(Object.values(overridesOf(defaults, defaults)).every((value) => value === null)).toBe(true);
+  });
+  it("保留未修改的同值例外，只有明确恢复时才清除", () => {
+    const existing = { daily_v5: 5, image: false };
+    expect(mergeOverrides(defaults, existing, { rpm: 20 }, new Set())).toEqual({ ...existing, rpm: 20 });
+    expect(mergeOverrides(defaults, existing, {}, new Set(["daily_v5"]))).toEqual({
+      daily_v5: null,
+      image: false,
+    });
+    expect(mergeOverrides(defaults, existing, { image: true }, new Set())).toEqual({
+      daily_v5: 5,
+      image: null,
+    });
   });
 });

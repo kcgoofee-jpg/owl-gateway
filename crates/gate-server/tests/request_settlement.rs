@@ -265,3 +265,339 @@ async fn pruning_keeps_only_unresolved_settlements() {
         .unwrap();
     assert_eq!(links, vec!["still-uncertain"]);
 }
+
+#[tokio::test]
+async fn transient_local_accounting_failure_retries_without_resending_upstream() {
+    let e = setup(&[]).await;
+    e.state.db.run_script(vec!["CREATE TRIGGER reject_retry BEFORE INSERT ON usage_log BEGIN SELECT RAISE(ABORT, 'synthetic failure'); END".into()]).await.unwrap();
+    let state = e.state.clone();
+    let request = tokio::spawn(async move {
+        Call::new("POST", "/ai/generate-image")
+            .bearer(TOKEN)
+            .json(body(1))
+            .send(&state)
+            .await
+            .0
+    });
+    tokio::time::timeout(std::time::Duration::from_secs(3), async {
+        loop {
+            let saved = e.state.db.read(|c| c.query_row("SELECT EXISTS(SELECT 1 FROM request_settlements WHERE status='result_saved')", [], |r| r.get::<_, i64>(0))).await.unwrap();
+            if saved == 1 { break; }
+            tokio::time::sleep(std::time::Duration::from_millis(5)).await;
+        }
+    }).await.expect("success payload was not persisted");
+    e.state
+        .db
+        .run_script(vec!["DROP TRIGGER reject_retry".into()])
+        .await
+        .unwrap();
+    assert_eq!(request.await.unwrap().as_u16(), 200);
+    settle().await;
+    assert_eq!(e.mock.requests_to("/ai/generate-image").len(), 1);
+    assert_eq!(
+        e.state
+            .db
+            .get_counter(1, &e.state.day())
+            .await
+            .unwrap()
+            .images,
+        1
+    );
+    assert!(e.state.budget.lock().await.reservations.is_empty());
+}
+
+#[tokio::test]
+async fn partial_stream_holds_paid_remainder_without_second_free_image() {
+    let e = setup(&[]).await;
+    common::policy_for(
+        &e.state,
+        1,
+        json!({"paid_parameters": true, "daily_anlas": 5000, "monthly_anlas": 99999}),
+    )
+    .await;
+    common::budgets_for(
+        &e.state,
+        json!({"daily_anlas": 5000, "monthly_anlas": 99999}),
+    )
+    .await;
+    e.mock.push(
+        "/ai/generate-image-stream",
+        Reply::Chunks {
+            status: 200,
+            content_type: "text/event-stream".into(),
+            chunks: gate_testkit::image_stream(1, "sse"),
+        },
+    );
+    let (status, _, response) = Call::new("POST", "/ai/generate-image-stream")
+        .bearer(TOKEN)
+        .json(body(3))
+        .send(&e.state)
+        .await;
+    assert_eq!(status, 200);
+    let text = String::from_utf8_lossy(&response);
+    assert!(text.contains("执行结果未知"), "{text}");
+    settle().await;
+    let sent = e.mock.requests_to("/ai/generate-image-stream");
+    assert_eq!(sent.len(), 1);
+    let full = sent[0].json();
+    assert_eq!(full["parameters"]["n_samples"], 3);
+    let mut completed = full.clone();
+    completed["parameters"]["n_samples"] = json!(1);
+    let total = gate_core::policy::estimate_image_cost(&full, true, false)
+        .unwrap()
+        .anlas;
+    let done = gate_core::policy::estimate_image_cost(&completed, true, false)
+        .unwrap()
+        .anlas;
+    let held = e.state.budget.lock().await.reservations.clone();
+    assert_eq!(held.len(), 1);
+    assert_eq!(held.values().next().unwrap().anlas, (total - done) as f64);
+    assert!(held.values().next().unwrap().anlas > 0.0);
+    assert_eq!(
+        e.state
+            .db
+            .get_counter(1, &e.state.day())
+            .await
+            .unwrap()
+            .images,
+        1
+    );
+}
+
+#[tokio::test]
+async fn owner_v5_stream_counts_each_completed_image_toward_v5_quota() {
+    let e = setup(&[]).await;
+    e.state.db.bind_image_owner(common::SUBJECT).await.unwrap();
+    assert!(
+        e.state
+            .db
+            .set_owner_image_enabled(common::SUBJECT, true)
+            .await
+            .unwrap()
+    );
+    common::policy_for(
+        &e.state,
+        1,
+        json!({"daily_v5":10,"daily_anlas":5000,"monthly_anlas":99999}),
+    )
+    .await;
+    common::budgets_for(
+        &e.state,
+        json!({"daily_v5":100,"daily_anlas":5000,"monthly_anlas":99999}),
+    )
+    .await;
+    let mut request_body = body(3);
+    request_body["model"] = json!("nai-diffusion-5-full");
+    let (status, _, response) = Call::new("POST", "/ai/generate-image-stream")
+        .bearer(TOKEN)
+        .json(request_body)
+        .send(&e.state)
+        .await;
+    assert_eq!(
+        status.as_u16(),
+        200,
+        "{}",
+        String::from_utf8_lossy(&response)
+    );
+    settle().await;
+    let c = e.state.db.get_counter(1, &e.state.day()).await.unwrap();
+    assert_eq!(c.images, 3);
+    assert_eq!(c.v5, 3);
+}
+
+#[tokio::test]
+async fn partial_owner_v5_counts_completed_and_holds_only_remaining_v5() {
+    let e = setup(&[]).await;
+    e.state.db.bind_image_owner(common::SUBJECT).await.unwrap();
+    assert!(
+        e.state
+            .db
+            .set_owner_image_enabled(common::SUBJECT, true)
+            .await
+            .unwrap()
+    );
+    common::policy_for(
+        &e.state,
+        1,
+        json!({"daily_v5":10,"daily_anlas":5000,"monthly_anlas":99999}),
+    )
+    .await;
+    common::budgets_for(
+        &e.state,
+        json!({"daily_v5":100,"daily_anlas":5000,"monthly_anlas":99999}),
+    )
+    .await;
+    e.mock.push(
+        "/ai/generate-image-stream",
+        Reply::Chunks {
+            status: 200,
+            content_type: "text/event-stream".into(),
+            chunks: gate_testkit::image_stream(1, "sse"),
+        },
+    );
+    let mut payload = body(3);
+    payload["model"] = json!("nai-diffusion-5-full");
+    let (status, _, _) = Call::new("POST", "/ai/generate-image-stream")
+        .bearer(TOKEN)
+        .json(payload)
+        .send(&e.state)
+        .await;
+    assert_eq!(status.as_u16(), 200);
+    settle().await;
+    let counter = e.state.db.get_counter(1, &e.state.day()).await.unwrap();
+    assert_eq!((counter.images, counter.v5), (1, 1));
+    let held = e.state.budget.lock().await.reservations.clone();
+    assert_eq!(held.len(), 1);
+    assert_eq!(held.values().next().unwrap().v5, 2);
+    let restarted = e.restart().await;
+    let recovered = restarted.budget.lock().await.reservations.clone();
+    assert_eq!(recovered.values().next().unwrap().v5, 2);
+    assert_eq!(e.mock.requests_to("/ai/generate-image-stream").len(), 1);
+}
+
+#[tokio::test]
+async fn partial_stream_keeps_full_reservation_if_completed_image_cannot_be_recorded() {
+    let e = setup(&[]).await;
+    common::policy_for(
+        &e.state,
+        1,
+        json!({"paid_parameters":true,"daily_anlas":5000,"monthly_anlas":99999}),
+    )
+    .await;
+    common::budgets_for(&e.state, json!({"daily_anlas":5000,"monthly_anlas":99999})).await;
+    e.state.db.run_script(vec!["CREATE TRIGGER reject_partial BEFORE INSERT ON usage_log BEGIN SELECT RAISE(ABORT, 'synthetic failure'); END".into()]).await.unwrap();
+    e.mock.push(
+        "/ai/generate-image-stream",
+        Reply::Chunks {
+            status: 200,
+            content_type: "text/event-stream".into(),
+            chunks: gate_testkit::image_stream(1, "sse"),
+        },
+    );
+    let (status, _, _) = Call::new("POST", "/ai/generate-image-stream")
+        .bearer(TOKEN)
+        .json(body(3))
+        .send(&e.state)
+        .await;
+    assert_eq!(status.as_u16(), 200);
+    settle().await;
+    let sent = e.mock.requests_to("/ai/generate-image-stream");
+    assert_eq!(sent.len(), 1);
+    let full = gate_core::policy::estimate_image_cost(&sent[0].json(), true, false).unwrap();
+    let held = e.state.budget.lock().await.reservations.clone();
+    assert_eq!(held.len(), 1);
+    assert_eq!(held.values().next().unwrap().anlas, full.anlas as f64);
+    assert_eq!(
+        e.state
+            .db
+            .get_counter(1, &e.state.day())
+            .await
+            .unwrap()
+            .images,
+        0
+    );
+    e.state
+        .db
+        .run_script(vec!["DROP TRIGGER reject_partial".into()])
+        .await
+        .unwrap();
+    let restarted = e.restart().await;
+    assert_eq!(
+        restarted
+            .db
+            .get_counter(1, &restarted.day())
+            .await
+            .unwrap()
+            .images,
+        1
+    );
+    assert_eq!(e.mock.requests_to("/ai/generate-image-stream").len(), 1);
+}
+
+#[tokio::test]
+async fn upstream_5xx_never_resends_and_keeps_the_result_unknown() {
+    let e = setup(&[]).await;
+    e.mock.push(
+        "/ai/generate-image",
+        Reply::status(500, "synthetic upstream error"),
+    );
+    let (status, _, response) = Call::new("POST", "/ai/generate-image")
+        .bearer(TOKEN)
+        .json(body(1))
+        .send(&e.state)
+        .await;
+    assert_eq!(status.as_u16(), 500);
+    let json: Value = serde_json::from_slice(&response).unwrap();
+    assert_eq!(json["error"]["execution_unknown"], true);
+    assert_eq!(json["error"]["retryable"], false);
+    settle().await;
+    assert_eq!(e.mock.requests_to("/ai/generate-image").len(), 1);
+    assert_eq!(
+        e.state
+            .db
+            .get_counter(1, &e.state.day())
+            .await
+            .unwrap()
+            .images,
+        0
+    );
+    let held = e.state.budget.lock().await.reservations.clone();
+    assert_eq!(held.len(), 1);
+    assert_eq!(held.values().next().unwrap().legacy, 1);
+    let restarted = e.restart().await;
+    assert_eq!(restarted.budget.lock().await.reservations.len(), 1);
+    assert_eq!(e.mock.requests_to("/ai/generate-image").len(), 1);
+}
+
+#[tokio::test]
+async fn streaming_upstream_5xx_is_unknown_and_not_retried() {
+    let e = setup(&[]).await;
+    e.mock.push(
+        "/ai/generate-image-stream",
+        Reply::status(500, "synthetic upstream error"),
+    );
+    let (status, _, response) = Call::new("POST", "/ai/generate-image-stream")
+        .bearer(TOKEN)
+        .json(body(1))
+        .send(&e.state)
+        .await;
+    assert_eq!(status.as_u16(), 500);
+    let v: Value = serde_json::from_slice(&response).unwrap();
+    assert_eq!(v["error"]["execution_unknown"], true);
+    assert_eq!(v["error"]["retryable"], false);
+    assert!(!v["message"].as_str().unwrap().contains("未扣费"));
+    settle().await;
+    assert_eq!(e.mock.requests_to("/ai/generate-image-stream").len(), 1);
+    assert_eq!(e.state.budget.lock().await.reservations.len(), 1);
+}
+
+#[tokio::test]
+#[ignore = "existing per-upstream V5 unknown reservation is not yet durable"]
+async fn unknown_free_v5_respects_single_upstream_daily_limit() {
+    let e = setup(&[]).await;
+    common::policy_for(&e.state, 1, json!({"daily_v5":10,"v5":true})).await;
+    let id = e.state.nai.tokens().await[0].token_id.clone();
+    assert!(e.state.nai.set_v5_daily_limit(&id, 1).await);
+    e.mock
+        .push("/ai/generate-image", Reply::status(500, "synthetic"));
+    let mut payload = body(1);
+    payload["model"] = json!("nai-diffusion-5-full");
+    let first = Call::new("POST", "/ai/generate-image")
+        .bearer(TOKEN)
+        .json(payload.clone())
+        .send(&e.state)
+        .await;
+    assert_eq!(first.0.as_u16(), 500);
+    settle().await;
+    let second = Call::new("POST", "/ai/generate-image")
+        .bearer(TOKEN)
+        .json(payload)
+        .send(&e.state)
+        .await;
+    assert_ne!(
+        second.0.as_u16(),
+        200,
+        "unknown first request must keep upstream allowance reserved"
+    );
+    assert_eq!(e.mock.requests_to("/ai/generate-image").len(), 1);
+}
