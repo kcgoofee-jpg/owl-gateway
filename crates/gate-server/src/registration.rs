@@ -29,6 +29,9 @@ use gate_db::repo::registration::{NewRegistration, RegistrationProfile};
 use gate_db::{Db, DbError};
 use reqwest::Method;
 use serde_json::{Value, json};
+/// 网页核验身份组的有效期：超过就要重新登录验证一次。
+pub const VERIFY_TTL_SECS: f64 = 3600.0;
+
 /// 身份组同步每轮最多摘几个（不制造突发请求）。
 pub const SYNC_ROLES_PER_RUN: usize = 5;
 
@@ -394,7 +397,7 @@ pub async fn registrar_jobs(state: &AppState) {
     if let Err(e) = svc.backfill_profiles(5).await {
         report("backfill_profiles", &e);
     }
-    if let Err(e) = svc.sweep_departed(state.now(), 1).await {
+    if let Err(e) = svc.sweep_departed(state.now(), 5).await {
         report("sweep_departed", &e);
     }
 }

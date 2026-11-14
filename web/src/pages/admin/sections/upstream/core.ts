@@ -157,7 +157,6 @@ export function v5LimitSpecs(field: { min: number; max: number }): Record<string
       min: field.min,
       max: field.max,
       unit: "张",
-      hint: "0 表示此上游不使用免费 V5；不影响允许的付费请求。",
     },
   };
 }
@@ -181,7 +180,6 @@ export function shareLimitSpecs(limit: { min: number; max: number }): Record<str
       min: 0,
       max: 1000000,
       unit: "Anlas",
-      hint: "0 = 一点 Anlas 也不许花；9999 = 不限。每天北京时间 7 点重置，包含在途和结果未知的预留。",
     },
     rpm: {
       kind: "int",
@@ -189,7 +187,6 @@ export function shareLimitSpecs(limit: { min: number; max: number }): Record<str
       min: 0,
       max: 9999,
       unit: "次 / 分钟",
-      hint: "每把 Key 独立计算最近 60 秒；0 = 一张都不收（等同停用），9999 = 不限。",
     },
     concurrency: { kind: "int", label: "出图并发", min: 1, max: 16, unit: "个" },
     post_wait_min: { kind: "int", label: "出图后最少等待", min: 0, max: 300, unit: "秒" },

@@ -63,7 +63,7 @@ function Settlements({ items, csrf }: { items: Settlement[]; csrf: string }) {
   return (
     <>
       <Notice tone="warn">
-        {items.length} 张图上游可能已执行、结果未知，正占着额度。
+        <span class="small">{items.length} 条结果未知，占着额度。</span>
         <Button size="sm" onClick={() => setTarget(items[0] ?? null)}>
           核对释放
         </Button>

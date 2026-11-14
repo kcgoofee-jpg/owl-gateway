@@ -28,16 +28,10 @@ function parseIds(text: string): string[] {
   ];
 }
 
-function when(ts: number | null): string {
-  if (!ts) return "";
-  return new Date(ts * 1000).toLocaleString("zh-CN", { hour12: false });
-}
-
 export function DebugRecordCard() {
   const { data } = useAdmin<Payload>("/admin/api/ops/debug-record");
   const [draft, setDraft] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
-  const [open, setOpen] = useState<string | null>(null);
   const serverText = (data?.subjects ?? []).join("\n");
   const text = draft ?? serverText;
   const ids = useMemo(() => parseIds(text), [text]);
@@ -71,47 +65,9 @@ export function DebugRecordCard() {
           </Button>
         )}
       </div>
-      {data.items.length > 0 && (
-        <div class="stack-sm" style={{ marginTop: "var(--sp-3)" }}>
-          {data.items.map((item) => {
-            const key = `${item.subject}/${item.session}`;
-            const shown = open === key;
-            return (
-              <div key={key} class="derive">
-                <button
-                  type="button"
-                  class="derive__title"
-                  style={{
-                    background: "none",
-                    border: 0,
-                    padding: 0,
-                    cursor: "pointer",
-                    textAlign: "left",
-                  }}
-                  onClick={() => setOpen(shown ? null : key)}
-                >
-                  {when(item.ts)} · {item.rid} · {item.model || item.kind || "请求"}
-                </button>
-                <div class="derive__body">
-                  {item.prompt || item.detail || "（无提示词摘要）"}
-                  {shown && item.images.length > 0 && (
-                    <div class="stack-sm" style={{ marginTop: "var(--sp-2)" }}>
-                      {item.images.map((file) => (
-                        <img
-                          key={file}
-                          alt=""
-                          src={`/admin/api/ops/debug-record/${item.subject}/${item.session}/${file}`}
-                          style={{ maxWidth: "100%", maxHeight: 360, borderRadius: 8 }}
-                        />
-                      ))}
-                    </div>
-                  )}
-                </div>
-              </div>
-            );
-          })}
-        </div>
-      )}
+      <p class="small muted">
+        服务器上已有 {data.items.length} 条记录（提示词 + 成图）。
+      </p>
     </Card>
   );
 }

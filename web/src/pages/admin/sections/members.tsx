@@ -8,7 +8,7 @@ import { useLocation } from "preact-iso";
 import { usedOf, withUnit } from "../../../lib/format";
 import { Button, Menu, toast } from "../../../ui";
 import { useAdmin } from "../data";
-import { ConfirmDialog, LoadError, Loading, SectionHead } from "./_kit";
+import { ConfirmDialog, LoadError, Loading } from "./_kit";
 import { FreshBar, useFrozenList, useScrolledPast } from "./live";
 import {
   addTag,
@@ -368,26 +368,6 @@ export default function Members() {
   /* ---------- 页面 ---------- */
   return (
     <div class="xa-page">
-      <SectionHead
-        title="成员"
-        actions={
-          <div class="xa-toolbar">
-            <Menu
-              button={(p) => (
-                <Button {...p}>
-                  更多
-                  <ChevronDown size={15} aria-hidden="true" />
-                </Button>
-              )}
-              items={[
-                { label: "手动停用的 Key", onSelect: () => setDlg({ t: "disabled" }) },
-                { label: `封禁黑名单（${bans.data?.total ?? 0}）`, onSelect: () => setDlg({ t: "bans" }) },
-                { label: "全站重置 Key…", onSelect: () => setDlg({ t: "resetAll" }), danger: true },
-              ]}
-            />
-          </div>
-        }
-      />
 
       {mem.loading && !mem.data ? (
         <Loading rows={6} />
@@ -408,6 +388,19 @@ export default function Members() {
                   onInput={(e) => setSearch(e.currentTarget.value)}
                 />
               </label>
+              <Menu
+                button={(p) => (
+                  <Button {...p}>
+                    更多
+                    <ChevronDown size={15} aria-hidden="true" />
+                  </Button>
+                )}
+                items={[
+                  { label: "手动停用的 Key", onSelect: () => setDlg({ t: "disabled" }) },
+                  { label: `封禁黑名单（${bans.data?.total ?? 0}）`, onSelect: () => setDlg({ t: "bans" }) },
+                  { label: "全站重置 Key…", onSelect: () => setDlg({ t: "resetAll" }), danger: true },
+                ]}
+              />
             </div>
             <FilterBar
               chips={chips}

@@ -294,10 +294,6 @@ export function ShareUpstream() {
   return (
     <Sect>
       <div class="section-head">
-        <p>
-          把朋友的拼车网关当额外上游；赞助席捐赠的 Key
-          也在这里，一起进全站共享池。份额余量来自对方钱包，不是官网电池。
-        </p>
         <span class="spacer" />
         <Button variant="primary" onClick={() => setDialog({ mode: "add" })}>
           <Plus size={16} aria-hidden="true" />

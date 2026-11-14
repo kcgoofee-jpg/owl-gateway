@@ -695,7 +695,13 @@ async fn role_gate_needs_oauth_verification_not_the_bot_token() {
     open_registration(&e).await;
     // 没核验过：拒绝，并给出验证链接；不发任何 Discord 请求（机器人不在那个服务器里）
     let r = issue(&e, MEMBER).await;
-    assert_eq!((r.0, detail(&r)), (403, "身份组错误。"));
+    assert_eq!(
+        (r.0, detail(&r)),
+        (
+            403,
+            "身份组核验未通过或已过期，请到网站重新登录验证后再试。"
+        )
+    );
     assert!(d.seen().is_empty());
     // 授权后没有身份组 → 仍不能领
     d.script("GET", &member_path(GUILD), 200, json!({"roles": ["1"]}));
@@ -757,7 +763,13 @@ async fn role_gate_can_target_another_community_via_settings() {
         .await
         .unwrap();
     let r = issue(&e, MEMBER).await;
-    assert_eq!((r.0, detail(&r)), (403, "身份组错误。"));
+    assert_eq!(
+        (r.0, detail(&r)),
+        (
+            403,
+            "身份组核验未通过或已过期，请到网站重新登录验证后再试。"
+        )
+    );
     d.script(
         "GET",
         &member_path(other_guild),
@@ -791,7 +803,13 @@ async fn role_gate_accepts_any_of_several_rules() {
     two_rules(&e).await;
     // 都没核验：拒绝，但不向成员暴露具体身份组要求
     let r = issue(&e, MEMBER).await;
-    assert_eq!((r.0, detail(&r)), (403, "身份组错误。"));
+    assert_eq!(
+        (r.0, detail(&r)),
+        (
+            403,
+            "身份组核验未通过或已过期，请到网站重新登录验证后再试。"
+        )
+    );
     // 在第一个服务器里没有身份组、在第二个服务器里有 → 通过，只记命中的那一条
     d.script("GET", &member_path(GUILD), 200, json!({"roles": ["1"]}));
     d.script(
@@ -988,7 +1006,10 @@ async fn unreachable_discord_never_mints_when_a_role_is_required() {
     open_registration(&e).await;
     let r = issue(&e, MEMBER).await;
     assert_eq!(r.0, 403);
-    assert_eq!(detail(&r), "身份组错误。");
+    assert_eq!(
+        detail(&r),
+        "身份组核验未通过或已过期，请到网站重新登录验证后再试。"
+    );
     assert!(
         e.state
             .db

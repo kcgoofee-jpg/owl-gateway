@@ -188,7 +188,7 @@ impl RegistrationService {
                         user_id,
                         &rule.guild,
                         &rule.role,
-                        crate::time::now() - 900.0,
+                        crate::time::now() - VERIFY_TTL_SECS,
                     )
                     .await?
                 {
@@ -197,7 +197,7 @@ impl RegistrationService {
                 }
             }
             if !passed {
-                return denied("身份组错误。");
+                return denied("身份组核验未通过或已过期，请到网站重新登录验证后再试。");
             }
         }
         let user = DiscordUser {
