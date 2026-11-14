@@ -524,6 +524,29 @@ impl Naimei {
         let Ok(channel_id) = m.channel_id.parse::<u64>() else {
             return false;
         };
+        // 模型挂了也要能登记客户端：这类固定说法直接走确定性路径，不排队等对话模型。
+        if let Some(client) = parse_client_report(&text) {
+            let tool = capabilities::ToolRequest {
+                actor: author.id.clone(),
+                channel: channel_id.to_string(),
+                name: "report_client".into(),
+                arguments: json!({"client": client}),
+            };
+            let out = self.capability(tool).await;
+            let data = &out["data"];
+            let reply = if data["recorded"] == json!(true) {
+                let name = data["client"].as_str().unwrap_or("这个客户端");
+                if data["unlocked"] == json!(true) {
+                    format!("登记好了：{name}。你被风控清零的额度已经自动恢复，现在就能出图。")
+                } else {
+                    format!("登记好了：{name}。站长会在后台核对。")
+                }
+            } else {
+                "这次没登记上，稍后再 @ 我说一次就行。".to_string()
+            };
+            self.send_chat_message(channel_id, &m.id, &reply).await;
+            return false;
+        }
         // 文本附件（txt/md/json/csv/log，≤128KB）：抓内容进上下文
         let mut text_files: Vec<(String, String)> = Vec::new();
         for a in m.attachments.iter().take(3) {
@@ -562,7 +585,13 @@ impl Naimei {
             author_name: &author.display_tag(),
         };
         let scoped_chat = chat.with_actor(author.id.clone(), m.channel_id.clone());
-        let result = self.chat_once(&scoped_chat, req).await;
+        // 上游 5xx / 连接失败时补一次：反代偶发 502，重试一次多半就过了
+        // （超时不重试：一次已经等了两分钟，再等一轮成员只会更烦）。
+        let mut result = self.chat_once(&scoped_chat, req.clone()).await;
+        if matches!(result, Err(ChatError::Upstream(_))) {
+            info!("[chat] 上游失败，立即重试一次");
+            result = self.chat_once(&scoped_chat, req).await;
+        }
         let transient = result.as_ref().err().is_some_and(ChatError::transient);
         *self
             .model_status
@@ -580,7 +609,12 @@ impl Naimei {
             }
             Err(ChatError::Timeout) => {
                 info!("[chat] 对话失败：上游超时");
-                self.send_chat_message(channel_id,&m.id,"聊天上游超时，本次结果未知，未自动重发。需要时请重新 @ 我；分享检测和状态查询不受影响。").await;
+                self.send_chat_message(
+                    channel_id,
+                    &m.id,
+                    "这次模型上游超时了（不是你的问题，也没扣任何东西），再 @ 我一次就行。",
+                )
+                .await;
             }
             Err(e) => {
                 // 额度类失败是常态，不打 [bug]；其他失败记日志但不惊动成员
@@ -1118,6 +1152,7 @@ impl Drop for AbortOnDrop {
 }
 
 /// 一轮对话的上下文：handle_message 收集，chat_once 消费。
+#[derive(Clone)]
 struct ChatRequest<'a> {
     channel_id: u64,
     message_id: &'a str,
@@ -1187,6 +1222,33 @@ impl<'a> Responder<'a> {
 
 /// 是否触发 AI 对话：被 @、回复的对象是奶妹本人，或正文里喊了「奶妹」。
 /// 喊名字触发是 10-31 加的自然唤起方式（不用学 @ 语法）；其余消息不触发。
+/// 「用的客户端是 X」「报客户端 X」这类固定说法里取出客户端名。
+/// 只认明确的句式，避免把普通聊天误判成登记。
+fn parse_client_report(text: &str) -> Option<String> {
+    const LEAD: [&str; 5] = [
+        "用的客户端是",
+        "用的客户端为",
+        "客户端是",
+        "报客户端",
+        "登记客户端",
+    ];
+    let t = text.trim();
+    for lead in LEAD {
+        if let Some(rest) = t.strip_prefix(lead) {
+            let name: String = rest
+                .trim()
+                .trim_matches(|c: char| " ：:，,。.！!、".contains(c))
+                .chars()
+                .take(40)
+                .collect();
+            if !name.is_empty() {
+                return Some(name);
+            }
+        }
+    }
+    None
+}
+
 fn is_chat_trigger(m: &MessageInfo, bot_id: &str) -> bool {
     let mentioned = m.mentions.iter().any(|u| u.id == bot_id);
     let reply_to_bot = m

@@ -430,17 +430,42 @@ async fn bot_client(State(state): State<AppState>, req: Request) -> ApiResult {
         .db
         .upsert_key_tag(key.id(), "自报客户端", &note, "奶妹", state.now())
         .await?;
+    // 风控把额度临时清零的成员：自报客户端（说明自己用的是什么客户端）就恢复默认额度，
+    // 不用再等站长手动解开。只清「额度确实全为 0」的例外，正常成员的自定义额度不动。
+    let mut unlocked = false;
+    if let Ok(snapshot) = state.db.member_policy(discord_id).await
+        && snapshot.overrides != gate_core::member_policy::MemberOverrides::default()
+    {
+        let p = &snapshot.effective;
+        // 风控的形态是「每天各项都 0」：月额度通常还是默认值，不参与判断
+        let zeroed = !p.image || (p.daily_images == 0 && p.daily_v5 == 0 && p.daily_anlas == 0);
+        if zeroed
+            && state
+                .db
+                .set_member_overrides(discord_id, &Default::default())
+                .await
+                .is_ok()
+        {
+            unlocked = true;
+        }
+    }
     crate::action_log::log_action(
         &state.db,
         &format!("Discord:{discord_id}"),
         "成员自报客户端",
         &format!("Key #{}", key.id()),
-        &client,
+        &if unlocked {
+            format!("{client}（额度已自动恢复）")
+        } else {
+            client.clone()
+        },
         true,
         state.now(),
     )
     .await;
-    Ok(ok_json(&json!({"ok": true, "client": client})))
+    Ok(ok_json(
+        &json!({"ok": true, "client": client, "unlocked": unlocked}),
+    ))
 }
 
 fn member_bot_projection(me: &Value) -> Value {

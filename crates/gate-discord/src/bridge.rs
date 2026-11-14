@@ -191,7 +191,13 @@ impl Bridge {
         let payload = serde_json::json!({"discord_id":discord_id,"guild_id":guild_id.to_string(),"client":client});
         match self.command("/self-register/bot/client", &payload).await {
             Ok(b) if b.status == 200 => {
-                serde_json::json!({"recorded":true,"client":b.data["client"],"note":"已登记给站长，站长核对后处理；登记本身不会自动解除限制"})
+                let unlocked = b.data["unlocked"].as_bool().unwrap_or(false);
+                let note = if unlocked {
+                    "已登记；检测到额度被风控清零，已自动恢复默认额度，现在就能出图"
+                } else {
+                    "已登记给站长核对；额度没有变化"
+                };
+                serde_json::json!({"recorded":true,"client":b.data["client"],"unlocked":unlocked,"note":note})
             }
             Ok(b) => serde_json::json!({"error":b.data}),
             Err(_) => serde_json::json!({"error":"登记暂不可用"}),

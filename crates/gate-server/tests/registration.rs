@@ -1206,6 +1206,60 @@ async fn bot_context_requires_bridge_auth_and_exposes_only_member_facts() {
     assert!(!fresh.2.to_string().contains(SECRET));
 }
 
+/// 风控把额度清零的成员自报客户端 → 自动恢复默认额度；正常成员的自定义额度不动。
+#[tokio::test]
+async fn reporting_client_restores_zeroed_member_limits_only() {
+    let (e, _d) = setup_reg(&[]).await;
+    open_registration(&e).await;
+    assert_eq!(issue(&e, MEMBER).await.0, 200);
+    let zeroed = gate_core::member_policy::MemberOverrides {
+        daily_images: Some(0),
+        daily_v5: Some(0),
+        daily_anlas: Some(0),
+        ..Default::default()
+    };
+    e.state
+        .db
+        .set_member_overrides(MEMBER, &zeroed)
+        .await
+        .unwrap();
+    let r = bridge(
+        &e,
+        "/self-register/bot/client",
+        json!({"discord_id":MEMBER,"guild_id":GUILD,"client":"柏宝绘"}),
+    )
+    .await;
+    assert_eq!(r.0, 200, "{:?}", r.2);
+    assert_eq!(r.2["unlocked"], true, "{:?}", r.2);
+    let after = e.state.db.member_policy(MEMBER).await.unwrap();
+    assert_eq!(
+        after.overrides,
+        gate_core::member_policy::MemberOverrides::default()
+    );
+
+    // 正常成员：自报只写标签，额度不动
+    let custom = gate_core::member_policy::MemberOverrides {
+        daily_images: Some(7),
+        ..Default::default()
+    };
+    e.state
+        .db
+        .set_member_overrides(MEMBER, &custom)
+        .await
+        .unwrap();
+    let r = bridge(
+        &e,
+        "/self-register/bot/client",
+        json!({"discord_id":MEMBER,"guild_id":GUILD,"client":"柏宝绘"}),
+    )
+    .await;
+    assert_eq!(r.2["unlocked"], false, "{:?}", r.2);
+    assert_eq!(
+        e.state.db.member_policy(MEMBER).await.unwrap().overrides,
+        custom
+    );
+}
+
 #[tokio::test]
 async fn bot_context_shows_recent_rejections_and_member_can_report_client() {
     let (e, _d) = setup_reg(&[]).await;
