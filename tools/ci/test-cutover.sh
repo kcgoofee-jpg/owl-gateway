@@ -25,7 +25,7 @@ set_image() {
   mv "$state.tmp" "$state"
 }
 case "$1" in
-  load) echo 'Loaded image: owl-gate:build-sha';;
+  load) cat >/dev/null; echo 'Loaded image: owl-gate:build-sha';;
   tag)
     src=$2 dst=$3
     value=$(get_image "$src")
