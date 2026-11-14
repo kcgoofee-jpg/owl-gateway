@@ -121,26 +121,6 @@ function Login() {
   );
 }
 
-/**
- * 鉴权探针失败（断网 / 5xx / 超时）：留在后台壳里给重试，**不要**当成「没登录」回登录页。
- * 只有 401 才是真的掉登录（见 Admin() 的 catch）。
- */
-
-function AdminDataError(props: { error: string | null; onRetry: () => void }) {
-  return (
-    <div class="admin-fail" role="alert">
-      <h1>后台数据读取失败</h1>
-      <p>网络或服务端暂时没有响应，登录状态没有变化。恢复后点「重试」即可，不用重新登录。</p>
-      {props.error && <p class="small muted">{props.error}</p>}
-      <div>
-        <Button variant="primary" onClick={props.onRetry}>
-          重试
-        </Button>
-      </div>
-    </div>
-  );
-}
-
 /** 未知的 /admin/*：旧分区地址换到设置页，其余给 404。 */
 function Fallback() {
   const { path, route } = useLocation();
@@ -281,54 +261,20 @@ function Shell(props: { children: ComponentChildren }) {
 }
 
 export function Admin() {
-  const [attempt, setAttempt] = useState(0);
-  const [authError, setAuthError] = useState<string | null>(null);
-  const [probing, setProbing] = useState(true);
-
+  // 不再先等 /admin/api/me 再渲染：多一个往返就是多 0.5～1 秒白屏（弱网下最明显）。
+  // 直接渲染分区，任何接口回 401 时 data.ts 会 endSession() 退回登录页。
   useEffect(() => {
-    let alive = true;
-    setProbing(true);
-    setAuthError(null);
     getJSON("/admin/api/me")
       .then(() => {
-        if (alive) authed.value = true;
+        authed.value = true;
       })
       .catch((e: unknown) => {
-        if (!alive) return;
         // 只有 401 才是真的没登录；断网 / 5xx 不能清掉已登录态
         if (e instanceof ApiError && e.status === 401) endSession();
-        else setAuthError(e instanceof Error ? e.message : String(e));
-      })
-      .finally(() => {
-        if (alive) setProbing(false);
       });
-    return () => {
-      alive = false;
-    };
-  }, [attempt]);
-
-  const retry = () => {
-    setAuthError(null);
-    setProbing(true);
-    setAttempt((n) => n + 1);
-  };
+  }, []);
 
   if (authed.value === false) return <Login />;
-  if (authed.value !== true) {
-    return (
-      <LocationProvider>
-        <Shell>
-          {probing ? (
-            <main class="admin-login">
-              <Skeleton w="240px" h="24px" />
-            </main>
-          ) : (
-            <AdminDataError error={authError} onRetry={retry} />
-          )}
-        </Shell>
-      </LocationProvider>
-    );
-  }
   const MembersView = SECTIONS[0]?.view as ComponentType;
   return (
     <LocationProvider>
